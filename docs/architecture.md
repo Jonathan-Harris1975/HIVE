@@ -63,3 +63,11 @@ The backend uses a single OpenRouter streaming wrapper and normalises events to:
 ## Source strategy
 
 The app should answer from extracted/indexed chunks, not whole raw files, to reduce cost and improve traceability.
+
+
+## Project glossary
+
+- HIVE = the private OpenRouter-powered ops chatbot/console in this repo.
+- AIMS = the user's AI/content automation and management ecosystem.
+- RAMS = the user's reporting, audit, monitoring, and production-readiness system for AI/content workflows.
+- Do not use the construction/legal “Risk Assessment Method Statement” meaning of RAMS unless explicitly requested.

@@ -28,22 +28,26 @@ If a request includes `model`, the backend sends that exact model ID to OpenRout
 
 OpenRouter 404/429/502/503/504 model failures trigger fallback attempts before the request fails.
 
-The final fallback is:
+By default, fallback is **free-first and free-only**:
 
 ```env
 OPENROUTER_FREE_FALLBACK_MODEL=nvidia/nemotron-3-ultra-550b-a55b:free
+ALLOW_PAID_FALLBACK=false
 ```
+
+Set `ALLOW_PAID_FALLBACK=true` only when a production lane is allowed to escalate from a dead/overloaded model into paid alternatives. This prevents smoke tests and low-risk calls quietly rolling into paid models.
 
 ## Recommended v1 defaults
 
 ```env
-DEFAULT_MODEL=~openai/gpt-mini-latest
+DEFAULT_MODEL=nvidia/nemotron-3-ultra-550b-a55b:free
 CHEAP_MODEL=nvidia/nemotron-3-ultra-550b-a55b:free
-BALANCED_MODEL=~google/gemini-flash-latest
+BALANCED_MODEL=nvidia/nemotron-3-ultra-550b-a55b:free
 PREMIUM_MODEL=~anthropic/claude-sonnet-latest
 CODE_MODEL=x-ai/grok-build-0.1
-AUDIT_MODEL=~anthropic/claude-sonnet-latest
+AUDIT_MODEL=nvidia/nemotron-3-ultra-550b-a55b:free
 OPENROUTER_FREE_FALLBACK_MODEL=nvidia/nemotron-3-ultra-550b-a55b:free
+ALLOW_PAID_FALLBACK=false
 ```
 
 ## AIMS alignment
@@ -55,3 +59,13 @@ That gives the best blend:
 - AIMS-compatible models for brand/audit-sensitive work
 - cheaper/free models for smoke tests and low-risk summaries
 - premium models only when the task deserves the bill
+
+## Brand glossary guardrail
+
+Brand and audit prompts define the user's ecosystem terms explicitly:
+
+- HIVE: this private OpenRouter-powered ops console.
+- AIMS: the user's AI/content automation and management ecosystem.
+- RAMS: the user's reporting, audit, monitoring, and production-readiness system.
+
+HIVE must not interpret RAMS as “Risk Assessment Method Statement” unless the user explicitly asks for that construction/legal meaning.
