@@ -56,6 +56,34 @@ curl -fsS -H "Authorization: Bearer $ADMIN_BEARER_TOKEN" \
   https://your-koyeb-service.example/v1/models
 ```
 
+
+## R2 text upload smoke test
+
+Once `/health` shows `"r2_configured": true`, test R2 without multipart file upload using JSON:
+
+```bash
+curl -X POST "https://your-koyeb-service.example/v1/files/upload-text" \
+  -H "Authorization: Bearer $ADMIN_BEARER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"filename\":\"hive-r2-smoke.txt\",\"content\":\"HIVE R2 smoke test. Upload pipeline working.\"}"
+```
+
+A successful R2 response should include:
+
+```json
+{
+  "ok": true,
+  "file": {
+    "storage": "r2",
+    "object_key": "uploads/.../hive-r2-smoke.txt",
+    "supported_for_text": true,
+    "chunk_count": 1
+  }
+}
+```
+
+The original multipart endpoint remains available at `POST /v1/files/upload` for real file uploads.
+
 ## Notes
 
 - Do not expose the OpenRouter key to the browser.
