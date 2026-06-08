@@ -22,7 +22,7 @@ class ChatTurn(BaseModel):
     content: str
 
 
-class ChatStreamRequest(BaseModel):
+class ChatRequest(BaseModel):
     message: str
     history: list[ChatTurn] = Field(default_factory=list)
     mode: Mode = Mode.AUTO
@@ -31,14 +31,11 @@ class ChatStreamRequest(BaseModel):
     max_tokens: int = 2048
 
 
-@router.post("/chat/stream")
-async def chat_stream(
-    request: ChatStreamRequest,
-    settings: Settings = Depends(get_settings),
-) -> StreamingResponse:
+def build_payload(request: ChatRequest, settings: Settings) -> tuple[dict[str, object], list[str]]:
     router_service = ModelRouter(settings)
     task = router_service.classify_task(request.message, request.mode)
     selected_model = router_service.select_model(task, request.model)
+    fallback_models = router_service.fallback_models_for_task(task, selected_model)
 
     window = ContextWindow()
     window.add("system", build_system_prompt(request.mode))
@@ -46,13 +43,43 @@ async def chat_stream(
         window.add(turn.role, turn.content)
     window.add("user", request.message)
 
-    payload = {
+    payload: dict[str, object] = {
         "model": selected_model,
         "messages": window.trimmed_messages(),
         "temperature": request.temperature,
         "max_tokens": request.max_tokens,
     }
+    return payload, fallback_models
 
+
+@router.post("/chat/stream")
+async def chat_stream(
+    request: ChatRequest,
+    settings: Settings = Depends(get_settings),
+) -> StreamingResponse:
+    payload, fallback_models = build_payload(request, settings)
     client = OpenRouterClient(settings)
-    stream = heartbeat_stream(client.stream_chat_completion(payload))
+    stream = heartbeat_stream(client.stream_chat_completion(payload, fallback_models=fallback_models))
     return StreamingResponse(stream, media_type="text/event-stream")
+
+
+@router.post("/chat")
+async def chat(
+    request: ChatRequest,
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    """Non-streaming endpoint for Make.com and smoke tests."""
+
+    payload, fallback_models = build_payload(request, settings)
+    client = OpenRouterClient(settings)
+    completion = await client.chat_completion(payload, fallback_models=fallback_models)
+    choice = (completion.get("choices") or [{}])[0]
+    message = choice.get("message") or {}
+    return {
+        "ok": True,
+        "reply": message.get("content", ""),
+        "model_used": completion.get("model") or payload.get("model"),
+        "provider": completion.get("provider"),
+        "usage": completion.get("usage"),
+        "raw_finish_reason": choice.get("finish_reason"),
+    }
