@@ -20,13 +20,14 @@ class Settings(BaseSettings):
 
     # Model policy is deliberately env-driven. Defaults use currently common
     # OpenRouter aliases / cheap high-context models rather than brittle dated IDs.
-    default_model: str = "~openai/gpt-mini-latest"
+    default_model: str = "nvidia/nemotron-3-ultra-550b-a55b:free"
     cheap_model: str = "nvidia/nemotron-3-ultra-550b-a55b:free"
-    balanced_model: str = "~google/gemini-flash-latest"
+    balanced_model: str = "nvidia/nemotron-3-ultra-550b-a55b:free"
     premium_model: str = "~anthropic/claude-sonnet-latest"
     code_model: str = "x-ai/grok-build-0.1"
-    audit_model: str = "~anthropic/claude-sonnet-latest"
+    audit_model: str = "nvidia/nemotron-3-ultra-550b-a55b:free"
     openrouter_free_fallback_model: str = "nvidia/nemotron-3-ultra-550b-a55b:free"
+    allow_paid_fallback: bool = False
 
     cf_r2_account_id: str = ""
     cf_r2_access_key_id: str = ""
