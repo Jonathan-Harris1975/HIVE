@@ -64,6 +64,21 @@ Recommended Koyeb path: use the `Dockerfile`. See `docs/koyeb-deployment.md`.
 - `GET /v1/models`
 - `POST /v1/chat/stream`
 - `POST /v1/files/upload`
+- `POST /v1/files/upload-text`
+
+
+### JSON text upload smoke test
+
+Use this when testing from ReqBin, Make.com, or a phone where multipart `curl -F` uploads are awkward:
+
+```bash
+curl -X POST "https://your-koyeb-service.example/v1/files/upload-text" \
+  -H "Authorization: Bearer $ADMIN_BEARER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"filename\":\"hive-r2-smoke.txt\",\"content\":\"HIVE R2 smoke test. Upload pipeline working.\"}"
+```
+
+Expected response includes `storage`, `object_key`, `public_url`, `chunk_count`, and `supported_for_text`.
 
 ## Environment
 
