@@ -12,6 +12,9 @@ from fastapi import HTTPException, status
 from app.core.config import Settings
 
 
+RETRYABLE_STATUS_CODES = {404, 408, 409, 425, 429, 500, 502, 503, 504}
+
+
 @dataclass(frozen=True)
 class OpenRouterStreamState:
     model_used: str | None = None
@@ -24,6 +27,7 @@ class OpenRouterClient:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self._models_cache: tuple[float, list[dict[str, Any]]] | None = None
+        self._model_ids_cache: tuple[float, set[str]] | None = None
         self._cache_seconds = 10 * 60
 
     def _headers(self) -> dict[str, str]:
@@ -39,6 +43,11 @@ class OpenRouterClient:
             "Content-Type": "application/json",
         }
 
+    def _attempt_timeout(self) -> httpx.Timeout:
+        seconds = max(1.0, float(self.settings.openrouter_attempt_timeout_seconds))
+        connect = min(10.0, seconds)
+        return httpx.Timeout(timeout=seconds, connect=connect)
+
     async def validate_key(self) -> bool:
         await self.list_models(force_refresh=True)
         return True
@@ -49,16 +58,30 @@ class OpenRouterClient:
             return self._models_cache[1]
 
         url = f"{self.settings.openrouter_base_url.rstrip('/')}/models"
-        async with httpx.AsyncClient(timeout=20) as client:
+        timeout = max(1.0, float(self.settings.openrouter_model_list_timeout_seconds))
+        async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.get(url, headers=self._headers())
             response.raise_for_status()
             payload = response.json()
             models = payload.get("data", []) if isinstance(payload, dict) else []
             self._models_cache = (now, models)
+            self._model_ids_cache = (now, {model["id"] for model in models if isinstance(model, dict) and model.get("id")})
             return models
 
+    async def model_ids(self) -> set[str]:
+        now = time.time()
+        if self._model_ids_cache and now - self._model_ids_cache[0] < self._cache_seconds:
+            return self._model_ids_cache[1]
+        models = await self.list_models()
+        return {model["id"] for model in models if isinstance(model, dict) and model.get("id")}
+
     async def chat_completion(self, payload: dict[str, Any], fallback_models: list[str] | None = None) -> dict[str, Any]:
-        """Non-streaming chat completion for Make.com and simple smoke tests."""
+        """Non-streaming chat completion for Make.com and simple smoke tests.
+
+        The attempt list is preflighted against OpenRouter's current model list by
+        default. That prevents known-dead IDs from burning the full request timeout
+        before falling back to the configured free model.
+        """
 
         async for candidate_payload in self._payload_attempts(payload, fallback_models):
             response_payload = await self._post_json(candidate_payload)
@@ -110,6 +133,14 @@ class OpenRouterClient:
                     continue
 
                 if event.get("event") == "done":
+                    if event.get("ok") is False:
+                        yield {
+                            "event": "done",
+                            "ok": False,
+                            "model_used": event.get("model_used") or state.model_used,
+                            "message": event.get("message"),
+                        }
+                        return
                     state = OpenRouterStreamState(
                         model_used=event.get("model_used") or state.model_used,
                         provider=event.get("provider"),
@@ -135,102 +166,152 @@ class OpenRouterClient:
     ) -> AsyncIterator[dict[str, Any]]:
         models = [payload.get("model"), *(fallback_models or [])]
         seen: set[str] = set()
+        ordered_models: list[str] = []
         for model in models:
-            if not model or model in seen:
+            if not isinstance(model, str) or not model or model in seen:
                 continue
             seen.add(model)
+            ordered_models.append(model)
+
+        valid_model_ids = await self._safe_model_ids_for_preflight()
+        if valid_model_ids is not None:
+            ordered_models = [model for model in ordered_models if model in valid_model_ids]
+
+        max_attempts = 1 + max(0, int(self.settings.openrouter_max_fallback_attempts))
+        for model in ordered_models[:max_attempts]:
             yield {**payload, "model": model}
+
+    async def _safe_model_ids_for_preflight(self) -> set[str] | None:
+        if not self.settings.openrouter_model_preflight_enabled:
+            return None
+        try:
+            return await self.model_ids()
+        except (httpx.HTTPError, ValueError):
+            # Model-list preflight is a speed optimisation, not a reason to block chat.
+            return None
 
     async def _post_json(self, payload: dict[str, Any]) -> dict[str, Any]:
         url = f"{self.settings.openrouter_base_url.rstrip('/')}/chat/completions"
-        async with httpx.AsyncClient(timeout=120) as client:
-            response = await client.post(url, headers=self._headers(), json={**payload, "stream": False})
-            if response.status_code >= 400:
-                message = response.text
-                if response.status_code in {404, 429, 502, 503, 504}:
-                    return {"_retryable_model_error": True, "status_code": response.status_code, "message": message}
-                raise HTTPException(status_code=response.status_code, detail=message)
-            return response.json()
+        try:
+            async with httpx.AsyncClient(timeout=self._attempt_timeout()) as client:
+                response = await client.post(url, headers=self._headers(), json={**payload, "stream": False})
+        except httpx.TimeoutException as exc:
+            return {
+                "_retryable_model_error": True,
+                "status_code": 408,
+                "message": f"OpenRouter attempt timed out for {payload.get('model')}: {exc}",
+            }
+        except httpx.HTTPError as exc:
+            return {
+                "_retryable_model_error": True,
+                "status_code": 502,
+                "message": f"OpenRouter request failed for {payload.get('model')}: {exc}",
+            }
+
+        if response.status_code >= 400:
+            message = response.text
+            if response.status_code in RETRYABLE_STATUS_CODES:
+                return {"_retryable_model_error": True, "status_code": response.status_code, "message": message}
+            raise HTTPException(status_code=response.status_code, detail=message)
+        return response.json()
 
     async def _stream_one_attempt(self, payload: dict[str, Any]) -> AsyncIterator[dict[str, Any]]:
         url = f"{self.settings.openrouter_base_url.rstrip('/')}/chat/completions"
         request_payload = {**payload, "stream": True}
 
-        async with httpx.AsyncClient(timeout=None) as client:
-            async with client.stream("POST", url, headers=self._headers(), json=request_payload) as response:
-                if response.status_code >= 400:
-                    body = await response.aread()
-                    message = body.decode("utf-8", errors="replace")
-                    if response.status_code in {404, 429, 502, 503, 504}:
-                        yield {"event": "retry_model", "message": message, "status_code": response.status_code}
-                        return
-                    yield {"event": "error", "message": message, "status_code": response.status_code}
-                    yield {"event": "done", "ok": False, "model_used": payload.get("model")}
-                    return
+        # For streaming, keep the read timeout open, but still bound connect/write/pool
+        # failures so a dead endpoint does not pin the worker indefinitely.
+        attempt_seconds = max(1.0, float(self.settings.openrouter_attempt_timeout_seconds))
+        timeout = httpx.Timeout(timeout=None, connect=min(10.0, attempt_seconds), write=attempt_seconds, pool=attempt_seconds)
 
-                final_model = payload.get("model")
-                final_provider = None
-                final_usage = None
-                final_chunk = None
-
-                async for raw_line in response.aiter_lines():
-                    if not raw_line:
-                        continue
-                    if raw_line.startswith(":"):
-                        yield {"event": "keepalive", "message": raw_line.removeprefix(':').strip()}
-                        continue
-                    if not raw_line.startswith("data:"):
-                        continue
-
-                    data = raw_line.removeprefix("data:").strip()
-                    if data == "[DONE]":
-                        yield {
-                            "event": "done",
-                            "ok": True,
-                            "model_used": final_model,
-                            "provider": final_provider,
-                            "usage": final_usage,
-                            "raw_final_chunk": final_chunk,
-                        }
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                async with client.stream("POST", url, headers=self._headers(), json=request_payload) as response:
+                    if response.status_code >= 400:
+                        body = await response.aread()
+                        message = body.decode("utf-8", errors="replace")
+                        if response.status_code in RETRYABLE_STATUS_CODES:
+                            yield {"event": "retry_model", "message": message, "status_code": response.status_code}
+                            return
+                        yield {"event": "error", "message": message, "status_code": response.status_code}
+                        yield {"event": "done", "ok": False, "model_used": payload.get("model")}
                         return
 
-                    try:
-                        chunk = json.loads(data)
-                    except json.JSONDecodeError:
-                        yield {"event": "raw", "data": data}
-                        continue
+                    final_model = payload.get("model")
+                    final_provider = None
+                    final_usage = None
+                    final_chunk = None
 
-                    if "error" in chunk:
-                        yield {
-                            "event": "error",
-                            "message": chunk["error"].get("message", "OpenRouter stream error"),
-                            "error": chunk["error"],
-                            "model_used": final_model,
-                        }
-                        yield {"event": "done", "ok": False, "model_used": final_model}
-                        return
+                    async for raw_line in response.aiter_lines():
+                        if not raw_line:
+                            continue
+                        if raw_line.startswith(":"):
+                            yield {"event": "keepalive", "message": raw_line.removeprefix(':').strip()}
+                            continue
+                        if not raw_line.startswith("data:"):
+                            continue
 
-                    final_chunk = chunk
-                    final_model = chunk.get("model") or final_model
-                    final_provider = chunk.get("provider") or final_provider
-                    final_usage = chunk.get("usage") or final_usage
-
-                    for choice in chunk.get("choices", []):
-                        delta = choice.get("delta") or {}
-                        content = delta.get("content")
-                        if content:
+                        data = raw_line.removeprefix("data:").strip()
+                        if data == "[DONE]":
                             yield {
-                                "event": "token",
-                                "content": content,
+                                "event": "done",
+                                "ok": True,
                                 "model_used": final_model,
                                 "provider": final_provider,
+                                "usage": final_usage,
+                                "raw_final_chunk": final_chunk,
                             }
+                            return
 
-                yield {
-                    "event": "done",
-                    "ok": True,
-                    "model_used": final_model,
-                    "provider": final_provider,
-                    "usage": final_usage,
-                    "raw_final_chunk": final_chunk,
-                }
+                        try:
+                            chunk = json.loads(data)
+                        except json.JSONDecodeError:
+                            yield {"event": "raw", "data": data}
+                            continue
+
+                        if "error" in chunk:
+                            yield {
+                                "event": "error",
+                                "message": chunk["error"].get("message", "OpenRouter stream error"),
+                                "error": chunk["error"],
+                                "model_used": final_model,
+                            }
+                            yield {"event": "done", "ok": False, "model_used": final_model}
+                            return
+
+                        final_chunk = chunk
+                        final_model = chunk.get("model") or final_model
+                        final_provider = chunk.get("provider") or final_provider
+                        final_usage = chunk.get("usage") or final_usage
+
+                        for choice in chunk.get("choices", []):
+                            delta = choice.get("delta") or {}
+                            content = delta.get("content")
+                            if content:
+                                yield {
+                                    "event": "token",
+                                    "content": content,
+                                    "model_used": final_model,
+                                    "provider": final_provider,
+                                }
+
+                    yield {
+                        "event": "done",
+                        "ok": True,
+                        "model_used": final_model,
+                        "provider": final_provider,
+                        "usage": final_usage,
+                        "raw_final_chunk": final_chunk,
+                    }
+        except httpx.TimeoutException as exc:
+            yield {
+                "event": "retry_model",
+                "message": f"OpenRouter stream attempt timed out for {payload.get('model')}: {exc}",
+                "status_code": 408,
+            }
+        except httpx.HTTPError as exc:
+            yield {
+                "event": "retry_model",
+                "message": f"OpenRouter stream attempt failed for {payload.get('model')}: {exc}",
+                "status_code": 502,
+            }
