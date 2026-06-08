@@ -18,12 +18,15 @@ class Settings(BaseSettings):
     openrouter_site_url: str = "https://jonathan-harris.online"
     openrouter_app_title: str = "JH Ops Chat"
 
-    default_model: str = "anthropic/claude-3.5-haiku"
-    cheap_model: str = "google/gemini-flash-1.5"
-    balanced_model: str = "anthropic/claude-3.5-haiku"
-    premium_model: str = "anthropic/claude-3.7-sonnet"
-    code_model: str = "anthropic/claude-3.7-sonnet"
-    audit_model: str = "anthropic/claude-3.7-sonnet"
+    # Model policy is deliberately env-driven. Defaults use currently common
+    # OpenRouter aliases / cheap high-context models rather than brittle dated IDs.
+    default_model: str = "~openai/gpt-mini-latest"
+    cheap_model: str = "nvidia/nemotron-3-ultra-550b-a55b:free"
+    balanced_model: str = "~google/gemini-flash-latest"
+    premium_model: str = "~anthropic/claude-sonnet-latest"
+    code_model: str = "x-ai/grok-build-0.1"
+    audit_model: str = "~anthropic/claude-sonnet-latest"
+    openrouter_free_fallback_model: str = "nvidia/nemotron-3-ultra-550b-a55b:free"
 
     cf_r2_account_id: str = ""
     cf_r2_access_key_id: str = ""

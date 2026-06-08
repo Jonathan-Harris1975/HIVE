@@ -11,15 +11,23 @@ def encode_sse(event: str, data: Any) -> str:
 async def heartbeat_stream(source: AsyncIterator[dict[str, Any]]) -> AsyncIterator[str]:
     """Convert structured stream events to SSE frames.
 
-    The upstream OpenRouter stream already sends chunks, but this wrapper gives the browser
-    consistent event names and a controlled error frame.
+    The upstream OpenRouter stream can emit comments, JSON chunks, errors and a final
+    done marker. This wrapper emits exactly what the source says; it does not add a
+    fake success event after an error.
     """
 
+    emitted_done = False
     try:
         async for item in source:
-            event = item.pop("event", "message")
-            yield encode_sse(event, item)
+            event = item.get("event", "message")
+            data = {key: value for key, value in item.items() if key != "event"}
+            if event == "done":
+                emitted_done = True
+            yield encode_sse(event, data)
     except Exception as exc:  # noqa: BLE001 - deliberate last-resort stream safety net
         yield encode_sse("error", {"message": str(exc)})
-    finally:
-        yield encode_sse("done", {"ok": True})
+        emitted_done = True
+        yield encode_sse("done", {"ok": False})
+
+    if not emitted_done:
+        yield encode_sse("done", {"ok": False, "message": "Stream ended without a done event"})
