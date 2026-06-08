@@ -76,11 +76,13 @@ async def chat(
     completion = await client.chat_completion(payload, fallback_models=fallback_models)
     choice = (completion.get("choices") or [{}])[0]
     message = choice.get("message") or {}
+    ok = not bool(completion.get("_all_attempts_failed"))
     return {
-        "ok": True,
+        "ok": ok,
         "reply": message.get("content", ""),
         "model_used": completion.get("model") or payload.get("model"),
         "provider": completion.get("provider"),
         "usage": completion.get("usage"),
         "raw_finish_reason": choice.get("finish_reason"),
+        "attempts": completion.get("hive_attempts"),
     }
