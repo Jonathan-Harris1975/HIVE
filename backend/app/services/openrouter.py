@@ -80,19 +80,43 @@ class OpenRouterClient:
 
         The attempt list is preflighted against OpenRouter's current model list by
         default. That prevents known-dead IDs from burning the full request timeout
-        before falling back to the configured free model.
+        before falling back to the configured free model. If every attempt still
+        fails, return a structured failure payload instead of surfacing a naked 502;
+        that makes Koyeb/ReqBin diagnostics usable rather than opaque.
         """
 
+        attempts: list[dict[str, Any]] = []
         async for candidate_payload in self._payload_attempts(payload, fallback_models):
+            model = candidate_payload.get("model")
             response_payload = await self._post_json(candidate_payload)
             if response_payload.get("_retryable_model_error"):
+                attempts.append(
+                    {
+                        "model": model,
+                        "status_code": response_payload.get("status_code"),
+                        "message": response_payload.get("message"),
+                    }
+                )
                 continue
+            if attempts:
+                response_payload.setdefault("hive_attempts", attempts + [{"model": model, "ok": True}])
             return response_payload
 
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="OpenRouter request failed for selected model and all fallback models",
-        )
+        return {
+            "_all_attempts_failed": True,
+            "model": None,
+            "provider": None,
+            "usage": None,
+            "hive_attempts": attempts,
+            "choices": [
+                {
+                    "message": {
+                        "content": "OpenRouter request failed for the selected model and all configured fallback models."
+                    },
+                    "finish_reason": "error",
+                }
+            ],
+        }
 
     async def stream_chat_completion(
         self,
@@ -178,11 +202,24 @@ class OpenRouterClient:
             # Preflight should protect us from obviously dead user/requested models,
             # but it must not aggressively filter controlled fallback aliases.
             # OpenRouter can resolve some aliases to dated endpoint IDs at runtime;
-            # exact-ID filtering of fallbacks can therefore remove every safe route
-            # and turn a recoverable bad-model request into a 502.
+            # exact-ID filtering of fallbacks can therefore remove every safe route.
             primary_model = ordered_models[0]
-            if primary_model not in valid_model_ids:
+            if primary_model not in valid_model_ids and not self._is_controlled_fallback_alias(primary_model):
                 ordered_models = ordered_models[1:]
+
+        # In free-only mode, a known-invalid paid/non-free primary should not burn a
+        # request attempt before the free fallback. This keeps bad-model smoke tests
+        # fast and stops accidental paid fallback drift.
+        if (
+            not self.settings.allow_paid_fallback
+            and ordered_models
+            and ordered_models[0] != self.settings.openrouter_free_fallback_model
+            and not ordered_models[0].endswith(":free")
+            and self.settings.openrouter_free_fallback_model in ordered_models[1:]
+        ):
+            ordered_models = [self.settings.openrouter_free_fallback_model] + [
+                model for model in ordered_models[1:] if model != self.settings.openrouter_free_fallback_model
+            ]
 
         if not ordered_models and self.settings.openrouter_free_fallback_model:
             ordered_models = [self.settings.openrouter_free_fallback_model]
@@ -190,6 +227,12 @@ class OpenRouterClient:
         max_attempts = 1 + max(0, int(self.settings.openrouter_max_fallback_attempts))
         for model in ordered_models[:max_attempts]:
             yield {**payload, "model": model}
+
+
+    def _is_controlled_fallback_alias(self, model: str) -> bool:
+        """Allow configured free/router aliases even when the model list returns dated IDs."""
+
+        return model == self.settings.openrouter_free_fallback_model or model.endswith(":free") or model.startswith("~")
 
     async def _safe_model_ids_for_preflight(self) -> set[str] | None:
         if not self.settings.openrouter_model_preflight_enabled:
