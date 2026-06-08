@@ -53,6 +53,20 @@ class ModelRouter:
             return TaskType.SUMMARY
         return TaskType.GENERAL
 
+    def resolve_mode(self, task: TaskType, requested_mode: Mode) -> Mode:
+        """Convert Auto mode into the best prompt mode for the classified task."""
+
+        if requested_mode != Mode.AUTO:
+            return requested_mode
+        return {
+            TaskType.CODE: Mode.CODE,
+            TaskType.AUDIT: Mode.AUDIT,
+            TaskType.FILE_TRIAGE: Mode.FILE_ANALYSIS,
+            TaskType.SUMMARY: Mode.GENERAL,
+            TaskType.GENERAL: Mode.GENERAL,
+            TaskType.PREMIUM: Mode.AUDIT,
+        }[task]
+
     def select_model(self, task: TaskType, requested_model: str | None = None) -> str:
         if requested_model:
             return requested_model
@@ -68,56 +82,73 @@ class ModelRouter:
     def fallback_models_for_task(self, task: TaskType, selected_model: str) -> list[str]:
         """Return ordered fallback models, excluding the model already selected.
 
-        These defaults favour cheap/high-context models first, then premium aliases.
-        Keep this list env-configurable rather than hard-coding the final model policy
-        into application logic.
+        Failed explicit models should not silently jump to a paid route during smoke
+        tests. By default, the fallback ladder is free-first and free-only. Set
+        ALLOW_PAID_FALLBACK=true when a production lane is allowed to escalate from a
+        dead/overloaded model into paid alternatives.
         """
 
         by_task = {
             TaskType.SUMMARY: [
+                self.settings.openrouter_free_fallback_model,
                 self.settings.cheap_model,
                 self.settings.default_model,
-                self.settings.openrouter_free_fallback_model,
             ],
             TaskType.GENERAL: [
-                self.settings.default_model,
-                self.settings.cheap_model,
-                self.settings.balanced_model,
                 self.settings.openrouter_free_fallback_model,
+                self.settings.cheap_model,
+                self.settings.default_model,
+                self.settings.balanced_model,
             ],
             TaskType.FILE_TRIAGE: [
+                self.settings.openrouter_free_fallback_model,
+                self.settings.cheap_model,
                 self.settings.balanced_model,
                 self.settings.default_model,
-                self.settings.openrouter_free_fallback_model,
             ],
             TaskType.CODE: [
+                self.settings.openrouter_free_fallback_model,
+                self.settings.cheap_model,
                 self.settings.code_model,
                 self.settings.balanced_model,
                 self.settings.premium_model,
-                self.settings.openrouter_free_fallback_model,
             ],
             TaskType.AUDIT: [
+                self.settings.openrouter_free_fallback_model,
+                self.settings.cheap_model,
                 self.settings.audit_model,
-                self.settings.premium_model,
                 self.settings.balanced_model,
                 self.settings.default_model,
-                self.settings.openrouter_free_fallback_model,
+                self.settings.premium_model,
             ],
             TaskType.PREMIUM: [
+                self.settings.openrouter_free_fallback_model,
                 self.settings.premium_model,
                 self.settings.audit_model,
                 self.settings.balanced_model,
-                self.settings.openrouter_free_fallback_model,
             ],
         }[task]
 
+        return self._dedupe_and_filter_fallbacks(by_task, selected_model)
+
+    def _dedupe_and_filter_fallbacks(self, candidates: list[str], selected_model: str) -> list[str]:
         seen: set[str] = {selected_model}
-        fallbacks: list[str] = []
-        for model in by_task:
-            if model and model not in seen:
-                seen.add(model)
-                fallbacks.append(model)
-        return fallbacks
+        free_fallbacks: list[str] = []
+        paid_fallbacks: list[str] = []
+
+        for model in candidates:
+            if not model or model in seen:
+                continue
+            seen.add(model)
+            if self._is_free_model(model):
+                free_fallbacks.append(model)
+            elif self.settings.allow_paid_fallback:
+                paid_fallbacks.append(model)
+
+        return free_fallbacks + paid_fallbacks
+
+    def _is_free_model(self, model: str) -> bool:
+        return model == self.settings.openrouter_free_fallback_model or model.endswith(":free")
 
     def summarise_model(self, model: dict[str, Any]) -> dict[str, Any]:
         pricing = model.get("pricing") or {}
