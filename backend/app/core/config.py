@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     audit_model: str = "nvidia/nemotron-3-ultra-550b-a55b:free"
     openrouter_free_fallback_model: str = "nvidia/nemotron-3-ultra-550b-a55b:free"
     allow_paid_fallback: bool = False
+    openrouter_model_preflight_enabled: bool = True
+    openrouter_model_list_timeout_seconds: float = 10
+    openrouter_attempt_timeout_seconds: float = 12
+    openrouter_max_fallback_attempts: int = 2
 
     cf_r2_account_id: str = ""
     cf_r2_access_key_id: str = ""
