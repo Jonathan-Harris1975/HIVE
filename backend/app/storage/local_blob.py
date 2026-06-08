@@ -13,6 +13,7 @@ class LocalObject:
     path: str
     size_bytes: int
     sha256: str
+    public_url: str | None = None
 
 
 class LocalBlobStorage:
