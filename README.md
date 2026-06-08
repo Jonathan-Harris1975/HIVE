@@ -1,4 +1,4 @@
-# JH Ops Chat
+# HIVE (Harris Intelligent Virtual Entity)
 
 Standalone Python-first OpenRouter operations chatbot for private brand and non-brand work.
 
