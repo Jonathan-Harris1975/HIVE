@@ -45,6 +45,19 @@ cp ../.env.example .env
 uvicorn app.main:app --reload --port 8080
 ```
 
+
+## Deployment
+
+The repo now includes both a Docker deployment path and a buildpack/Nixpacks fallback:
+
+- `Dockerfile` for predictable Koyeb deployment.
+- `.dockerignore` to keep the image lean.
+- `requirements.txt` for root-level Python dependency detection.
+- `Procfile`, `runtime.txt`, and `nixpacks.toml` for buildpack/Nixpacks fallback.
+- `scripts/start.sh` as the single start command.
+
+Recommended Koyeb path: use the `Dockerfile`. See `docs/koyeb-deployment.md`.
+
 ## Useful endpoints
 
 - `GET /health`
