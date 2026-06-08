@@ -174,8 +174,18 @@ class OpenRouterClient:
             ordered_models.append(model)
 
         valid_model_ids = await self._safe_model_ids_for_preflight()
-        if valid_model_ids is not None:
-            ordered_models = [model for model in ordered_models if model in valid_model_ids]
+        if valid_model_ids is not None and ordered_models:
+            # Preflight should protect us from obviously dead user/requested models,
+            # but it must not aggressively filter controlled fallback aliases.
+            # OpenRouter can resolve some aliases to dated endpoint IDs at runtime;
+            # exact-ID filtering of fallbacks can therefore remove every safe route
+            # and turn a recoverable bad-model request into a 502.
+            primary_model = ordered_models[0]
+            if primary_model not in valid_model_ids:
+                ordered_models = ordered_models[1:]
+
+        if not ordered_models and self.settings.openrouter_free_fallback_model:
+            ordered_models = [self.settings.openrouter_free_fallback_model]
 
         max_attempts = 1 + max(0, int(self.settings.openrouter_max_fallback_attempts))
         for model in ordered_models[:max_attempts]:
