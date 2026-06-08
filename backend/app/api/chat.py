@@ -34,11 +34,12 @@ class ChatRequest(BaseModel):
 def build_payload(request: ChatRequest, settings: Settings) -> tuple[dict[str, object], list[str]]:
     router_service = ModelRouter(settings)
     task = router_service.classify_task(request.message, request.mode)
+    effective_mode = router_service.resolve_mode(task, request.mode)
     selected_model = router_service.select_model(task, request.model)
     fallback_models = router_service.fallback_models_for_task(task, selected_model)
 
     window = ContextWindow()
-    window.add("system", build_system_prompt(request.mode))
+    window.add("system", build_system_prompt(effective_mode))
     for turn in request.history:
         window.add(turn.role, turn.content)
     window.add("user", request.message)
