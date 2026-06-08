@@ -24,15 +24,28 @@ If a request includes `model`, the backend sends that exact model ID to OpenRout
 | Brand / audit | `AUDIT_MODEL` |
 | Premium | `PREMIUM_MODEL` |
 
-## Rule 3: retry bad endpoints before failing
+## Rule 3: preflight dead model IDs before calling OpenRouter
 
-OpenRouter 404/429/502/503/504 model failures trigger fallback attempts before the request fails.
+By default, HIVE checks the requested model ID against OpenRouter's current model list before making the chat call. If the requested model is not available, HIVE skips it immediately and tries the fallback ladder instead. This prevents a known-dead model from burning the full HTTP timeout before fallback.
+
+```env
+OPENROUTER_MODEL_PREFLIGHT_ENABLED=true
+OPENROUTER_MODEL_LIST_TIMEOUT_SECONDS=10
+```
+
+If the model-list check itself fails, HIVE fails open and attempts the requested model rather than blocking chat entirely.
+
+## Rule 4: retry bad endpoints before failing
+
+OpenRouter 404/408/429/500/502/503/504 model failures trigger fallback attempts before the request fails. Individual non-streaming attempts are timeout-limited.
 
 By default, fallback is **free-first and free-only**:
 
 ```env
 OPENROUTER_FREE_FALLBACK_MODEL=nvidia/nemotron-3-ultra-550b-a55b:free
 ALLOW_PAID_FALLBACK=false
+OPENROUTER_ATTEMPT_TIMEOUT_SECONDS=12
+OPENROUTER_MAX_FALLBACK_ATTEMPTS=2
 ```
 
 Set `ALLOW_PAID_FALLBACK=true` only when a production lane is allowed to escalate from a dead/overloaded model into paid alternatives. This prevents smoke tests and low-risk calls quietly rolling into paid models.
@@ -48,6 +61,10 @@ CODE_MODEL=x-ai/grok-build-0.1
 AUDIT_MODEL=nvidia/nemotron-3-ultra-550b-a55b:free
 OPENROUTER_FREE_FALLBACK_MODEL=nvidia/nemotron-3-ultra-550b-a55b:free
 ALLOW_PAID_FALLBACK=false
+OPENROUTER_MODEL_PREFLIGHT_ENABLED=true
+OPENROUTER_MODEL_LIST_TIMEOUT_SECONDS=10
+OPENROUTER_ATTEMPT_TIMEOUT_SECONDS=12
+OPENROUTER_MAX_FALLBACK_ATTEMPTS=2
 ```
 
 ## AIMS alignment
