@@ -41,7 +41,7 @@ class R2Storage:
                 aws_access_key_id=self.settings.cf_r2_access_key_id,
                 aws_secret_access_key=self.settings.cf_r2_secret_access_key,
                 config=Config(signature_version="s3v4"),
-                region_name="auto",
+                region_name=self.settings.r2_region or "auto",
             )
         return self._client
 
