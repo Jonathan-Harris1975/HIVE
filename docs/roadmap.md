@@ -20,7 +20,9 @@
 - [ ] SQLAlchemy models for conversations, messages, files, chunks, costs
 - [ ] SQLite local database
 - [ ] PostgreSQL production path
-- [ ] File metadata API
+- [x] File list/read API
+- [x] Single-file chat API
+- [ ] Durable file metadata API
 - [ ] Conversation resume API
 
 ## v0.3 Search
@@ -36,7 +38,8 @@
 - [ ] Mode selector
 - [ ] Model picker
 - [ ] Upload panel
-- [ ] R2 file browser
+- [x] R2 file browser API
+- [ ] R2 file browser UI
 - [ ] Cost display
 
 ## v0.5 Ops features

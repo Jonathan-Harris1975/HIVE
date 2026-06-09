@@ -89,3 +89,33 @@ The original multipart endpoint remains available at `POST /v1/files/upload` for
 - Do not expose the OpenRouter key to the browser.
 - Keep uploads routed through the backend so ZIP safety checks and R2 storage happen server-side.
 - Use Docker for the most predictable Koyeb deployment. The buildpack files are there as a backup route, not the main road.
+
+
+## R2 list/read/chat smoke tests
+
+After a successful `/v1/files/upload-text` response, copy the returned `object_key`.
+
+List recent uploaded objects:
+
+```bash
+curl -X GET "https://your-koyeb-service.example/v1/files/list?prefix=uploads/&limit=20" \
+  -H "Authorization: Bearer $ADMIN_BEARER_TOKEN"
+```
+
+Read a stored text object:
+
+```bash
+curl -X GET "https://your-koyeb-service.example/v1/files/read?key=uploads/FILE_ID/hive-r2-smoke.txt" \
+  -H "Authorization: Bearer $ADMIN_BEARER_TOKEN"
+```
+
+Ask HIVE about a stored object:
+
+```bash
+curl -X POST "https://your-koyeb-service.example/v1/chat/with-file" \
+  -H "Authorization: Bearer $ADMIN_BEARER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"object_key\":\"uploads/FILE_ID/hive-r2-smoke.txt\",\"message\":\"What does this file confirm?\",\"mode\":\"file_analysis\",\"model\":\"nvidia/nemotron-3-ultra-550b-a55b:free\",\"max_tokens\":400}"
+```
+
+For v1 this route reads up to `MAX_FILE_READ_BYTES` and injects up to `MAX_FILE_CHAT_CHARS` into the model context. Keep large-file RAG for the Vectorize phase.
