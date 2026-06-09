@@ -103,6 +103,16 @@ The core v1 chat/R2 file loop still works with both stores disabled. Persistence
 
 The same schema works for local SQLite smoke tests and Koyeb/PostgreSQL.
 
+
+
+### Persistence production rules
+
+- PostgreSQL writes use transaction context managers with rollback-on-error.
+- Conversation and file records use `ON CONFLICT` upserts, avoiding PostgreSQL aborted-transaction poisoning.
+- Each diagnostic table count runs safely so one missing table cannot poison the remaining checks.
+- D1 queries include bounded retries and structured diagnostics.
+- `/v1/db/ping-write` verifies SQL and D1 write/delete paths without leaving permanent records.
+
 ### D1 schema
 
 `POST /v1/db/init` also creates `hive_ecosystem_metadata` when `D1_ENABLED=true`. This table is intentionally generic so RAMS/AIMS indexes can be added without a schema rewrite every time a new audit lane appears.

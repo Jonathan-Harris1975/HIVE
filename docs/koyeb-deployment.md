@@ -159,6 +159,8 @@ DATABASE_USER=your-database-user
 DATABASE_PASSWORD=your-database-password
 DATABASE_NAME=your-database-name
 DATABASE_SSLMODE=require
+DATABASE_CONNECT_TIMEOUT_SECONDS=8
+DATABASE_STATEMENT_TIMEOUT_SECONDS=30
 ```
 
 Then redeploy and run:
@@ -181,3 +183,18 @@ CHAT_WITH_FILE_MODEL_TIMEOUT_SECONDS=30
 ```
 
 The endpoint returns `stage`, `timings`, and `error_code:"chat_with_file_timeout"` instead of a hanging request when model calls exceed the guard.
+
+
+### Production persistence verification
+
+After enabling Koyeb PostgreSQL and Cloudflare D1, run these in order:
+
+```bash
+curl -X POST "https://YOUR-KOYEB-APP.koyeb.app/v1/db/init" -H "Authorization: Bearer YOUR_ADMIN_BEARER_TOKEN"
+
+curl -X POST "https://YOUR-KOYEB-APP.koyeb.app/v1/db/ping-write" -H "Authorization: Bearer YOUR_ADMIN_BEARER_TOKEN"
+
+curl -X GET "https://YOUR-KOYEB-APP.koyeb.app/v1/db/diagnostics" -H "Authorization: Bearer YOUR_ADMIN_BEARER_TOKEN"
+```
+
+`/v1/db/ping-write` writes and deletes temporary probe rows in SQL and D1. It is the quick check that the persistence layer is not stuck in an aborted PostgreSQL transaction and that D1 writes are accepted.

@@ -93,3 +93,12 @@ The endpoint returns `stage`, `timings`, and `error_code:"chat_with_file_timeout
 - [x] List Cloudflare D1 ecosystem metadata records by lane.
 
 Next persistence step: add chunk records and Vectorize-backed retrieval, rather than sending large files directly to the model.
+
+
+## Completed v1.1 persistence hardening
+
+- Production-safe PostgreSQL transaction rollback behaviour.
+- True SQL upserts for conversations and files.
+- SQL/D1 write probes via `/v1/db/ping-write`.
+- D1 retry/diagnostic controls.
+- Persistence docs and Koyeb env guidance updated.
