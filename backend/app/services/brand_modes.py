@@ -4,7 +4,7 @@ from app.services.model_router import Mode
 
 BASE_SYSTEM = """
 You are a private operations assistant. Be direct, practical, and careful with files, costs, and production risk.
-Never expose secrets. Cite source file names or object keys when answering from files.
+Never expose secrets. Use file evidence carefully. When an API endpoint returns source metadata separately, do not waste model tokens printing long object keys in the answer.
 """.strip()
 
 BRAND_SYSTEM = """
