@@ -62,7 +62,7 @@ def test_vectorize_diagnostics_endpoint_is_safe_when_disabled(monkeypatch, tmp_p
     assert response.status_code == 200
     body = response.json()
     assert body["ok"] is True
-    assert body["build"] == "v1.3-vectorize-foundation"
+    assert body["build"] == "v1.3.1-vectorize-upsert-fix"
     assert body["sql_chunks_source_of_truth"] is True
     assert body["vectorize"]["enabled"] is False
 
@@ -107,3 +107,35 @@ async def test_vector_search_falls_back_to_sql_chunks_when_vectorize_disabled(tm
     assert search["fallback_used"] is True
     assert search["count"] == 1
     assert "Deployment failure" in search["chunks"][0]["content"]
+
+@pytest.mark.asyncio
+async def test_vectorize_upsert_uses_cloudflare_vectors_multipart_part(monkeypatch) -> None:
+    settings = Settings(
+        VECTORIZE_ENABLED="true",
+        VECTORIZE_ACCOUNT_ID="account123",
+        VECTORIZE_API_TOKEN="token123",
+        VECTORIZE_INDEX_NAME="hive-chunks",
+    )
+    client = VectorizeClient(settings)
+    captured: dict[str, object] = {}
+
+    async def fake_request(method: str, url: str, **kwargs):
+        captured["method"] = method
+        captured["url"] = url
+        captured["files"] = kwargs.get("files")
+        return {"ok": True, "status_code": 200, "result": {"mutationId": "mut-test"}}
+
+    monkeypatch.setattr(client, "_request", fake_request)
+    result = await client.upsert_vectors([
+        {"id": "chunk-1", "values": [0.1, 0.2, 0.3], "metadata": {"object_key": "uploads/demo.txt"}}
+    ])
+
+    assert result["ok"] is True
+    files = captured["files"]
+    assert isinstance(files, dict)
+    assert "vectors" in files
+    assert "body" not in files
+    filename, payload, content_type = files["vectors"]
+    assert filename == "vectors.ndjson"
+    assert content_type == "application/x-ndjson"
+    assert b'"id": "chunk-1"' in payload
