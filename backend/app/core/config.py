@@ -71,10 +71,42 @@ class Settings(BaseSettings):
     d1_timeout_seconds: int = Field(12, validation_alias=AliasChoices("D1_TIMEOUT_SECONDS"))
     d1_max_attempts: int = Field(2, validation_alias=AliasChoices("D1_MAX_ATTEMPTS"))
 
-    cf_account_id: str = Field("", validation_alias=AliasChoices("CF_ACCOUNT_ID", "R2_ACCOUNT_ID"))
-    cf_api_token: str = Field("", validation_alias=AliasChoices("CF_API_TOKEN", "VECTORIZE_API_TOKEN"))
-    cf_vectorize_index: str = Field("jh-ops-chat", validation_alias=AliasChoices("CF_VECTORIZE_INDEX", "VECTORIZE_INDEX_NAME"))
-    cf_embedding_model: str = "@cf/baai/bge-base-en-v1.5"
+    # Optional Cloudflare Vectorize semantic retrieval. SQL chunks remain the
+    # source of truth; Vectorize only stores/searches embeddings keyed by SQL chunk IDs.
+    vectorize_enabled: bool = Field(False, validation_alias=AliasChoices("VECTORIZE_ENABLED"))
+    vectorize_account_id: str = Field("", validation_alias=AliasChoices("VECTORIZE_ACCOUNT_ID", "CF_VECTORIZE_ACCOUNT_ID", "CF_ACCOUNT_ID", "R2_ACCOUNT_ID"))
+    vectorize_api_token: str = Field("", validation_alias=AliasChoices("VECTORIZE_API_TOKEN", "Vectorize_API_kEY", "CF_VECTORIZE_API_TOKEN", "CF_API_TOKEN"))
+    vectorize_index_name: str = Field("hive-chunks", validation_alias=AliasChoices("VECTORIZE_INDEX_NAME", "CF_VECTORIZE_INDEX"))
+    vectorize_timeout_seconds: int = Field(15, validation_alias=AliasChoices("VECTORIZE_TIMEOUT_SECONDS"))
+    vectorize_max_attempts: int = Field(2, validation_alias=AliasChoices("VECTORIZE_MAX_ATTEMPTS"))
+    vectorize_top_k: int = Field(8, validation_alias=AliasChoices("VECTORIZE_TOP_K"))
+    vectorize_return_metadata: str | bool = Field("all", validation_alias=AliasChoices("VECTORIZE_RETURN_METADATA"))
+
+    embeddings_enabled: bool = Field(False, validation_alias=AliasChoices("EMBEDDINGS_ENABLED"))
+    embeddings_provider: str = Field("cloudflare", validation_alias=AliasChoices("EMBEDDINGS_PROVIDER"))
+    embeddings_account_id: str = Field("", validation_alias=AliasChoices("EMBEDDINGS_ACCOUNT_ID", "VECTORIZE_ACCOUNT_ID", "CF_ACCOUNT_ID", "R2_ACCOUNT_ID"))
+    embeddings_api_token: str = Field("", validation_alias=AliasChoices("EMBEDDINGS_API_TOKEN", "VECTORIZE_API_TOKEN", "Vectorize_API_kEY", "CF_API_TOKEN"))
+    embeddings_model: str = Field("@cf/baai/bge-base-en-v1.5", validation_alias=AliasChoices("EMBEDDINGS_MODEL", "CF_EMBEDDING_MODEL"))
+    embeddings_dimensions: int = Field(768, validation_alias=AliasChoices("EMBEDDINGS_DIMENSIONS"))
+    embeddings_timeout_seconds: int = Field(20, validation_alias=AliasChoices("EMBEDDINGS_TIMEOUT_SECONDS"))
+    embeddings_max_batch_size: int = Field(32, validation_alias=AliasChoices("EMBEDDINGS_MAX_BATCH_SIZE"))
+
+    # Backwards-compatible aliases for older adapter references.
+    @property
+    def cf_account_id(self) -> str:
+        return self.vectorize_account_id
+
+    @property
+    def cf_api_token(self) -> str:
+        return self.vectorize_api_token
+
+    @property
+    def cf_vectorize_index(self) -> str:
+        return self.vectorize_index_name
+
+    @property
+    def cf_embedding_model(self) -> str:
+        return self.embeddings_model
 
     max_upload_bytes: int = 100 * 1024 * 1024
     max_zip_files: int = 5000
