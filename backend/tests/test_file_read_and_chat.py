@@ -92,3 +92,45 @@ def test_chat_with_file_injects_bounded_file_context(monkeypatch, tmp_path):
     assert body["source"]["object_key"] == key
     assert body["source"]["truncated"] is False
     assert "R2 read layer works" in body["reply"]
+
+
+def test_file_list_runtime_error_returns_json_diagnostics(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+
+    from app.api import files as files_api
+
+    class BrokenStorage:
+        def list_objects(self, prefix="", limit=100):  # noqa: ANN001
+            raise RuntimeError("R2 list failed for prefix 'uploads/': code=AccessDenied; message=denied; http_status=403")
+
+    monkeypatch.setattr(files_api, "_storage", lambda settings: BrokenStorage())
+    client = TestClient(app)
+
+    response = client.get("/v1/files/list")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is False
+    assert body["error"]["operation"] == "list"
+    assert "bucket permissions" in body["error"]["hint"]
+
+
+def test_file_diagnostics_returns_list_probe_error(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+
+    from app.api import files as files_api
+
+    class BrokenStorage:
+        def list_objects(self, prefix="", limit=100):  # noqa: ANN001
+            raise RuntimeError("R2 list failed for prefix 'uploads/': code=NoSuchBucket; message=missing")
+
+    monkeypatch.setattr(files_api, "_storage", lambda settings: BrokenStorage())
+    client = TestClient(app)
+
+    response = client.get("/v1/files/diagnostics")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is False
+    assert body["list_probe"]["ok"] is False
+    assert "bucket" in body["list_probe"]["hint"].lower()
