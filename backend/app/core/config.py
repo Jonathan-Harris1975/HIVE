@@ -59,15 +59,17 @@ class Settings(BaseSettings):
     database_name: str = Field("", validation_alias=AliasChoices("DATABASE_NAME", "POSTGRES_DB", "POSTGRES_DATABASE"))
     database_sslmode: str = "require"
     database_connect_timeout_seconds: int = 8
+    database_statement_timeout_seconds: int = 30
 
     # Optional Cloudflare D1 metadata store. D1 is kept separate from the SQL
     # conversation store so it can be used for ecosystem indexes/cache snapshots.
     d1_enabled: bool = Field(False, validation_alias=AliasChoices("D1_ENABLED"))
     d1_account_id: str = Field("", validation_alias=AliasChoices("D1_ACCOUNT_ID", "CF_ACCOUNT_ID", "R2_ACCOUNT_ID"))
-    d1_api_key: str = Field("", validation_alias=AliasChoices("D1_API_KEY", "D1_API_TOKEN", "CF_D1_API_TOKEN"))
+    d1_api_key: str = Field("", validation_alias=AliasChoices("D1_API_KEY", "D1_api_key", "D1_API_TOKEN", "CF_D1_API_TOKEN"))
     d1_database_id: str = Field("", validation_alias=AliasChoices("D1_DATABASE_ID", "D1_UUID"))
     d1_database_name: str = Field("database-hive", validation_alias=AliasChoices("D1_DATABASE_NAME", "D1_DATABASE"))
     d1_timeout_seconds: int = 12
+    d1_max_attempts: int = 2
 
     cf_account_id: str = Field("", validation_alias=AliasChoices("CF_ACCOUNT_ID", "R2_ACCOUNT_ID"))
     cf_api_token: str = Field("", validation_alias=AliasChoices("CF_API_TOKEN", "VECTORIZE_API_TOKEN"))
