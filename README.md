@@ -71,6 +71,7 @@ Recommended Koyeb path: use the `Dockerfile`. See `docs/koyeb-deployment.md`.
 - `GET /v1/files/public-url?key=uploads/...`
 - `GET /v1/files/zip/inspect?key=uploads/...`
 - `POST /v1/chat/with-file`
+  - Supports `dry_run:true` / `skip_model:true` for file-read and prompt-build diagnostics.
 
 
 ### JSON text upload smoke test
@@ -140,6 +141,17 @@ curl -X POST "https://your-koyeb-service.example/v1/chat/with-file" \
 ```
 
 The v1 file-chat route injects a bounded text excerpt into the prompt. The model is told not to print long object keys inside the reply because the API returns `source` and `source_citation` metadata separately. If a model returns no visible assistant text, HIVE retries the fallback ladder and returns `ok:false` with `error_code:"empty_model_reply"` if all attempts remain empty. Vectorize/chunk retrieval will replace this later for larger corpora.
+
+If hosted runners stick on file chat, run a dry-run first. This verifies R2 read + prompt construction without calling OpenRouter:
+
+```bash
+curl -X POST "https://your-koyeb-service.example/v1/chat/with-file" \
+  -H "Authorization: Bearer $ADMIN_BEARER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"object_key\":\"uploads/FILE_ID/hive-r2-smoke.txt\",\"message\":\"What does this file confirm?\",\"dry_run\":true}"
+```
+
+Normal file-chat responses now include `stage` and `timings`. If the model call exceeds `CHAT_WITH_FILE_MODEL_TIMEOUT_SECONDS` or `model_timeout_seconds`, HIVE returns `ok:false`, `error_code:"chat_with_file_timeout"`, source metadata, and timings instead of leaving the client hanging.
 
 ### Empty reply and truncation behaviour
 
