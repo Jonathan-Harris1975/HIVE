@@ -65,3 +65,14 @@
 - [ ] Quarantine report review
 - [ ] Koyeb/GitHub log analysis upload mode
 - [ ] Social/post QA lanes
+
+
+## File-chat timeout diagnostics
+
+`/v1/chat/with-file` supports `dry_run:true` / `skip_model:true` to verify R2 read and prompt construction without a model call. Configure the model-call guard with:
+
+```env
+CHAT_WITH_FILE_MODEL_TIMEOUT_SECONDS=30
+```
+
+The endpoint returns `stage`, `timings`, and `error_code:"chat_with_file_timeout"` instead of a hanging request when model calls exceed the guard.

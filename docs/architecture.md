@@ -106,3 +106,14 @@ The same schema works for local SQLite smoke tests and Koyeb/PostgreSQL.
 ### D1 schema
 
 `POST /v1/db/init` also creates `hive_ecosystem_metadata` when `D1_ENABLED=true`. This table is intentionally generic so RAMS/AIMS indexes can be added without a schema rewrite every time a new audit lane appears.
+
+
+## File-chat timeout diagnostics
+
+`/v1/chat/with-file` supports `dry_run:true` / `skip_model:true` to verify R2 read and prompt construction without a model call. Configure the model-call guard with:
+
+```env
+CHAT_WITH_FILE_MODEL_TIMEOUT_SECONDS=30
+```
+
+The endpoint returns `stage`, `timings`, and `error_code:"chat_with_file_timeout"` instead of a hanging request when model calls exceed the guard.

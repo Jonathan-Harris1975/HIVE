@@ -170,3 +170,14 @@ curl -X POST "https://YOUR-KOYEB-APP.koyeb.app/v1/db/init" -H "Authorization: Be
 ```
 
 If the password is missing, diagnostics will show the SQL store as configured but the probe will fail. Add the missing secret, redeploy, then rerun `/v1/db/init`.
+
+
+## File-chat timeout diagnostics
+
+`/v1/chat/with-file` supports `dry_run:true` / `skip_model:true` to verify R2 read and prompt construction without a model call. Configure the model-call guard with:
+
+```env
+CHAT_WITH_FILE_MODEL_TIMEOUT_SECONDS=30
+```
+
+The endpoint returns `stage`, `timings`, and `error_code:"chat_with_file_timeout"` instead of a hanging request when model calls exceed the guard.
