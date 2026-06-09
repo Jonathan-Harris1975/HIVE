@@ -55,6 +55,8 @@ class SqlStore:
             "url_configured": bool(self.settings.database_url),
             "sslmode": self.settings.database_sslmode or None,
             "connect_timeout_seconds": self.settings.database_connect_timeout_seconds,
+            "statement_timeout_seconds": self.settings.database_statement_timeout_seconds,
+            "statement_timeout_sql": self._postgres_statement_timeout_sql() if self.dialect == "postgres" else None,
         }
 
     def init_schema(self) -> dict[str, object]:
@@ -453,24 +455,33 @@ class SqlStore:
                 import psycopg
             except ImportError as exc:  # pragma: no cover
                 raise RuntimeError("psycopg[binary] is required for PostgreSQL support") from exc
-            conn = psycopg.connect(self.url, connect_timeout=self.settings.database_connect_timeout_seconds)
+            conn = None
             try:
+                conn = psycopg.connect(self.url, connect_timeout=self.settings.database_connect_timeout_seconds)
                 timeout_sql = self._postgres_statement_timeout_sql()
                 if timeout_sql:
-                    # PostgreSQL does not accept bind parameters for SET statements
-                    # (SET statement_timeout = $1 fails). The value is a sanitised
-                    # integer derived from configuration, so this literal SQL is safe.
                     with conn.cursor() as cur:
+                        # PostgreSQL does not accept bind placeholders for this SET command
+                        # on psycopg/Koyeb. Use a sanitised integer literal instead.
                         cur.execute(timeout_sql)
-                yield conn
-            except Exception:
                 try:
-                    conn.rollback()
+                    yield conn
                 except Exception:
-                    pass
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
+                    raise
+            except Exception:
+                if conn is not None:
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
                 raise
             finally:
-                conn.close()
+                if conn is not None:
+                    conn.close()
             return
 
         raise RuntimeError(f"Unsupported SQL database URL: {self.url!r}")
@@ -489,19 +500,22 @@ class SqlStore:
 
 
     def _postgres_statement_timeout_sql(self) -> str | None:
-        """Return safe literal SQL for PostgreSQL statement timeout.
+        """Return safe PostgreSQL statement_timeout SQL or None.
 
-        PostgreSQL utility commands such as SET do not support bind
-        placeholders in the same way as DML queries. psycopg sends
-        ``SET statement_timeout = %s`` as ``SET statement_timeout = $1``,
-        which PostgreSQL rejects. This method converts the configured
-        seconds to a non-negative integer millisecond literal.
+        PostgreSQL/Koyeb rejects parameter binding for ``SET statement_timeout``
+        in this context, producing ``SET statement_timeout = $1`` syntax errors.
+        The value comes from a typed integer setting, is clamped to >= 0, and is
+        converted to milliseconds before being interpolated as a numeric literal.
         """
 
-        statement_timeout_ms = int(max(0, self.settings.database_statement_timeout_seconds) * 1000)
-        if statement_timeout_ms <= 0:
+        try:
+            timeout_seconds = int(self.settings.database_statement_timeout_seconds)
+        except Exception:
+            timeout_seconds = 30
+        timeout_ms = max(0, timeout_seconds) * 1000
+        if timeout_ms <= 0:
             return None
-        return f"SET statement_timeout = {statement_timeout_ms}"
+        return f"SET statement_timeout = {timeout_ms}"
 
     def _sqlite_path(self) -> Path:
         value = self.url
