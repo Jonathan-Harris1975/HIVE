@@ -86,3 +86,101 @@ def test_d1_env_aliases() -> None:
     assert settings.d1_account_id == "account-123"
     assert settings.d1_database_id == "database-uuid"
     assert settings.d1_database_name == "database-hive"
+
+
+def test_sql_store_lists_conversations_files_and_costs(tmp_path: Path) -> None:
+    db_path = tmp_path / "hive.sqlite3"
+    settings = Settings(
+        APP_ENV="test",
+        DATABASE_ENABLED=True,
+        DATABASE_URL=f"sqlite:///{db_path}",
+    )
+    store = SqlStore(settings)
+    assert store.init_schema()["ok"] is True
+
+    chat = store.record_chat(
+        conversation_id="conv-1",
+        mode="general",
+        user_message="hello",
+        assistant_reply="world",
+        model_used="test/model",
+        provider="test-provider",
+        usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15, "cost": 0.001},
+    )
+    assert chat["ok"] is True
+    assert store.record_file(
+        {
+            "object_key": "uploads/example.txt",
+            "original_name": "example.txt",
+            "storage": "r2",
+            "bucket": "hive",
+            "public_url": "https://example.com/example.txt",
+            "size_bytes": 7,
+            "content_type": "text/plain",
+        }
+    )["ok"] is True
+
+    conversations = store.list_conversations(limit=10)
+    assert conversations["ok"] is True
+    assert conversations["count"] == 1
+    assert conversations["conversations"][0]["id"] == "conv-1"
+
+    conversation = store.get_conversation("conv-1")
+    assert conversation["ok"] is True
+    assert conversation["message_count"] == 2
+    assert [item["role"] for item in conversation["messages"]] == ["user", "assistant"]
+
+    turns = store.recent_chat_turns("conv-1", limit=10)
+    assert turns == [{"role": "user", "content": "hello"}, {"role": "assistant", "content": "world"}]
+
+    files = store.list_files(limit=10)
+    assert files["ok"] is True
+    assert files["files"][0]["object_key"] == "uploads/example.txt"
+
+    costs = store.cost_summary()
+    assert costs["ok"] is True
+    assert costs["totals"]["total_tokens"] == 15
+    assert costs["by_model"][0]["model"] == "test/model"
+
+    counts = store.table_counts()
+    assert counts["ok"] is True
+    assert counts["counts"]["hive_conversations"] == 1
+
+
+def test_chat_payload_hydrates_persisted_history(tmp_path: Path) -> None:
+    from app.api.chat import ChatRequest, build_payload
+
+    db_path = tmp_path / "hive.sqlite3"
+    settings = Settings(
+        APP_ENV="test",
+        DATABASE_ENABLED=True,
+        DATABASE_URL=f"sqlite:///{db_path}",
+        OPENROUTER_API_KEY="test",
+    )
+    store = SqlStore(settings)
+    assert store.init_schema()["ok"] is True
+    assert store.record_chat(
+        conversation_id="conv-history",
+        mode="general",
+        user_message="Remember the colour is blue.",
+        assistant_reply="I will remember blue.",
+        model_used="test/model",
+        provider="test",
+        usage={"total_tokens": 3, "cost": 0},
+    )["ok"] is True
+
+    payload, _fallbacks = build_payload(
+        ChatRequest(
+            conversation_id="conv-history",
+            message="What colour did I mention?",
+            mode="general",
+            model="test/model",
+            db_history_limit=10,
+        ),
+        settings,
+    )
+
+    contents = [message["content"] for message in payload["messages"]]
+    assert "Remember the colour is blue." in contents
+    assert "I will remember blue." in contents
+    assert contents[-1] == "What colour did I mention?"
