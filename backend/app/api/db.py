@@ -74,6 +74,23 @@ def init_database(settings: Settings = Depends(get_settings)) -> dict[str, objec
     }
 
 
+@router.post("/db/ping-write")
+def database_ping_write(settings: Settings = Depends(get_settings)) -> dict[str, object]:
+    """Run safe SQL and D1 write/delete probes.
+
+    Use this after a persistence failure to verify that Postgres transactions and
+    D1 writes are clean without creating lasting records.
+    """
+
+    sql = SqlStore(settings)
+    d1 = D1MetadataStore(settings)
+    sql_result = sql.ping_write()
+    d1_result = d1.ping_write()
+    return {
+        "ok": bool(sql_result.get("ok") or not sql.enabled) and bool(d1_result.get("ok") or not d1.enabled),
+        "sql": sql_result,
+        "d1": d1_result,
+    }
 
 
 @router.get("/db/conversations")
