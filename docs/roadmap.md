@@ -22,6 +22,9 @@
 - [ ] PostgreSQL production path
 - [x] File list/read API
 - [x] Single-file chat API
+- [x] Public URL helper API
+- [x] Base64 upload API for phone/ReqBin/Make testing
+- [x] Stored ZIP inspection API
 - [ ] Durable file metadata API
 - [ ] Conversation resume API
 
@@ -39,6 +42,7 @@
 - [ ] Model picker
 - [ ] Upload panel
 - [x] R2 file browser API
+- [x] Source metadata outside model replies
 - [ ] R2 file browser UI
 - [ ] Cost display
 
