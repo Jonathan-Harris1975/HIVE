@@ -226,6 +226,33 @@ curl -X POST "https://YOUR-KOYEB-APP.koyeb.app/v1/db/init" -H "Authorization: Be
 
 The core chat/file routes continue to work if the database layer is disabled or temporarily unavailable.
 
+
+
+### Production-grade persistence hardening
+
+The SQL layer uses true `ON CONFLICT` upserts for conversations and files. It does **not** use insert-fail-then-update flows, because PostgreSQL marks a transaction as aborted after a failed statement. Every SQL write runs inside a transaction context that commits on success and rolls back on failure before the connection closes.
+
+Use this after deployment, after `/v1/db/init`, or after any persistence error:
+
+```bash
+curl -X POST "https://YOUR-KOYEB-APP.koyeb.app/v1/db/ping-write" \
+  -H "Authorization: Bearer YOUR_ADMIN_BEARER_TOKEN"
+```
+
+Expected: SQL and D1 both return `ok:true`. The probe creates and deletes temporary diagnostic records, so it should not clutter the database.
+
+Key production envs:
+
+```env
+DATABASE_ENABLED=true
+DATABASE_SSLMODE=require
+DATABASE_CONNECT_TIMEOUT_SECONDS=8
+DATABASE_STATEMENT_TIMEOUT_SECONDS=30
+D1_ENABLED=true
+D1_TIMEOUT_SECONDS=12
+D1_MAX_ATTEMPTS=2
+```
+
 ### Persistence retrieval and conversation resume
 
 Once `DATABASE_ENABLED=true` and `/v1/db/init` has run, HIVE automatically records non-streaming `/v1/chat`, `/v1/chat/with-file`, upload metadata and model usage/cost events.
