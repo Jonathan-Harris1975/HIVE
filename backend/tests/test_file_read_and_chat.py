@@ -269,3 +269,68 @@ def test_chat_with_file_returns_empty_reply_diagnostic(monkeypatch, tmp_path):
     assert body["empty_reply"] is False
     assert body["error_code"] == "empty_model_reply"
     assert "no visible assistant text" in body["reply"]
+
+
+
+def test_chat_with_file_dry_run_skips_model_and_returns_timings(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    client = TestClient(app)
+    key = _upload_text(client, content="This file says dry run diagnostics work.")
+
+    async def fail_if_called(self, payload, fallback_models=None):  # noqa: ANN001, ARG001
+        raise AssertionError("OpenRouter should not be called during dry_run")
+
+    monkeypatch.setattr(OpenRouterClient, "chat_completion", fail_if_called)
+
+    response = client.post(
+        "/v1/chat/with-file",
+        json={
+            "object_key": key,
+            "message": "What does this confirm?",
+            "model": "poolside/laguna-xs.2:free",
+            "dry_run": True,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert body["dry_run"] is True
+    assert body["stage"] == "complete_without_model"
+    assert body["source"]["object_key"] == key
+    assert body["file_excerpt_chars"] > 0
+    assert body["timings"]["read_file_seconds"] is not None
+    assert body["timings"]["prompt_build_seconds"] is not None
+
+
+def test_chat_with_file_model_timeout_returns_structured_diagnostic(monkeypatch, tmp_path):
+    import asyncio
+
+    monkeypatch.chdir(tmp_path)
+    client = TestClient(app)
+    key = _upload_text(client, content="This file says timeout diagnostics work.")
+
+    async def slow_chat_completion(self, payload, fallback_models=None):  # noqa: ANN001, ARG001
+        await asyncio.sleep(2)
+        return {"choices": [{"message": {"content": "too late"}, "finish_reason": "stop"}]}
+
+    monkeypatch.setattr(OpenRouterClient, "chat_completion", slow_chat_completion)
+
+    response = client.post(
+        "/v1/chat/with-file",
+        json={
+            "object_key": key,
+            "message": "What does this confirm?",
+            "model": "poolside/laguna-xs.2:free",
+            "model_timeout_seconds": 0.5,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is False
+    assert body["stage"] == "model_call"
+    assert body["error_code"] == "chat_with_file_timeout"
+    assert body["source"]["object_key"] == key
+    assert body["timings"]["model_call_seconds"] is not None
+    assert "skip_model=true" in body["hint"]
