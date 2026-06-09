@@ -8,6 +8,7 @@ import time
 import zipfile
 from dataclasses import asdict
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Literal
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
@@ -15,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from app.core.config import Settings, get_settings
 from app.core.security import require_admin
+from app.ingestion.chunking import chunks_to_dicts, split_text_into_chunks
 from app.ingestion.file_ingestion import ingest_bytes_content, ingest_text_content, ingest_upload
 from app.ingestion.zip_ingestion import UnsafeZipError, inspect_zip
 from app.services.brand_modes import build_system_prompt
@@ -38,6 +40,14 @@ class Base64UploadRequest(BaseModel):
     filename: str = Field(..., min_length=1, max_length=255)
     content_base64: str = Field(..., min_length=1)
     content_type: str | None = None
+
+
+class FileChunkRequest(BaseModel):
+    object_key: str = Field(..., min_length=1, max_length=2048)
+    max_chars: int | None = Field(None, ge=80, le=24000)
+    overlap_chars: int | None = Field(None, ge=0, le=12000)
+    max_chunks: int | None = Field(None, ge=1, le=5000)
+    replace_existing: bool = True
 
 
 class ChatTurn(BaseModel):
@@ -69,6 +79,10 @@ class ChatWithFileRequest(BaseModel):
         description="Alias for skip_model, useful for smoke tests and diagnosing file-context build issues.",
     )
     conversation_id: str | None = None
+    use_chunks: bool = Field(False, description="Use persisted SQL chunks instead of injecting the raw file excerpt.")
+    chunk_query: str | None = Field(None, max_length=2000, description="Optional retrieval query; defaults to the user message.")
+    chunk_limit: int | None = Field(None, ge=1, le=30)
+    auto_chunk: bool = Field(False, description="If use_chunks is true and no chunks exist, read the file and create chunks first.")
 
 
 @router.post("/files/upload")
@@ -274,6 +288,98 @@ def inspect_stored_zip(
     }
 
 
+@router.post("/files/chunk")
+def chunk_file(
+    payload: FileChunkRequest,
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    """Read one stored text-ish object, split it into SQL-backed retrieval chunks."""
+
+    clean_key = _validate_object_key(payload.object_key)
+    try:
+        obj = _storage(settings).read_object(clean_key, max_bytes=settings.max_file_read_bytes)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        return _storage_error_response(
+            operation="chunk_read",
+            settings=settings,
+            key_or_prefix=clean_key,
+            error=exc,
+        )
+
+    content, had_decode_replacements = _decode_text(obj.content)
+    max_chars = payload.max_chars or settings.file_chunk_max_chars
+    overlap_chars = payload.overlap_chars if payload.overlap_chars is not None else settings.file_chunk_overlap_chars
+    max_chunks = payload.max_chunks or settings.file_chunk_max_count
+    chunks = split_text_into_chunks(
+        content,
+        max_chars=max_chars,
+        overlap_chars=overlap_chars,
+        max_chunks=max_chunks,
+    )
+    chunk_dicts = chunks_to_dicts(chunks)
+    source = _source_metadata(obj, settings, truncated=False, decode_replacements=had_decode_replacements)
+    db_record = SqlStore(settings).record_file_chunks(
+        object_key=clean_key,
+        chunks=chunk_dicts,
+        source_metadata=source,
+        replace_existing=payload.replace_existing,
+    )
+    return {
+        "ok": bool(db_record.get("ok")),
+        "source": source,
+        "chunking": {
+            "chunk_count": len(chunk_dicts),
+            "max_chars": max_chars,
+            "overlap_chars": overlap_chars,
+            "max_chunks": max_chunks,
+            "replace_existing": payload.replace_existing,
+            "total_token_estimate": sum(int(chunk.get("token_estimate") or 0) for chunk in chunk_dicts),
+        },
+        "db_recorded": bool(db_record.get("ok")),
+        "db_error": db_record.get("error"),
+        "chunks_preview": [
+            {**chunk, "content": chunk["content"][:360]}
+            for chunk in chunk_dicts[:5]
+        ],
+    }
+
+
+@router.get("/files/chunks/search")
+def search_chunks(
+    query: str = Query(..., min_length=1, max_length=2000),
+    key: str | None = Query(None, min_length=1, max_length=2048),
+    limit: int = Query(6, ge=1, le=30),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    """Search persisted file chunks with SQL-backed lexical retrieval."""
+
+    clean_key = _validate_object_key(key) if key else None
+    return SqlStore(settings).search_file_chunks(query=query, object_key=clean_key, limit=limit)
+
+
+@router.get("/files/chunks")
+def list_chunks(
+    key: str = Query(..., min_length=1, max_length=2048),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    include_content: bool = Query(False),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    """List persisted SQL chunks for one file."""
+
+    clean_key = _validate_object_key(key)
+    return SqlStore(settings).list_file_chunks(
+        object_key=clean_key,
+        limit=limit,
+        offset=offset,
+        include_content=include_content,
+    )
+
+
 @router.post("/chat/with-file")
 async def chat_with_file(
     request: ChatWithFileRequest,
@@ -290,6 +396,8 @@ async def chat_with_file(
         "validate_key_seconds": None,
         "read_file_seconds": None,
         "decode_seconds": None,
+        "chunk_retrieval_seconds": None,
+        "chunk_index_seconds": None,
         "prompt_build_seconds": None,
         "model_call_seconds": None,
         "db_record_seconds": None,
@@ -303,35 +411,113 @@ async def chat_with_file(
     except HTTPException:
         raise
 
-    stage = "read_file"
-    try:
-        obj = _time_stage(
-            timings,
-            "read_file_seconds",
-            lambda: _storage(settings).read_object(clean_key, max_bytes=settings.max_file_read_bytes),
-        )
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)) from exc
-    except RuntimeError as exc:
-        response = _storage_error_response(
-            operation="chat_with_file_read",
-            settings=settings,
-            key_or_prefix=clean_key,
-            error=exc,
-        )
-        response["stage"] = stage
-        response["timings"] = _finalise_timings(timings, total_started)
-        return response
-
-    stage = "decode_file"
-    content, had_decode_replacements = _time_stage(timings, "decode_seconds", lambda: _decode_text(obj.content))
-    max_chars = request.max_file_chars or settings.max_file_chat_chars
-    excerpt = content[:max_chars]
-    truncated = len(content) > len(excerpt)
-    source = _source_metadata(obj, settings, truncated=truncated, decode_replacements=had_decode_replacements)
     source_label = Path(clean_key).name or clean_key
+
+    if request.use_chunks:
+        stage = "chunk_retrieval"
+        query = request.chunk_query or request.message
+        chunk_limit = request.chunk_limit or settings.file_retrieval_max_chunks
+        store = SqlStore(settings)
+        retrieval = _time_stage(
+            timings,
+            "chunk_retrieval_seconds",
+            lambda: store.search_file_chunks(query=query, object_key=clean_key, limit=chunk_limit),
+        )
+        chunks = retrieval.get("chunks", []) if isinstance(retrieval, dict) else []
+
+        if not chunks and request.auto_chunk:
+            stage = "chunk_index"
+            try:
+                chunk_index_result = _time_stage(
+                    timings,
+                    "chunk_index_seconds",
+                    lambda: _chunk_file_for_chat(clean_key=clean_key, settings=settings),
+                )
+            except FileNotFoundError as exc:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+            except ValueError as exc:
+                raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)) from exc
+            except RuntimeError as exc:
+                response = _storage_error_response(
+                    operation="chat_with_file_auto_chunk_read",
+                    settings=settings,
+                    key_or_prefix=clean_key,
+                    error=exc,
+                )
+                response["stage"] = stage
+                response["timings"] = _finalise_timings(timings, total_started)
+                return response
+            if not chunk_index_result.get("ok"):
+                return {
+                    "ok": False,
+                    "stage": stage,
+                    "error_code": "chunk_index_failed",
+                    "message": chunk_index_result.get("db_error") or "File chunks could not be recorded.",
+                    "chunk_index": chunk_index_result,
+                    "timings": _finalise_timings(timings, total_started),
+                }
+            stage = "chunk_retrieval"
+            retrieval = _time_stage(
+                timings,
+                "chunk_retrieval_seconds",
+                lambda: store.search_file_chunks(query=query, object_key=clean_key, limit=chunk_limit),
+            )
+            chunks = retrieval.get("chunks", []) if isinstance(retrieval, dict) else []
+
+        if not isinstance(retrieval, dict) or not retrieval.get("ok"):
+            return {
+                "ok": False,
+                "stage": stage,
+                "error_code": "chunk_retrieval_failed",
+                "message": (retrieval or {}).get("error") if isinstance(retrieval, dict) else "Chunk retrieval failed.",
+                "timings": _finalise_timings(timings, total_started),
+                "hint": "Run POST /v1/files/chunk first, or retry with use_chunks=false for small files.",
+            }
+        if not chunks:
+            return {
+                "ok": False,
+                "stage": stage,
+                "error_code": "no_chunks_found",
+                "message": "No persisted chunks were found for this file/query.",
+                "retrieval": retrieval,
+                "timings": _finalise_timings(timings, total_started),
+                "hint": "Run POST /v1/files/chunk for this object_key, or set auto_chunk=true.",
+            }
+
+        excerpt = _chunks_to_excerpt(chunks)
+        obj = _object_stub_from_chunks(clean_key, settings)
+        source = _chunk_source_metadata(clean_key, settings, retrieval, chunks)
+        truncated = False
+        had_decode_replacements = False
+    else:
+        stage = "read_file"
+        try:
+            obj = _time_stage(
+                timings,
+                "read_file_seconds",
+                lambda: _storage(settings).read_object(clean_key, max_bytes=settings.max_file_read_bytes),
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            response = _storage_error_response(
+                operation="chat_with_file_read",
+                settings=settings,
+                key_or_prefix=clean_key,
+                error=exc,
+            )
+            response["stage"] = stage
+            response["timings"] = _finalise_timings(timings, total_started)
+            return response
+
+        stage = "decode_file"
+        content, had_decode_replacements = _time_stage(timings, "decode_seconds", lambda: _decode_text(obj.content))
+        max_chars = request.max_file_chars or settings.max_file_chat_chars
+        excerpt = content[:max_chars]
+        truncated = len(content) > len(excerpt)
+        source = _source_metadata(obj, settings, truncated=truncated, decode_replacements=had_decode_replacements)
 
     stage = "prompt_build"
     prompt_context = _time_stage(
@@ -580,6 +766,80 @@ def _build_file_chat_payload(
         "fallback_models": fallback_models,
         "selected_model": selected_model,
         "effective_mode": effective_mode,
+    }
+
+
+def _chunk_file_for_chat(*, clean_key: str, settings: Settings) -> dict[str, object]:
+    obj = _storage(settings).read_object(clean_key, max_bytes=settings.max_file_read_bytes)
+    content, had_decode_replacements = _decode_text(obj.content)
+    chunks = split_text_into_chunks(
+        content,
+        max_chars=settings.file_chunk_max_chars,
+        overlap_chars=settings.file_chunk_overlap_chars,
+        max_chunks=settings.file_chunk_max_count,
+    )
+    source = _source_metadata(obj, settings, truncated=False, decode_replacements=had_decode_replacements)
+    db_record = SqlStore(settings).record_file_chunks(
+        object_key=clean_key,
+        chunks=chunks_to_dicts(chunks),
+        source_metadata=source,
+        replace_existing=True,
+    )
+    return {
+        "ok": bool(db_record.get("ok")),
+        "object_key": clean_key,
+        "chunk_count": len(chunks),
+        "db_recorded": bool(db_record.get("ok")),
+        "db_error": db_record.get("error"),
+    }
+
+
+def _chunks_to_excerpt(chunks: list[dict[str, object]]) -> str:
+    blocks: list[str] = []
+    for chunk in chunks:
+        blocks.append(
+            "\n".join(
+                [
+                    f"[Chunk {chunk.get('chunk_index')} | chars {chunk.get('char_start')}-{chunk.get('char_end')} | score {chunk.get('score', 0)}]",
+                    str(chunk.get("content") or chunk.get("content_preview") or ""),
+                ]
+            ).strip()
+        )
+    return "\n\n---\n\n".join(block for block in blocks if block)
+
+
+def _object_stub_from_chunks(clean_key: str, settings: Settings) -> SimpleNamespace:
+    public_url = R2Storage(settings).public_url_for_key(clean_key) if R2Storage(settings).enabled else None
+    return SimpleNamespace(
+        key=clean_key,
+        bucket=settings.cf_r2_bucket if R2Storage(settings).enabled else None,
+        size_bytes=None,
+        content_type="text/plain; charset=utf-8",
+        public_url=public_url,
+    )
+
+
+def _chunk_source_metadata(
+    clean_key: str,
+    settings: Settings,
+    retrieval: dict[str, object],
+    chunks: list[dict[str, object]],
+) -> dict[str, object]:
+    public_url = R2Storage(settings).public_url_for_key(clean_key) if R2Storage(settings).enabled else None
+    return {
+        "object_key": clean_key,
+        "storage": _storage_name(settings),
+        "bucket": settings.cf_r2_bucket if R2Storage(settings).enabled else None,
+        "size_bytes": None,
+        "content_type": "text/plain; charset=utf-8",
+        "public_url": public_url,
+        "truncated": False,
+        "decode_replacements": False,
+        "chunked": True,
+        "chunks_used": len(chunks),
+        "chunk_indexes": [chunk.get("chunk_index") for chunk in chunks],
+        "retrieval_query": retrieval.get("query"),
+        "retrieval_candidate_count": retrieval.get("candidate_count"),
     }
 
 
