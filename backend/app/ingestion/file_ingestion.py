@@ -56,40 +56,58 @@ def ingest_text_content(
     settings: Settings,
     content_type: str | None = "text/plain; charset=utf-8",
 ) -> IngestionResult:
-    file_id = str(uuid.uuid4())
-    original_name = _safe_original_name(filename, fallback="upload.txt")
-    object_key = f"uploads/{file_id}/{original_name}"
-    data = content.encode("utf-8")
+    return ingest_bytes_content(
+        filename=filename,
+        data=content.encode("utf-8"),
+        settings=settings,
+        content_type=content_type or "text/plain; charset=utf-8",
+        fallback_name="upload.txt",
+        known_text=content,
+    )
+
+
+def ingest_bytes_content(
+    *,
+    filename: str,
+    data: bytes,
+    settings: Settings,
+    content_type: str | None = None,
+    fallback_name: str = "upload.bin",
+    known_text: str | None = None,
+) -> IngestionResult:
+    """Store arbitrary uploaded bytes and run the v1-safe inspection pipeline.
+
+    This powers phone/ReqBin-friendly base64 uploads as well as JSON text uploads.
+    ZIP files are inspected, not extracted into R2 in v1; unsafe ZIPs are rejected.
+    """
+
     if len(data) > settings.max_upload_bytes:
         raise ValueError(f"Upload exceeds max size of {settings.max_upload_bytes} bytes")
 
-    suffix = Path(original_name).suffix.lower() or ".txt"
+    file_id = str(uuid.uuid4())
+    original_name = _safe_original_name(filename, fallback=fallback_name)
+    suffix = Path(original_name).suffix.lower()
+    resolved_content_type = content_type or mimetypes.guess_type(original_name)[0]
+    object_key = f"uploads/{file_id}/{original_name}"
+
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         temp_path = Path(tmp.name)
         tmp.write(data)
 
-    digest = sha256_file(temp_path)
-    stored, storage_name = _store_path(temp_path, object_key, content_type, settings)
-    chunks = list(chunk_text(content)) if content else []
-
-    return IngestionResult(
+    return _ingest_path(
+        temp_path=temp_path,
         file_id=file_id,
         original_name=original_name,
-        content_type=content_type,
-        size_bytes=stored.size_bytes,
-        sha256=digest,
         object_key=object_key,
-        storage=storage_name,
-        public_url=stored.public_url,
-        extracted_text_chars=len(content),
-        chunk_count=len(chunks),
-        supported_for_text=bool(content),
+        content_type=resolved_content_type,
+        settings=settings,
+        known_text=known_text,
     )
 
 
 async def ingest_upload(upload: UploadFile, settings: Settings) -> IngestionResult:
     file_id = str(uuid.uuid4())
-    original_name = Path(upload.filename or "upload.bin").name
+    original_name = _safe_original_name(upload.filename, fallback="upload.bin")
     suffix = Path(original_name).suffix.lower()
     content_type = upload.content_type or mimetypes.guess_type(original_name)[0]
     object_key = f"uploads/{file_id}/{original_name}"
@@ -106,18 +124,46 @@ async def ingest_upload(upload: UploadFile, settings: Settings) -> IngestionResu
                 raise ValueError(f"Upload exceeds max size of {settings.max_upload_bytes} bytes")
             tmp.write(chunk)
 
+    return _ingest_path(
+        temp_path=temp_path,
+        file_id=file_id,
+        original_name=original_name,
+        object_key=object_key,
+        content_type=content_type,
+        settings=settings,
+    )
+
+
+def _ingest_path(
+    *,
+    temp_path: Path,
+    file_id: str,
+    original_name: str,
+    object_key: str,
+    content_type: str | None,
+    settings: Settings,
+    known_text: str | None = None,
+) -> IngestionResult:
+    suffix = Path(original_name).suffix.lower()
     digest = sha256_file(temp_path)
-    stored, storage_name = _store_path(temp_path, object_key, content_type, settings)
 
     zip_members = []
     if suffix == ".zip":
+        # Inspect before storage so unsafe archives never enter the bucket.
         zip_members = inspect_zip(
             temp_path,
             max_files=settings.max_zip_files,
             max_uncompressed_bytes=settings.max_zip_uncompressed_bytes,
         )
 
-    extracted = "" if suffix == ".zip" else extract_text(temp_path, content_type)
+    stored, storage_name = _store_path(temp_path, object_key, content_type, settings)
+
+    if suffix == ".zip":
+        extracted = ""
+    elif known_text is not None:
+        extracted = known_text
+    else:
+        extracted = extract_text(temp_path, content_type)
     chunks = list(chunk_text(extracted)) if extracted else []
 
     return IngestionResult(
