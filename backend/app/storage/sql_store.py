@@ -454,11 +454,14 @@ class SqlStore:
             except ImportError as exc:  # pragma: no cover
                 raise RuntimeError("psycopg[binary] is required for PostgreSQL support") from exc
             conn = psycopg.connect(self.url, connect_timeout=self.settings.database_connect_timeout_seconds)
-            statement_timeout = int(max(0, self.settings.database_statement_timeout_seconds) * 1000)
-            if statement_timeout:
-                with conn.cursor() as cur:
-                    cur.execute("SET statement_timeout = %s", (statement_timeout,))
             try:
+                timeout_sql = self._postgres_statement_timeout_sql()
+                if timeout_sql:
+                    # PostgreSQL does not accept bind parameters for SET statements
+                    # (SET statement_timeout = $1 fails). The value is a sanitised
+                    # integer derived from configuration, so this literal SQL is safe.
+                    with conn.cursor() as cur:
+                        cur.execute(timeout_sql)
                 yield conn
             except Exception:
                 try:
@@ -483,6 +486,22 @@ class SqlStore:
                 raise
             else:
                 conn.commit()
+
+
+    def _postgres_statement_timeout_sql(self) -> str | None:
+        """Return safe literal SQL for PostgreSQL statement timeout.
+
+        PostgreSQL utility commands such as SET do not support bind
+        placeholders in the same way as DML queries. psycopg sends
+        ``SET statement_timeout = %s`` as ``SET statement_timeout = $1``,
+        which PostgreSQL rejects. This method converts the configured
+        seconds to a non-negative integer millisecond literal.
+        """
+
+        statement_timeout_ms = int(max(0, self.settings.database_statement_timeout_seconds) * 1000)
+        if statement_timeout_ms <= 0:
+            return None
+        return f"SET statement_timeout = {statement_timeout_ms}"
 
     def _sqlite_path(self) -> Path:
         value = self.url
