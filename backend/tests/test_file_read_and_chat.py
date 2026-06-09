@@ -61,7 +61,8 @@ def test_chat_with_file_injects_bounded_file_context(monkeypatch, tmp_path):
 
     async def fake_chat_completion(self, payload, fallback_models=None):  # noqa: ANN001, ARG001
         joined = "\n".join(message["content"] for message in payload["messages"])
-        assert key in joined
+        assert key not in joined
+        assert "Attached file label: hive-note.txt" in joined
         assert "This file says the R2 read layer works." in joined
         return {
             "model": payload["model"],
@@ -69,7 +70,7 @@ def test_chat_with_file_injects_bounded_file_context(monkeypatch, tmp_path):
             "usage": {"total_tokens": 12, "cost": 0},
             "choices": [
                 {
-                    "message": {"content": f"Read {key}: the R2 read layer works."},
+                    "message": {"content": "The R2 read layer works."},
                     "finish_reason": "stop",
                 }
             ],
@@ -91,6 +92,8 @@ def test_chat_with_file_injects_bounded_file_context(monkeypatch, tmp_path):
     assert body["ok"] is True
     assert body["source"]["object_key"] == key
     assert body["source"]["truncated"] is False
+    assert body["source_citation"]["label"] == "hive-note.txt"
+    assert body["completion_truncated"] is False
     assert "R2 read layer works" in body["reply"]
 
 
@@ -134,3 +137,98 @@ def test_file_diagnostics_returns_list_probe_error(monkeypatch, tmp_path):
     assert body["ok"] is False
     assert body["list_probe"]["ok"] is False
     assert "bucket" in body["list_probe"]["hint"].lower()
+
+
+def test_public_url_endpoint_returns_local_none(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    client = TestClient(app)
+    key = _upload_text(client)
+
+    response = client.get("/v1/files/public-url", params={"key": key})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert body["object_key"] == key
+    assert body["storage"] == "local"
+    assert body["public_url"] is None
+
+
+def test_upload_base64_text_endpoint(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    client = TestClient(app)
+
+    response = client.post(
+        "/v1/files/upload-base64",
+        json={
+            "filename": "base64-note.txt",
+            "content_type": "text/plain",
+            "content_base64": "QmFzZTY0IHVwbG9hZCB3b3Jrcy4=",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert body["file"]["original_name"] == "base64-note.txt"
+    assert body["file"]["supported_for_text"] is True
+    assert body["file"]["chunk_count"] == 1
+
+
+def test_upload_base64_rejects_invalid_payload(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    client = TestClient(app)
+
+    response = client.post(
+        "/v1/files/upload-base64",
+        json={"filename": "bad.txt", "content_base64": "not base64 !!!"},
+    )
+
+    assert response.status_code == 400
+
+
+def test_upload_base64_zip_and_inspect(monkeypatch, tmp_path):
+    import base64
+    import io
+    import zipfile
+
+    monkeypatch.chdir(tmp_path)
+    client = TestClient(app)
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("folder/a.txt", "hello")
+        archive.writestr("folder/b.txt", "world")
+
+    response = client.post(
+        "/v1/files/upload-base64",
+        json={
+            "filename": "sample.zip",
+            "content_type": "application/zip",
+            "content_base64": base64.b64encode(buffer.getvalue()).decode("ascii"),
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    key = body["file"]["object_key"]
+    assert body["file"]["zip_member_count"] == 2
+    assert body["file"]["supported_for_text"] is False
+
+    inspect_response = client.get("/v1/files/zip/inspect", params={"key": key})
+
+    assert inspect_response.status_code == 200
+    inspect_body = inspect_response.json()
+    assert inspect_body["ok"] is True
+    assert inspect_body["zip"]["member_count"] == 2
+    assert inspect_body["zip"]["file_count"] == 2
+    assert inspect_body["zip"]["members_preview"][0]["filename"] == "folder/a.txt"
+
+
+def test_zip_inspect_rejects_non_zip(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    client = TestClient(app)
+    key = _upload_text(client)
+
+    response = client.get("/v1/files/zip/inspect", params={"key": key})
+
+    assert response.status_code == 400
