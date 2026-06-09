@@ -301,6 +301,53 @@ class SqlStore:
         except Exception as exc:  # pragma: no cover
             return {"ok": False, "enabled": True, "query": query, "object_key": object_key, "error": str(exc)}
 
+    def get_file_chunks_by_ids(
+        self,
+        *,
+        chunk_ids: list[str],
+        object_key: str | None = None,
+        include_content: bool = True,
+    ) -> dict[str, object]:
+        """Fetch SQL chunk rows by their IDs in caller-supplied order.
+
+        Vectorize vector IDs are the same as SQL chunk IDs, so this is the
+        bridge back from semantic matches to the durable source-of-truth rows.
+        """
+
+        if not self.enabled:
+            return {"ok": False, "enabled": False}
+        clean_ids = [str(item) for item in chunk_ids if item]
+        if not clean_ids:
+            return {"ok": True, "enabled": True, "count": 0, "chunks": []}
+        p = self._param()
+        placeholders = ", ".join([p for _ in clean_ids])
+        content_column = "content" if include_content else "SUBSTR(content, 1, 360) AS content_preview"
+        params: list[Any] = list(clean_ids)
+        where_object = ""
+        if object_key:
+            where_object = f" AND object_key={p}"
+            params.append(object_key)
+        try:
+            with self._connect() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    f"""
+                    SELECT id, object_key, chunk_index, {content_column}, char_start, char_end,
+                           token_estimate, content_sha256, metadata_json, created_at, updated_at
+                    FROM hive_file_chunks
+                    WHERE id IN ({placeholders}){where_object}
+                    """,
+                    tuple(params),
+                )
+                rows = self._fetch_dicts(cur)
+            order = {chunk_id: index for index, chunk_id in enumerate(clean_ids)}
+            for row in rows:
+                row["metadata"] = _json_or_none(row.pop("metadata_json", None))
+            rows.sort(key=lambda item: order.get(str(item.get("id")), len(order)))
+            return {"ok": True, "enabled": True, "count": len(rows), "chunks": rows}
+        except Exception as exc:  # pragma: no cover
+            return {"ok": False, "enabled": True, "error": str(exc), "chunk_ids": clean_ids}
+
     def table_counts(self) -> dict[str, object]:
         """Return safe row counts for operational tables.
 
