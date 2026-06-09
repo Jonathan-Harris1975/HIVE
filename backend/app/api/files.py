@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 import tempfile
+import time
 import zipfile
 from dataclasses import asdict
 from pathlib import Path
@@ -52,6 +54,20 @@ class ChatWithFileRequest(BaseModel):
     temperature: float = 0.3
     max_tokens: int = 1200
     max_file_chars: int | None = None
+    model_timeout_seconds: float | None = Field(
+        None,
+        ge=0.5,
+        le=120,
+        description="Optional timeout just for the model-call stage.",
+    )
+    skip_model: bool = Field(
+        False,
+        description="If true, read/build context only and return diagnostics without calling OpenRouter.",
+    )
+    dry_run: bool = Field(
+        False,
+        description="Alias for skip_model, useful for smoke tests and diagnosing file-context build issues.",
+    )
     conversation_id: str | None = None
 
 
@@ -266,71 +282,135 @@ async def chat_with_file(
     """Ask a question about one stored R2/local object.
 
     V1 intentionally injects a bounded text excerpt directly into the model context.
-    Vector search/chunk retrieval can replace this later without changing the public route.
+    The endpoint now returns stage timings and bounded model-call diagnostics so
+    hosted smoke-test runners do not get stuck behind an opaque timeout.
     """
 
-    clean_key = _validate_object_key(request.object_key)
+    timings: dict[str, float | None] = {
+        "validate_key_seconds": None,
+        "read_file_seconds": None,
+        "decode_seconds": None,
+        "prompt_build_seconds": None,
+        "model_call_seconds": None,
+        "db_record_seconds": None,
+        "total_seconds": None,
+    }
+    total_started = time.perf_counter()
+    stage = "validate_key"
+
     try:
-        obj = _storage(settings).read_object(clean_key, max_bytes=settings.max_file_read_bytes)
+        clean_key = _time_stage(timings, "validate_key_seconds", lambda: _validate_object_key(request.object_key))
+    except HTTPException:
+        raise
+
+    stage = "read_file"
+    try:
+        obj = _time_stage(
+            timings,
+            "read_file_seconds",
+            lambda: _storage(settings).read_object(clean_key, max_bytes=settings.max_file_read_bytes),
+        )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)) from exc
     except RuntimeError as exc:
-        return _storage_error_response(
+        response = _storage_error_response(
             operation="chat_with_file_read",
             settings=settings,
             key_or_prefix=clean_key,
             error=exc,
         )
+        response["stage"] = stage
+        response["timings"] = _finalise_timings(timings, total_started)
+        return response
 
-    content, had_decode_replacements = _decode_text(obj.content)
+    stage = "decode_file"
+    content, had_decode_replacements = _time_stage(timings, "decode_seconds", lambda: _decode_text(obj.content))
     max_chars = request.max_file_chars or settings.max_file_chat_chars
     excerpt = content[:max_chars]
     truncated = len(content) > len(excerpt)
-
-    router_service = ModelRouter(settings)
-    task = router_service.classify_task(request.message, request.mode)
-    effective_mode = router_service.resolve_mode(task, request.mode)
-    selected_model = router_service.select_model(task, request.model)
-    fallback_models = router_service.fallback_models_for_task(task, selected_model)
-
+    source = _source_metadata(obj, settings, truncated=truncated, decode_replacements=had_decode_replacements)
     source_label = Path(clean_key).name or clean_key
-    window = ContextWindow()
-    window.add("system", build_system_prompt(effective_mode))
-    window.add(
-        "system",
-        "Answer using the attached file content only where relevant. "
-        "Do not print the object key or public URL inside the answer; "
-        "the API returns source metadata separately.",
-    )
-    for turn in request.history:
-        window.add(turn.role, turn.content)
-    window.add(
-        "user",
-        "\n".join(
-            [
-                request.message,
-                "",
-                f"Attached file label: {source_label}",
-                f"Content type: {obj.content_type or 'unknown'}",
-                f"Size bytes: {obj.size_bytes}",
-                "",
-                "File content excerpt:",
-                excerpt,
-                "\n[FILE CONTENT TRUNCATED]" if truncated else "",
-            ]
-        ).strip(),
-    )
 
-    payload: dict[str, object] = {
-        "model": selected_model,
-        "messages": window.trimmed_messages(),
-        "temperature": request.temperature,
-        "max_tokens": max(request.max_tokens, settings.openrouter_min_response_tokens),
-    }
+    stage = "prompt_build"
+    prompt_context = _time_stage(
+        timings,
+        "prompt_build_seconds",
+        lambda: _build_file_chat_payload(
+            request=request,
+            settings=settings,
+            source_label=source_label,
+            obj=obj,
+            excerpt=excerpt,
+            truncated=truncated,
+        ),
+    )
+    payload = prompt_context["payload"]
+    fallback_models = prompt_context["fallback_models"]
+    selected_model = prompt_context["selected_model"]
+    effective_mode = prompt_context["effective_mode"]
+
+    if request.skip_model or request.dry_run:
+        return {
+            "ok": True,
+            "dry_run": True,
+            "skip_model": True,
+            "stage": "complete_without_model",
+            "message": "File read and prompt build completed; model call was skipped.",
+            "selected_model": selected_model,
+            "fallback_models": fallback_models,
+            "effective_mode": str(effective_mode),
+            "prompt_message_count": len(payload.get("messages", [])),
+            "file_excerpt_chars": len(excerpt),
+            "source": source,
+            "source_citation": {
+                "label": source_label,
+                "object_key": obj.key,
+                "public_url": obj.public_url,
+            },
+            "timings": _finalise_timings(timings, total_started),
+        }
+
+    stage = "model_call"
     client = OpenRouterClient(settings)
-    completion = await client.chat_completion(payload, fallback_models=fallback_models)
+    model_timeout = request.model_timeout_seconds or settings.chat_with_file_model_timeout_seconds
+    model_started = time.perf_counter()
+    try:
+        completion = await asyncio.wait_for(
+            client.chat_completion(payload, fallback_models=fallback_models),
+            timeout=max(0.5, float(model_timeout)),
+        )
+    except TimeoutError:
+        timings["model_call_seconds"] = round(time.perf_counter() - model_started, 3)
+        return _chat_with_file_model_error_response(
+            stage=stage,
+            error_code="chat_with_file_timeout",
+            message=f"Model call timed out after {model_timeout} seconds.",
+            payload=payload,
+            selected_model=selected_model,
+            fallback_models=fallback_models,
+            source=source,
+            source_label=source_label,
+            obj=obj,
+            timings=_finalise_timings(timings, total_started),
+        )
+    except Exception as exc:  # defensive: never let this endpoint become a vague 502
+        timings["model_call_seconds"] = round(time.perf_counter() - model_started, 3)
+        return _chat_with_file_model_error_response(
+            stage=stage,
+            error_code="chat_with_file_model_error",
+            message=str(exc),
+            payload=payload,
+            selected_model=selected_model,
+            fallback_models=fallback_models,
+            source=source,
+            source_label=source_label,
+            obj=obj,
+            timings=_finalise_timings(timings, total_started),
+        )
+    timings["model_call_seconds"] = round(time.perf_counter() - model_started, 3)
+
     choice = (completion.get("choices") or [{}])[0]
     message = choice.get("message") or {}
     reply = _reply_text(message.get("content"))
@@ -340,7 +420,9 @@ async def chat_with_file(
     model_used = completion.get("model") or payload.get("model")
     provider = completion.get("provider")
     usage = completion.get("usage")
-    source = _source_metadata(obj, settings, truncated=truncated, decode_replacements=had_decode_replacements)
+
+    stage = "db_record"
+    db_started = time.perf_counter()
     db_record = SqlStore(settings).record_chat(
         conversation_id=request.conversation_id,
         mode=str(request.mode),
@@ -355,8 +437,11 @@ async def chat_with_file(
             "finish_reason": finish_reason,
             "empty_reply": empty_reply,
             "source": source,
+            "timings": timings,
         },
     )
+    timings["db_record_seconds"] = round(time.perf_counter() - db_started, 3)
+
     return {
         "ok": ok,
         "reply": reply,
@@ -368,6 +453,8 @@ async def chat_with_file(
         "empty_reply": empty_reply,
         "error_code": completion.get("hive_error_code"),
         "attempts": completion.get("hive_attempts"),
+        "stage": "complete",
+        "timings": _finalise_timings(timings, total_started),
         "conversation_id": db_record.get("conversation_id") or request.conversation_id,
         "db_recorded": bool(db_record.get("ok")),
         "db_error": db_record.get("error"),
@@ -424,6 +511,114 @@ def files_diagnostics(
             "hint": _storage_error_hint(str(exc)),
         }
     return diagnostics
+
+
+def _time_stage(timings: dict[str, float | None], key: str, func):  # noqa: ANN001, ANN202
+    started = time.perf_counter()
+    try:
+        return func()
+    finally:
+        timings[key] = round(time.perf_counter() - started, 3)
+
+
+def _finalise_timings(timings: dict[str, float | None], total_started: float) -> dict[str, float | None]:
+    final = dict(timings)
+    final["total_seconds"] = round(time.perf_counter() - total_started, 3)
+    return final
+
+
+def _build_file_chat_payload(
+    *,
+    request: ChatWithFileRequest,
+    settings: Settings,
+    source_label: str,
+    obj,
+    excerpt: str,
+    truncated: bool,
+) -> dict[str, object]:
+    router_service = ModelRouter(settings)
+    task = router_service.classify_task(request.message, request.mode)
+    effective_mode = router_service.resolve_mode(task, request.mode)
+    selected_model = router_service.select_model(task, request.model)
+    fallback_models = router_service.fallback_models_for_task(task, selected_model)
+
+    window = ContextWindow()
+    window.add("system", build_system_prompt(effective_mode))
+    window.add(
+        "system",
+        "Answer using the attached file content only where relevant. "
+        "Do not print the object key or public URL inside the answer; "
+        "the API returns source metadata separately.",
+    )
+    for turn in request.history:
+        window.add(turn.role, turn.content)
+    window.add(
+        "user",
+        "\n".join(
+            [
+                request.message,
+                "",
+                f"Attached file label: {source_label}",
+                f"Content type: {obj.content_type or 'unknown'}",
+                f"Size bytes: {obj.size_bytes}",
+                "",
+                "File content excerpt:",
+                excerpt,
+                "\n[FILE CONTENT TRUNCATED]" if truncated else "",
+            ]
+        ).strip(),
+    )
+
+    payload: dict[str, object] = {
+        "model": selected_model,
+        "messages": window.trimmed_messages(),
+        "temperature": request.temperature,
+        "max_tokens": max(request.max_tokens, settings.openrouter_min_response_tokens),
+    }
+    return {
+        "payload": payload,
+        "fallback_models": fallback_models,
+        "selected_model": selected_model,
+        "effective_mode": effective_mode,
+    }
+
+
+def _chat_with_file_model_error_response(
+    *,
+    stage: str,
+    error_code: str,
+    message: str,
+    payload: dict[str, object],
+    selected_model: str,
+    fallback_models: list[str],
+    source: dict[str, object],
+    source_label: str,
+    obj,
+    timings: dict[str, float | None],
+) -> dict[str, object]:
+    return {
+        "ok": False,
+        "reply": "",
+        "stage": stage,
+        "error_code": error_code,
+        "message": message,
+        "model_used": payload.get("model") or selected_model,
+        "selected_model": selected_model,
+        "fallback_models": fallback_models,
+        "usage": None,
+        "raw_finish_reason": "timeout" if error_code == "chat_with_file_timeout" else "error",
+        "completion_truncated": False,
+        "empty_reply": True,
+        "attempts": None,
+        "timings": timings,
+        "source": source,
+        "source_citation": {
+            "label": source_label,
+            "object_key": obj.key,
+            "public_url": obj.public_url,
+        },
+        "hint": "Retry with skip_model=true to verify file read/prompt build, or lower max_file_chars/use a faster model for smoke tests.",
+    }
 
 
 def _storage(settings: Settings):
