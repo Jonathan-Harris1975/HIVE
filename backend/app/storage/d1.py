@@ -119,6 +119,41 @@ class D1MetadataStore:
             ],
         )
 
+
+    def list_metadata(self, *, lane: str | None = None, limit: int = 50) -> dict[str, object]:
+        """List recent ecosystem metadata records from D1."""
+
+        if not self.enabled:
+            return {"ok": False, "enabled": False}
+        safe_limit = max(1, min(int(limit or 50), 500))
+        if lane:
+            result = self.query(
+                """
+                SELECT id, lane, source_type, source_id, title, url, metadata_json, created_at, updated_at
+                FROM hive_ecosystem_metadata
+                WHERE lane = ?
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """,
+                [lane, safe_limit],
+            )
+        else:
+            result = self.query(
+                """
+                SELECT id, lane, source_type, source_id, title, url, metadata_json, created_at, updated_at
+                FROM hive_ecosystem_metadata
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """,
+                [safe_limit],
+            )
+        if not result.get("ok"):
+            return result
+        rows = _extract_d1_rows(result.get("result"))
+        for row in rows:
+            row["metadata"] = _json_or_none(row.pop("metadata_json", None))
+        return {"ok": True, "enabled": True, "count": len(rows), "items": rows}
+
     def query(self, sql: str, params: list[Any] | None = None) -> dict[str, object]:
         if not self.enabled:
             return {"ok": False, "message": "D1 metadata store disabled or not configured."}
@@ -149,6 +184,36 @@ class D1MetadataStore:
             }
         except Exception as exc:  # pragma: no cover - network only
             return {"ok": False, "message": str(exc)}
+
+
+
+def _extract_d1_rows(result: Any) -> list[dict[str, Any]]:
+    """Cloudflare D1 REST responses normally wrap rows under result[0].results."""
+
+    if isinstance(result, list):
+        rows: list[dict[str, Any]] = []
+        for item in result:
+            if isinstance(item, dict):
+                nested = item.get("results")
+                if isinstance(nested, list):
+                    rows.extend(row for row in nested if isinstance(row, dict))
+                elif all(key in item for key in ("id", "lane", "source_type")):
+                    rows.append(item)
+        return rows
+    if isinstance(result, dict):
+        nested = result.get("results")
+        if isinstance(nested, list):
+            return [row for row in nested if isinstance(row, dict)]
+    return []
+
+
+def _json_or_none(value: Any) -> Any:
+    if value in {None, ""}:
+        return None
+    try:
+        return json.loads(value)
+    except (TypeError, json.JSONDecodeError):
+        return value
 
 
 def _d1_error_message(payload: dict[str, Any]) -> str:

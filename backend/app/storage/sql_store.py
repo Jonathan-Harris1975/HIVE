@@ -149,6 +149,181 @@ class SqlStore:
         except Exception as exc:  # pragma: no cover
             return {"ok": False, "object_key": object_key, "error": str(exc)}
 
+
+    def table_counts(self) -> dict[str, object]:
+        """Return safe row counts for operational tables."""
+
+        if not self.enabled:
+            return {"ok": False, "enabled": False}
+        counts: dict[str, int | str] = {}
+        try:
+            with self._connect() as conn:
+                cur = conn.cursor()
+                for table in self.table_names():
+                    try:
+                        cur.execute(f"SELECT COUNT(*) FROM {table}")
+                        row = cur.fetchone()
+                        counts[table] = int(row[0]) if row else 0
+                    except Exception as exc:  # table may not exist before /db/init
+                        counts[table] = f"unavailable: {exc}"
+            return {"ok": True, "enabled": True, "counts": counts}
+        except Exception as exc:  # pragma: no cover
+            return {"ok": False, "enabled": True, "error": str(exc)}
+
+    def list_conversations(self, *, limit: int = 50) -> dict[str, object]:
+        if not self.enabled:
+            return {"ok": False, "enabled": False}
+        p = self._param()
+        sql = f"""
+            SELECT
+              c.id,
+              c.mode,
+              c.model,
+              c.title,
+              c.created_at,
+              c.updated_at,
+              COUNT(m.id) AS message_count,
+              COALESCE(SUM(CASE WHEN m.role='assistant' THEN m.cost_usd ELSE 0 END), 0) AS cost_usd
+            FROM hive_conversations c
+            LEFT JOIN hive_messages m ON m.conversation_id = c.id
+            GROUP BY c.id, c.mode, c.model, c.title, c.created_at, c.updated_at
+            ORDER BY c.updated_at DESC
+            LIMIT {p}
+        """
+        try:
+            with self._connect() as conn:
+                cur = conn.cursor()
+                cur.execute(sql, (_int_or_none(limit) or 50,))
+                rows = self._fetch_dicts(cur)
+            return {"ok": True, "enabled": True, "count": len(rows), "conversations": rows}
+        except Exception as exc:  # pragma: no cover
+            return {"ok": False, "enabled": True, "error": str(exc)}
+
+    def get_conversation(self, conversation_id: str, *, limit: int = 100) -> dict[str, object]:
+        if not self.enabled:
+            return {"ok": False, "enabled": False}
+        p = self._param()
+        try:
+            with self._connect() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    f"SELECT id, mode, model, title, created_at, updated_at FROM hive_conversations WHERE id={p}",
+                    (conversation_id,),
+                )
+                conversation_rows = self._fetch_dicts(cur)
+                if not conversation_rows:
+                    return {"ok": False, "enabled": True, "error": "conversation_not_found", "conversation_id": conversation_id}
+                cur.execute(
+                    f"""
+                    SELECT id, role, content, model, provider, token_total, cost_usd, metadata_json, created_at
+                    FROM hive_messages
+                    WHERE conversation_id={p}
+                    ORDER BY created_at DESC
+                    LIMIT {p}
+                    """,
+                    (conversation_id, _int_or_none(limit) or 100),
+                )
+                messages = list(reversed(self._fetch_dicts(cur)))
+            for message in messages:
+                message["metadata"] = _json_or_none(message.pop("metadata_json", None))
+            return {
+                "ok": True,
+                "enabled": True,
+                "conversation": conversation_rows[0],
+                "message_count": len(messages),
+                "messages": messages,
+            }
+        except Exception as exc:  # pragma: no cover
+            return {"ok": False, "enabled": True, "conversation_id": conversation_id, "error": str(exc)}
+
+    def recent_chat_turns(self, conversation_id: str, *, limit: int = 20) -> list[dict[str, str]]:
+        """Return recent user/assistant turns suitable for model context hydration."""
+
+        if not self.enabled or not conversation_id:
+            return []
+        p = self._param()
+        try:
+            with self._connect() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    f"""
+                    SELECT role, content
+                    FROM hive_messages
+                    WHERE conversation_id={p} AND role IN ('user', 'assistant')
+                    ORDER BY created_at DESC
+                    LIMIT {p}
+                    """,
+                    (conversation_id, _int_or_none(limit) or 20),
+                )
+                rows = list(reversed(self._fetch_dicts(cur)))
+            return [
+                {"role": str(row.get("role")), "content": str(row.get("content") or "")}
+                for row in rows
+                if row.get("role") in {"user", "assistant"} and row.get("content")
+            ]
+        except Exception:
+            return []
+
+    def list_files(self, *, limit: int = 50) -> dict[str, object]:
+        if not self.enabled:
+            return {"ok": False, "enabled": False}
+        p = self._param()
+        try:
+            with self._connect() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    f"""
+                    SELECT id, object_key, filename, storage, bucket, public_url, size_bytes, content_type, sha256, created_at, updated_at
+                    FROM hive_files
+                    ORDER BY updated_at DESC
+                    LIMIT {p}
+                    """,
+                    (_int_or_none(limit) or 50,),
+                )
+                rows = self._fetch_dicts(cur)
+            return {"ok": True, "enabled": True, "count": len(rows), "files": rows}
+        except Exception as exc:  # pragma: no cover
+            return {"ok": False, "enabled": True, "error": str(exc)}
+
+    def cost_summary(self, *, by_model_limit: int = 20) -> dict[str, object]:
+        if not self.enabled:
+            return {"ok": False, "enabled": False}
+        p = self._param()
+        try:
+            with self._connect() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT
+                      COUNT(*) AS event_count,
+                      COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+                      COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+                      COALESCE(SUM(total_tokens), 0) AS total_tokens,
+                      COALESCE(SUM(cost_usd), 0) AS cost_usd
+                    FROM hive_cost_events
+                    """
+                )
+                totals = self._fetch_dicts(cur)[0]
+                cur.execute(
+                    f"""
+                    SELECT
+                      model,
+                      provider,
+                      COUNT(*) AS event_count,
+                      COALESCE(SUM(total_tokens), 0) AS total_tokens,
+                      COALESCE(SUM(cost_usd), 0) AS cost_usd
+                    FROM hive_cost_events
+                    GROUP BY model, provider
+                    ORDER BY cost_usd DESC, total_tokens DESC
+                    LIMIT {p}
+                    """,
+                    (_int_or_none(by_model_limit) or 20,),
+                )
+                by_model = self._fetch_dicts(cur)
+            return {"ok": True, "enabled": True, "totals": totals, "by_model": by_model}
+        except Exception as exc:  # pragma: no cover
+            return {"ok": False, "enabled": True, "error": str(exc)}
+
     def table_names(self) -> list[str]:
         return ["hive_conversations", "hive_messages", "hive_files", "hive_cost_events"]
 
@@ -222,6 +397,11 @@ class SqlStore:
             ON hive_cost_events (created_at)
             """,
         ]
+
+
+    def _fetch_dicts(self, cur: Any) -> list[dict[str, Any]]:
+        columns = [item[0] for item in cur.description or []]
+        return [dict(zip(columns, row)) for row in cur.fetchall()]
 
     @contextmanager
     def _connect(self) -> Iterator[Any]:
@@ -393,6 +573,16 @@ class DatabaseUrlBuilder:
         if settings.is_dev:
             return "sqlite:///./local-data/hive.sqlite3"
         return ""
+
+
+
+def _json_or_none(value: Any) -> Any:
+    if value in {None, ""}:
+        return None
+    try:
+        return json.loads(value)
+    except (TypeError, json.JSONDecodeError):
+        return value
 
 
 def _int_or_none(value: Any) -> int | None:
