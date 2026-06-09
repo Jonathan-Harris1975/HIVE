@@ -28,6 +28,17 @@
 - [ ] Durable file metadata API
 - [ ] Conversation resume API
 
+## v1.0 Test-ready baseline
+
+- [x] Koyeb deployment contract
+- [x] OpenRouter model/key smoke tests
+- [x] Free-first fallback policy
+- [x] R2 diagnostics/list/read cycle
+- [x] JSON/base64 upload path for phone/ReqBin/Make tests
+- [x] Stored ZIP inspection
+- [x] Single-file chat with separate source metadata
+- [x] Empty reply and truncation diagnostics
+
 ## v0.3 Search
 
 - [ ] Embedding worker
@@ -43,6 +54,8 @@
 - [ ] Upload panel
 - [x] R2 file browser API
 - [x] Source metadata outside model replies
+- [x] Empty-reply retry/diagnostics
+- [x] Completion truncation flags
 - [ ] R2 file browser UI
 - [ ] Cost display
 

@@ -71,3 +71,12 @@ The app should answer from extracted/indexed chunks, not whole raw files, to red
 - AIMS = the user's AI/content automation and management ecosystem.
 - RAMS = the user's reporting, audit, monitoring, and production-readiness system for AI/content workflows.
 - Do not use the construction/legal “Risk Assessment Method Statement” meaning of RAMS unless explicitly requested.
+
+
+## v1 reliability guardrails
+
+- Explicit model selection is honoured, then preflighted where possible.
+- Free-first fallback is used unless `ALLOW_PAID_FALLBACK=true`.
+- Empty visible model replies are retried and surfaced as structured diagnostics.
+- File-chat answers keep source metadata outside the model reply.
+- R2 operations return JSON diagnostics instead of opaque Bad Gateway errors.

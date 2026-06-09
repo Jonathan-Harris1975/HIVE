@@ -46,6 +46,8 @@ OPENROUTER_FREE_FALLBACK_MODEL=nvidia/nemotron-3-ultra-550b-a55b:free
 ALLOW_PAID_FALLBACK=false
 OPENROUTER_ATTEMPT_TIMEOUT_SECONDS=12
 OPENROUTER_MAX_FALLBACK_ATTEMPTS=2
+OPENROUTER_EMPTY_REPLY_RETRY_ENABLED=true
+OPENROUTER_MIN_RESPONSE_TOKENS=80
 ```
 
 Set `ALLOW_PAID_FALLBACK=true` only when a production lane is allowed to escalate from a dead/overloaded model into paid alternatives. This prevents smoke tests and low-risk calls quietly rolling into paid models.
@@ -65,6 +67,8 @@ OPENROUTER_MODEL_PREFLIGHT_ENABLED=true
 OPENROUTER_MODEL_LIST_TIMEOUT_SECONDS=10
 OPENROUTER_ATTEMPT_TIMEOUT_SECONDS=12
 OPENROUTER_MAX_FALLBACK_ATTEMPTS=2
+OPENROUTER_EMPTY_REPLY_RETRY_ENABLED=true
+OPENROUTER_MIN_RESPONSE_TOKENS=80
 ```
 
 ## AIMS alignment
@@ -86,3 +90,24 @@ Brand and audit prompts define the user's ecosystem terms explicitly:
 - RAMS: the user's reporting, audit, monitoring, and production-readiness system.
 
 HIVE must not interpret RAMS as “Risk Assessment Method Statement” unless the user explicitly asks for that construction/legal meaning.
+
+
+## Empty visible replies
+
+Some free/reasoning-heavy models can consume a very small `max_tokens` budget in hidden reasoning and return no visible assistant text. HIVE now treats that as an incomplete model attempt, not a successful response.
+
+Behaviour:
+
+1. If a model returns no visible text, HIVE records an `empty_reply` attempt.
+2. HIVE tries the configured fallback ladder.
+3. If every attempt is empty or failed, the API returns `ok:false`, `error_code:"empty_model_reply"`, and a readable diagnostic reply.
+4. Direct and file-chat endpoints include `completion_truncated` and `empty_reply` fields.
+
+Recommended smoke-test setting:
+
+```env
+OPENROUTER_EMPTY_REPLY_RETRY_ENABLED=true
+OPENROUTER_MIN_RESPONSE_TOKENS=80
+```
+
+This keeps phone/ReqBin tests from accidentally asking a reasoning model to answer with too little output room.

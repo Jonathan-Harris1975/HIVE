@@ -38,6 +38,8 @@ CORS_ORIGINS=https://your-frontend-domain.example
 OPENROUTER_API_KEY=sk-or-...
 OPENROUTER_SITE_URL=https://your-koyeb-service.example
 OPENROUTER_APP_TITLE=HIVE
+OPENROUTER_EMPTY_REPLY_RETRY_ENABLED=true
+OPENROUTER_MIN_RESPONSE_TOKENS=80
 
 CF_R2_ACCOUNT_ID=
 CF_R2_ACCESS_KEY_ID=
@@ -130,3 +132,17 @@ R2_ADDRESSING_STYLE=path
 ```
 
 If `/v1/files/list`, `/v1/files/read`, or `/v1/chat/with-file` fails, call `/v1/files/diagnostics?prefix=uploads/` first. It returns safe JSON diagnostics instead of hiding the problem behind a generic 502.
+
+
+## Final v1 smoke-test notes
+
+ReqBin and similar remote curl tools can timeout on slow free models or streaming calls. Prefer these settings for v1 smoke tests:
+
+```env
+OPENROUTER_ATTEMPT_TIMEOUT_SECONDS=30
+OPENROUTER_EMPTY_REPLY_RETRY_ENABLED=true
+OPENROUTER_MIN_RESPONSE_TOKENS=80
+ALLOW_PAID_FALLBACK=false
+```
+
+For direct `/v1/chat` tests, avoid very small `max_tokens` values. If a model still returns no visible text, HIVE returns `ok:false` with `error_code:"empty_model_reply"` instead of `ok:true` and `reply:null`.
