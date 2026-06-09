@@ -65,8 +65,11 @@ Recommended Koyeb path: use the `Dockerfile`. See `docs/koyeb-deployment.md`.
 - `POST /v1/chat/stream`
 - `POST /v1/files/upload`
 - `POST /v1/files/upload-text`
+- `POST /v1/files/upload-base64`
 - `GET /v1/files/list`
 - `GET /v1/files/read?key=uploads/...`
+- `GET /v1/files/public-url?key=uploads/...`
+- `GET /v1/files/zip/inspect?key=uploads/...`
 - `POST /v1/chat/with-file`
 
 
@@ -82,6 +85,34 @@ curl -X POST "https://your-koyeb-service.example/v1/files/upload-text" \
 ```
 
 Expected response includes `storage`, `object_key`, `public_url`, `chunk_count`, and `supported_for_text`.
+
+
+### Base64 upload and ZIP inspect smoke tests
+
+Use base64 uploads for ReqBin, Make.com, or phone-based tests where multipart upload is fiddly:
+
+```bash
+curl -X POST "https://your-koyeb-service.example/v1/files/upload-base64" \
+  -H "Authorization: Bearer $ADMIN_BEARER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"filename\":\"sample.txt\",\"content_type\":\"text/plain\",\"content_base64\":\"SElWRSBiYXNlNjQgdXBsb2FkIHdvcmtzLg==\"}"
+```
+
+For ZIPs, upload a base64 ZIP or use multipart upload, then inspect it without extraction:
+
+```bash
+curl -X GET "https://your-koyeb-service.example/v1/files/zip/inspect?key=uploads/FILE_ID/sample.zip" \
+  -H "Authorization: Bearer $ADMIN_BEARER_TOKEN"
+```
+
+The ZIP inspector checks path traversal, member count and uncompressed-size limits. V1 inspects ZIP contents but does not yet extract every member into R2.
+
+Get a public URL for a stored key:
+
+```bash
+curl -X GET "https://your-koyeb-service.example/v1/files/public-url?key=uploads/FILE_ID/sample.txt" \
+  -H "Authorization: Bearer $ADMIN_BEARER_TOKEN"
+```
 
 ### File read and chat smoke tests
 
@@ -108,7 +139,7 @@ curl -X POST "https://your-koyeb-service.example/v1/chat/with-file" \
   -d "{\"object_key\":\"uploads/FILE_ID/hive-r2-smoke.txt\",\"message\":\"Summarise this file in one sentence.\",\"mode\":\"file_analysis\",\"model\":\"nvidia/nemotron-3-ultra-550b-a55b:free\"}"
 ```
 
-The v1 file-chat route injects a bounded text excerpt into the prompt. Vectorize/chunk retrieval will replace this later for larger corpora.
+The v1 file-chat route injects a bounded text excerpt into the prompt. The model is told not to print long object keys inside the reply because the API returns `source` and `source_citation` metadata separately. Vectorize/chunk retrieval will replace this later for larger corpora.
 
 ## Environment
 
