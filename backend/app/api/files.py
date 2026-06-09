@@ -21,6 +21,7 @@ from app.services.model_router import Mode, ModelRouter
 from app.services.openrouter import OpenRouterClient
 from app.storage.local_blob import LocalBlobStorage
 from app.storage.r2 import R2Storage
+from app.storage.sql_store import SqlStore
 
 router = APIRouter(tags=["files"], dependencies=[Depends(require_admin)])
 
@@ -51,6 +52,7 @@ class ChatWithFileRequest(BaseModel):
     temperature: float = 0.3
     max_tokens: int = 1200
     max_file_chars: int | None = None
+    conversation_id: str | None = None
 
 
 @router.post("/files/upload")
@@ -64,7 +66,8 @@ async def upload_file(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)) from exc
-    return {"ok": True, "file": result.__dict__}
+    db_record = SqlStore(settings).record_file(result)
+    return {"ok": True, "file": result.__dict__, "db_recorded": bool(db_record.get("ok")), "db_error": db_record.get("error")}
 
 
 @router.post("/files/upload-text")
@@ -81,7 +84,8 @@ async def upload_text(
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)) from exc
-    return {"ok": True, "file": result.__dict__}
+    db_record = SqlStore(settings).record_file(result)
+    return {"ok": True, "file": result.__dict__, "db_recorded": bool(db_record.get("ok")), "db_error": db_record.get("error")}
 
 
 @router.post("/files/upload-base64")
@@ -110,7 +114,8 @@ async def upload_base64(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)) from exc
-    return {"ok": True, "file": result.__dict__}
+    db_record = SqlStore(settings).record_file(result)
+    return {"ok": True, "file": result.__dict__, "db_recorded": bool(db_record.get("ok")), "db_error": db_record.get("error")}
 
 
 @router.get("/files/list")
@@ -332,18 +337,41 @@ async def chat_with_file(
     finish_reason = choice.get("finish_reason")
     empty_reply = not reply.strip()
     ok = not bool(completion.get("_all_attempts_failed")) and not empty_reply
+    model_used = completion.get("model") or payload.get("model")
+    provider = completion.get("provider")
+    usage = completion.get("usage")
+    source = _source_metadata(obj, settings, truncated=truncated, decode_replacements=had_decode_replacements)
+    db_record = SqlStore(settings).record_chat(
+        conversation_id=request.conversation_id,
+        mode=str(request.mode),
+        user_message=request.message,
+        assistant_reply=reply,
+        model_used=str(model_used) if model_used else None,
+        provider=str(provider) if provider else None,
+        usage=usage if isinstance(usage, dict) else None,
+        metadata={
+            "endpoint": "/v1/chat/with-file",
+            "ok": ok,
+            "finish_reason": finish_reason,
+            "empty_reply": empty_reply,
+            "source": source,
+        },
+    )
     return {
         "ok": ok,
         "reply": reply,
-        "model_used": completion.get("model") or payload.get("model"),
-        "provider": completion.get("provider"),
-        "usage": completion.get("usage"),
+        "model_used": model_used,
+        "provider": provider,
+        "usage": usage,
         "raw_finish_reason": finish_reason,
         "completion_truncated": finish_reason == "length",
         "empty_reply": empty_reply,
         "error_code": completion.get("hive_error_code"),
         "attempts": completion.get("hive_attempts"),
-        "source": _source_metadata(obj, settings, truncated=truncated, decode_replacements=had_decode_replacements),
+        "conversation_id": db_record.get("conversation_id") or request.conversation_id,
+        "db_recorded": bool(db_record.get("ok")),
+        "db_error": db_record.get("error"),
+        "source": source,
         "source_citation": {
             "label": source_label,
             "object_key": obj.key,

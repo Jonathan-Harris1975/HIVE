@@ -13,6 +13,7 @@ from app.services.brand_modes import build_system_prompt
 from app.services.context_manager import ContextWindow
 from app.services.model_router import Mode, ModelRouter
 from app.services.openrouter import OpenRouterClient
+from app.storage.sql_store import SqlStore
 
 router = APIRouter(tags=["chat"], dependencies=[Depends(require_admin)])
 
@@ -29,6 +30,7 @@ class ChatRequest(BaseModel):
     model: str | None = None
     temperature: float = 0.4
     max_tokens: int = 2048
+    conversation_id: str | None = None
 
 
 def build_payload(request: ChatRequest, settings: Settings) -> tuple[dict[str, object], list[str]]:
@@ -80,17 +82,38 @@ async def chat(
     finish_reason = choice.get("finish_reason")
     empty_reply = not reply.strip()
     ok = not bool(completion.get("_all_attempts_failed")) and not empty_reply
+    model_used = completion.get("model") or payload.get("model")
+    provider = completion.get("provider")
+    usage = completion.get("usage")
+    db_record = SqlStore(settings).record_chat(
+        conversation_id=request.conversation_id,
+        mode=str(request.mode),
+        user_message=request.message,
+        assistant_reply=reply,
+        model_used=str(model_used) if model_used else None,
+        provider=str(provider) if provider else None,
+        usage=usage if isinstance(usage, dict) else None,
+        metadata={
+            "endpoint": "/v1/chat",
+            "ok": ok,
+            "finish_reason": finish_reason,
+            "empty_reply": empty_reply,
+        },
+    )
     return {
         "ok": ok,
         "reply": reply,
-        "model_used": completion.get("model") or payload.get("model"),
-        "provider": completion.get("provider"),
-        "usage": completion.get("usage"),
+        "model_used": model_used,
+        "provider": provider,
+        "usage": usage,
         "raw_finish_reason": finish_reason,
         "completion_truncated": finish_reason == "length",
         "empty_reply": empty_reply,
         "error_code": completion.get("hive_error_code"),
         "attempts": completion.get("hive_attempts"),
+        "conversation_id": db_record.get("conversation_id") or request.conversation_id,
+        "db_recorded": bool(db_record.get("ok")),
+        "db_error": db_record.get("error"),
     }
 
 
