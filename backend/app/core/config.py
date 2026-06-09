@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     cf_r2_public_base_url: str = Field("", validation_alias=AliasChoices("CF_R2_PUBLIC_BASE_URL", "R2_PUBLIC_BASE_URL"))
     cf_r2_endpoint_url: str = Field("", validation_alias=AliasChoices("CF_R2_ENDPOINT_URL", "R2_ENDPOINT_URL"))
     r2_region: str = Field("auto", validation_alias=AliasChoices("R2_REGION", "AWS_REGION"))
+    r2_connect_timeout_seconds: int = 8
+    r2_read_timeout_seconds: int = 20
+    r2_max_attempts: int = 2
+    r2_addressing_style: str = "path"
 
     database_url: str = "sqlite+aiosqlite:///./local-data/jh_ops_chat.sqlite3"
 
