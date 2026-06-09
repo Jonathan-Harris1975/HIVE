@@ -48,7 +48,7 @@ def build_payload(request: ChatRequest, settings: Settings) -> tuple[dict[str, o
         "model": selected_model,
         "messages": window.trimmed_messages(),
         "temperature": request.temperature,
-        "max_tokens": request.max_tokens,
+        "max_tokens": max(request.max_tokens, settings.openrouter_min_response_tokens),
     }
     return payload, fallback_models
 
@@ -76,13 +76,37 @@ async def chat(
     completion = await client.chat_completion(payload, fallback_models=fallback_models)
     choice = (completion.get("choices") or [{}])[0]
     message = choice.get("message") or {}
-    ok = not bool(completion.get("_all_attempts_failed"))
+    reply = _reply_text(message.get("content"))
+    finish_reason = choice.get("finish_reason")
+    empty_reply = not reply.strip()
+    ok = not bool(completion.get("_all_attempts_failed")) and not empty_reply
     return {
         "ok": ok,
-        "reply": message.get("content", ""),
+        "reply": reply,
         "model_used": completion.get("model") or payload.get("model"),
         "provider": completion.get("provider"),
         "usage": completion.get("usage"),
-        "raw_finish_reason": choice.get("finish_reason"),
+        "raw_finish_reason": finish_reason,
+        "completion_truncated": finish_reason == "length",
+        "empty_reply": empty_reply,
+        "error_code": completion.get("hive_error_code"),
         "attempts": completion.get("hive_attempts"),
     }
+
+
+def _reply_text(content: object) -> str:
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                text = item.get("text") or item.get("content")
+                if isinstance(text, str):
+                    parts.append(text)
+        return "".join(parts)
+    return str(content)
