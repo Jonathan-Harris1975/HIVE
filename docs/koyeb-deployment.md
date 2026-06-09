@@ -119,3 +119,14 @@ curl -X POST "https://your-koyeb-service.example/v1/chat/with-file" \
 ```
 
 For v1 this route reads up to `MAX_FILE_READ_BYTES` and injects up to `MAX_FILE_CHAT_CHARS` into the model context. Keep large-file RAG for the Vectorize phase.
+
+R2 runtime guardrails:
+
+```env
+R2_CONNECT_TIMEOUT_SECONDS=8
+R2_READ_TIMEOUT_SECONDS=20
+R2_MAX_ATTEMPTS=2
+R2_ADDRESSING_STYLE=path
+```
+
+If `/v1/files/list`, `/v1/files/read`, or `/v1/chat/with-file` fails, call `/v1/files/diagnostics?prefix=uploads/` first. It returns safe JSON diagnostics instead of hiding the problem behind a generic 502.
