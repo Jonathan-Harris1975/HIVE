@@ -44,3 +44,32 @@ Fallback:
 
 - Use OpenRouter-compatible embedding model if needed.
 - Store vectors in pgvector if a single Postgres service becomes preferable.
+
+## Cloudflare D1 metadata lane
+
+D1 is optional in v1.1 and should be used for ecosystem metadata rather than full chat history. Recommended split:
+
+- SQL/Koyeb PostgreSQL: conversations, messages, file metadata, upload records, token usage and cost tracking.
+- Cloudflare D1: audit run index, council report index, podcast episode index, ebook catalogue cache, social performance snapshots and other AIMS/RAMS ecosystem metadata.
+
+Required envs:
+
+```env
+D1_ENABLED=true
+D1_ACCOUNT_ID=your-cloudflare-account-id
+D1_API_KEY=your-d1-api-token
+D1_DATABASE_ID=your-d1-database-uuid
+D1_DATABASE_NAME=database-hive
+```
+
+Initialise the D1 schema with:
+
+```bash
+curl -X POST "https://YOUR-KOYEB-APP.koyeb.app/v1/db/init" -H "Authorization: Bearer YOUR_ADMIN_BEARER_TOKEN"
+```
+
+Add a metadata smoke record:
+
+```bash
+curl -X POST "https://YOUR-KOYEB-APP.koyeb.app/v1/db/ecosystem-metadata" -H "Authorization: Bearer YOUR_ADMIN_BEARER_TOKEN" -H "Content-Type: application/json" -d "{\"lane\":\"rams\",\"source_type\":\"audit_run\",\"title\":\"D1 smoke test\",\"metadata\":{\"ok\":true}}"
+```

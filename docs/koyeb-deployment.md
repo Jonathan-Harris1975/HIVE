@@ -146,3 +146,27 @@ ALLOW_PAID_FALLBACK=false
 ```
 
 For direct `/v1/chat` tests, avoid very small `max_tokens` values. If a model still returns no visible text, HIVE returns `ok:false` with `error_code:"empty_model_reply"` instead of `ok:true` and `reply:null`.
+
+## Optional Koyeb PostgreSQL persistence
+
+For operational HIVE history, enable the SQL layer only after the core v1 smoke tests are passing.
+
+```env
+DATABASE_ENABLED=true
+DATABASE_HOST=your-koyeb-postgres-host
+DATABASE_PORT=5432
+DATABASE_USER=your-database-user
+DATABASE_PASSWORD=your-database-password
+DATABASE_NAME=your-database-name
+DATABASE_SSLMODE=require
+```
+
+Then redeploy and run:
+
+```bash
+curl -X GET "https://YOUR-KOYEB-APP.koyeb.app/v1/db/diagnostics" -H "Authorization: Bearer YOUR_ADMIN_BEARER_TOKEN"
+
+curl -X POST "https://YOUR-KOYEB-APP.koyeb.app/v1/db/init" -H "Authorization: Bearer YOUR_ADMIN_BEARER_TOKEN"
+```
+
+If the password is missing, diagnostics will show the SQL store as configured but the probe will fail. Add the missing secret, redeploy, then rerun `/v1/db/init`.

@@ -80,3 +80,29 @@ The app should answer from extracted/indexed chunks, not whole raw files, to red
 - Empty visible model replies are retried and surfaced as structured diagnostics.
 - File-chat answers keep source metadata outside the model reply.
 - R2 operations return JSON diagnostics instead of opaque Bad Gateway errors.
+
+## Optional v1.1 persistence layer
+
+HIVE now has an optional two-store persistence design:
+
+| Store | Recommended use |
+| --- | --- |
+| Koyeb/PostgreSQL or local SQLite | Conversations, messages, upload records, file metadata, cost tracking and token usage logs. |
+| Cloudflare D1 | Ecosystem metadata indexes such as audit runs, council reports, podcast episodes, ebook catalogue cache and social performance snapshots. |
+
+The core v1 chat/R2 file loop still works with both stores disabled. Persistence is additive, not a hard dependency.
+
+### SQL schema
+
+`POST /v1/db/init` creates these SQL tables when `DATABASE_ENABLED=true`:
+
+- `hive_conversations`
+- `hive_messages`
+- `hive_files`
+- `hive_cost_events`
+
+The same schema works for local SQLite smoke tests and Koyeb/PostgreSQL.
+
+### D1 schema
+
+`POST /v1/db/init` also creates `hive_ecosystem_metadata` when `D1_ENABLED=true`. This table is intentionally generic so RAMS/AIMS indexes can be added without a schema rewrite every time a new audit lane appears.
