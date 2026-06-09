@@ -47,7 +47,26 @@ class Settings(BaseSettings):
     r2_max_attempts: int = 2
     r2_addressing_style: str = "path"
 
-    database_url: str = "sqlite+aiosqlite:///./local-data/jh_ops_chat.sqlite3"
+    # Optional SQL persistence. HIVE v1 works without this; enable when you want
+    # conversation/message/file/cost records in SQLite or Koyeb/PostgreSQL.
+    database_enabled: bool = Field(False, validation_alias=AliasChoices("DATABASE_ENABLED"))
+    database_url: str = Field("", validation_alias=AliasChoices("DATABASE_URL", "DATABASE_URI"))
+    database_host: str = Field("", validation_alias=AliasChoices("DATABASE_HOST", "POSTGRES_HOST"))
+    database_port: int = Field(5432, validation_alias=AliasChoices("DATABASE_PORT", "POSTGRES_PORT"))
+    database_user: str = Field("", validation_alias=AliasChoices("DATABASE_USER", "POSTGRES_USER"))
+    database_password: str = Field("", validation_alias=AliasChoices("DATABASE_PASSWORD", "POSTGRES_PASSWORD"))
+    database_name: str = Field("", validation_alias=AliasChoices("DATABASE_NAME", "POSTGRES_DB", "POSTGRES_DATABASE"))
+    database_sslmode: str = "require"
+    database_connect_timeout_seconds: int = 8
+
+    # Optional Cloudflare D1 metadata store. D1 is kept separate from the SQL
+    # conversation store so it can be used for ecosystem indexes/cache snapshots.
+    d1_enabled: bool = Field(False, validation_alias=AliasChoices("D1_ENABLED"))
+    d1_account_id: str = Field("", validation_alias=AliasChoices("D1_ACCOUNT_ID", "CF_ACCOUNT_ID", "R2_ACCOUNT_ID"))
+    d1_api_key: str = Field("", validation_alias=AliasChoices("D1_API_KEY", "D1_API_TOKEN", "CF_D1_API_TOKEN"))
+    d1_database_id: str = Field("", validation_alias=AliasChoices("D1_DATABASE_ID", "D1_UUID"))
+    d1_database_name: str = Field("database-hive", validation_alias=AliasChoices("D1_DATABASE_NAME", "D1_DATABASE"))
+    d1_timeout_seconds: int = 12
 
     cf_account_id: str = Field("", validation_alias=AliasChoices("CF_ACCOUNT_ID", "R2_ACCOUNT_ID"))
     cf_api_token: str = Field("", validation_alias=AliasChoices("CF_API_TOKEN", "VECTORIZE_API_TOKEN"))
@@ -70,6 +89,24 @@ class Settings(BaseSettings):
     @property
     def is_dev(self) -> bool:
         return self.app_env.lower() in {"dev", "development", "local", "test"}
+
+
+    @property
+    def sql_database_url(self) -> str:
+        if self.database_url:
+            return self.database_url
+        if self.database_host and self.database_user and self.database_name:
+            from urllib.parse import quote_plus
+
+            user = quote_plus(self.database_user)
+            password = quote_plus(self.database_password)
+            auth = f"{user}:{password}" if password else user
+            port = f":{self.database_port}" if self.database_port else ""
+            ssl = f"?sslmode={quote_plus(self.database_sslmode)}" if self.database_sslmode else ""
+            return f"postgresql://{auth}@{self.database_host}{port}/{self.database_name}{ssl}"
+        if self.database_enabled and self.is_dev:
+            return "sqlite:///./local-data/hive.sqlite3"
+        return ""
 
     @property
     def r2_endpoint_url(self) -> str:
