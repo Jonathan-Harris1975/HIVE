@@ -277,3 +277,42 @@ def test_sql_store_ping_write_is_ephemeral(tmp_path: Path) -> None:
     conversations = store.list_conversations(limit=10)
     assert conversations["ok"] is True
     assert conversations["count"] == 0
+
+
+def test_postgres_statement_timeout_sql_uses_safe_literal() -> None:
+    settings = Settings(
+        DATABASE_ENABLED=True,
+        DATABASE_URL="postgresql://user:secret@example.com:5432/hive?sslmode=require",
+        DATABASE_STATEMENT_TIMEOUT_SECONDS=30,
+    )
+    store = SqlStore(settings)
+
+    assert store.dialect == "postgres"
+    assert store._postgres_statement_timeout_sql() == "SET statement_timeout = 30000"
+    assert "%s" not in store._postgres_statement_timeout_sql()
+    assert "$1" not in store._postgres_statement_timeout_sql()
+
+
+def test_postgres_statement_timeout_can_be_disabled() -> None:
+    settings = Settings(
+        DATABASE_ENABLED=True,
+        DATABASE_URL="postgresql://user:secret@example.com:5432/hive?sslmode=require",
+        DATABASE_STATEMENT_TIMEOUT_SECONDS=0,
+    )
+    store = SqlStore(settings)
+
+    assert store._postgres_statement_timeout_sql() is None
+
+
+def test_persistence_timeout_env_aliases() -> None:
+    settings = Settings(
+        DATABASE_STATEMENT_TIMEOUT_SECONDS=17,
+        DATABASE_CONNECT_TIMEOUT_SECONDS=5,
+        D1_TIMEOUT_SECONDS=9,
+        D1_MAX_ATTEMPTS=3,
+    )
+
+    assert settings.database_statement_timeout_seconds == 17
+    assert settings.database_connect_timeout_seconds == 5
+    assert settings.d1_timeout_seconds == 9
+    assert settings.d1_max_attempts == 3
