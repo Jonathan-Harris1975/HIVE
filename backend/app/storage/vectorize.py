@@ -66,7 +66,7 @@ class VectorizeClient:
         if not vectors:
             return {"ok": False, "enabled": True, "reason": "No vectors supplied."}
         ndjson = "\n".join(json.dumps(vector, ensure_ascii=False, default=str) for vector in vectors) + "\n"
-        files = {"body": ("vectors.ndjson", ndjson.encode("utf-8"), "application/x-ndjson")}
+        files = {"vectors": ("vectors.ndjson", ndjson.encode("utf-8"), "application/x-ndjson")}
         return await self._request(
             "POST",
             f"{self.base_url}/upsert?unparsable-behavior=error",
