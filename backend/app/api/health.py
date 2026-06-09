@@ -14,7 +14,7 @@ async def health() -> dict[str, object]:
     d1 = D1MetadataStore(settings)
     return {
         "ok": True,
-        "build": "v1.3-vectorize-foundation",
+        "build": "v1.3.1-vectorize-upsert-fix",
         "app": settings.app_name,
         "env": settings.app_env,
         "r2_configured": bool(settings.r2_endpoint_url and settings.cf_r2_access_key_id),

@@ -22,7 +22,7 @@ async def vectorize_diagnostics(settings: Settings = Depends(get_settings)) -> d
     embeddings_probe = await embeddings.diagnostics()
     return {
         "ok": bool(vectorize_probe.get("ok")) if settings.vectorize_enabled else True,
-        "build": "v1.3-vectorize-foundation",
+        "build": "v1.3.1-vectorize-upsert-fix",
         "vectorize": vectorize_probe,
         "embeddings": embeddings_probe,
         "sql_chunks_source_of_truth": True,
