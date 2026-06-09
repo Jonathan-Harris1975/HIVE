@@ -185,3 +185,65 @@ async def test_free_only_mode_reorders_non_free_primary_behind_free_fallback(mon
     ]
 
     assert [attempt["model"] for attempt in attempts] == ["free-good:free"]
+
+
+@pytest.mark.asyncio
+async def test_chat_completion_retries_empty_visible_reply(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = Settings(
+        openrouter_api_key="test-key",
+        openrouter_free_fallback_model="fallback-good:free",
+        openrouter_max_fallback_attempts=2,
+    )
+    client = OpenRouterClient(settings)
+    called_models: list[str] = []
+
+    async def fake_attempts(payload, fallback_models):  # noqa: ANN001
+        yield {**payload, "model": "empty-model:free"}
+        yield {**payload, "model": "fallback-good:free"}
+
+    async def fake_post_json(payload):  # noqa: ANN001
+        called_models.append(payload["model"])
+        if payload["model"] == "empty-model:free":
+            return {
+                "model": "empty-model:free",
+                "choices": [{"message": {"content": None}, "finish_reason": "length"}],
+            }
+        return {
+            "model": "fallback-good:free",
+            "choices": [{"message": {"content": "visible reply"}, "finish_reason": "stop"}],
+        }
+
+    monkeypatch.setattr(client, "_payload_attempts", fake_attempts)
+    monkeypatch.setattr(client, "_post_json", fake_post_json)
+
+    result = await client.chat_completion({"model": "empty-model:free", "messages": []}, ["fallback-good:free"])
+
+    assert result["model"] == "fallback-good:free"
+    assert called_models == ["empty-model:free", "fallback-good:free"]
+    assert result["hive_attempts"][0]["empty_reply"] is True
+    assert result["choices"][0]["message"]["content"] == "visible reply"
+
+
+@pytest.mark.asyncio
+async def test_chat_completion_returns_empty_reply_diagnostic_when_all_attempts_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = Settings(openrouter_api_key="test-key", openrouter_free_fallback_model="empty-free:free")
+    client = OpenRouterClient(settings)
+
+    async def fake_attempts(payload, fallback_models):  # noqa: ANN001
+        yield {**payload, "model": "empty-free:free"}
+
+    async def fake_post_json(payload):  # noqa: ANN001, ARG001
+        return {
+            "model": "empty-free:free",
+            "choices": [{"message": {"content": ""}, "finish_reason": "length"}],
+        }
+
+    monkeypatch.setattr(client, "_payload_attempts", fake_attempts)
+    monkeypatch.setattr(client, "_post_json", fake_post_json)
+
+    result = await client.chat_completion({"model": "empty-free:free", "messages": []}, [])
+
+    assert result["_all_attempts_failed"] is True
+    assert result["_empty_model_reply"] is True
+    assert result["hive_error_code"] == "empty_model_reply"
+    assert result["choices"][0]["finish_reason"] == "empty_reply"

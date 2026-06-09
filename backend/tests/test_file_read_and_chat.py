@@ -232,3 +232,40 @@ def test_zip_inspect_rejects_non_zip(monkeypatch, tmp_path):
     response = client.get("/v1/files/zip/inspect", params={"key": key})
 
     assert response.status_code == 400
+
+
+def test_chat_with_file_returns_empty_reply_diagnostic(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    client = TestClient(app)
+    key = _upload_text(client, content="This file says empty reply handling works.")
+
+    async def fake_chat_completion(self, payload, fallback_models=None):  # noqa: ANN001, ARG001
+        return {
+            "_all_attempts_failed": True,
+            "_empty_model_reply": True,
+            "hive_error_code": "empty_model_reply",
+            "model": payload["model"],
+            "provider": None,
+            "usage": None,
+            "hive_attempts": [{"model": payload["model"], "empty_reply": True}],
+            "choices": [
+                {
+                    "message": {"content": "OpenRouter returned no visible assistant text for the selected model and configured fallbacks."},
+                    "finish_reason": "empty_reply",
+                }
+            ],
+        }
+
+    monkeypatch.setattr(OpenRouterClient, "chat_completion", fake_chat_completion)
+
+    response = client.post(
+        "/v1/chat/with-file",
+        json={"object_key": key, "message": "What does this confirm?", "model": "poolside/laguna-xs.2:free", "max_tokens": 20},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is False
+    assert body["empty_reply"] is False
+    assert body["error_code"] == "empty_model_reply"
+    assert "no visible assistant text" in body["reply"]
