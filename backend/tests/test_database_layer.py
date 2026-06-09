@@ -184,3 +184,96 @@ def test_chat_payload_hydrates_persisted_history(tmp_path: Path) -> None:
     assert "Remember the colour is blue." in contents
     assert "I will remember blue." in contents
     assert contents[-1] == "What colour did I mention?"
+
+
+def test_sql_store_reuses_existing_conversation_without_poisoning_transaction(tmp_path: Path) -> None:
+    db_path = tmp_path / "hive.sqlite3"
+    settings = Settings(
+        APP_ENV="test",
+        DATABASE_ENABLED=True,
+        DATABASE_URL=f"sqlite:///{db_path}",
+    )
+    store = SqlStore(settings)
+    assert store.init_schema()["ok"] is True
+
+    first = store.record_chat(
+        conversation_id="same-conversation",
+        mode="general",
+        user_message="first",
+        assistant_reply="reply one",
+        model_used="test/model",
+        provider="test",
+        usage={"total_tokens": 1, "cost": 0},
+    )
+    second = store.record_chat(
+        conversation_id="same-conversation",
+        mode="general",
+        user_message="second",
+        assistant_reply="reply two",
+        model_used="test/model",
+        provider="test",
+        usage={"total_tokens": 2, "cost": 0},
+    )
+
+    assert first["ok"] is True
+    assert second["ok"] is True
+    conversation = store.get_conversation("same-conversation", limit=10)
+    assert conversation["ok"] is True
+    assert conversation["message_count"] == 4
+
+
+def test_sql_store_file_upsert_rewrites_without_transaction_poison(tmp_path: Path) -> None:
+    db_path = tmp_path / "hive.sqlite3"
+    settings = Settings(
+        APP_ENV="test",
+        DATABASE_ENABLED=True,
+        DATABASE_URL=f"sqlite:///{db_path}",
+    )
+    store = SqlStore(settings)
+    assert store.init_schema()["ok"] is True
+
+    first = store.record_file(
+        {
+            "object_key": "uploads/duplicate.txt",
+            "original_name": "duplicate.txt",
+            "storage": "r2",
+            "bucket": "hive",
+            "size_bytes": 1,
+            "content_type": "text/plain",
+        }
+    )
+    second = store.record_file(
+        {
+            "object_key": "uploads/duplicate.txt",
+            "original_name": "duplicate.txt",
+            "storage": "r2",
+            "bucket": "hive",
+            "size_bytes": 2,
+            "content_type": "text/plain",
+        }
+    )
+
+    assert first["ok"] is True
+    assert second["ok"] is True
+    files = store.list_files(limit=10)
+    assert files["ok"] is True
+    assert files["count"] == 1
+    assert files["files"][0]["size_bytes"] == 2
+
+
+def test_sql_store_ping_write_is_ephemeral(tmp_path: Path) -> None:
+    db_path = tmp_path / "hive.sqlite3"
+    settings = Settings(
+        APP_ENV="test",
+        DATABASE_ENABLED=True,
+        DATABASE_URL=f"sqlite:///{db_path}",
+    )
+    store = SqlStore(settings)
+    assert store.init_schema()["ok"] is True
+
+    probe = store.ping_write()
+
+    assert probe["ok"] is True
+    conversations = store.list_conversations(limit=10)
+    assert conversations["ok"] is True
+    assert conversations["count"] == 0
