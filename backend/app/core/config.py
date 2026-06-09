@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     openrouter_max_fallback_attempts: int = 2
     openrouter_empty_reply_retry_enabled: bool = True
     openrouter_min_response_tokens: int = 80
+    chat_with_file_model_timeout_seconds: float = 30
 
     cf_r2_account_id: str = Field("", validation_alias=AliasChoices("CF_R2_ACCOUNT_ID", "R2_ACCOUNT_ID"))
     cf_r2_access_key_id: str = Field("", validation_alias=AliasChoices("CF_R2_ACCESS_KEY_ID", "R2_ACCESS_KEY_ID"))
