@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
 from app.core.config import Settings, get_settings
@@ -33,6 +33,7 @@ def database_diagnostics(settings: Settings = Depends(get_settings)) -> dict[str
     return {
         "ok": True,
         "sql": sql.diagnostics(),
+        "sql_table_counts": sql.table_counts(),
         "d1": d1.diagnostics(),
         "recommended_split": {
             "sql": [
@@ -71,6 +72,60 @@ def init_database(settings: Settings = Depends(get_settings)) -> dict[str, objec
         "sql": sql_result,
         "d1": d1_result,
     }
+
+
+
+
+@router.get("/db/conversations")
+def list_conversations(
+    limit: int = Query(50, ge=1, le=500),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    """List recent persisted conversations from SQL storage."""
+
+    return SqlStore(settings).list_conversations(limit=limit)
+
+
+@router.get("/db/conversations/{conversation_id}")
+def get_conversation(
+    conversation_id: str,
+    limit: int = Query(100, ge=1, le=500),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    """Return one persisted conversation and its recent messages."""
+
+    return SqlStore(settings).get_conversation(conversation_id, limit=limit)
+
+
+@router.get("/db/files")
+def list_file_records(
+    limit: int = Query(50, ge=1, le=500),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    """List file metadata records captured in SQL storage."""
+
+    return SqlStore(settings).list_files(limit=limit)
+
+
+@router.get("/db/cost-summary")
+def cost_summary(
+    by_model_limit: int = Query(20, ge=1, le=200),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    """Summarise token/cost records captured in SQL storage."""
+
+    return SqlStore(settings).cost_summary(by_model_limit=by_model_limit)
+
+
+@router.get("/db/ecosystem-metadata")
+def list_ecosystem_metadata(
+    lane: str | None = Query(None, min_length=1, max_length=120),
+    limit: int = Query(50, ge=1, le=500),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    """List recent ecosystem metadata records from D1."""
+
+    return D1MetadataStore(settings).list_metadata(lane=lane, limit=limit)
 
 
 @router.post("/db/ecosystem-metadata")

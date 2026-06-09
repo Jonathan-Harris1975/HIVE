@@ -31,6 +31,8 @@ class ChatRequest(BaseModel):
     temperature: float = 0.4
     max_tokens: int = 2048
     conversation_id: str | None = None
+    use_persisted_history: bool = True
+    db_history_limit: int = Field(20, ge=0, le=100)
 
 
 def build_payload(request: ChatRequest, settings: Settings) -> tuple[dict[str, object], list[str]]:
@@ -42,6 +44,14 @@ def build_payload(request: ChatRequest, settings: Settings) -> tuple[dict[str, o
 
     window = ContextWindow()
     window.add("system", build_system_prompt(effective_mode))
+
+    if request.conversation_id and request.use_persisted_history and request.db_history_limit > 0:
+        for turn in SqlStore(settings).recent_chat_turns(
+            request.conversation_id,
+            limit=request.db_history_limit,
+        ):
+            window.add(turn["role"], turn["content"])
+
     for turn in request.history:
         window.add(turn.role, turn.content)
     window.add("user", request.message)
