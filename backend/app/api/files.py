@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import base64
+import binascii
+import tempfile
+import zipfile
 from dataclasses import asdict
+from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
@@ -8,8 +13,8 @@ from pydantic import BaseModel, Field
 
 from app.core.config import Settings, get_settings
 from app.core.security import require_admin
-from app.ingestion.file_ingestion import ingest_text_content, ingest_upload
-from app.ingestion.zip_ingestion import UnsafeZipError
+from app.ingestion.file_ingestion import ingest_bytes_content, ingest_text_content, ingest_upload
+from app.ingestion.zip_ingestion import UnsafeZipError, inspect_zip
 from app.services.brand_modes import build_system_prompt
 from app.services.context_manager import ContextWindow
 from app.services.model_router import Mode, ModelRouter
@@ -24,6 +29,12 @@ class TextUploadRequest(BaseModel):
     filename: str = Field("hive-r2-smoke.txt", min_length=1, max_length=255)
     content: str = Field(..., min_length=0)
     content_type: str | None = "text/plain; charset=utf-8"
+
+
+class Base64UploadRequest(BaseModel):
+    filename: str = Field(..., min_length=1, max_length=255)
+    content_base64: str = Field(..., min_length=1)
+    content_type: str | None = None
 
 
 class ChatTurn(BaseModel):
@@ -73,6 +84,35 @@ async def upload_text(
     return {"ok": True, "file": result.__dict__}
 
 
+@router.post("/files/upload-base64")
+async def upload_base64(
+    payload: Base64UploadRequest,
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    """Upload arbitrary bytes from JSON.
+
+    Useful for ReqBin/Make.com/phone tests where multipart file upload is awkward.
+    The payload may contain plain base64 or a data URL such as
+    data:application/zip;base64,....
+    """
+
+    try:
+        content_type, data = _decode_base64_upload(payload.content_base64, payload.content_type)
+        result = ingest_bytes_content(
+            filename=payload.filename,
+            data=data,
+            content_type=content_type,
+            settings=settings,
+        )
+    except binascii.Error as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid base64 payload") from exc
+    except UnsafeZipError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)) from exc
+    return {"ok": True, "file": result.__dict__}
+
+
 @router.get("/files/list")
 def list_files(
     prefix: str = Query("uploads/", min_length=0, max_length=512),
@@ -98,6 +138,25 @@ def list_files(
         "prefix": clean_prefix,
         "count": len(objects),
         "files": [asdict(item) for item in objects],
+    }
+
+
+@router.get("/files/public-url")
+def public_url(
+    key: str = Query(..., min_length=1, max_length=2048),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    """Return the configured public R2 URL for a key without reading the object."""
+
+    clean_key = _validate_object_key(key)
+    storage_name = _storage_name(settings)
+    url = R2Storage(settings).public_url_for_key(clean_key) if storage_name == "r2" else None
+    return {
+        "ok": True,
+        "storage": storage_name,
+        "object_key": clean_key,
+        "public_url": url,
+        "public_base_url_configured": bool(settings.cf_r2_public_base_url),
     }
 
 
@@ -139,6 +198,61 @@ def read_file(
     }
 
 
+@router.get("/files/zip/inspect")
+def inspect_stored_zip(
+    key: str = Query(..., min_length=1, max_length=2048),
+    max_members: int = Query(200, ge=1, le=1000),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    """Inspect a stored ZIP archive without extracting it into the bucket."""
+
+    clean_key = _validate_object_key(key)
+    try:
+        obj = _storage(settings).read_object(clean_key, max_bytes=settings.max_upload_bytes)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        return _storage_error_response(
+            operation="zip_inspect_read",
+            settings=settings,
+            key_or_prefix=clean_key,
+            error=exc,
+        )
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as tmp:
+        temp_path = Path(tmp.name)
+        tmp.write(obj.content)
+
+    try:
+        members = inspect_zip(
+            temp_path,
+            max_files=settings.max_zip_files,
+            max_uncompressed_bytes=settings.max_zip_uncompressed_bytes,
+        )
+    except zipfile.BadZipFile as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Stored object is not a valid ZIP archive") from exc
+    except UnsafeZipError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    files = [member for member in members if not member.is_dir]
+    dirs = [member for member in members if member.is_dir]
+    return {
+        "ok": True,
+        "source": _source_metadata(obj, settings, truncated=False, decode_replacements=False),
+        "zip": {
+            "member_count": len(members),
+            "file_count": len(files),
+            "directory_count": len(dirs),
+            "total_uncompressed_bytes": sum(member.size for member in members),
+            "total_compressed_bytes": sum(member.compressed_size for member in members),
+            "preview_limit": max_members,
+            "members_preview": [asdict(member) for member in members[:max_members]],
+        },
+    }
+
+
 @router.post("/chat/with-file")
 async def chat_with_file(
     request: ChatWithFileRequest,
@@ -176,9 +290,15 @@ async def chat_with_file(
     selected_model = router_service.select_model(task, request.model)
     fallback_models = router_service.fallback_models_for_task(task, selected_model)
 
+    source_label = Path(clean_key).name or clean_key
     window = ContextWindow()
     window.add("system", build_system_prompt(effective_mode))
-    window.add("system", f"Answer using the attached file content. Cite this object key when relevant: {clean_key}")
+    window.add(
+        "system",
+        "Answer using the attached file content only where relevant. "
+        "Do not print the object key or public URL inside the answer; "
+        "the API returns source metadata separately.",
+    )
     for turn in request.history:
         window.add(turn.role, turn.content)
     window.add(
@@ -187,7 +307,7 @@ async def chat_with_file(
             [
                 request.message,
                 "",
-                f"Source object key: {clean_key}",
+                f"Attached file label: {source_label}",
                 f"Content type: {obj.content_type or 'unknown'}",
                 f"Size bytes: {obj.size_bytes}",
                 "",
@@ -208,6 +328,7 @@ async def chat_with_file(
     completion = await client.chat_completion(payload, fallback_models=fallback_models)
     choice = (completion.get("choices") or [{}])[0]
     message = choice.get("message") or {}
+    finish_reason = choice.get("finish_reason")
     ok = not bool(completion.get("_all_attempts_failed"))
     return {
         "ok": ok,
@@ -215,17 +336,14 @@ async def chat_with_file(
         "model_used": completion.get("model") or payload.get("model"),
         "provider": completion.get("provider"),
         "usage": completion.get("usage"),
-        "raw_finish_reason": choice.get("finish_reason"),
+        "raw_finish_reason": finish_reason,
+        "completion_truncated": finish_reason == "length",
         "attempts": completion.get("hive_attempts"),
-        "source": {
+        "source": _source_metadata(obj, settings, truncated=truncated, decode_replacements=had_decode_replacements),
+        "source_citation": {
+            "label": source_label,
             "object_key": obj.key,
-            "storage": _storage_name(settings),
-            "bucket": obj.bucket,
-            "size_bytes": obj.size_bytes,
-            "content_type": obj.content_type,
             "public_url": obj.public_url,
-            "truncated": truncated,
-            "decode_replacements": had_decode_replacements,
         },
     }
 
@@ -301,9 +419,32 @@ def _validate_object_key(key: str, *, allow_trailing_slash: bool = False) -> str
     return clean_key
 
 
+def _decode_base64_upload(content_base64: str, content_type: str | None) -> tuple[str | None, bytes]:
+    raw = content_base64.strip()
+    detected_content_type = content_type
+    if raw.startswith("data:") and "," in raw:
+        header, raw = raw.split(",", 1)
+        if ";base64" in header and not detected_content_type:
+            detected_content_type = header.removeprefix("data:").split(";", 1)[0] or None
+    return detected_content_type, base64.b64decode(raw, validate=True)
+
+
 def _decode_text(content: bytes) -> tuple[str, bool]:
     decoded = content.decode("utf-8", errors="replace")
     return decoded, "\ufffd" in decoded
+
+
+def _source_metadata(obj, settings: Settings, *, truncated: bool, decode_replacements: bool) -> dict[str, object]:
+    return {
+        "object_key": obj.key,
+        "storage": _storage_name(settings),
+        "bucket": obj.bucket,
+        "size_bytes": obj.size_bytes,
+        "content_type": obj.content_type,
+        "public_url": obj.public_url,
+        "truncated": truncated,
+        "decode_replacements": decode_replacements,
+    }
 
 
 def _storage_name(settings: Settings) -> str:
