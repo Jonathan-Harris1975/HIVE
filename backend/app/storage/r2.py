@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import boto3
 from botocore.client import Config
@@ -17,6 +19,24 @@ class StoredObject:
     bucket: str
     size_bytes: int
     sha256: str
+    public_url: str | None = None
+
+
+@dataclass(frozen=True)
+class ObjectSummary:
+    key: str
+    size_bytes: int
+    last_modified: str | None = None
+    public_url: str | None = None
+
+
+@dataclass(frozen=True)
+class ReadObject:
+    key: str
+    bucket: str
+    content: bytes
+    size_bytes: int
+    content_type: str | None = None
     public_url: str | None = None
 
 
@@ -45,6 +65,11 @@ class R2Storage:
             )
         return self._client
 
+    def public_url_for_key(self, key: str) -> str | None:
+        if self.settings.cf_r2_public_base_url:
+            return f"{self.settings.cf_r2_public_base_url.rstrip('/')}/{key}"
+        return None
+
     def put_file(self, path: Path, key: str, content_type: str | None = None) -> StoredObject:
         digest = sha256_file(path)
         extra_args = {"ContentType": content_type} if content_type else {}
@@ -52,24 +77,75 @@ class R2Storage:
             self.client().upload_file(str(path), self.settings.cf_r2_bucket, key, ExtraArgs=extra_args)
         except (BotoCoreError, ClientError) as exc:
             raise RuntimeError(f"R2 upload failed for {key}: {exc}") from exc
-        public_url = None
-        if self.settings.cf_r2_public_base_url:
-            public_url = f"{self.settings.cf_r2_public_base_url.rstrip('/')}/{key}"
         return StoredObject(
             key=key,
             bucket=self.settings.cf_r2_bucket,
             size_bytes=path.stat().st_size,
             sha256=digest,
-            public_url=public_url,
+            public_url=self.public_url_for_key(key),
         )
 
     def list_keys(self, prefix: str = "", limit: int = 1000) -> list[str]:
-        response = self.client().list_objects_v2(
-            Bucket=self.settings.cf_r2_bucket,
-            Prefix=prefix,
-            MaxKeys=limit,
+        return [item.key for item in self.list_objects(prefix=prefix, limit=limit)]
+
+    def list_objects(self, prefix: str = "", limit: int = 100) -> list[ObjectSummary]:
+        safe_limit = max(1, min(int(limit), 1000))
+        try:
+            response = self.client().list_objects_v2(
+                Bucket=self.settings.cf_r2_bucket,
+                Prefix=prefix,
+                MaxKeys=safe_limit,
+            )
+        except (BotoCoreError, ClientError) as exc:
+            raise RuntimeError(f"R2 list failed for prefix {prefix!r}: {exc}") from exc
+
+        objects: list[ObjectSummary] = []
+        for item in response.get("Contents", []):
+            key = item.get("Key")
+            if not key:
+                continue
+            last_modified = _isoformat(item.get("LastModified"))
+            objects.append(
+                ObjectSummary(
+                    key=key,
+                    size_bytes=int(item.get("Size") or 0),
+                    last_modified=last_modified,
+                    public_url=self.public_url_for_key(key),
+                )
+            )
+        return objects
+
+    def read_object(self, key: str, max_bytes: int) -> ReadObject:
+        if not key:
+            raise ValueError("Object key is required")
+        try:
+            head = self.client().head_object(Bucket=self.settings.cf_r2_bucket, Key=key)
+            size_bytes = int(head.get("ContentLength") or 0)
+            if size_bytes > max_bytes:
+                raise ValueError(f"Object is {size_bytes} bytes; max read size is {max_bytes} bytes")
+            response = self.client().get_object(Bucket=self.settings.cf_r2_bucket, Key=key)
+            content = response["Body"].read(max_bytes + 1)
+        except ValueError:
+            raise
+        except (BotoCoreError, ClientError) as exc:
+            raise RuntimeError(f"R2 read failed for {key}: {exc}") from exc
+
+        if len(content) > max_bytes:
+            raise ValueError(f"Object exceeds max read size of {max_bytes} bytes")
+        return ReadObject(
+            key=key,
+            bucket=self.settings.cf_r2_bucket,
+            content=content,
+            size_bytes=size_bytes,
+            content_type=head.get("ContentType") or response.get("ContentType"),
+            public_url=self.public_url_for_key(key),
         )
-        return [item["Key"] for item in response.get("Contents", [])]
+
+
+def _isoformat(value: Any) -> str | None:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return None
 
 
 def sha256_file(path: Path) -> str:
