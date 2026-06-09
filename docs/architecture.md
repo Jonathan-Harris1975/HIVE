@@ -155,3 +155,18 @@ incoming /v1/chat with conversation_id
 This keeps current prompts deterministic while allowing HIVE to continue an existing session without relying on client-side history alone.
 
 D1 remains separate and stores ecosystem metadata indexes rather than full chat history.
+
+
+## Chunk retrieval foundation
+
+HIVE stores raw file bodies in R2/local blob storage and stores retrieval metadata in SQL. The `hive_file_chunks` table is the stable bridge between file storage and future vector search.
+
+Current v1.2 flow:
+
+1. Upload file to R2/local storage.
+2. Run `POST /v1/files/chunk` for supported text-ish files.
+3. Store deterministic overlapping chunks in SQL.
+4. Use `GET /v1/files/chunks/search` for lightweight lexical retrieval.
+5. Use `/v1/chat/with-file` with `use_chunks:true` to answer from selected chunks instead of injecting the full file excerpt.
+
+Vectorize remains optional and disabled until the chunk table has proved stable in production. When enabled later, Vectorize should index these chunk IDs rather than inventing a parallel storage contract.

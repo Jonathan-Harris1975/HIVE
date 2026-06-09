@@ -198,3 +198,17 @@ curl -X GET "https://YOUR-KOYEB-APP.koyeb.app/v1/db/diagnostics" -H "Authorizati
 ```
 
 `/v1/db/ping-write` writes and deletes temporary probe rows in SQL and D1. It is the quick check that the persistence layer is not stuck in an aborted PostgreSQL transaction and that D1 writes are accepted.
+
+
+## Chunk retrieval env controls
+
+These are safe defaults for the v1.2 SQL chunking foundation:
+
+```env
+FILE_CHUNK_MAX_CHARS=4000
+FILE_CHUNK_OVERLAP_CHARS=400
+FILE_CHUNK_MAX_COUNT=500
+FILE_RETRIEVAL_MAX_CHUNKS=6
+```
+
+Run `/v1/db/init` after deploying this version so Koyeb PostgreSQL creates the `hive_file_chunks` table.

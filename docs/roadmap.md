@@ -92,7 +92,7 @@ The endpoint returns `stage`, `timings`, and `error_code:"chat_with_file_timeout
 - [x] Summarise total and by-model token/cost usage.
 - [x] List Cloudflare D1 ecosystem metadata records by lane.
 
-Next persistence step: add chunk records and Vectorize-backed retrieval, rather than sending large files directly to the model.
+Next persistence step: add embeddings/Vectorize on top of the now-stable chunk records rather than sending large files directly to the model.
 
 
 ## Completed v1.1 persistence hardening
@@ -102,3 +102,15 @@ Next persistence step: add chunk records and Vectorize-backed retrieval, rather 
 - SQL/D1 write probes via `/v1/db/ping-write`.
 - D1 retry/diagnostic controls.
 - Persistence docs and Koyeb env guidance updated.
+
+
+## v1.2 Chunk retrieval foundation
+
+- [x] Deterministic text chunking with overlap and token estimates.
+- [x] SQL `hive_file_chunks` table for durable chunk storage.
+- [x] `/v1/files/chunk` to create/recreate chunks for one stored file.
+- [x] `/v1/files/chunks` to list chunk records for a file.
+- [x] `/v1/files/chunks/search` for SQL-backed lexical retrieval.
+- [x] `/v1/chat/with-file` chunk mode via `use_chunks:true`.
+- [x] Optional `auto_chunk:true` bridge for smoke tests/small files.
+- [ ] Cloudflare Vectorize embeddings/upsert/query using the stable chunk table.
