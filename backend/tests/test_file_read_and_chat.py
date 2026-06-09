@@ -334,3 +334,109 @@ def test_chat_with_file_model_timeout_returns_structured_diagnostic(monkeypatch,
     assert body["source"]["object_key"] == key
     assert body["timings"]["model_call_seconds"] is not None
     assert "skip_model=true" in body["hint"]
+
+
+def test_file_chunk_endpoints_with_sql_store(monkeypatch, tmp_path):
+    from app.core.config import Settings, get_settings
+
+    monkeypatch.chdir(tmp_path)
+    db_path = tmp_path / "hive.sqlite3"
+    settings = Settings(
+        APP_ENV="test",
+        DATABASE_ENABLED=True,
+        DATABASE_URL=f"sqlite:///{db_path}",
+        FILE_CHUNK_MAX_CHARS=120,
+        FILE_CHUNK_OVERLAP_CHARS=20,
+    )
+    app.dependency_overrides[get_settings] = lambda: settings
+    try:
+        client = TestClient(app)
+        assert client.post("/v1/db/init").json()["ok"] is True
+        key = _upload_text(
+            client,
+            content="Alpha badger context. " * 20 + "Final retrieval sentence about badgers.",
+        )
+
+        chunk_response = client.post(
+            "/v1/files/chunk",
+            json={"object_key": key, "max_chars": 120, "overlap_chars": 20},
+        )
+        assert chunk_response.status_code == 200
+        chunk_body = chunk_response.json()
+        assert chunk_body["ok"] is True
+        assert chunk_body["db_recorded"] is True
+        assert chunk_body["chunking"]["chunk_count"] > 1
+
+        list_response = client.get("/v1/files/chunks", params={"key": key, "include_content": True})
+        assert list_response.status_code == 200
+        list_body = list_response.json()
+        assert list_body["ok"] is True
+        assert list_body["count"] == chunk_body["chunking"]["chunk_count"]
+
+        search_response = client.get(
+            "/v1/files/chunks/search",
+            params={"key": key, "query": "badger retrieval", "limit": 2},
+        )
+        assert search_response.status_code == 200
+        search_body = search_response.json()
+        assert search_body["ok"] is True
+        assert search_body["count"] >= 1
+        assert search_body["chunks"][0]["score"] > 0
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_chat_with_file_can_use_persisted_chunks(monkeypatch, tmp_path):
+    from app.core.config import Settings, get_settings
+
+    monkeypatch.chdir(tmp_path)
+    db_path = tmp_path / "hive.sqlite3"
+    settings = Settings(
+        APP_ENV="test",
+        DATABASE_ENABLED=True,
+        DATABASE_URL=f"sqlite:///{db_path}",
+        OPENROUTER_API_KEY="test",
+        FILE_CHUNK_MAX_CHARS=120,
+        FILE_CHUNK_OVERLAP_CHARS=20,
+    )
+    app.dependency_overrides[get_settings] = lambda: settings
+    try:
+        client = TestClient(app)
+        assert client.post("/v1/db/init").json()["ok"] is True
+        key = _upload_text(
+            client,
+            content="Alpha project note. " * 10 + "The important retrieval animal is a badger.",
+        )
+        assert client.post("/v1/files/chunk", json={"object_key": key, "max_chars": 120}).json()["ok"] is True
+
+        async def fake_chat_completion(self, payload, fallback_models=None):  # noqa: ANN001, ARG001
+            joined = "\n".join(message["content"] for message in payload["messages"])
+            assert "[Chunk" in joined
+            assert "badger" in joined.lower()
+            return {
+                "model": payload["model"],
+                "provider": "test-provider",
+                "usage": {"total_tokens": 12, "cost": 0},
+                "choices": [{"message": {"content": "The retrieved chunk says badger."}, "finish_reason": "stop"}],
+            }
+
+        monkeypatch.setattr(OpenRouterClient, "chat_completion", fake_chat_completion)
+        response = client.post(
+            "/v1/chat/with-file",
+            json={
+                "object_key": key,
+                "message": "What animal is important?",
+                "model": "poolside/laguna-xs.2:free",
+                "use_chunks": True,
+                "chunk_limit": 3,
+            },
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["ok"] is True
+        assert body["source"]["chunked"] is True
+        assert body["source"]["chunks_used"] >= 1
+        assert "badger" in body["reply"].lower()
+    finally:
+        app.dependency_overrides.clear()

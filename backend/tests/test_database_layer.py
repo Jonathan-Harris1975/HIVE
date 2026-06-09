@@ -305,3 +305,39 @@ def test_postgres_statement_timeout_can_be_disabled() -> None:
     store = SqlStore(settings)
 
     assert store._postgres_statement_timeout_sql() is None
+
+
+def test_sql_store_records_lists_and_searches_file_chunks(tmp_path: Path) -> None:
+    from app.ingestion.chunking import chunks_to_dicts, split_text_into_chunks
+
+    db_path = tmp_path / "hive.sqlite3"
+    settings = Settings(
+        APP_ENV="test",
+        DATABASE_ENABLED=True,
+        DATABASE_URL=f"sqlite:///{db_path}",
+    )
+    store = SqlStore(settings)
+    assert store.init_schema()["ok"] is True
+
+    chunks = split_text_into_chunks(
+        "Alpha badger context.\n\nBeta fox context.\n\nGamma badger retrieval target.",
+        max_chars=80,
+        overlap_chars=10,
+    )
+    result = store.record_file_chunks(
+        object_key="uploads/chunked.txt",
+        chunks=chunks_to_dicts(chunks),
+        source_metadata={"content_type": "text/plain"},
+    )
+
+    assert result["ok"] is True
+    assert result["chunk_count"] >= 1
+    listed = store.list_file_chunks(object_key="uploads/chunked.txt", include_content=True)
+    assert listed["ok"] is True
+    assert listed["count"] == result["chunk_count"]
+    found = store.search_file_chunks(query="badger retrieval", object_key="uploads/chunked.txt", limit=2)
+    assert found["ok"] is True
+    assert found["count"] >= 1
+    assert "badger" in found["chunks"][0]["content"].lower()
+    counts = store.table_counts()
+    assert counts["counts"]["hive_file_chunks"] == result["chunk_count"]
