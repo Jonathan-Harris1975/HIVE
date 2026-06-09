@@ -174,6 +174,133 @@ class SqlStore:
         except Exception as exc:  # pragma: no cover
             return {"ok": False, "object_key": object_key, "error": str(exc)}
 
+    def record_file_chunks(
+        self,
+        *,
+        object_key: str,
+        chunks: list[dict[str, Any]],
+        source_metadata: dict[str, Any] | None = None,
+        replace_existing: bool = True,
+    ) -> dict[str, object]:
+        """Persist chunk records for one stored file.
+
+        Existing chunks are replaced by default so re-chunking with a new chunk
+        size cannot leave stale records behind.
+        """
+
+        if not self.enabled:
+            return {"ok": False, "enabled": False}
+        if not object_key:
+            return {"ok": False, "error": "object_key is required"}
+
+        now = _now()
+        p = self._param()
+        try:
+            with self._transaction() as cur:
+                if replace_existing:
+                    cur.execute(f"DELETE FROM hive_file_chunks WHERE object_key={p}", (object_key,))
+                for chunk in chunks:
+                    metadata = dict(source_metadata or {})
+                    metadata.update(chunk.get("metadata") or {})
+                    self._upsert_file_chunk(cur, object_key, chunk, metadata, now)
+            return {"ok": True, "object_key": object_key, "chunk_count": len(chunks), "replaced_existing": replace_existing}
+        except Exception as exc:  # pragma: no cover
+            return {"ok": False, "object_key": object_key, "chunk_count": len(chunks), "error": str(exc)}
+
+    def list_file_chunks(
+        self,
+        *,
+        object_key: str,
+        limit: int = 50,
+        offset: int = 0,
+        include_content: bool = False,
+    ) -> dict[str, object]:
+        if not self.enabled:
+            return {"ok": False, "enabled": False}
+        p = self._param()
+        content_column = "content" if include_content else "SUBSTR(content, 1, 360) AS content_preview"
+        try:
+            with self._connect() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    f"""
+                    SELECT id, object_key, chunk_index, {content_column}, char_start, char_end,
+                           token_estimate, content_sha256, metadata_json, created_at, updated_at
+                    FROM hive_file_chunks
+                    WHERE object_key={p}
+                    ORDER BY chunk_index ASC
+                    LIMIT {p} OFFSET {p}
+                    """,
+                    (object_key, _int_or_none(limit) or 50, _int_or_none(offset) or 0),
+                )
+                rows = self._fetch_dicts(cur)
+            for row in rows:
+                row["metadata"] = _json_or_none(row.pop("metadata_json", None))
+            return {"ok": True, "enabled": True, "object_key": object_key, "count": len(rows), "chunks": rows}
+        except Exception as exc:  # pragma: no cover
+            return {"ok": False, "enabled": True, "object_key": object_key, "error": str(exc)}
+
+    def search_file_chunks(
+        self,
+        *,
+        query: str,
+        object_key: str | None = None,
+        limit: int = 6,
+        candidate_limit: int = 300,
+    ) -> dict[str, object]:
+        """Simple SQL-backed lexical retrieval for chunked files.
+
+        This is intentionally not a Vectorize replacement. It gives HIVE a stable
+        retrieval contract before embeddings are introduced.
+        """
+
+        if not self.enabled:
+            return {"ok": False, "enabled": False}
+        p = self._param()
+        terms = _query_terms(query)
+        where_parts: list[str] = []
+        params: list[Any] = []
+        if object_key:
+            where_parts.append(f"object_key={p}")
+            params.append(object_key)
+        if terms:
+            term_sql = " OR ".join([f"LOWER(content) LIKE {p}" for _ in terms])
+            where_parts.append(f"({term_sql})")
+            params.extend([f"%{term}%" for term in terms])
+        where_sql = "WHERE " + " AND ".join(where_parts) if where_parts else ""
+        try:
+            with self._connect() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    f"""
+                    SELECT id, object_key, chunk_index, content, char_start, char_end,
+                           token_estimate, content_sha256, metadata_json, created_at, updated_at
+                    FROM hive_file_chunks
+                    {where_sql}
+                    ORDER BY object_key ASC, chunk_index ASC
+                    LIMIT {p}
+                    """,
+                    tuple(params + [_int_or_none(candidate_limit) or 300]),
+                )
+                rows = self._fetch_dicts(cur)
+            for row in rows:
+                row["metadata"] = _json_or_none(row.pop("metadata_json", None))
+                row["score"] = _score_chunk(str(row.get("content") or ""), query)
+            rows.sort(key=lambda item: (float(item.get("score") or 0), -int(item.get("chunk_index") or 0)), reverse=True)
+            selected = rows[: _int_or_none(limit) or 6]
+            return {
+                "ok": True,
+                "enabled": True,
+                "query": query,
+                "object_key": object_key,
+                "terms": terms,
+                "candidate_count": len(rows),
+                "count": len(selected),
+                "chunks": selected,
+            }
+        except Exception as exc:  # pragma: no cover
+            return {"ok": False, "enabled": True, "query": query, "object_key": object_key, "error": str(exc)}
+
     def table_counts(self) -> dict[str, object]:
         """Return safe row counts for operational tables.
 
@@ -350,7 +477,7 @@ class SqlStore:
             return {"ok": False, "enabled": True, "error": str(exc)}
 
     def table_names(self) -> list[str]:
-        return ["hive_conversations", "hive_messages", "hive_files", "hive_cost_events"]
+        return ["hive_conversations", "hive_messages", "hive_files", "hive_file_chunks", "hive_cost_events"]
 
     def _schema_statements(self) -> list[str]:
         # TEXT timestamps keep the schema portable between SQLite and PostgreSQL.
@@ -402,6 +529,30 @@ class SqlStore:
             """
             CREATE INDEX IF NOT EXISTS idx_hive_files_object_key
             ON hive_files (object_key)
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS hive_file_chunks (
+                id TEXT PRIMARY KEY,
+                object_key TEXT NOT NULL,
+                chunk_index INTEGER NOT NULL,
+                content TEXT NOT NULL,
+                char_start INTEGER,
+                char_end INTEGER,
+                token_estimate INTEGER,
+                content_sha256 TEXT,
+                metadata_json TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(object_key, chunk_index)
+            )
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_hive_file_chunks_object_key
+            ON hive_file_chunks (object_key, chunk_index)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_hive_file_chunks_sha256
+            ON hive_file_chunks (content_sha256)
             """,
             """
             CREATE TABLE IF NOT EXISTS hive_cost_events (
@@ -606,6 +757,45 @@ class SqlStore:
             values,
         )
 
+    def _upsert_file_chunk(
+        self,
+        cur: Any,
+        object_key: str,
+        chunk: dict[str, Any],
+        metadata: dict[str, Any],
+        now: str,
+    ) -> None:
+        p = self._param()
+        values = (
+            str(uuid.uuid4()),
+            object_key,
+            _int_or_none(chunk.get("chunk_index")) or 0,
+            str(chunk.get("content") or ""),
+            _int_or_none(chunk.get("char_start")),
+            _int_or_none(chunk.get("char_end")),
+            _int_or_none(chunk.get("token_estimate")),
+            chunk.get("content_sha256"),
+            json.dumps(metadata, ensure_ascii=False, default=str),
+            now,
+            now,
+        )
+        cur.execute(
+            f"""
+            INSERT INTO hive_file_chunks
+            (id, object_key, chunk_index, content, char_start, char_end, token_estimate, content_sha256, metadata_json, created_at, updated_at)
+            VALUES ({p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p})
+            ON CONFLICT(object_key, chunk_index) DO UPDATE SET
+              content=excluded.content,
+              char_start=excluded.char_start,
+              char_end=excluded.char_end,
+              token_estimate=excluded.token_estimate,
+              content_sha256=excluded.content_sha256,
+              metadata_json=excluded.metadata_json,
+              updated_at=excluded.updated_at
+            """,
+            values,
+        )
+
     def _insert_cost_event(
         self,
         cur: Any,
@@ -661,6 +851,39 @@ def _json_or_none(value: Any) -> Any:
         return json.loads(value)
     except (TypeError, json.JSONDecodeError):
         return value
+
+
+def _query_terms(query: str, *, max_terms: int = 8) -> list[str]:
+    import re
+
+    terms = [term.lower() for term in re.findall(r"[A-Za-z0-9][A-Za-z0-9_-]{1,}", query or "")]
+    seen: set[str] = set()
+    unique: list[str] = []
+    for term in terms:
+        if term not in seen:
+            seen.add(term)
+            unique.append(term)
+        if len(unique) >= max_terms:
+            break
+    return unique
+
+
+def _score_chunk(content: str, query: str) -> float:
+    terms = _query_terms(query)
+    if not terms:
+        return 0.0
+    lowered = content.lower()
+    score = 0.0
+    query_lowered = (query or "").strip().lower()
+    if query_lowered and query_lowered in lowered:
+        score += 10.0
+    for term in terms:
+        count = lowered.count(term)
+        if count:
+            score += 2.0 * count
+            if term in lowered[:240]:
+                score += 0.5
+    return round(score, 3)
 
 
 def _int_or_none(value: Any) -> int | None:
