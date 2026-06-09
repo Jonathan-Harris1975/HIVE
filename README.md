@@ -176,3 +176,31 @@ curl -X GET "https://your-koyeb-service.example/v1/files/diagnostics?prefix=uplo
 ```
 
 File list/read/chat-with-file now return `ok:false` JSON diagnostics for R2 runtime failures rather than a generic Bad Gateway.
+
+## Optional v1.1 persistence
+
+HIVE v1 works without a database. The optional v1.1 persistence layer adds:
+
+- SQL store for conversations, messages, files, upload records and cost/token logs.
+- Cloudflare D1 store for AIMS/RAMS ecosystem metadata indexes.
+
+Recommended long-term split:
+
+| Koyeb/PostgreSQL or SQLite | Cloudflare D1 |
+| --- | --- |
+| Conversations | Ecosystem metadata |
+| Messages | Audit run index |
+| File metadata | Council report index |
+| Upload records | Podcast episode index |
+| Cost tracking | Book/ebook catalogue cache |
+| Token usage data | Social performance snapshots |
+
+### Database smoke tests
+
+```bash
+curl -X GET "https://YOUR-KOYEB-APP.koyeb.app/v1/db/diagnostics" -H "Authorization: Bearer YOUR_ADMIN_BEARER_TOKEN"
+
+curl -X POST "https://YOUR-KOYEB-APP.koyeb.app/v1/db/init" -H "Authorization: Bearer YOUR_ADMIN_BEARER_TOKEN"
+```
+
+The core chat/file routes continue to work if the database layer is disabled or temporarily unavailable.
