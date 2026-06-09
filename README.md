@@ -121,3 +121,14 @@ See `.env.example`.
 - ZIP extraction uses path traversal checks and size/file-count limits.
 - Unsupported files are stored and recorded, not blindly pushed into model context.
 - Uploaded content should be indexed and selected before model use to avoid token bonfires.
+
+### R2 diagnostics
+
+If file list/read tests return errors, use the diagnostics endpoint first. It returns safe, redacted R2 configuration plus a small list probe instead of surfacing a raw 502.
+
+```bash
+curl -X GET "https://your-koyeb-service.example/v1/files/diagnostics?prefix=uploads/" \
+  -H "Authorization: Bearer YOUR_ADMIN_BEARER_TOKEN"
+```
+
+File list/read/chat-with-file now return `ok:false` JSON diagnostics for R2 runtime failures rather than a generic Bad Gateway.
