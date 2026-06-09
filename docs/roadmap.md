@@ -25,8 +25,11 @@
 - [x] Public URL helper API
 - [x] Base64 upload API for phone/ReqBin/Make testing
 - [x] Stored ZIP inspection API
-- [ ] Durable file metadata API
-- [ ] Conversation resume API
+- [x] Durable file metadata API
+- [x] Conversation resume API
+- [x] Conversation listing/read API
+- [x] Cost summary API
+- [x] D1 metadata listing API
 
 ## v1.0 Test-ready baseline
 
@@ -76,3 +79,17 @@ CHAT_WITH_FILE_MODEL_TIMEOUT_SECONDS=30
 ```
 
 The endpoint returns `stage`, `timings`, and `error_code:"chat_with_file_timeout"` instead of a hanging request when model calls exceed the guard.
+
+
+## v1.1 Persistence retrieval
+
+- [x] Persist non-streaming chat usage/cost events to SQL when enabled.
+- [x] Persist upload/file metadata to SQL when enabled.
+- [x] List recent conversations.
+- [x] Read one conversation and recent messages.
+- [x] Hydrate `/v1/chat` from stored conversation history when `conversation_id` is supplied.
+- [x] List SQL file metadata records.
+- [x] Summarise total and by-model token/cost usage.
+- [x] List Cloudflare D1 ecosystem metadata records by lane.
+
+Next persistence step: add chunk records and Vectorize-backed retrieval, rather than sending large files directly to the model.

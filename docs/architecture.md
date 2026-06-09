@@ -117,3 +117,31 @@ CHAT_WITH_FILE_MODEL_TIMEOUT_SECONDS=30
 ```
 
 The endpoint returns `stage`, `timings`, and `error_code:"chat_with_file_timeout"` instead of a hanging request when model calls exceed the guard.
+
+
+### Persistence retrieval flow
+
+When SQL persistence is enabled, non-streaming chat endpoints write:
+
+```text
+/v1/chat or /v1/chat/with-file
+  -> hive_conversations
+  -> hive_messages
+  -> hive_cost_events
+```
+
+Upload endpoints write file metadata to `hive_files`. Read/list endpoints continue to use R2/local object storage as the source of truth for bytes.
+
+Conversation resume is intentionally conservative:
+
+```text
+incoming /v1/chat with conversation_id
+  -> load recent SQL user/assistant turns
+  -> add explicit request.history if supplied
+  -> add current user message
+  -> build OpenRouter payload
+```
+
+This keeps current prompts deterministic while allowing HIVE to continue an existing session without relying on client-side history alone.
+
+D1 remains separate and stores ecosystem metadata indexes rather than full chat history.
