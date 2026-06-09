@@ -51,6 +51,8 @@ class Settings(BaseSettings):
     max_upload_bytes: int = 100 * 1024 * 1024
     max_zip_files: int = 5000
     max_zip_uncompressed_bytes: int = 500 * 1024 * 1024
+    max_file_read_bytes: int = 2 * 1024 * 1024
+    max_file_chat_chars: int = 24_000
 
     @field_validator("cors_origins", mode="before")
     @classmethod
