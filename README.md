@@ -19,7 +19,7 @@ This is **not** a ChatLima/Kanari/OrChat fork. Those projects are reference arch
 
 ## Current status
 
-V1 scaffold with working OpenRouter chat, model routing, R2/local upload storage, JSON text upload, file listing, file read-back, and single-file chat. Vectorize and durable metadata persistence remain later layers.
+V1 test-ready build with working OpenRouter chat, model routing, empty-reply hardening, R2/local upload storage, JSON/base64 uploads, file listing, file read-back, public URL helper, stored ZIP inspection, and single-file chat. Vectorize and durable metadata persistence remain later layers.
 
 ## Recommended v1 architecture
 
@@ -139,7 +139,20 @@ curl -X POST "https://your-koyeb-service.example/v1/chat/with-file" \
   -d "{\"object_key\":\"uploads/FILE_ID/hive-r2-smoke.txt\",\"message\":\"Summarise this file in one sentence.\",\"mode\":\"file_analysis\",\"model\":\"nvidia/nemotron-3-ultra-550b-a55b:free\"}"
 ```
 
-The v1 file-chat route injects a bounded text excerpt into the prompt. The model is told not to print long object keys inside the reply because the API returns `source` and `source_citation` metadata separately. Vectorize/chunk retrieval will replace this later for larger corpora.
+The v1 file-chat route injects a bounded text excerpt into the prompt. The model is told not to print long object keys inside the reply because the API returns `source` and `source_citation` metadata separately. If a model returns no visible assistant text, HIVE retries the fallback ladder and returns `ok:false` with `error_code:"empty_model_reply"` if all attempts remain empty. Vectorize/chunk retrieval will replace this later for larger corpora.
+
+### Empty reply and truncation behaviour
+
+Some reasoning-heavy free models can spend a tiny output budget on internal reasoning and return no visible assistant text. HIVE treats that as incomplete rather than a clean success.
+
+Responses now include:
+
+- `completion_truncated`: `true` when the provider stops because of output length.
+- `empty_reply`: `true` only when the final visible reply field is blank.
+- `error_code`: `empty_model_reply` when all configured attempts returned no visible text.
+- `attempts`: structured diagnostics for failed/empty model attempts.
+
+Use at least `max_tokens:80` for ReqBin/free-model smoke tests. HIVE also enforces `OPENROUTER_MIN_RESPONSE_TOKENS` to avoid tiny token budgets producing false failures.
 
 ## Environment
 
