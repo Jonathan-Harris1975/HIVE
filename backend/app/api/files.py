@@ -23,9 +23,11 @@ from app.services.brand_modes import build_system_prompt
 from app.services.context_manager import ContextWindow
 from app.services.model_router import Mode, ModelRouter
 from app.services.openrouter import OpenRouterClient
+from app.services.embeddings import CloudflareEmbeddingsClient
 from app.storage.local_blob import LocalBlobStorage
 from app.storage.r2 import R2Storage
 from app.storage.sql_store import SqlStore
+from app.storage.vectorize import VectorizeClient
 
 router = APIRouter(tags=["files"], dependencies=[Depends(require_admin)])
 
@@ -48,6 +50,14 @@ class FileChunkRequest(BaseModel):
     overlap_chars: int | None = Field(None, ge=0, le=12000)
     max_chunks: int | None = Field(None, ge=1, le=5000)
     replace_existing: bool = True
+
+
+class FileVectorizeRequest(BaseModel):
+    object_key: str = Field(..., min_length=1, max_length=2048)
+    auto_chunk: bool = True
+    replace_existing_chunks: bool = False
+    chunk_limit: int | None = Field(None, ge=1, le=5000)
+    batch_size: int | None = Field(None, ge=1, le=100)
 
 
 class ChatTurn(BaseModel):
@@ -80,6 +90,8 @@ class ChatWithFileRequest(BaseModel):
     )
     conversation_id: str | None = None
     use_chunks: bool = Field(False, description="Use persisted SQL chunks instead of injecting the raw file excerpt.")
+    use_vectorize: bool = Field(False, description="When use_chunks is true, try Vectorize semantic retrieval first.")
+    vectorize_fallback_sql: bool = Field(True, description="Fall back to SQL lexical chunk search if Vectorize is disabled, empty, or fails.")
     chunk_query: str | None = Field(None, max_length=2000, description="Optional retrieval query; defaults to the user message.")
     chunk_limit: int | None = Field(None, ge=1, le=30)
     auto_chunk: bool = Field(False, description="If use_chunks is true and no chunks exist, read the file and create chunks first.")
@@ -380,6 +392,70 @@ def list_chunks(
     )
 
 
+@router.post("/files/vectorize")
+async def vectorize_file_chunks(
+    payload: FileVectorizeRequest,
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    """Embed persisted SQL chunks and upsert them to Cloudflare Vectorize.
+
+    Vector IDs are the SQL chunk IDs, so PostgreSQL remains the source of truth.
+    """
+
+    clean_key = _validate_object_key(payload.object_key)
+    if payload.auto_chunk:
+        existing = SqlStore(settings).list_file_chunks(
+            object_key=clean_key,
+            limit=1,
+            include_content=False,
+        )
+        if not isinstance(existing, dict) or not existing.get("ok"):
+            return {"ok": False, "stage": "chunk_check", "error": existing.get("error") if isinstance(existing, dict) else "Chunk lookup failed."}
+        if existing.get("count") == 0 or payload.replace_existing_chunks:
+            chunk_result = _chunk_file_for_chat(clean_key=clean_key, settings=settings)
+            if not chunk_result.get("ok"):
+                return {"ok": False, "stage": "auto_chunk", "chunking": chunk_result}
+
+    chunk_limit = payload.chunk_limit or settings.file_chunk_max_count
+    chunks_result = SqlStore(settings).list_file_chunks(
+        object_key=clean_key,
+        limit=chunk_limit,
+        include_content=True,
+    )
+    chunks = chunks_result.get("chunks", []) if isinstance(chunks_result, dict) else []
+    if not isinstance(chunks_result, dict) or not chunks_result.get("ok"):
+        return {"ok": False, "stage": "list_chunks", "error": chunks_result.get("error") if isinstance(chunks_result, dict) else "Chunk list failed."}
+    if not chunks:
+        return {"ok": False, "stage": "list_chunks", "error_code": "no_chunks_found", "message": "No persisted chunks found to vectorize."}
+
+    return await _vectorize_chunks(
+        chunks=chunks,
+        object_key=clean_key,
+        settings=settings,
+        batch_size=payload.batch_size,
+    )
+
+
+@router.get("/files/vector-search")
+async def vector_search_file_chunks(
+    query: str = Query(..., min_length=1, max_length=2000),
+    key: str | None = Query(None, min_length=1, max_length=2048),
+    limit: int = Query(6, ge=1, le=30),
+    fallback_sql: bool = Query(True),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    """Search chunks using Vectorize, falling back to SQL lexical search by default."""
+
+    clean_key = _validate_object_key(key) if key else None
+    return await _vector_search_chunks(
+        query=query,
+        object_key=clean_key,
+        limit=limit,
+        settings=settings,
+        fallback_sql=fallback_sql,
+    )
+
+
 @router.post("/chat/with-file")
 async def chat_with_file(
     request: ChatWithFileRequest,
@@ -418,11 +494,21 @@ async def chat_with_file(
         query = request.chunk_query or request.message
         chunk_limit = request.chunk_limit or settings.file_retrieval_max_chunks
         store = SqlStore(settings)
-        retrieval = _time_stage(
-            timings,
-            "chunk_retrieval_seconds",
-            lambda: store.search_file_chunks(query=query, object_key=clean_key, limit=chunk_limit),
-        )
+
+        retrieval_started = time.perf_counter()
+        if request.use_vectorize:
+            retrieval = await _vector_search_chunks(
+                query=query,
+                object_key=clean_key,
+                limit=chunk_limit,
+                settings=settings,
+                fallback_sql=request.vectorize_fallback_sql,
+            )
+        else:
+            retrieval = store.search_file_chunks(query=query, object_key=clean_key, limit=chunk_limit)
+            if isinstance(retrieval, dict):
+                retrieval["retrieval_mode"] = "sql"
+        timings["chunk_retrieval_seconds"] = round(time.perf_counter() - retrieval_started, 3)
         chunks = retrieval.get("chunks", []) if isinstance(retrieval, dict) else []
 
         if not chunks and request.auto_chunk:
@@ -457,11 +543,20 @@ async def chat_with_file(
                     "timings": _finalise_timings(timings, total_started),
                 }
             stage = "chunk_retrieval"
-            retrieval = _time_stage(
-                timings,
-                "chunk_retrieval_seconds",
-                lambda: store.search_file_chunks(query=query, object_key=clean_key, limit=chunk_limit),
-            )
+            retrieval_started = time.perf_counter()
+            if request.use_vectorize:
+                retrieval = await _vector_search_chunks(
+                    query=query,
+                    object_key=clean_key,
+                    limit=chunk_limit,
+                    settings=settings,
+                    fallback_sql=request.vectorize_fallback_sql,
+                )
+            else:
+                retrieval = store.search_file_chunks(query=query, object_key=clean_key, limit=chunk_limit)
+                if isinstance(retrieval, dict):
+                    retrieval["retrieval_mode"] = "sql"
+            timings["chunk_retrieval_seconds"] = round(time.perf_counter() - retrieval_started, 3)
             chunks = retrieval.get("chunks", []) if isinstance(retrieval, dict) else []
 
         if not isinstance(retrieval, dict) or not retrieval.get("ok"):
@@ -470,8 +565,9 @@ async def chat_with_file(
                 "stage": stage,
                 "error_code": "chunk_retrieval_failed",
                 "message": (retrieval or {}).get("error") if isinstance(retrieval, dict) else "Chunk retrieval failed.",
+                "retrieval": retrieval if isinstance(retrieval, dict) else None,
                 "timings": _finalise_timings(timings, total_started),
-                "hint": "Run POST /v1/files/chunk first, or retry with use_chunks=false for small files.",
+                "hint": "Run POST /v1/files/chunk first, retry with use_chunks=false for small files, or enable SQL fallback for Vectorize.",
             }
         if not chunks:
             return {
@@ -697,6 +793,159 @@ def files_diagnostics(
             "hint": _storage_error_hint(str(exc)),
         }
     return diagnostics
+
+
+async def _vectorize_chunks(
+    *,
+    chunks: list[dict[str, object]],
+    object_key: str,
+    settings: Settings,
+    batch_size: int | None = None,
+) -> dict[str, object]:
+    embeddings = CloudflareEmbeddingsClient(settings)
+    vectorize = VectorizeClient(settings)
+    if not embeddings.enabled:
+        return {"ok": False, "stage": "embeddings", "embeddings": embeddings.safe_config, "error": "Embeddings disabled or not configured."}
+    if not vectorize.enabled:
+        return {"ok": False, "stage": "vectorize", "vectorize": vectorize.safe_config, "error": "Vectorize disabled or not configured."}
+
+    clean_chunks = [chunk for chunk in chunks if chunk.get("id") and (chunk.get("content") or chunk.get("content_preview"))]
+    if not clean_chunks:
+        return {"ok": False, "stage": "prepare", "error": "No chunk IDs/content available for vectorization."}
+
+    requested_batch_size = batch_size or settings.embeddings_max_batch_size
+    safe_batch_size = max(1, min(int(requested_batch_size), int(settings.embeddings_max_batch_size), 100))
+    upserts: list[dict[str, object]] = []
+    embedding_batches = 0
+    vector_count = 0
+    mutation_ids: list[str] = []
+
+    for batch in _batches(clean_chunks, safe_batch_size):
+        texts = [str(chunk.get("content") or chunk.get("content_preview") or "") for chunk in batch]
+        embedding_result = await embeddings.embed_texts(texts)
+        embedding_batches += 1
+        if not embedding_result.get("ok"):
+            return {"ok": False, "stage": "embedding", "batch": embedding_batches, "embedding_error": embedding_result}
+        vectors = embedding_result.get("vectors") or []
+        vector_payload: list[dict[str, object]] = []
+        for chunk, vector in zip(batch, vectors):
+            chunk_id = str(chunk.get("id"))
+            metadata = {
+                "object_key": object_key,
+                "chunk_id": chunk_id,
+                "chunk_index": chunk.get("chunk_index"),
+                "content_sha256": chunk.get("content_sha256"),
+                "source": "hive_sql_chunk",
+            }
+            vector_payload.append({"id": chunk_id, "values": vector, "metadata": metadata})
+        upsert_result = await vectorize.upsert_vectors(vector_payload)
+        if not upsert_result.get("ok"):
+            return {"ok": False, "stage": "upsert", "batch": embedding_batches, "vectorize_error": upsert_result}
+        raw_result = upsert_result.get("result") if isinstance(upsert_result.get("result"), dict) else {}
+        mutation_id = raw_result.get("mutationId") if isinstance(raw_result, dict) else None
+        if mutation_id:
+            mutation_ids.append(str(mutation_id))
+        vector_count += len(vector_payload)
+        upserts.append({"batch": embedding_batches, "count": len(vector_payload), "mutation_id": mutation_id, "status_code": upsert_result.get("status_code")})
+
+    return {
+        "ok": True,
+        "stage": "complete",
+        "object_key": object_key,
+        "chunk_count": len(clean_chunks),
+        "vector_count": vector_count,
+        "batch_count": embedding_batches,
+        "mutation_ids": mutation_ids,
+        "upserts": upserts,
+        "vectorize": vectorize.safe_config,
+        "embeddings": embeddings.safe_config,
+        "note": "Vectorize upserts are asynchronous; allow a short delay before querying newly upserted vectors.",
+    }
+
+
+async def _vector_search_chunks(
+    *,
+    query: str,
+    object_key: str | None,
+    limit: int,
+    settings: Settings,
+    fallback_sql: bool = True,
+) -> dict[str, object]:
+    embeddings = CloudflareEmbeddingsClient(settings)
+    vectorize = VectorizeClient(settings)
+    vector_diag: dict[str, object] = {
+        "vectorize_enabled": vectorize.enabled,
+        "embeddings_enabled": embeddings.enabled,
+        "index_name": settings.vectorize_index_name,
+    }
+
+    if embeddings.enabled and vectorize.enabled:
+        embedding = await embeddings.embed_texts([query])
+        if embedding.get("ok") and embedding.get("vectors"):
+            query_result = await vectorize.query(
+                embedding["vectors"][0],
+                top_k=max(limit, int(settings.vectorize_top_k)),
+            )
+            vector_diag["query"] = {k: v for k, v in query_result.items() if k not in {"raw", "matches"}}
+            matches = query_result.get("matches") or []
+            ids = [str(match.get("id")) for match in matches if match.get("id")]
+            if ids:
+                sql_result = SqlStore(settings).get_file_chunks_by_ids(
+                    chunk_ids=ids,
+                    object_key=object_key,
+                    include_content=True,
+                )
+                if sql_result.get("ok"):
+                    score_by_id = {str(match.get("id")): match.get("score") for match in matches}
+                    chunks = sql_result.get("chunks", [])
+                    for chunk in chunks:
+                        chunk["vector_score"] = score_by_id.get(str(chunk.get("id")))
+                        chunk["score"] = chunk.get("vector_score")
+                    if chunks:
+                        return {
+                            "ok": True,
+                            "enabled": True,
+                            "retrieval_mode": "vectorize",
+                            "fallback_used": False,
+                            "query": query,
+                            "object_key": object_key,
+                            "candidate_count": len(matches),
+                            "count": len(chunks),
+                            "chunks": chunks[:limit],
+                            "vectorize": vector_diag,
+                        }
+                vector_diag["sql_lookup"] = sql_result
+            else:
+                vector_diag["empty_matches"] = True
+        else:
+            vector_diag["embedding_error"] = embedding
+    else:
+        vector_diag["reason"] = "Vectorize or embeddings disabled/not configured."
+
+    if fallback_sql:
+        fallback = SqlStore(settings).search_file_chunks(query=query, object_key=object_key, limit=limit)
+        if isinstance(fallback, dict):
+            fallback["retrieval_mode"] = "sql_fallback"
+            fallback["fallback_used"] = True
+            fallback["vectorize"] = vector_diag
+        return fallback
+
+    return {
+        "ok": False,
+        "enabled": True,
+        "retrieval_mode": "vectorize",
+        "fallback_used": False,
+        "query": query,
+        "object_key": object_key,
+        "count": 0,
+        "chunks": [],
+        "vectorize": vector_diag,
+        "error": "Vectorize retrieval produced no usable chunks and SQL fallback is disabled.",
+    }
+
+
+def _batches(items: list[dict[str, object]], batch_size: int) -> list[list[dict[str, object]]]:
+    return [items[index:index + batch_size] for index in range(0, len(items), batch_size)]
 
 
 def _time_stage(timings: dict[str, float | None], key: str, func):  # noqa: ANN001, ANN202
