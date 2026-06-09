@@ -81,14 +81,21 @@ def list_files(
 ) -> dict[str, object]:
     """List stored files from R2, or local storage in development/test mode."""
 
+    clean_prefix = _normalise_prefix(prefix)
+    storage = _storage(settings)
     try:
-        objects = _storage(settings).list_objects(prefix=_normalise_prefix(prefix), limit=limit)
+        objects = storage.list_objects(prefix=clean_prefix, limit=limit)
     except RuntimeError as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        return _storage_error_response(
+            operation="list",
+            settings=settings,
+            key_or_prefix=clean_prefix,
+            error=exc,
+        )
     return {
         "ok": True,
-        "storage": "r2" if R2Storage(settings).enabled else "local",
-        "prefix": _normalise_prefix(prefix),
+        "storage": _storage_name(settings),
+        "prefix": clean_prefix,
         "count": len(objects),
         "files": [asdict(item) for item in objects],
     }
@@ -109,14 +116,19 @@ def read_file(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)) from exc
     except RuntimeError as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        return _storage_error_response(
+            operation="read",
+            settings=settings,
+            key_or_prefix=clean_key,
+            error=exc,
+        )
 
     content, had_decode_replacements = _decode_text(obj.content)
     return {
         "ok": True,
         "file": {
             "object_key": obj.key,
-            "storage": "r2" if R2Storage(settings).enabled else "local",
+            "storage": _storage_name(settings),
             "bucket": obj.bucket,
             "size_bytes": obj.size_bytes,
             "content_type": obj.content_type,
@@ -146,7 +158,12 @@ async def chat_with_file(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)) from exc
     except RuntimeError as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        return _storage_error_response(
+            operation="chat_with_file_read",
+            settings=settings,
+            key_or_prefix=clean_key,
+            error=exc,
+        )
 
     content, had_decode_replacements = _decode_text(obj.content)
     max_chars = request.max_file_chars or settings.max_file_chat_chars
@@ -202,7 +219,7 @@ async def chat_with_file(
         "attempts": completion.get("hive_attempts"),
         "source": {
             "object_key": obj.key,
-            "storage": "r2" if R2Storage(settings).enabled else "local",
+            "storage": _storage_name(settings),
             "bucket": obj.bucket,
             "size_bytes": obj.size_bytes,
             "content_type": obj.content_type,
@@ -211,6 +228,52 @@ async def chat_with_file(
             "decode_replacements": had_decode_replacements,
         },
     }
+
+
+@router.get("/files/diagnostics")
+def files_diagnostics(
+    prefix: str = Query("uploads/", min_length=0, max_length=512),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    """Return safe storage diagnostics without exposing secrets."""
+
+    clean_prefix = _normalise_prefix(prefix)
+    r2 = R2Storage(settings)
+    diagnostics: dict[str, object] = {
+        "ok": True,
+        "storage": "r2" if r2.enabled else "local",
+        "r2_configured": r2.enabled,
+        "r2": {
+            "bucket": settings.cf_r2_bucket if r2.enabled else None,
+            "endpoint_url": settings.r2_endpoint_url if r2.enabled else None,
+            "public_base_url_configured": bool(settings.cf_r2_public_base_url),
+            "region": settings.r2_region,
+            "addressing_style": settings.r2_addressing_style,
+            "timeouts": {
+                "connect_seconds": settings.r2_connect_timeout_seconds,
+                "read_seconds": settings.r2_read_timeout_seconds,
+                "max_attempts": settings.r2_max_attempts,
+            },
+        },
+        "prefix": clean_prefix,
+        "list_probe": None,
+    }
+
+    try:
+        objects = _storage(settings).list_objects(prefix=clean_prefix, limit=5)
+        diagnostics["list_probe"] = {
+            "ok": True,
+            "count": len(objects),
+            "files": [asdict(item) for item in objects],
+        }
+    except RuntimeError as exc:
+        diagnostics["ok"] = False
+        diagnostics["list_probe"] = {
+            "ok": False,
+            "error": str(exc),
+            "hint": _storage_error_hint(str(exc)),
+        }
+    return diagnostics
 
 
 def _storage(settings: Settings):
@@ -241,3 +304,48 @@ def _validate_object_key(key: str, *, allow_trailing_slash: bool = False) -> str
 def _decode_text(content: bytes) -> tuple[str, bool]:
     decoded = content.decode("utf-8", errors="replace")
     return decoded, "\ufffd" in decoded
+
+
+def _storage_name(settings: Settings) -> str:
+    return "r2" if R2Storage(settings).enabled else "local"
+
+
+def _storage_error_response(
+    *,
+    operation: str,
+    settings: Settings,
+    key_or_prefix: str,
+    error: RuntimeError,
+) -> dict[str, object]:
+    return {
+        "ok": False,
+        "error": {
+            "operation": operation,
+            "message": str(error),
+            "hint": _storage_error_hint(str(error)),
+        },
+        "storage": _storage_name(settings),
+        "key_or_prefix": key_or_prefix,
+        "r2_configured": R2Storage(settings).enabled,
+        "r2": {
+            "bucket": settings.cf_r2_bucket if R2Storage(settings).enabled else None,
+            "endpoint_url": settings.r2_endpoint_url if R2Storage(settings).enabled else None,
+            "public_base_url_configured": bool(settings.cf_r2_public_base_url),
+            "addressing_style": settings.r2_addressing_style,
+        },
+    }
+
+
+def _storage_error_hint(message: str) -> str:
+    lowered = message.lower()
+    if "accessdenied" in lowered or "forbidden" in lowered or "403" in lowered:
+        return "R2 credentials are valid enough to reach R2, but this operation is not allowed. Check bucket permissions for list/read/write."
+    if "nosuchbucket" in lowered or ("not found" in lowered and "bucket" in lowered):
+        return "R2 bucket was not found. Check R2_BUCKET_UPLOADS/R2_BUCKET and account endpoint."
+    if "nosuchkey" in lowered or "404" in lowered:
+        return "Object key was not found. Use /v1/files/list to copy the exact key."
+    if "timed out" in lowered or "timeout" in lowered:
+        return "R2 operation timed out. Retry, then increase R2_READ_TIMEOUT_SECONDS if needed."
+    if "signature" in lowered or "invalidaccesskeyid" in lowered:
+        return "R2 signature/auth failed. Check R2 access key, secret key, endpoint and region."
+    return "Check the R2 bucket name, endpoint URL, key permissions and exact object key."
