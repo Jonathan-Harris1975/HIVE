@@ -14,12 +14,12 @@ This is **not** a ChatLima/Kanari/OrChat fork. Those projects are reference arch
 - Cloudflare R2 object storage for uploads and extracted artefacts.
 - Safe upload handling for any file type, including ZIPs.
 - Document ingestion for common formats.
-- Cloudflare Vectorize-ready abstraction for semantic search.
+- Cloudflare Vectorize REST integration for optional semantic chunk retrieval.
 - Pluggable metadata store: SQLite for local dev, PostgreSQL/D1 adapter later.
 
 ## Current status
 
-V1 test-ready build with working OpenRouter chat, model routing, empty-reply hardening, R2/local upload storage, JSON/base64 uploads, file listing, file read-back, public URL helper, stored ZIP inspection, and single-file chat. Vectorize and durable metadata persistence remain later layers.
+V1 test-ready build with working OpenRouter chat, model routing, empty-reply hardening, R2/local upload storage, JSON/base64 uploads, file listing, file read-back, public URL helper, stored ZIP inspection, and single-file chat. Durable persistence, SQL chunking, and optional Vectorize semantic retrieval are included as gated layers.
 
 ## Recommended v1 architecture
 
@@ -78,6 +78,9 @@ Recommended Koyeb path: use the `Dockerfile`. See `docs/koyeb-deployment.md`.
 - `GET /v1/db/conversations/{conversation_id}`
 - `GET /v1/db/files`
 - `GET /v1/db/cost-summary`
+- `GET /v1/vectorize/diagnostics`
+- `POST /v1/files/vectorize`
+- `GET /v1/files/vector-search`
 - `POST /v1/db/ecosystem-metadata`
 - `GET /v1/db/ecosystem-metadata`
 
@@ -337,4 +340,55 @@ FILE_CHUNK_MAX_CHARS=4000
 FILE_CHUNK_OVERLAP_CHARS=400
 FILE_CHUNK_MAX_COUNT=500
 FILE_RETRIEVAL_MAX_CHUNKS=6
+```
+
+
+## v1.3 Vectorize foundation
+
+Vectorize is optional and gated. PostgreSQL `hive_file_chunks` remains the source of truth; HIVE uses SQL chunk IDs as Vectorize vector IDs. If Vectorize or embeddings are disabled or fail, chunk-aware chat can fall back to SQL lexical retrieval.
+
+Recommended flow:
+
+```bash
+curl "$HIVE_URL/v1/vectorize/diagnostics" -H "Authorization: Bearer $ADMIN_BEARER_TOKEN"
+
+curl -X POST "$HIVE_URL/v1/files/vectorize" \
+  -H "Authorization: Bearer $ADMIN_BEARER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"object_key":"uploads/example/file.txt","auto_chunk":true}'
+
+curl "$HIVE_URL/v1/files/vector-search?key=uploads/example/file.txt&query=deployment%20failure&limit=6" \
+  -H "Authorization: Bearer $ADMIN_BEARER_TOKEN"
+```
+
+Chunk-aware chat can request semantic retrieval like this:
+
+```json
+{
+  "object_key": "uploads/example/file.txt",
+  "message": "What does this file say about deployment failure?",
+  "use_chunks": true,
+  "use_vectorize": true,
+  "vectorize_fallback_sql": true,
+  "chunk_limit": 6
+}
+```
+
+Env controls:
+
+```env
+VECTORIZE_ENABLED=false
+VECTORIZE_ACCOUNT_ID=3fb60a7136e950a7ec74959b45e4635e
+VECTORIZE_API_TOKEN={{ secret.Vectorize_API_kEY }}
+VECTORIZE_INDEX_NAME=hive-chunks
+VECTORIZE_TIMEOUT_SECONDS=15
+VECTORIZE_MAX_ATTEMPTS=2
+VECTORIZE_TOP_K=8
+VECTORIZE_RETURN_METADATA=all
+EMBEDDINGS_ENABLED=false
+EMBEDDINGS_PROVIDER=cloudflare
+EMBEDDINGS_MODEL=@cf/baai/bge-base-en-v1.5
+EMBEDDINGS_DIMENSIONS=768
+EMBEDDINGS_TIMEOUT_SECONDS=20
+EMBEDDINGS_MAX_BATCH_SIZE=32
 ```
