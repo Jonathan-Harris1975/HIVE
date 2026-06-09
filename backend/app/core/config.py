@@ -81,6 +81,10 @@ class Settings(BaseSettings):
     max_zip_uncompressed_bytes: int = 500 * 1024 * 1024
     max_file_read_bytes: int = 2 * 1024 * 1024
     max_file_chat_chars: int = 24_000
+    file_chunk_max_chars: int = Field(4000, validation_alias=AliasChoices("FILE_CHUNK_MAX_CHARS"))
+    file_chunk_overlap_chars: int = Field(400, validation_alias=AliasChoices("FILE_CHUNK_OVERLAP_CHARS"))
+    file_chunk_max_count: int = Field(500, validation_alias=AliasChoices("FILE_CHUNK_MAX_COUNT"))
+    file_retrieval_max_chunks: int = Field(6, validation_alias=AliasChoices("FILE_RETRIEVAL_MAX_CHUNKS"))
 
     @field_validator("cors_origins", mode="before")
     @classmethod
