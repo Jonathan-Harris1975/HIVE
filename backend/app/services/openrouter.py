@@ -83,10 +83,17 @@ class OpenRouterClient:
         before falling back to the configured free model. If every attempt still
         fails, return a structured failure payload instead of surfacing a naked 502;
         that makes Koyeb/ReqBin diagnostics usable rather than opaque.
+
+        Some reasoning-heavy free models can spend a very small ``max_tokens`` budget
+        on hidden reasoning and return no visible assistant text. HIVE treats that
+        as incomplete rather than a clean success, then tries the configured fallback
+        ladder before returning a clear ``empty_model_reply`` diagnostic.
         """
 
         attempts: list[dict[str, Any]] = []
-        async for candidate_payload in self._payload_attempts(payload, fallback_models):
+        candidate_payloads = [item async for item in self._payload_attempts(payload, fallback_models)]
+
+        for candidate_payload in candidate_payloads:
             model = candidate_payload.get("model")
             response_payload = await self._post_json(candidate_payload)
             if response_payload.get("_retryable_model_error"):
@@ -98,22 +105,41 @@ class OpenRouterClient:
                     }
                 )
                 continue
+
+            if self.settings.openrouter_empty_reply_retry_enabled and self._has_empty_visible_reply(response_payload):
+                attempts.append(
+                    {
+                        "model": model,
+                        "status_code": 204,
+                        "message": "Model returned no visible assistant text.",
+                        "finish_reason": self._first_finish_reason(response_payload),
+                        "empty_reply": True,
+                    }
+                )
+                continue
+
             if attempts:
                 response_payload.setdefault("hive_attempts", attempts + [{"model": model, "ok": True}])
             return response_payload
 
+        empty_reply_seen = any(attempt.get("empty_reply") for attempt in attempts)
+        failure_message = (
+            "OpenRouter returned no visible assistant text for the selected model and configured fallbacks."
+            if empty_reply_seen
+            else "OpenRouter request failed for the selected model and all configured fallback models."
+        )
         return {
             "_all_attempts_failed": True,
-            "model": None,
+            "_empty_model_reply": empty_reply_seen,
+            "hive_error_code": "empty_model_reply" if empty_reply_seen else "openrouter_attempts_failed",
+            "model": attempts[-1].get("model") if attempts else None,
             "provider": None,
             "usage": None,
             "hive_attempts": attempts,
             "choices": [
                 {
-                    "message": {
-                        "content": "OpenRouter request failed for the selected model and all configured fallback models."
-                    },
-                    "finish_reason": "error",
+                    "message": {"content": failure_message},
+                    "finish_reason": "empty_reply" if empty_reply_seen else "error",
                 }
             ],
         }
@@ -171,6 +197,14 @@ class OpenRouterClient:
                         usage=event.get("usage"),
                         raw_final_chunk=event.get("raw_final_chunk"),
                     )
+                    if self.settings.openrouter_empty_reply_retry_enabled and not saw_token:
+                        yield {
+                            "event": "meta",
+                            "type": "empty_reply_retry",
+                            "from_model": state.model_used,
+                            "message": "Model returned no visible assistant text; trying fallback if available.",
+                        }
+                        break
                     yield {
                         "event": "done",
                         "ok": True,
@@ -181,7 +215,37 @@ class OpenRouterClient:
                     return
 
                 yield event
-        yield {"event": "done", "ok": False, "message": "All model attempts failed"}
+        yield {"event": "done", "ok": False, "message": "All model attempts failed or returned no visible assistant text"}
+
+    def _has_empty_visible_reply(self, response_payload: dict[str, Any]) -> bool:
+        choices = response_payload.get("choices") or []
+        if not choices:
+            return True
+        message = (choices[0] or {}).get("message") or {}
+        return not self._visible_text(message.get("content")).strip()
+
+    def _first_finish_reason(self, response_payload: dict[str, Any]) -> str | None:
+        choices = response_payload.get("choices") or []
+        if not choices:
+            return None
+        return (choices[0] or {}).get("finish_reason")
+
+    def _visible_text(self, content: Any) -> str:
+        if content is None:
+            return ""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: list[str] = []
+            for item in content:
+                if isinstance(item, str):
+                    parts.append(item)
+                elif isinstance(item, dict):
+                    text = item.get("text") or item.get("content")
+                    if isinstance(text, str):
+                        parts.append(text)
+            return "".join(parts)
+        return str(content)
 
     async def _payload_attempts(
         self,
