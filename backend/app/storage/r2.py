@@ -60,7 +60,13 @@ class R2Storage:
                 endpoint_url=self.settings.r2_endpoint_url,
                 aws_access_key_id=self.settings.cf_r2_access_key_id,
                 aws_secret_access_key=self.settings.cf_r2_secret_access_key,
-                config=Config(signature_version="s3v4"),
+                config=Config(
+                    signature_version="s3v4",
+                    connect_timeout=self.settings.r2_connect_timeout_seconds,
+                    read_timeout=self.settings.r2_read_timeout_seconds,
+                    retries={"max_attempts": self.settings.r2_max_attempts, "mode": "standard"},
+                    s3={"addressing_style": self.settings.r2_addressing_style},
+                ),
                 region_name=self.settings.r2_region or "auto",
             )
         return self._client
@@ -75,7 +81,9 @@ class R2Storage:
         extra_args = {"ContentType": content_type} if content_type else {}
         try:
             self.client().upload_file(str(path), self.settings.cf_r2_bucket, key, ExtraArgs=extra_args)
-        except (BotoCoreError, ClientError) as exc:
+        except ClientError as exc:
+            raise RuntimeError(f"R2 upload failed for {key}: {_format_client_error(exc)}") from exc
+        except BotoCoreError as exc:
             raise RuntimeError(f"R2 upload failed for {key}: {exc}") from exc
         return StoredObject(
             key=key,
@@ -96,7 +104,9 @@ class R2Storage:
                 Prefix=prefix,
                 MaxKeys=safe_limit,
             )
-        except (BotoCoreError, ClientError) as exc:
+        except ClientError as exc:
+            raise RuntimeError(f"R2 list failed for prefix {prefix!r}: {_format_client_error(exc)}") from exc
+        except BotoCoreError as exc:
             raise RuntimeError(f"R2 list failed for prefix {prefix!r}: {exc}") from exc
 
         objects: list[ObjectSummary] = []
@@ -127,7 +137,9 @@ class R2Storage:
             content = response["Body"].read(max_bytes + 1)
         except ValueError:
             raise
-        except (BotoCoreError, ClientError) as exc:
+        except ClientError as exc:
+            raise RuntimeError(f"R2 read failed for {key}: {_format_client_error(exc)}") from exc
+        except BotoCoreError as exc:
             raise RuntimeError(f"R2 read failed for {key}: {exc}") from exc
 
         if len(content) > max_bytes:
@@ -154,3 +166,17 @@ def sha256_file(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             hasher.update(chunk)
     return hasher.hexdigest()
+
+
+def _format_client_error(exc: ClientError) -> str:
+    error = (exc.response or {}).get("Error", {})
+    code = error.get("Code") or "Unknown"
+    message = error.get("Message") or str(exc)
+    status_code = (exc.response or {}).get("ResponseMetadata", {}).get("HTTPStatusCode")
+    request_id = (exc.response or {}).get("ResponseMetadata", {}).get("RequestId")
+    parts = [f"code={code}", f"message={message}"]
+    if status_code:
+        parts.append(f"http_status={status_code}")
+    if request_id:
+        parts.append(f"request_id={request_id}")
+    return "; ".join(parts)
