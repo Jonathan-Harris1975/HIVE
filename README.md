@@ -294,3 +294,47 @@ List D1 ecosystem metadata records:
 curl -X GET "https://YOUR-KOYEB-APP.koyeb.app/v1/db/ecosystem-metadata?lane=rams&limit=20" \
   -H "Authorization: Bearer YOUR_ADMIN_BEARER_TOKEN"
 ```
+
+
+### Chunk retrieval foundation
+
+After persistence is enabled and `/v1/db/init` has run, HIVE can index stored text-ish files into SQL chunks:
+
+```bash
+curl -X POST "$HIVE_URL/v1/files/chunk" \
+  -H "Authorization: Bearer $ADMIN_BEARER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"object_key":"uploads/example/file.txt"}'
+```
+
+List chunks:
+
+```bash
+curl "$HIVE_URL/v1/files/chunks?key=uploads/example/file.txt&include_content=false" \
+  -H "Authorization: Bearer $ADMIN_BEARER_TOKEN"
+```
+
+Search chunks:
+
+```bash
+curl "$HIVE_URL/v1/files/chunks/search?key=uploads/example/file.txt&query=deployment%20failure&limit=6" \
+  -H "Authorization: Bearer $ADMIN_BEARER_TOKEN"
+```
+
+Ask using persisted chunks rather than the raw file excerpt:
+
+```bash
+curl -X POST "$HIVE_URL/v1/chat/with-file" \
+  -H "Authorization: Bearer $ADMIN_BEARER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"object_key":"uploads/example/file.txt","message":"What does this file say about deployment failure?","use_chunks":true,"chunk_limit":6}'
+```
+
+Relevant env controls:
+
+```env
+FILE_CHUNK_MAX_CHARS=4000
+FILE_CHUNK_OVERLAP_CHARS=400
+FILE_CHUNK_MAX_COUNT=500
+FILE_RETRIEVAL_MAX_CHUNKS=6
+```
