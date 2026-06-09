@@ -72,6 +72,15 @@ Recommended Koyeb path: use the `Dockerfile`. See `docs/koyeb-deployment.md`.
 - `GET /v1/files/zip/inspect?key=uploads/...`
 - `POST /v1/chat/with-file`
   - Supports `dry_run:true` / `skip_model:true` for file-read and prompt-build diagnostics.
+- `GET /v1/db/diagnostics`
+- `POST /v1/db/init`
+- `GET /v1/db/conversations`
+- `GET /v1/db/conversations/{conversation_id}`
+- `GET /v1/db/files`
+- `GET /v1/db/cost-summary`
+- `POST /v1/db/ecosystem-metadata`
+- `GET /v1/db/ecosystem-metadata`
+
 
 
 ### JSON text upload smoke test
@@ -216,3 +225,45 @@ curl -X POST "https://YOUR-KOYEB-APP.koyeb.app/v1/db/init" -H "Authorization: Be
 ```
 
 The core chat/file routes continue to work if the database layer is disabled or temporarily unavailable.
+
+### Persistence retrieval and conversation resume
+
+Once `DATABASE_ENABLED=true` and `/v1/db/init` has run, HIVE automatically records non-streaming `/v1/chat`, `/v1/chat/with-file`, upload metadata and model usage/cost events.
+
+Retrieve recent conversations:
+
+```bash
+curl -X GET "https://YOUR-KOYEB-APP.koyeb.app/v1/db/conversations?limit=20" \
+  -H "Authorization: Bearer YOUR_ADMIN_BEARER_TOKEN"
+```
+
+Read one conversation with messages:
+
+```bash
+curl -X GET "https://YOUR-KOYEB-APP.koyeb.app/v1/db/conversations/CONVERSATION_ID?limit=100" \
+  -H "Authorization: Bearer YOUR_ADMIN_BEARER_TOKEN"
+```
+
+Resume context in `/v1/chat` by sending the previous `conversation_id`. HIVE will hydrate recent user/assistant turns from SQL before adding the new message:
+
+```bash
+curl -X POST "https://YOUR-KOYEB-APP.koyeb.app/v1/chat" \
+  -H "Authorization: Bearer YOUR_ADMIN_BEARER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{"conversation_id":"CONVERSATION_ID","message":"Continue from the previous answer in one sentence.","mode":"general","db_history_limit":20}"
+```
+
+Inspect persisted file metadata and model costs:
+
+```bash
+curl -X GET "https://YOUR-KOYEB-APP.koyeb.app/v1/db/files?limit=20" -H "Authorization: Bearer YOUR_ADMIN_BEARER_TOKEN"
+
+curl -X GET "https://YOUR-KOYEB-APP.koyeb.app/v1/db/cost-summary" -H "Authorization: Bearer YOUR_ADMIN_BEARER_TOKEN"
+```
+
+List D1 ecosystem metadata records:
+
+```bash
+curl -X GET "https://YOUR-KOYEB-APP.koyeb.app/v1/db/ecosystem-metadata?lane=rams&limit=20" \
+  -H "Authorization: Bearer YOUR_ADMIN_BEARER_TOKEN"
+```
