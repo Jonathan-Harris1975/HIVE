@@ -20,11 +20,12 @@ def _now() -> str:
 class SqlStore:
     """Optional SQL persistence layer for HIVE.
 
-    V1 keeps this deliberately small and dependency-light:
-    - SQLite for local/dev smoke tests.
-    - Koyeb/PostgreSQL when DATABASE_* env vars are supplied.
-
-    Chat/file endpoints continue to work when this layer is disabled or unavailable.
+    Production rules:
+    - Works with SQLite for local/dev smoke tests.
+    - Works with Koyeb/PostgreSQL for production persistence.
+    - Uses true UPSERTs instead of insert-then-update exception flow.
+    - Rolls back every failed transaction before closing.
+    - Returns structured diagnostics; chat/file routes keep working if DB writes fail.
     """
 
     def __init__(self, settings: Settings) -> None:
@@ -52,6 +53,8 @@ class SqlStore:
             "password_configured": bool(self.settings.database_password),
             "database_name": self.settings.database_name or None,
             "url_configured": bool(self.settings.database_url),
+            "sslmode": self.settings.database_sslmode or None,
+            "connect_timeout_seconds": self.settings.database_connect_timeout_seconds,
         }
 
     def init_schema(self) -> dict[str, object]:
@@ -60,11 +63,9 @@ class SqlStore:
 
         statements = self._schema_statements()
         try:
-            with self._connect() as conn:
-                cur = conn.cursor()
+            with self._transaction() as cur:
                 for statement in statements:
                     cur.execute(statement)
-                conn.commit()
             return {"ok": True, "enabled": True, "dialect": self.dialect, "tables": self.table_names()}
         except Exception as exc:  # pragma: no cover - exact driver exceptions vary by provider
             return {"ok": False, "enabled": True, "dialect": self.dialect, "error": str(exc)}
@@ -85,13 +86,37 @@ class SqlStore:
             payload["probe"] = {"ok": False, "error": str(exc)}
         return payload
 
+    def ping_write(self) -> dict[str, object]:
+        """Verify that the SQL write path can commit and roll back cleanly.
+
+        This creates and deletes a tiny probe conversation in one transaction. It is
+        safe to run repeatedly and should be the first check after a DB error.
+        """
+
+        if not self.enabled:
+            return {"ok": False, "enabled": False}
+
+        probe_id = f"probe-{uuid.uuid4()}"
+        now = _now()
+        p = self._param()
+        try:
+            with self._transaction() as cur:
+                cur.execute(
+                    f"INSERT INTO hive_conversations (id, mode, model, title, created_at, updated_at) VALUES ({p}, {p}, {p}, {p}, {p}, {p})",
+                    (probe_id, "diagnostic", "probe", "SQL write probe", now, now),
+                )
+                cur.execute(f"DELETE FROM hive_conversations WHERE id={p}", (probe_id,))
+            return {"ok": True, "enabled": True, "dialect": self.dialect, "probe_id": probe_id}
+        except Exception as exc:  # pragma: no cover
+            return {"ok": False, "enabled": True, "dialect": self.dialect, "probe_id": probe_id, "error": str(exc)}
+
     def record_chat(
         self,
         *,
         conversation_id: str | None,
         mode: str,
         user_message: str,
-        assistant_reply: str,
+        assistant_reply: str | None,
         model_used: str | None,
         provider: str | None,
         usage: dict[str, Any] | None,
@@ -104,17 +129,18 @@ class SqlStore:
         total_tokens = _int_or_none((usage or {}).get("total_tokens"))
         cost = _float_or_none((usage or {}).get("cost"))
         created = _now()
-        metadata_json = json.dumps(metadata or {}, ensure_ascii=False)
+        metadata_json = json.dumps(metadata or {}, ensure_ascii=False, default=str)
+        safe_reply = assistant_reply or ""
+
         try:
-            with self._connect() as conn:
-                cur = conn.cursor()
+            with self._transaction() as cur:
                 self._upsert_conversation(cur, conv_id, mode, model_used, created)
-                self._insert_message(cur, conv_id, "user", user_message, None, None, None, None, metadata_json, created)
+                self._insert_message(cur, conv_id, "user", user_message or "", None, None, None, None, metadata_json, created)
                 self._insert_message(
                     cur,
                     conv_id,
                     "assistant",
-                    assistant_reply,
+                    safe_reply,
                     model_used,
                     provider,
                     total_tokens,
@@ -124,7 +150,6 @@ class SqlStore:
                 )
                 if usage:
                     self._insert_cost_event(cur, conv_id, model_used, provider, usage, created)
-                conn.commit()
             return {"ok": True, "conversation_id": conv_id}
         except Exception as exc:  # pragma: no cover
             return {"ok": False, "conversation_id": conv_id, "error": str(exc)}
@@ -141,34 +166,32 @@ class SqlStore:
         now = _now()
         metadata_json = json.dumps(data, ensure_ascii=False, default=str)
         try:
-            with self._connect() as conn:
-                cur = conn.cursor()
+            with self._transaction() as cur:
                 self._upsert_file(cur, data, metadata_json, now)
-                conn.commit()
             return {"ok": True, "object_key": object_key}
         except Exception as exc:  # pragma: no cover
             return {"ok": False, "object_key": object_key, "error": str(exc)}
 
-
     def table_counts(self) -> dict[str, object]:
-        """Return safe row counts for operational tables."""
+        """Return safe row counts for operational tables.
+
+        Each table count uses a separate connection so one missing table does not
+        poison the rest of the diagnostic check on PostgreSQL.
+        """
 
         if not self.enabled:
             return {"ok": False, "enabled": False}
         counts: dict[str, int | str] = {}
-        try:
-            with self._connect() as conn:
-                cur = conn.cursor()
-                for table in self.table_names():
-                    try:
-                        cur.execute(f"SELECT COUNT(*) FROM {table}")
-                        row = cur.fetchone()
-                        counts[table] = int(row[0]) if row else 0
-                    except Exception as exc:  # table may not exist before /db/init
-                        counts[table] = f"unavailable: {exc}"
-            return {"ok": True, "enabled": True, "counts": counts}
-        except Exception as exc:  # pragma: no cover
-            return {"ok": False, "enabled": True, "error": str(exc)}
+        for table in self.table_names():
+            try:
+                with self._connect() as conn:
+                    cur = conn.cursor()
+                    cur.execute(f"SELECT COUNT(*) FROM {table}")
+                    row = cur.fetchone()
+                    counts[table] = int(row[0]) if row else 0
+            except Exception as exc:  # table may not exist before /db/init
+                counts[table] = f"unavailable: {exc}"
+        return {"ok": True, "enabled": True, "counts": counts}
 
     def list_conversations(self, *, limit: int = 50) -> dict[str, object]:
         if not self.enabled:
@@ -396,8 +419,11 @@ class SqlStore:
             CREATE INDEX IF NOT EXISTS idx_hive_cost_events_created
             ON hive_cost_events (created_at)
             """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_hive_cost_events_conversation
+            ON hive_cost_events (conversation_id)
+            """,
         ]
-
 
     def _fetch_dicts(self, cur: Any) -> list[dict[str, Any]]:
         columns = [item[0] for item in cur.description or []]
@@ -407,10 +433,17 @@ class SqlStore:
     def _connect(self) -> Iterator[Any]:
         if self.dialect == "sqlite":
             path = self._sqlite_path()
-            path.parent.mkdir(parents=True, exist_ok=True)
-            conn = sqlite3.connect(path)
+            if str(path) != ":memory:":
+                path.parent.mkdir(parents=True, exist_ok=True)
+            conn = sqlite3.connect(":memory:" if str(path) == ":memory:" else path)
             try:
                 yield conn
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                raise
             finally:
                 conn.close()
             return
@@ -421,19 +454,42 @@ class SqlStore:
             except ImportError as exc:  # pragma: no cover
                 raise RuntimeError("psycopg[binary] is required for PostgreSQL support") from exc
             conn = psycopg.connect(self.url, connect_timeout=self.settings.database_connect_timeout_seconds)
+            statement_timeout = int(max(0, self.settings.database_statement_timeout_seconds) * 1000)
+            if statement_timeout:
+                with conn.cursor() as cur:
+                    cur.execute("SET statement_timeout = %s", (statement_timeout,))
             try:
                 yield conn
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                raise
             finally:
                 conn.close()
             return
 
         raise RuntimeError(f"Unsupported SQL database URL: {self.url!r}")
 
+    @contextmanager
+    def _transaction(self) -> Iterator[Any]:
+        with self._connect() as conn:
+            cur = conn.cursor()
+            try:
+                yield cur
+            except Exception:
+                conn.rollback()
+                raise
+            else:
+                conn.commit()
+
     def _sqlite_path(self) -> Path:
         value = self.url
         for prefix in ("sqlite+aiosqlite:///", "sqlite:///"):
             if value.startswith(prefix):
-                return Path(value.removeprefix(prefix))
+                stripped = value.removeprefix(prefix)
+                return Path(":memory:") if stripped == ":memory:" else Path(stripped)
         if value in {"sqlite://", "sqlite:///:memory:", ":memory:"}:
             return Path(":memory:")
         return Path(value)
@@ -446,16 +502,17 @@ class SqlStore:
 
     def _upsert_conversation(self, cur: Any, conv_id: str, mode: str, model: str | None, now: str) -> None:
         p = self._param()
-        try:
-            cur.execute(
-                f"INSERT INTO hive_conversations (id, mode, model, created_at, updated_at) VALUES ({p}, {p}, {p}, {p}, {p})",
-                (conv_id, mode, model, now, now),
-            )
-        except Exception:
-            cur.execute(
-                f"UPDATE hive_conversations SET mode={p}, model={p}, updated_at={p} WHERE id={p}",
-                (mode, model, now, conv_id),
-            )
+        cur.execute(
+            f"""
+            INSERT INTO hive_conversations (id, mode, model, created_at, updated_at)
+            VALUES ({p}, {p}, {p}, {p}, {p})
+            ON CONFLICT(id) DO UPDATE SET
+              mode=excluded.mode,
+              model=excluded.model,
+              updated_at=excluded.updated_at
+            """,
+            (conv_id, mode, model, now, now),
+        )
 
     def _insert_message(
         self,
@@ -477,7 +534,7 @@ class SqlStore:
             (id, conversation_id, role, content, model, provider, token_total, cost_usd, metadata_json, created_at)
             VALUES ({p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p})
             """,
-            (str(uuid.uuid4()), conv_id, role, content, model, provider, total_tokens, cost, metadata_json, created),
+            (str(uuid.uuid4()), conv_id, role, content or "", model, provider, total_tokens, cost, metadata_json, created),
         )
 
     def _upsert_file(self, cur: Any, data: dict[str, Any], metadata_json: str, now: str) -> None:
@@ -497,35 +554,24 @@ class SqlStore:
             now,
             now,
         )
-        try:
-            cur.execute(
-                f"""
-                INSERT INTO hive_files
-                (id, object_key, filename, storage, bucket, public_url, size_bytes, content_type, sha256, metadata_json, created_at, updated_at)
-                VALUES ({p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p})
-                """,
-                values,
-            )
-        except Exception:
-            cur.execute(
-                f"""
-                UPDATE hive_files
-                SET filename={p}, storage={p}, bucket={p}, public_url={p}, size_bytes={p}, content_type={p}, sha256={p}, metadata_json={p}, updated_at={p}
-                WHERE object_key={p}
-                """,
-                (
-                    values[2],
-                    values[3],
-                    values[4],
-                    values[5],
-                    values[6],
-                    values[7],
-                    values[8],
-                    values[9],
-                    now,
-                    object_key,
-                ),
-            )
+        cur.execute(
+            f"""
+            INSERT INTO hive_files
+            (id, object_key, filename, storage, bucket, public_url, size_bytes, content_type, sha256, metadata_json, created_at, updated_at)
+            VALUES ({p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p})
+            ON CONFLICT(object_key) DO UPDATE SET
+              filename=excluded.filename,
+              storage=excluded.storage,
+              bucket=excluded.bucket,
+              public_url=excluded.public_url,
+              size_bytes=excluded.size_bytes,
+              content_type=excluded.content_type,
+              sha256=excluded.sha256,
+              metadata_json=excluded.metadata_json,
+              updated_at=excluded.updated_at
+            """,
+            values,
+        )
 
     def _insert_cost_event(
         self,
@@ -573,7 +619,6 @@ class DatabaseUrlBuilder:
         if settings.is_dev:
             return "sqlite:///./local-data/hive.sqlite3"
         return ""
-
 
 
 def _json_or_none(value: Any) -> Any:
