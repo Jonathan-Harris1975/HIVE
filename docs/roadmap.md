@@ -113,4 +113,13 @@ Next persistence step: add embeddings/Vectorize on top of the now-stable chunk r
 - [x] `/v1/files/chunks/search` for SQL-backed lexical retrieval.
 - [x] `/v1/chat/with-file` chunk mode via `use_chunks:true`.
 - [x] Optional `auto_chunk:true` bridge for smoke tests/small files.
-- [ ] Cloudflare Vectorize embeddings/upsert/query using the stable chunk table.
+- [x] Cloudflare Vectorize diagnostics, embeddings/upsert/query, SQL fallback and chunk-aware chat integration.
+
+
+## v1.3 Vectorize foundation
+
+- [x] `/v1/vectorize/diagnostics` for safe config/probe checks.
+- [x] `/v1/files/vectorize` to embed SQL chunks and upsert to Vectorize.
+- [x] `/v1/files/vector-search` with SQL fallback.
+- [x] `/v1/chat/with-file` semantic retrieval via `use_vectorize:true`.
+- [x] Vectorize IDs are SQL chunk IDs, keeping PostgreSQL as source of truth.

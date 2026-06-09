@@ -212,3 +212,28 @@ FILE_RETRIEVAL_MAX_CHUNKS=6
 ```
 
 Run `/v1/db/init` after deploying this version so Koyeb PostgreSQL creates the `hive_file_chunks` table.
+
+
+## Optional Vectorize v1.3 env controls
+
+Keep these disabled until the Vectorize index exists and `/v1/vectorize/diagnostics` passes. The token should have Cloudflare Vectorize read/write permissions.
+
+```env
+VECTORIZE_ENABLED=false
+VECTORIZE_ACCOUNT_ID=3fb60a7136e950a7ec74959b45e4635e
+VECTORIZE_API_TOKEN={{ secret.Vectorize_API_kEY }}
+VECTORIZE_INDEX_NAME=hive-chunks
+VECTORIZE_TIMEOUT_SECONDS=15
+VECTORIZE_MAX_ATTEMPTS=2
+VECTORIZE_TOP_K=8
+VECTORIZE_RETURN_METADATA=all
+
+EMBEDDINGS_ENABLED=false
+EMBEDDINGS_PROVIDER=cloudflare
+EMBEDDINGS_MODEL=@cf/baai/bge-base-en-v1.5
+EMBEDDINGS_DIMENSIONS=768
+EMBEDDINGS_TIMEOUT_SECONDS=20
+EMBEDDINGS_MAX_BATCH_SIZE=32
+```
+
+After confirming diagnostics, switch `VECTORIZE_ENABLED=true` and `EMBEDDINGS_ENABLED=true`, then run `/v1/files/vectorize` for already chunked files.
