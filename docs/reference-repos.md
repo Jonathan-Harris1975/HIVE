@@ -37,3 +37,8 @@ Study:
 ## Rule
 
 Borrow ideas, not code baggage.
+
+
+## v1.4 note
+
+HIVE has now moved beyond reference-study mode into its own operational architecture: FastAPI on Koyeb, R2 for file bodies, PostgreSQL for durable operational state, D1 for ecosystem metadata, and Vectorize/Workers AI for optional semantic retrieval. Reference repos remain inspiration only.

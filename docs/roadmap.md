@@ -123,3 +123,16 @@ Next persistence step: add embeddings/Vectorize on top of the now-stable chunk r
 - [x] `/v1/files/vector-search` with SQL fallback.
 - [x] `/v1/chat/with-file` semantic retrieval via `use_vectorize:true`.
 - [x] Vectorize IDs are SQL chunk IDs, keeping PostgreSQL as source of truth.
+
+
+## v1.4 Operational polish
+
+- [x] Add `retrieval_source`, `vector_hits`, `sql_fallback_hits` and `fallback_used` metadata.
+- [x] Add dry-run-first smoke-test cleanup endpoint.
+- [x] Patch `/health` with exact build and structured storage flags.
+- [x] Add `/healthz` for future MAST keep-awake checks.
+- [x] Add Vectorize index stats to diagnostics.
+- [x] Add larger ZIP/document ingestion tests.
+- [x] Add token-rotation guidance to docs.
+
+Next: add MAST-side scheduling, dashboards and optional cleanup automation once the HIVE API surface remains stable for a few days.

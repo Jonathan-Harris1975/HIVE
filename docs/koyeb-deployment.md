@@ -237,3 +237,19 @@ EMBEDDINGS_MAX_BATCH_SIZE=32
 ```
 
 After confirming diagnostics, switch `VECTORIZE_ENABLED=true` and `EMBEDDINGS_ENABLED=true`, then run `/v1/files/vectorize` for already chunked files.
+
+
+## v1.4 deployment checks
+
+After deploying v1.4, verify:
+
+```bash
+curl https://YOUR-KOYEB-APP.koyeb.app/health
+curl https://YOUR-KOYEB-APP.koyeb.app/healthz
+```
+
+`/health` should show `build: v1.4-operational-polish` and clean flags for R2, SQL, D1, Vectorize and embeddings. `/healthz` is deliberately small and unauthenticated for later MAST keep-awake use.
+
+Use `POST /v1/db/test-cleanup` with `dry_run:true` before deleting smoke-test records.
+
+If a token is pasted into a browser, chat, log, or screenshot, rotate it in Cloudflare/OpenRouter, update the Koyeb secret, then redeploy.

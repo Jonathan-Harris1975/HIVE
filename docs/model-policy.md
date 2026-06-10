@@ -122,3 +122,10 @@ CHAT_WITH_FILE_MODEL_TIMEOUT_SECONDS=30
 ```
 
 The endpoint returns `stage`, `timings`, and `error_code:"chat_with_file_timeout"` instead of a hanging request when model calls exceed the guard.
+
+
+## v1.4 retrieval policy
+
+For file answers, HIVE should prefer chunked retrieval over raw prompt stuffing. Vectorize is allowed to improve semantic matching, but SQL chunks remain the source of truth. If Vectorize or embeddings fail, HIVE should fall back to SQL chunk search rather than blocking file chat.
+
+Responses should expose retrieval metadata so operators can tell whether an answer used Vectorize or SQL fallback.

@@ -170,3 +170,21 @@ Current v1.2 flow:
 5. Use `/v1/chat/with-file` with `use_chunks:true` to answer from selected chunks instead of injecting the full file excerpt.
 
 Vectorize remains optional and disabled until the chunk table has proved stable in production. When enabled later, Vectorize should index these chunk IDs rather than inventing a parallel storage contract.
+
+
+## v1.4 operational view
+
+HIVE now has a durable retrieval spine:
+
+```text
+R2 raw files
+  -> PostgreSQL file metadata
+  -> PostgreSQL chunks as source of truth
+  -> Workers AI embeddings
+  -> Vectorize semantic lookup keyed by SQL chunk IDs
+  -> SQL lexical fallback if Vectorize is unavailable
+```
+
+File-chat responses surface `retrieval_source`, `vector_hits`, `sql_fallback_hits` and `fallback_used` so operators can see whether an answer came from Vectorize or SQL fallback.
+
+`/health` reports clean storage flags. `/healthz` is a minimal unauthenticated keep-awake point for future MAST monitoring.

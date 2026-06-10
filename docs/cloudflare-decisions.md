@@ -73,3 +73,19 @@ Add a metadata smoke record:
 ```bash
 curl -X POST "https://YOUR-KOYEB-APP.koyeb.app/v1/db/ecosystem-metadata" -H "Authorization: Bearer YOUR_ADMIN_BEARER_TOKEN" -H "Content-Type: application/json" -d "{\"lane\":\"rams\",\"source_type\":\"audit_run\",\"title\":\"D1 smoke test\",\"metadata\":{\"ok\":true}}"
 ```
+
+
+## v1.4 Cloudflare operational notes
+
+Vectorize is used through the REST API from Koyeb. A Worker binding is not required for HIVE because the FastAPI service calls Vectorize directly.
+
+The `hive-chunks` index should match the embedding dimensions used by Workers AI. For `@cf/baai/bge-base-en-v1.5`, use 768 dimensions and cosine distance.
+
+Recommended split remains:
+
+- R2: raw file bodies and uploaded ZIP/document objects.
+- D1: ecosystem metadata indexes.
+- Vectorize: semantic lookup only, with SQL chunk IDs as vector IDs.
+- PostgreSQL: durable source of truth for conversations, files, chunks and cost events.
+
+Rotate Cloudflare API tokens after accidental exposure. Update the Koyeb secret, redeploy, and verify `/v1/vectorize/diagnostics`.
