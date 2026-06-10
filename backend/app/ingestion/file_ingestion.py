@@ -9,7 +9,7 @@ from pathlib import Path
 from fastapi import UploadFile
 
 from app.core.config import Settings
-from app.ingestion.text_extractors import chunk_text, extract_text
+from app.ingestion.text_extractors import chunk_text, extract_text_with_metadata
 from app.ingestion.zip_ingestion import inspect_zip
 from app.storage.local_blob import LocalBlobStorage
 from app.storage.r2 import R2Storage, sha256_file
@@ -30,6 +30,7 @@ class IngestionResult:
     zip_member_count: int = 0
     zip_members_preview: list[dict] | None = None
     supported_for_text: bool = False
+    extraction: dict | None = None
 
 
 def _store_path(
@@ -158,12 +159,26 @@ def _ingest_path(
 
     stored, storage_name = _store_path(temp_path, object_key, content_type, settings)
 
+    extraction_meta: dict | None = None
     if suffix == ".zip":
         extracted = ""
+        extraction_meta = {"supported": False, "extractor": "zip_inspect_only", "note": "Use /v1/files/zip/extract-text to extract bounded text from archives."}
     elif known_text is not None:
-        extracted = known_text
+        extracted = known_text[: settings.document_extract_max_chars]
+        extraction_meta = {"supported": True, "extractor": "known_text", "char_count": len(extracted), "truncated": len(known_text) > len(extracted)}
     else:
-        extracted = extract_text(temp_path, content_type)
+        extraction = extract_text_with_metadata(
+            temp_path,
+            content_type,
+            max_chars=settings.document_extract_max_chars,
+            pdf_max_pages=settings.document_extract_pdf_max_pages,
+            csv_max_rows=settings.document_extract_csv_max_rows,
+            xlsx_max_rows_per_sheet=settings.document_extract_xlsx_max_rows_per_sheet,
+            xlsx_max_sheets=settings.document_extract_xlsx_max_sheets,
+            docx_max_table_rows=settings.document_extract_docx_max_table_rows,
+        )
+        extracted = extraction.text
+        extraction_meta = extraction.as_dict()
     chunks = list(chunk_text(extracted)) if extracted else []
 
     return IngestionResult(
@@ -180,4 +195,5 @@ def _ingest_path(
         zip_member_count=len(zip_members),
         zip_members_preview=[asdict(member) for member in zip_members[:100]] if zip_members else None,
         supported_for_text=bool(extracted),
+        extraction=extraction_meta,
     )
