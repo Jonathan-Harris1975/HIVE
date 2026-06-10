@@ -108,15 +108,28 @@ class Settings(BaseSettings):
     def cf_embedding_model(self) -> str:
         return self.embeddings_model
 
-    max_upload_bytes: int = 100 * 1024 * 1024
-    max_zip_files: int = 5000
-    max_zip_uncompressed_bytes: int = 500 * 1024 * 1024
-    max_file_read_bytes: int = 2 * 1024 * 1024
-    max_file_chat_chars: int = 24_000
+    hive_free_tier_mode: bool = Field(True, validation_alias=AliasChoices("HIVE_FREE_TIER_MODE", "KOYEB_FREE_TIER_MODE"))
+    max_upload_bytes: int = Field(100 * 1024 * 1024, validation_alias=AliasChoices("MAX_UPLOAD_BYTES"))
+    max_zip_files: int = Field(5000, validation_alias=AliasChoices("MAX_ZIP_FILES"))
+    max_zip_uncompressed_bytes: int = Field(500 * 1024 * 1024, validation_alias=AliasChoices("MAX_ZIP_UNCOMPRESSED_BYTES"))
+    max_file_read_bytes: int = Field(2 * 1024 * 1024, validation_alias=AliasChoices("MAX_FILE_READ_BYTES"))
+    max_file_chat_chars: int = Field(24_000, validation_alias=AliasChoices("MAX_FILE_CHAT_CHARS"))
     file_chunk_max_chars: int = Field(4000, validation_alias=AliasChoices("FILE_CHUNK_MAX_CHARS"))
     file_chunk_overlap_chars: int = Field(400, validation_alias=AliasChoices("FILE_CHUNK_OVERLAP_CHARS"))
     file_chunk_max_count: int = Field(500, validation_alias=AliasChoices("FILE_CHUNK_MAX_COUNT"))
     file_retrieval_max_chunks: int = Field(6, validation_alias=AliasChoices("FILE_RETRIEVAL_MAX_CHUNKS"))
+
+    document_extract_max_chars: int = Field(120_000, validation_alias=AliasChoices("DOCUMENT_EXTRACT_MAX_CHARS"))
+    document_extract_pdf_max_pages: int = Field(40, validation_alias=AliasChoices("DOCUMENT_EXTRACT_PDF_MAX_PAGES"))
+    document_extract_csv_max_rows: int = Field(2000, validation_alias=AliasChoices("DOCUMENT_EXTRACT_CSV_MAX_ROWS"))
+    document_extract_xlsx_max_rows_per_sheet: int = Field(500, validation_alias=AliasChoices("DOCUMENT_EXTRACT_XLSX_MAX_ROWS_PER_SHEET"))
+    document_extract_xlsx_max_sheets: int = Field(12, validation_alias=AliasChoices("DOCUMENT_EXTRACT_XLSX_MAX_SHEETS"))
+    document_extract_docx_max_table_rows: int = Field(2000, validation_alias=AliasChoices("DOCUMENT_EXTRACT_DOCX_MAX_TABLE_ROWS"))
+    zip_extract_max_members: int = Field(80, validation_alias=AliasChoices("ZIP_EXTRACT_MAX_MEMBERS"))
+    zip_extract_max_member_bytes: int = Field(2 * 1024 * 1024, validation_alias=AliasChoices("ZIP_EXTRACT_MAX_MEMBER_BYTES"))
+    zip_extract_max_total_text_chars: int = Field(120_000, validation_alias=AliasChoices("ZIP_EXTRACT_MAX_TOTAL_TEXT_CHARS"))
+    zip_extract_max_depth: int = Field(2, validation_alias=AliasChoices("ZIP_EXTRACT_MAX_DEPTH"))
+    zip_extract_supported_suffixes: str = Field(".txt,.md,.log,.json,.csv,.html,.htm,.pdf,.docx,.xlsx", validation_alias=AliasChoices("ZIP_EXTRACT_SUPPORTED_SUFFIXES"))
 
     @field_validator("cors_origins", mode="before")
     @classmethod
@@ -154,6 +167,11 @@ class Settings(BaseSettings):
         if not self.cf_r2_account_id:
             return ""
         return f"https://{self.cf_r2_account_id}.r2.cloudflarestorage.com"
+
+
+    @property
+    def zip_extract_supported_suffix_set(self) -> set[str]:
+        return {item.strip().lower() for item in self.zip_extract_supported_suffixes.split(",") if item.strip()}
 
 
 @lru_cache
