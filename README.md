@@ -19,7 +19,7 @@ This is **not** a ChatLima/Kanari/OrChat fork. Those projects are reference arch
 
 ## Current status
 
-**Build stage:** `v1.4-operational-polish`.
+**Build stage:** `v1.5-ingestion-expansion-free-tier`.
 
 HIVE now has working OpenRouter chat/model routing, R2/local upload storage, JSON/base64 uploads, stored ZIP inspection, SQL persistence, SQL chunk retrieval, Cloudflare D1 metadata, Cloudflare Workers AI embeddings, and Cloudflare Vectorize semantic retrieval. v1.4 adds clearer retrieval metadata, Vectorize index diagnostics, safe smoke-test cleanup, token-rotation guidance, larger ingestion tests, and a minimal `/healthz` endpoint for future MAST keep-awake checks.
 
@@ -411,3 +411,28 @@ This build keeps PostgreSQL chunks as the source of truth and uses Vectorize as 
 `/health` now reports structured storage flags for R2, SQL, D1, Vectorize and embeddings. `/healthz` is intentionally tiny so MAST can later call it to keep the Koyeb service awake without touching admin APIs.
 
 Token hygiene: rotate Cloudflare/OpenRouter/admin tokens after any accidental paste into chat or logs, then update the matching Koyeb secret and redeploy.
+
+## v1.5 ingestion expansion for Koyeb free tier
+
+Build stage `v1.5-ingestion-expansion-free-tier` adds bounded archive/document ingestion without turning HIVE into a heavy always-on worker. This matters because the current deployment is on a free Koyeb web service.
+
+New/expanded capabilities:
+
+- `/v1/files/zip/extract-text` extracts bounded text from ZIP archives, including nested ZIPs up to `ZIP_EXTRACT_MAX_DEPTH`.
+- DOCX, XLSX, PDF, CSV, JSON and HTML extraction now reports structured metadata and truncation status.
+- `/v1/files/chunk` and `chat/with-file` use document extractors for binary office/PDF files instead of treating them as raw UTF-8.
+- Free-tier limits are visible from `/health` under `free_tier.ingestion_limits`.
+- MAST can use `/healthz` as a tiny keep-awake target.
+
+Recommended free-tier defaults:
+
+```env
+HIVE_FREE_TIER_MODE=true
+DOCUMENT_EXTRACT_MAX_CHARS=120000
+ZIP_EXTRACT_MAX_MEMBERS=80
+ZIP_EXTRACT_MAX_MEMBER_BYTES=2097152
+ZIP_EXTRACT_MAX_TOTAL_TEXT_CHARS=120000
+ZIP_EXTRACT_MAX_DEPTH=2
+```
+
+The intended real workflow is now: upload an audit/report ZIP to R2, extract a bounded text artefact, chunk it into PostgreSQL, optionally Vectorize those chunks, and ask HIVE questions over the extracted package.
