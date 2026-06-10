@@ -33,6 +33,7 @@ class ChatRequest(BaseModel):
     conversation_id: str | None = None
     use_persisted_history: bool = True
     db_history_limit: int = Field(20, ge=0, le=100)
+    test_run_id: str | None = Field(None, max_length=120)
 
 
 def build_payload(request: ChatRequest, settings: Settings) -> tuple[dict[str, object], list[str]]:
@@ -108,6 +109,7 @@ async def chat(
             "ok": ok,
             "finish_reason": finish_reason,
             "empty_reply": empty_reply,
+            "test_run_id": request.test_run_id,
         },
     )
     return {

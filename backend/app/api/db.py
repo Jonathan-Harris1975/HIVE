@@ -24,6 +24,12 @@ class EcosystemMetadataRequest(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class TestCleanupRequest(BaseModel):
+    test_run_id: str | None = Field(None, min_length=1, max_length=120)
+    object_key_prefix: str | None = Field(None, min_length=1, max_length=2048)
+    dry_run: bool = True
+
+
 @router.get("/db/diagnostics")
 def database_diagnostics(settings: Settings = Depends(get_settings)) -> dict[str, object]:
     """Return safe SQL/D1 diagnostics without exposing secrets."""
@@ -91,6 +97,23 @@ def database_ping_write(settings: Settings = Depends(get_settings)) -> dict[str,
         "sql": sql_result,
         "d1": d1_result,
     }
+
+
+@router.post("/db/test-cleanup")
+def cleanup_test_records(
+    payload: TestCleanupRequest,
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    """Clean smoke-test SQL records by test_run_id and/or object-key prefix.
+
+    Defaults to dry-run. Set dry_run=false only after reviewing matched counts.
+    """
+
+    return SqlStore(settings).cleanup_test_records(
+        test_run_id=payload.test_run_id,
+        object_key_prefix=payload.object_key_prefix,
+        dry_run=payload.dry_run,
+    )
 
 
 @router.get("/db/conversations")

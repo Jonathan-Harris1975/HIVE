@@ -36,12 +36,14 @@ class TextUploadRequest(BaseModel):
     filename: str = Field("hive-r2-smoke.txt", min_length=1, max_length=255)
     content: str = Field(..., min_length=0)
     content_type: str | None = "text/plain; charset=utf-8"
+    test_run_id: str | None = Field(None, max_length=120)
 
 
 class Base64UploadRequest(BaseModel):
     filename: str = Field(..., min_length=1, max_length=255)
     content_base64: str = Field(..., min_length=1)
     content_type: str | None = None
+    test_run_id: str | None = Field(None, max_length=120)
 
 
 class FileChunkRequest(BaseModel):
@@ -50,6 +52,7 @@ class FileChunkRequest(BaseModel):
     overlap_chars: int | None = Field(None, ge=0, le=12000)
     max_chunks: int | None = Field(None, ge=1, le=5000)
     replace_existing: bool = True
+    test_run_id: str | None = Field(None, max_length=120)
 
 
 class FileVectorizeRequest(BaseModel):
@@ -58,6 +61,7 @@ class FileVectorizeRequest(BaseModel):
     replace_existing_chunks: bool = False
     chunk_limit: int | None = Field(None, ge=1, le=5000)
     batch_size: int | None = Field(None, ge=1, le=100)
+    test_run_id: str | None = Field(None, max_length=120)
 
 
 class ChatTurn(BaseModel):
@@ -95,6 +99,7 @@ class ChatWithFileRequest(BaseModel):
     chunk_query: str | None = Field(None, max_length=2000, description="Optional retrieval query; defaults to the user message.")
     chunk_limit: int | None = Field(None, ge=1, le=30)
     auto_chunk: bool = Field(False, description="If use_chunks is true and no chunks exist, read the file and create chunks first.")
+    test_run_id: str | None = Field(None, max_length=120)
 
 
 @router.post("/files/upload")
@@ -126,7 +131,7 @@ async def upload_text(
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)) from exc
-    db_record = SqlStore(settings).record_file(result)
+    db_record = SqlStore(settings).record_file(result, extra_metadata={"test_run_id": payload.test_run_id} if payload.test_run_id else None)
     return {"ok": True, "file": result.__dict__, "db_recorded": bool(db_record.get("ok")), "db_error": db_record.get("error")}
 
 
@@ -156,7 +161,7 @@ async def upload_base64(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)) from exc
-    db_record = SqlStore(settings).record_file(result)
+    db_record = SqlStore(settings).record_file(result, extra_metadata={"test_run_id": payload.test_run_id} if payload.test_run_id else None)
     return {"ok": True, "file": result.__dict__, "db_recorded": bool(db_record.get("ok")), "db_error": db_record.get("error")}
 
 
@@ -334,6 +339,8 @@ def chunk_file(
     )
     chunk_dicts = chunks_to_dicts(chunks)
     source = _source_metadata(obj, settings, truncated=False, decode_replacements=had_decode_replacements)
+    if payload.test_run_id:
+        source["test_run_id"] = payload.test_run_id
     db_record = SqlStore(settings).record_file_chunks(
         object_key=clean_key,
         chunks=chunk_dicts,
@@ -433,6 +440,7 @@ async def vectorize_file_chunks(
         object_key=clean_key,
         settings=settings,
         batch_size=payload.batch_size,
+        test_run_id=payload.test_run_id,
     )
 
 
@@ -583,6 +591,7 @@ async def chat_with_file(
         excerpt = _chunks_to_excerpt(chunks)
         obj = _object_stub_from_chunks(clean_key, settings)
         source = _chunk_source_metadata(clean_key, settings, retrieval, chunks)
+        retrieval_metadata = _retrieval_metadata(retrieval, chunks)
         truncated = False
         had_decode_replacements = False
     else:
@@ -614,6 +623,7 @@ async def chat_with_file(
         excerpt = content[:max_chars]
         truncated = len(content) > len(excerpt)
         source = _source_metadata(obj, settings, truncated=truncated, decode_replacements=had_decode_replacements)
+        retrieval_metadata = None
 
     stage = "prompt_build"
     prompt_context = _time_stage(
@@ -646,6 +656,7 @@ async def chat_with_file(
             "prompt_message_count": len(payload.get("messages", [])),
             "file_excerpt_chars": len(excerpt),
             "source": source,
+            "retrieval_metadata": retrieval_metadata,
             "source_citation": {
                 "label": source_label,
                 "object_key": obj.key,
@@ -676,6 +687,7 @@ async def chat_with_file(
             source_label=source_label,
             obj=obj,
             timings=_finalise_timings(timings, total_started),
+            retrieval_metadata=retrieval_metadata,
         )
     except Exception as exc:  # defensive: never let this endpoint become a vague 502
         timings["model_call_seconds"] = round(time.perf_counter() - model_started, 3)
@@ -690,6 +702,7 @@ async def chat_with_file(
             source_label=source_label,
             obj=obj,
             timings=_finalise_timings(timings, total_started),
+            retrieval_metadata=retrieval_metadata,
         )
     timings["model_call_seconds"] = round(time.perf_counter() - model_started, 3)
 
@@ -719,7 +732,9 @@ async def chat_with_file(
             "finish_reason": finish_reason,
             "empty_reply": empty_reply,
             "source": source,
+            "retrieval_metadata": retrieval_metadata,
             "timings": timings,
+            "test_run_id": request.test_run_id,
         },
     )
     timings["db_record_seconds"] = round(time.perf_counter() - db_started, 3)
@@ -741,6 +756,7 @@ async def chat_with_file(
         "db_recorded": bool(db_record.get("ok")),
         "db_error": db_record.get("error"),
         "source": source,
+        "retrieval_metadata": retrieval_metadata,
         "source_citation": {
             "label": source_label,
             "object_key": obj.key,
@@ -801,6 +817,7 @@ async def _vectorize_chunks(
     object_key: str,
     settings: Settings,
     batch_size: int | None = None,
+    test_run_id: str | None = None,
 ) -> dict[str, object]:
     embeddings = CloudflareEmbeddingsClient(settings)
     vectorize = VectorizeClient(settings)
@@ -837,6 +854,8 @@ async def _vectorize_chunks(
                 "content_sha256": chunk.get("content_sha256"),
                 "source": "hive_sql_chunk",
             }
+            if test_run_id:
+                metadata["test_run_id"] = test_run_id
             vector_payload.append({"id": chunk_id, "values": vector, "metadata": metadata})
         upsert_result = await vectorize.upsert_vectors(vector_payload)
         if not upsert_result.get("ok"):
@@ -906,7 +925,10 @@ async def _vector_search_chunks(
                             "ok": True,
                             "enabled": True,
                             "retrieval_mode": "vectorize",
+                            "retrieval_source": "vectorize",
                             "fallback_used": False,
+                            "vector_hits": len(chunks),
+                            "sql_fallback_hits": 0,
                             "query": query,
                             "object_key": object_key,
                             "candidate_count": len(matches),
@@ -926,7 +948,10 @@ async def _vector_search_chunks(
         fallback = SqlStore(settings).search_file_chunks(query=query, object_key=object_key, limit=limit)
         if isinstance(fallback, dict):
             fallback["retrieval_mode"] = "sql_fallback"
+            fallback["retrieval_source"] = "sql_fallback"
             fallback["fallback_used"] = True
+            fallback["vector_hits"] = 0
+            fallback["sql_fallback_hits"] = len(fallback.get("chunks") or [])
             fallback["vectorize"] = vector_diag
         return fallback
 
@@ -934,7 +959,10 @@ async def _vector_search_chunks(
         "ok": False,
         "enabled": True,
         "retrieval_mode": "vectorize",
+        "retrieval_source": "vectorize",
         "fallback_used": False,
+        "vector_hits": 0,
+        "sql_fallback_hits": 0,
         "query": query,
         "object_key": object_key,
         "count": 0,
@@ -1068,6 +1096,27 @@ def _object_stub_from_chunks(clean_key: str, settings: Settings) -> SimpleNamesp
     )
 
 
+def _retrieval_metadata(retrieval: dict[str, object] | None, chunks: list[dict[str, object]]) -> dict[str, object]:
+    if not isinstance(retrieval, dict):
+        return {
+            "retrieval_source": "raw_file",
+            "retrieval_mode": "raw_file",
+            "vector_hits": 0,
+            "sql_fallback_hits": 0,
+            "chunks_used": len(chunks),
+        }
+    source = retrieval.get("retrieval_source") or retrieval.get("retrieval_mode") or "sql"
+    return {
+        "retrieval_source": source,
+        "retrieval_mode": retrieval.get("retrieval_mode") or source,
+        "fallback_used": bool(retrieval.get("fallback_used")),
+        "vector_hits": int(retrieval.get("vector_hits") or 0),
+        "sql_fallback_hits": int(retrieval.get("sql_fallback_hits") or 0),
+        "candidate_count": retrieval.get("candidate_count"),
+        "chunks_used": len(chunks),
+    }
+
+
 def _chunk_source_metadata(
     clean_key: str,
     settings: Settings,
@@ -1089,6 +1138,9 @@ def _chunk_source_metadata(
         "chunk_indexes": [chunk.get("chunk_index") for chunk in chunks],
         "retrieval_query": retrieval.get("query"),
         "retrieval_candidate_count": retrieval.get("candidate_count"),
+        "retrieval_source": retrieval.get("retrieval_source") or retrieval.get("retrieval_mode"),
+        "vector_hits": retrieval.get("vector_hits", 0),
+        "sql_fallback_hits": retrieval.get("sql_fallback_hits", 0),
     }
 
 
@@ -1104,6 +1156,7 @@ def _chat_with_file_model_error_response(
     source_label: str,
     obj,
     timings: dict[str, float | None],
+    retrieval_metadata: dict[str, object] | None = None,
 ) -> dict[str, object]:
     return {
         "ok": False,
@@ -1121,6 +1174,7 @@ def _chat_with_file_model_error_response(
         "attempts": None,
         "timings": timings,
         "source": source,
+        "retrieval_metadata": retrieval_metadata,
         "source_citation": {
             "label": source_label,
             "object_key": obj.key,
