@@ -18,7 +18,8 @@ from app.core.config import Settings, get_settings
 from app.core.security import require_admin
 from app.ingestion.chunking import chunks_to_dicts, split_text_into_chunks
 from app.ingestion.file_ingestion import ingest_bytes_content, ingest_text_content, ingest_upload
-from app.ingestion.zip_ingestion import UnsafeZipError, inspect_zip
+from app.ingestion.text_extractors import extract_text_with_metadata
+from app.ingestion.zip_ingestion import UnsafeZipError, extract_text_from_zip, inspect_zip
 from app.services.brand_modes import build_system_prompt
 from app.services.context_manager import ContextWindow
 from app.services.model_router import Mode, ModelRouter
@@ -61,6 +62,19 @@ class FileVectorizeRequest(BaseModel):
     replace_existing_chunks: bool = False
     chunk_limit: int | None = Field(None, ge=1, le=5000)
     batch_size: int | None = Field(None, ge=1, le=100)
+    test_run_id: str | None = Field(None, max_length=120)
+
+
+class ZipExtractTextRequest(BaseModel):
+    object_key: str = Field(..., min_length=1, max_length=2048)
+    recursive: bool = True
+    chunk: bool = True
+    vectorize: bool = False
+    replace_existing_chunks: bool = True
+    max_members: int | None = Field(None, ge=1, le=1000)
+    max_member_bytes: int | None = Field(None, ge=1024, le=25 * 1024 * 1024)
+    max_total_text_chars: int | None = Field(None, ge=1000, le=1_000_000)
+    max_depth: int | None = Field(None, ge=0, le=5)
     test_run_id: str | None = Field(None, max_length=120)
 
 
@@ -305,6 +319,134 @@ def inspect_stored_zip(
     }
 
 
+@router.post("/files/zip/extract-text")
+async def extract_text_from_stored_zip(
+    payload: ZipExtractTextRequest,
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    """Extract bounded text from a stored ZIP, optionally chunking/vectorizing it.
+
+    This is the v1.5 free-tier friendly archive workflow. It never extracts the
+    entire archive into permanent storage; only a bounded combined text artefact
+    is stored so HIVE can chunk/search/ask questions over audit/report ZIPs.
+    """
+
+    clean_key = _validate_object_key(payload.object_key)
+    try:
+        obj = _storage(settings).read_object(clean_key, max_bytes=settings.max_upload_bytes)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        return _storage_error_response(
+            operation="zip_extract_read",
+            settings=settings,
+            key_or_prefix=clean_key,
+            error=exc,
+        )
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as tmp:
+        temp_path = Path(tmp.name)
+        tmp.write(obj.content)
+
+    try:
+        report = extract_text_from_zip(
+            temp_path,
+            max_files=settings.max_zip_files,
+            max_uncompressed_bytes=settings.max_zip_uncompressed_bytes,
+            max_members=payload.max_members or settings.zip_extract_max_members,
+            max_member_bytes=payload.max_member_bytes or settings.zip_extract_max_member_bytes,
+            max_total_text_chars=payload.max_total_text_chars or settings.zip_extract_max_total_text_chars,
+            max_depth=payload.max_depth if payload.max_depth is not None else settings.zip_extract_max_depth,
+            supported_suffixes=settings.zip_extract_supported_suffix_set,
+        )
+    except zipfile.BadZipFile as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Stored object is not a valid ZIP archive") from exc
+    except UnsafeZipError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    extracted_text = str(report.get("text") or "")
+    if not extracted_text.strip():
+        return {
+            "ok": False,
+            "stage": "extract_text",
+            "error_code": "no_extractable_text",
+            "source": _source_metadata(obj, settings, truncated=False, decode_replacements=False),
+            "extraction": {k: v for k, v in report.items() if k != "text"},
+        }
+
+    source_name = Path(clean_key).stem or "archive"
+    text_result = ingest_text_content(
+        filename=f"{source_name}-extracted.txt",
+        content=extracted_text,
+        content_type="text/plain; charset=utf-8",
+        settings=settings,
+    )
+    metadata = {
+        "test_run_id": payload.test_run_id,
+        "source_archive_object_key": clean_key,
+        "extraction_summary": report.get("summary"),
+        "extraction_limits": report.get("limits"),
+        "free_tier_mode": settings.hive_free_tier_mode,
+    }
+    metadata = {key: value for key, value in metadata.items() if value is not None}
+    db_file = SqlStore(settings).record_file(text_result, extra_metadata=metadata)
+
+    chunk_result: dict[str, object] | None = None
+    vectorize_result: dict[str, object] | None = None
+    if payload.chunk:
+        chunks = split_text_into_chunks(
+            extracted_text,
+            max_chars=settings.file_chunk_max_chars,
+            overlap_chars=settings.file_chunk_overlap_chars,
+            max_chunks=settings.file_chunk_max_count,
+        )
+        chunk_dicts = chunks_to_dicts(chunks)
+        chunk_source = {
+            **metadata,
+            "object_key": text_result.object_key,
+            "source_archive_object_key": clean_key,
+            "extracted_text_chars": len(extracted_text),
+            "zip_extracted_items": (report.get("summary") or {}).get("extracted_count"),
+        }
+        chunk_result = SqlStore(settings).record_file_chunks(
+            object_key=text_result.object_key,
+            chunks=chunk_dicts,
+            source_metadata=chunk_source,
+            replace_existing=payload.replace_existing_chunks,
+        )
+        if payload.vectorize and chunk_result.get("ok"):
+            stored_chunks = SqlStore(settings).list_file_chunks(
+                object_key=text_result.object_key,
+                limit=settings.file_chunk_max_count,
+                include_content=True,
+            )
+            vectorize_result = await _vectorize_chunks(
+                chunks=stored_chunks.get("chunks", []) if isinstance(stored_chunks, dict) else [],
+                object_key=text_result.object_key,
+                settings=settings,
+                test_run_id=payload.test_run_id,
+            )
+
+    return {
+        "ok": True,
+        "stage": "complete",
+        "source_archive": _source_metadata(obj, settings, truncated=False, decode_replacements=False),
+        "extracted_file": text_result.__dict__,
+        "extraction": {k: v for k, v in report.items() if k != "text"},
+        "extracted_text_preview": extracted_text[:1200],
+        "db_recorded": bool(db_file.get("ok")),
+        "db_error": db_file.get("error"),
+        "chunking": chunk_result,
+        "vectorize": vectorize_result,
+        "free_tier": {
+            "enabled": settings.hive_free_tier_mode,
+            "note": "Archive extraction is bounded for Koyeb free web-service safety.",
+        },
+    }
+
+
 @router.post("/files/chunk")
 def chunk_file(
     payload: FileChunkRequest,
@@ -327,7 +469,9 @@ def chunk_file(
             error=exc,
         )
 
-    content, had_decode_replacements = _decode_text(obj.content)
+    extracted = _extract_object_text(obj, settings, max_chars=settings.document_extract_max_chars)
+    content = extracted["content"]
+    had_decode_replacements = bool(extracted.get("decode_replacements"))
     max_chars = payload.max_chars or settings.file_chunk_max_chars
     overlap_chars = payload.overlap_chars if payload.overlap_chars is not None else settings.file_chunk_overlap_chars
     max_chunks = payload.max_chunks or settings.file_chunk_max_count
@@ -338,7 +482,8 @@ def chunk_file(
         max_chunks=max_chunks,
     )
     chunk_dicts = chunks_to_dicts(chunks)
-    source = _source_metadata(obj, settings, truncated=False, decode_replacements=had_decode_replacements)
+    source = _source_metadata(obj, settings, truncated=bool(extracted.get("truncated")), decode_replacements=had_decode_replacements)
+    source["extraction"] = extracted.get("extraction")
     if payload.test_run_id:
         source["test_run_id"] = payload.test_run_id
     db_record = SqlStore(settings).record_file_chunks(
@@ -618,11 +763,14 @@ async def chat_with_file(
             return response
 
         stage = "decode_file"
-        content, had_decode_replacements = _time_stage(timings, "decode_seconds", lambda: _decode_text(obj.content))
+        extracted = _time_stage(timings, "decode_seconds", lambda: _extract_object_text(obj, settings, max_chars=settings.document_extract_max_chars))
+        content = str(extracted.get("content") or "")
+        had_decode_replacements = bool(extracted.get("decode_replacements"))
         max_chars = request.max_file_chars or settings.max_file_chat_chars
         excerpt = content[:max_chars]
-        truncated = len(content) > len(excerpt)
+        truncated = len(content) > len(excerpt) or bool(extracted.get("truncated"))
         source = _source_metadata(obj, settings, truncated=truncated, decode_replacements=had_decode_replacements)
+        source["extraction"] = extracted.get("extraction")
         retrieval_metadata = None
 
     stage = "prompt_build"
@@ -1048,14 +1196,17 @@ def _build_file_chat_payload(
 
 def _chunk_file_for_chat(*, clean_key: str, settings: Settings) -> dict[str, object]:
     obj = _storage(settings).read_object(clean_key, max_bytes=settings.max_file_read_bytes)
-    content, had_decode_replacements = _decode_text(obj.content)
+    extracted = _extract_object_text(obj, settings, max_chars=settings.document_extract_max_chars)
+    content = str(extracted.get("content") or "")
+    had_decode_replacements = bool(extracted.get("decode_replacements"))
     chunks = split_text_into_chunks(
         content,
         max_chars=settings.file_chunk_max_chars,
         overlap_chars=settings.file_chunk_overlap_chars,
         max_chunks=settings.file_chunk_max_count,
     )
-    source = _source_metadata(obj, settings, truncated=False, decode_replacements=had_decode_replacements)
+    source = _source_metadata(obj, settings, truncated=bool(extracted.get("truncated")), decode_replacements=had_decode_replacements)
+    source["extraction"] = extracted.get("extraction")
     db_record = SqlStore(settings).record_file_chunks(
         object_key=clean_key,
         chunks=chunks_to_dicts(chunks),
@@ -1235,6 +1386,43 @@ def _decode_base64_upload(content_base64: str, content_type: str | None) -> tupl
         if ";base64" in header and not detected_content_type:
             detected_content_type = header.removeprefix("data:").split(";", 1)[0] or None
     return detected_content_type, base64.b64decode(raw, validate=True)
+
+
+def _extract_object_text(obj, settings: Settings, *, max_chars: int | None = None) -> dict[str, object]:
+    suffix = Path(obj.key).suffix.lower()
+    if suffix in {".pdf", ".docx", ".xlsx", ".csv", ".json", ".html", ".htm"}:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix or ".bin") as tmp:
+            temp_path = Path(tmp.name)
+            tmp.write(obj.content)
+        extracted = extract_text_with_metadata(
+            temp_path,
+            obj.content_type,
+            max_chars=max_chars or settings.document_extract_max_chars,
+            pdf_max_pages=settings.document_extract_pdf_max_pages,
+            csv_max_rows=settings.document_extract_csv_max_rows,
+            xlsx_max_rows_per_sheet=settings.document_extract_xlsx_max_rows_per_sheet,
+            xlsx_max_sheets=settings.document_extract_xlsx_max_sheets,
+            docx_max_table_rows=settings.document_extract_docx_max_table_rows,
+        )
+        if extracted.supported and extracted.text:
+            return {
+                "content": extracted.text,
+                "decode_replacements": False,
+                "truncated": extracted.truncated,
+                "extraction": extracted.as_dict(),
+            }
+    content, had_decode_replacements = _decode_text(obj.content)
+    if max_chars and len(content) > max_chars:
+        content = content[:max_chars]
+        truncated = True
+    else:
+        truncated = False
+    return {
+        "content": content,
+        "decode_replacements": had_decode_replacements,
+        "truncated": truncated,
+        "extraction": {"supported": suffix not in {".zip"}, "extractor": "utf8_decode", "suffix": suffix, "char_count": len(content), "truncated": truncated},
+    }
 
 
 def _decode_text(content: bytes) -> tuple[str, bool]:

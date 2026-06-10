@@ -51,6 +51,17 @@ async def health() -> dict[str, object]:
         "build": BUILD_STAGE,
         "app": settings.app_name,
         "env": settings.app_env,
+        "free_tier": {
+            "enabled": settings.hive_free_tier_mode,
+            "platform": "koyeb-free-web-service" if settings.hive_free_tier_mode else None,
+            "ingestion_limits": {
+                "document_extract_max_chars": settings.document_extract_max_chars,
+                "zip_extract_max_members": settings.zip_extract_max_members,
+                "zip_extract_max_member_bytes": settings.zip_extract_max_member_bytes,
+                "zip_extract_max_total_text_chars": settings.zip_extract_max_total_text_chars,
+                "zip_extract_max_depth": settings.zip_extract_max_depth,
+            },
+        },
         "storage_flags": storage_flags,
         "r2_configured": r2.enabled,
         "openrouter_configured": bool(settings.openrouter_api_key),
@@ -73,4 +84,5 @@ async def mast_keepawake_health() -> dict[str, object]:
         "ok": True,
         "app": settings.app_name,
         "build": BUILD_STAGE,
+        "free_tier": settings.hive_free_tier_mode,
     }
