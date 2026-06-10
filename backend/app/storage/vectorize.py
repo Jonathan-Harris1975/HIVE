@@ -49,12 +49,18 @@ class VectorizeClient:
         }
 
     async def diagnostics(self) -> dict[str, object]:
-        payload: dict[str, object] = {"ok": self.enabled, **self.safe_config, "info_probe": None}
+        payload: dict[str, object] = {
+            "ok": self.enabled,
+            **self.safe_config,
+            "info_probe": None,
+            "index_stats": None,
+        }
         if not self.enabled:
             payload["reason"] = "Vectorize disabled or not fully configured."
             return payload
         payload["info_probe"] = await self.info()
         payload["ok"] = bool(isinstance(payload["info_probe"], dict) and payload["info_probe"].get("ok"))
+        payload["index_stats"] = _extract_index_stats(payload.get("info_probe"))
         return payload
 
     async def info(self) -> dict[str, object]:
@@ -139,6 +145,55 @@ class VectorizeClient:
                 last = {"ok": False, "enabled": True, "attempt": attempt, "error": str(exc), "type": type(exc).__name__}
         return last or {"ok": False, "enabled": True, "error": "Vectorize request failed."}
 
+
+
+def _extract_index_stats(info_probe: Any) -> dict[str, Any]:
+    """Return stable, safe index stats from Cloudflare's evolving info shape."""
+
+    stats: dict[str, Any] = {
+        "dimensions": None,
+        "metric": None,
+        "vector_count": None,
+        "processed_up_to_mutation": None,
+    }
+    if not isinstance(info_probe, dict):
+        return stats
+    raw = info_probe.get("raw")
+    result = info_probe.get("result")
+    if isinstance(raw, dict) and result is None:
+        result = raw.get("result")
+    candidates: list[Any] = []
+    if isinstance(result, dict):
+        candidates.append(result)
+        config = result.get("config")
+        if isinstance(config, dict):
+            candidates.append(config)
+        dimensions = result.get("dimensions")
+        metric = result.get("metric")
+        count = result.get("vector_count") or result.get("vectorCount") or result.get("count")
+        mutation = result.get("processedUpToMutation") or result.get("processed_up_to_mutation")
+        if dimensions is not None:
+            stats["dimensions"] = dimensions
+        if metric is not None:
+            stats["metric"] = metric
+        if count is not None:
+            stats["vector_count"] = count
+        if mutation is not None:
+            stats["processed_up_to_mutation"] = mutation
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        for source_key, target_key in (
+            ("dimensions", "dimensions"),
+            ("dimension", "dimensions"),
+            ("metric", "metric"),
+            ("vector_count", "vector_count"),
+            ("vectorCount", "vector_count"),
+            ("count", "vector_count"),
+        ):
+            if stats.get(target_key) is None and candidate.get(source_key) is not None:
+                stats[target_key] = candidate.get(source_key)
+    return stats
 
 def _safe_json(response: httpx.Response) -> Any:
     try:

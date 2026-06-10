@@ -156,7 +156,7 @@ class SqlStore:
         except Exception as exc:  # pragma: no cover
             return {"ok": False, "conversation_id": conv_id, "error": str(exc)}
 
-    def record_file(self, file_result: Any) -> dict[str, object]:
+    def record_file(self, file_result: Any, extra_metadata: dict[str, Any] | None = None) -> dict[str, object]:
         if not self.enabled:
             return {"ok": False, "enabled": False}
 
@@ -165,6 +165,9 @@ class SqlStore:
         if not object_key:
             return {"ok": False, "error": "file result has no object_key"}
 
+        if extra_metadata:
+            data = dict(data)
+            data.update(extra_metadata)
         now = _now()
         metadata_json = json.dumps(data, ensure_ascii=False, default=str)
         try:
@@ -294,6 +297,11 @@ class SqlStore:
                 "query": query,
                 "object_key": object_key,
                 "terms": terms,
+                "retrieval_source": "sql",
+                "retrieval_mode": "sql",
+                "fallback_used": False,
+                "vector_hits": 0,
+                "sql_fallback_hits": len(selected),
                 "candidate_count": len(rows),
                 "count": len(selected),
                 "chunks": selected,
@@ -522,6 +530,96 @@ class SqlStore:
             return {"ok": True, "enabled": True, "totals": totals, "by_model": by_model}
         except Exception as exc:  # pragma: no cover
             return {"ok": False, "enabled": True, "error": str(exc)}
+
+    def cleanup_test_records(
+        self,
+        *,
+        test_run_id: str | None = None,
+        object_key_prefix: str | None = None,
+        dry_run: bool = True,
+    ) -> dict[str, object]:
+        """Delete smoke-test records by explicit test_run_id and/or object-key prefix.
+
+        The default is dry-run so this endpoint can be used safely from MAST or
+        ad-hoc test scripts before any destructive cleanup is allowed.
+        """
+
+        if not self.enabled:
+            return {"ok": False, "enabled": False}
+        if not test_run_id and not object_key_prefix:
+            return {
+                "ok": False,
+                "enabled": True,
+                "error": "test_run_id or object_key_prefix is required",
+                "dry_run": dry_run,
+            }
+
+        p = self._param()
+        metadata_like = f"%{test_run_id}%" if test_run_id else None
+        prefix_like = f"{object_key_prefix}%" if object_key_prefix else None
+
+        try:
+            with self._transaction() as cur:
+                conversation_ids: list[str] = []
+                object_keys: list[str] = []
+
+                if metadata_like:
+                    cur.execute(
+                        f"SELECT DISTINCT conversation_id FROM hive_messages WHERE metadata_json LIKE {p}",
+                        (metadata_like,),
+                    )
+                    conversation_ids = [str(row[0]) for row in cur.fetchall() if row and row[0]]
+
+                    cur.execute(
+                        f"SELECT DISTINCT object_key FROM hive_files WHERE metadata_json LIKE {p}",
+                        (metadata_like,),
+                    )
+                    object_keys.extend(str(row[0]) for row in cur.fetchall() if row and row[0])
+
+                    cur.execute(
+                        f"SELECT DISTINCT object_key FROM hive_file_chunks WHERE metadata_json LIKE {p}",
+                        (metadata_like,),
+                    )
+                    object_keys.extend(str(row[0]) for row in cur.fetchall() if row and row[0])
+
+                if prefix_like:
+                    cur.execute(f"SELECT DISTINCT object_key FROM hive_files WHERE object_key LIKE {p}", (prefix_like,))
+                    object_keys.extend(str(row[0]) for row in cur.fetchall() if row and row[0])
+                    cur.execute(f"SELECT DISTINCT object_key FROM hive_file_chunks WHERE object_key LIKE {p}", (prefix_like,))
+                    object_keys.extend(str(row[0]) for row in cur.fetchall() if row and row[0])
+
+                conversation_ids = sorted(set(conversation_ids))
+                object_keys = sorted(set(object_keys))
+
+                counts = {
+                    "conversation_ids": len(conversation_ids),
+                    "object_keys": len(object_keys),
+                    "messages": self._count_in(cur, "hive_messages", "conversation_id", conversation_ids),
+                    "cost_events": self._count_in(cur, "hive_cost_events", "conversation_id", conversation_ids),
+                    "conversations": self._count_in(cur, "hive_conversations", "id", conversation_ids),
+                    "file_chunks": self._count_in(cur, "hive_file_chunks", "object_key", object_keys),
+                    "files": self._count_in(cur, "hive_files", "object_key", object_keys),
+                }
+
+                if not dry_run:
+                    self._delete_in(cur, "hive_cost_events", "conversation_id", conversation_ids)
+                    self._delete_in(cur, "hive_messages", "conversation_id", conversation_ids)
+                    self._delete_in(cur, "hive_conversations", "id", conversation_ids)
+                    self._delete_in(cur, "hive_file_chunks", "object_key", object_keys)
+                    self._delete_in(cur, "hive_files", "object_key", object_keys)
+
+            return {
+                "ok": True,
+                "enabled": True,
+                "dry_run": dry_run,
+                "test_run_id": test_run_id,
+                "object_key_prefix": object_key_prefix,
+                "matched": counts,
+                "deleted": {} if dry_run else counts,
+            }
+        except Exception as exc:  # pragma: no cover
+            return {"ok": False, "enabled": True, "dry_run": dry_run, "error": str(exc)}
+
 
     def table_names(self) -> list[str]:
         return ["hive_conversations", "hive_messages", "hive_files", "hive_file_chunks", "hive_cost_events"]
@@ -872,6 +970,23 @@ class SqlStore:
                 created,
             ),
         )
+
+
+    def _count_in(self, cur: Any, table: str, column: str, values: list[str]) -> int:
+        if not values:
+            return 0
+        p = self._param()
+        placeholders = ", ".join([p for _ in values])
+        cur.execute(f"SELECT COUNT(*) FROM {table} WHERE {column} IN ({placeholders})", tuple(values))
+        row = cur.fetchone()
+        return int(row[0]) if row else 0
+
+    def _delete_in(self, cur: Any, table: str, column: str, values: list[str]) -> None:
+        if not values:
+            return
+        p = self._param()
+        placeholders = ", ".join([p for _ in values])
+        cur.execute(f"DELETE FROM {table} WHERE {column} IN ({placeholders})", tuple(values))
 
 
 class DatabaseUrlBuilder:
