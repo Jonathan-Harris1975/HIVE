@@ -341,3 +341,61 @@ def test_sql_store_records_lists_and_searches_file_chunks(tmp_path: Path) -> Non
     assert "badger" in found["chunks"][0]["content"].lower()
     counts = store.table_counts()
     assert counts["counts"]["hive_file_chunks"] == result["chunk_count"]
+
+
+def test_sql_store_cleanup_test_records_dry_run_and_delete(tmp_path: Path) -> None:
+    db_path = tmp_path / "hive.sqlite3"
+    settings = Settings(
+        APP_ENV="test",
+        DATABASE_ENABLED=True,
+        DATABASE_URL=f"sqlite:///{db_path}",
+    )
+    store = SqlStore(settings)
+    assert store.init_schema()["ok"] is True
+
+    assert store.record_chat(
+        conversation_id="cleanup-conv",
+        mode="general",
+        user_message="cleanup user",
+        assistant_reply="cleanup reply",
+        model_used="test/model",
+        provider="test",
+        usage={"total_tokens": 4, "cost": 0},
+        metadata={"test_run_id": "run-clean"},
+    )["ok"] is True
+    assert store.record_file(
+        {
+            "object_key": "uploads/run-clean/file.txt",
+            "original_name": "file.txt",
+            "storage": "r2",
+            "bucket": "hive",
+            "size_bytes": 4,
+            "content_type": "text/plain",
+        },
+        extra_metadata={"test_run_id": "run-clean"},
+    )["ok"] is True
+    assert store.record_file_chunks(
+        object_key="uploads/run-clean/file.txt",
+        chunks=[{
+            "chunk_index": 0,
+            "content": "cleanup chunk",
+            "char_start": 0,
+            "char_end": 13,
+            "token_estimate": 3,
+            "content_sha256": "sha-clean",
+        }],
+        source_metadata={"test_run_id": "run-clean"},
+    )["ok"] is True
+
+    dry = store.cleanup_test_records(test_run_id="run-clean", dry_run=True)
+    assert dry["ok"] is True
+    assert dry["dry_run"] is True
+    assert dry["matched"]["conversations"] == 1
+    assert dry["matched"]["files"] == 1
+
+    deleted = store.cleanup_test_records(test_run_id="run-clean", dry_run=False)
+    assert deleted["ok"] is True
+    assert deleted["deleted"]["conversations"] == 1
+    assert store.list_conversations(limit=10)["count"] == 0
+    assert store.list_files(limit=10)["count"] == 0
+    assert store.list_file_chunks(object_key="uploads/run-clean/file.txt")["count"] == 0

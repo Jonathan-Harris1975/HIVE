@@ -62,7 +62,7 @@ def test_vectorize_diagnostics_endpoint_is_safe_when_disabled(monkeypatch, tmp_p
     assert response.status_code == 200
     body = response.json()
     assert body["ok"] is True
-    assert body["build"] == "v1.3.1-vectorize-upsert-fix"
+    assert body["build"] == "v1.4-operational-polish"
     assert body["sql_chunks_source_of_truth"] is True
     assert body["vectorize"]["enabled"] is False
 
@@ -104,7 +104,10 @@ async def test_vector_search_falls_back_to_sql_chunks_when_vectorize_disabled(tm
 
     assert search["ok"] is True
     assert search["retrieval_mode"] == "sql_fallback"
+    assert search["retrieval_source"] == "sql_fallback"
     assert search["fallback_used"] is True
+    assert search["vector_hits"] == 0
+    assert search["sql_fallback_hits"] == 1
     assert search["count"] == 1
     assert "Deployment failure" in search["chunks"][0]["content"]
 
