@@ -136,3 +136,16 @@ Next persistence step: add embeddings/Vectorize on top of the now-stable chunk r
 - [x] Add token-rotation guidance to docs.
 
 Next: add MAST-side scheduling, dashboards and optional cleanup automation once the HIVE API surface remains stable for a few days.
+
+## v1.5 Ingestion expansion
+
+Completed:
+
+- Bounded document extraction for DOCX/XLSX/PDF/CSV/JSON/HTML.
+- Bounded recursive ZIP text extraction via `/v1/files/zip/extract-text`.
+- Derived text artefact storage for archive packages.
+- Optional immediate SQL chunking for extracted ZIP text.
+- Free-tier ingestion limits surfaced in `/health`.
+- MAST keep-awake support through `/healthz`.
+
+Next logical phase: real-world audit/report ZIP testing, then targeted UI/ops-console affordances for selecting extracted artefacts and asking questions over them.

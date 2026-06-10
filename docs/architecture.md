@@ -188,3 +188,9 @@ R2 raw files
 File-chat responses surface `retrieval_source`, `vector_hits`, `sql_fallback_hits` and `fallback_used` so operators can see whether an answer came from Vectorize or SQL fallback.
 
 `/health` reports clean storage flags. `/healthz` is a minimal unauthenticated keep-awake point for future MAST monitoring.
+
+## v1.5 ingestion architecture
+
+HIVE now treats archive ingestion as a bounded transformation, not a background-heavy extraction worker. Raw uploaded ZIPs remain in R2. `/v1/files/zip/extract-text` reads the ZIP, extracts text from supported members into a single derived text artefact, stores that artefact back through the normal upload path, and can immediately create SQL chunks for retrieval.
+
+PostgreSQL remains the source of truth for file metadata and chunks. Vectorize remains an optional semantic accelerator over SQL chunk IDs. Koyeb free-tier protection is provided by explicit member, byte, character and recursion limits.

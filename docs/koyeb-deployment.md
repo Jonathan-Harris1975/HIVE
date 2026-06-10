@@ -248,8 +248,26 @@ curl https://YOUR-KOYEB-APP.koyeb.app/health
 curl https://YOUR-KOYEB-APP.koyeb.app/healthz
 ```
 
-`/health` should show `build: v1.4-operational-polish` and clean flags for R2, SQL, D1, Vectorize and embeddings. `/healthz` is deliberately small and unauthenticated for later MAST keep-awake use.
+`/health` should show `build: v1.5-ingestion-expansion-free-tier` and clean flags for R2, SQL, D1, Vectorize and embeddings. `/healthz` is deliberately small and unauthenticated for later MAST keep-awake use.
 
 Use `POST /v1/db/test-cleanup` with `dry_run:true` before deleting smoke-test records.
 
 If a token is pasted into a browser, chat, log, or screenshot, rotate it in Cloudflare/OpenRouter, update the Koyeb secret, then redeploy.
+
+## v1.5 Koyeb free-tier settings
+
+For the current free Koyeb web service, keep extraction bounded:
+
+```env
+HIVE_FREE_TIER_MODE=true
+DOCUMENT_EXTRACT_MAX_CHARS=120000
+DOCUMENT_EXTRACT_PDF_MAX_PAGES=40
+DOCUMENT_EXTRACT_XLSX_MAX_ROWS_PER_SHEET=500
+DOCUMENT_EXTRACT_XLSX_MAX_SHEETS=12
+ZIP_EXTRACT_MAX_MEMBERS=80
+ZIP_EXTRACT_MAX_MEMBER_BYTES=2097152
+ZIP_EXTRACT_MAX_TOTAL_TEXT_CHARS=120000
+ZIP_EXTRACT_MAX_DEPTH=2
+```
+
+MAST can ping `GET /healthz` every 10 minutes using `HIVE_KEEPAWAKE_URL` to reduce free-service cold starts. Keep this endpoint unauthenticated and minimal.
