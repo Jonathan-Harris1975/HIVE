@@ -19,7 +19,9 @@ This is **not** a ChatLima/Kanari/OrChat fork. Those projects are reference arch
 
 ## Current status
 
-V1 test-ready build with working OpenRouter chat, model routing, empty-reply hardening, R2/local upload storage, JSON/base64 uploads, file listing, file read-back, public URL helper, stored ZIP inspection, and single-file chat. Durable persistence, SQL chunking, and optional Vectorize semantic retrieval are included as gated layers.
+**Build stage:** `v1.4-operational-polish`.
+
+HIVE now has working OpenRouter chat/model routing, R2/local upload storage, JSON/base64 uploads, stored ZIP inspection, SQL persistence, SQL chunk retrieval, Cloudflare D1 metadata, Cloudflare Workers AI embeddings, and Cloudflare Vectorize semantic retrieval. v1.4 adds clearer retrieval metadata, Vectorize index diagnostics, safe smoke-test cleanup, token-rotation guidance, larger ingestion tests, and a minimal `/healthz` endpoint for future MAST keep-awake checks.
 
 ## Recommended v1 architecture
 
@@ -61,6 +63,7 @@ Recommended Koyeb path: use the `Dockerfile`. See `docs/koyeb-deployment.md`.
 ## Useful endpoints
 
 - `GET /health`
+- `GET /healthz` - tiny unauthenticated keep-awake point for MAST.
 - `GET /v1/models`
 - `POST /v1/chat/stream`
 - `POST /v1/files/upload`
@@ -78,6 +81,7 @@ Recommended Koyeb path: use the `Dockerfile`. See `docs/koyeb-deployment.md`.
 - `GET /v1/db/conversations/{conversation_id}`
 - `GET /v1/db/files`
 - `GET /v1/db/cost-summary`
+- `POST /v1/db/test-cleanup` - dry-run-first smoke-test SQL cleanup by `test_run_id` and/or object-key prefix.
 - `GET /v1/vectorize/diagnostics`
 - `POST /v1/files/vectorize`
 - `GET /v1/files/vector-search`
@@ -392,3 +396,18 @@ EMBEDDINGS_DIMENSIONS=768
 EMBEDDINGS_TIMEOUT_SECONDS=20
 EMBEDDINGS_MAX_BATCH_SIZE=32
 ```
+
+
+## v1.4 operational polish
+
+This build keeps PostgreSQL chunks as the source of truth and uses Vectorize as an optional semantic accelerator. File-chat and vector-search responses now expose stable retrieval metadata:
+
+- `retrieval_source`
+- `retrieval_mode`
+- `vector_hits`
+- `sql_fallback_hits`
+- `fallback_used`
+
+`/health` now reports structured storage flags for R2, SQL, D1, Vectorize and embeddings. `/healthz` is intentionally tiny so MAST can later call it to keep the Koyeb service awake without touching admin APIs.
+
+Token hygiene: rotate Cloudflare/OpenRouter/admin tokens after any accidental paste into chat or logs, then update the matching Koyeb secret and redeploy.
