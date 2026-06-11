@@ -176,3 +176,13 @@ Completed in this stage:
 - R2 lane public URL awareness retained from v1.6.
 
 The next likely phase is a minimal operator UI over these endpoints rather than more backend storage plumbing.
+
+## v1.8 – Skill Registry Import
+
+Status: implemented.
+
+- Import R2 shared skill-pool search documents into D1.
+- Catalogue skills by priority tier, HIVE lane, risk level, repo membership and tags.
+- Support filtered list/search for HIVE, RAMS, AIMS and Website consumers.
+- Keep R2 as source of truth and D1 as the lightweight searchable catalogue.
+- Dry-run import remains the default for safe phone/ReqBin testing.
