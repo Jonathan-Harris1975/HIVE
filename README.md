@@ -19,7 +19,7 @@ This is **not** a ChatLima/Kanari/OrChat fork. Those projects are reference arch
 
 ## Current status
 
-**Build stage:** `v1.6-workflow-presets-r2-lanes`.
+**Build stage:** `v1.7-ecosystem-intelligence`.
 
 HIVE now has working OpenRouter chat/model routing, R2/local upload storage, JSON/base64 uploads, stored ZIP inspection/extraction, SQL persistence, SQL chunk retrieval, Cloudflare D1 metadata, Cloudflare Workers AI embeddings, and Cloudflare Vectorize semantic retrieval. v1.6 adds workflow presets, grounded `source_chunks[]` metadata, retrieval summaries, and an R2 ecosystem lane registry for AIMS/RAMS/website/podcast/skills buckets.
 
@@ -418,7 +418,7 @@ Token hygiene: rotate Cloudflare/OpenRouter/admin tokens after any accidental pa
 
 ## v1.5 ingestion expansion for Koyeb free tier
 
-Build stage `v1.6-workflow-presets-r2-lanes` adds bounded archive/document ingestion without turning HIVE into a heavy always-on worker. This matters because the current deployment is on a free Koyeb web service.
+Build stage `v1.7-ecosystem-intelligence` adds bounded archive/document ingestion without turning HIVE into a heavy always-on worker. This matters because the current deployment is on a free Koyeb web service.
 
 New/expanded capabilities:
 
@@ -443,7 +443,7 @@ The intended real workflow is now: upload an audit/report ZIP to R2, extract a b
 
 ## v1.6 workflow presets and R2 lane registry
 
-Build stage `v1.6-workflow-presets-r2-lanes` turns HIVE from a generic file-aware chatbot into a small private ops analyst with labelled workflows.
+Build stage `v1.7-ecosystem-intelligence` turns HIVE from a generic file-aware chatbot into a small private ops analyst with labelled workflows.
 
 Workflow presets currently available:
 
@@ -485,3 +485,18 @@ To include a dry-run preset chat check:
 ADMIN_BEARER_TOKEN=your-token HIVE_TEST_OBJECT_KEY=uploads/.../file.txt python scripts/v16_smoke.py
 ```
 
+
+## v1.7 Ecosystem Intelligence
+
+Build stage `v1.7-ecosystem-intelligence` adds lightweight cross-lane discovery without turning HIVE into a heavy background crawler. PostgreSQL chunks, Cloudflare Vectorize, D1 metadata, and the R2 lane registry remain separate, bounded layers.
+
+New endpoints:
+
+- `GET /v1/ecosystem/status` – MAST-friendly ecosystem status across SQL, D1, R2, Vectorize, embeddings, and the skills lane.
+- `GET /v1/ecosystem/search?q=...` – searches D1 ecosystem metadata and enriches results with lane/public URL hints.
+- `GET /v1/ecosystem/recent` – returns recent indexed ecosystem metadata, grouped by lane.
+- `GET /v1/files/r2-discovery` – bounded R2 lane preview. This lists a small number of objects only and does not read object bodies.
+- `GET /v1/skills/search?q=...` – searches indexed shared skills metadata.
+- `GET /v1/skills/list` – lists recent indexed skills metadata.
+
+Free-tier note: v1.7 deliberately avoids large bucket walks, background polling, and recursive object reads. Use D1 metadata as the discovery index and R2 discovery only for small previews or diagnostics.

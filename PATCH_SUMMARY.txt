@@ -1,0 +1,19 @@
+HIVE v1.7 ecosystem intelligence patch-only files. Apply over v1.6-workflow-presets-r2-lanes.
+
+Files:
+README.md
+backend/app/api/ecosystem.py
+backend/app/api/skills.py
+backend/app/core/version.py
+backend/app/main.py
+backend/app/services/ecosystem_index.py
+backend/app/services/workflow_presets.py
+backend/app/storage/d1.py
+backend/app/storage/r2.py
+backend/tests/test_health_operational.py
+backend/tests/test_v15_ingestion_expansion.py
+backend/tests/test_v16_workflow_presets_r2_lanes.py
+backend/tests/test_v17_ecosystem_intelligence.py
+backend/tests/test_vectorize_foundation.py
+docs/koyeb-deployment.md
+docs/roadmap.md
