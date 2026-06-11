@@ -248,7 +248,7 @@ curl https://YOUR-KOYEB-APP.koyeb.app/health
 curl https://YOUR-KOYEB-APP.koyeb.app/healthz
 ```
 
-`/health` should show `build: v1.6-workflow-presets-r2-lanes` and clean flags for R2, SQL, D1, Vectorize and embeddings. `/healthz` is deliberately small and unauthenticated for later MAST keep-awake use.
+`/health` should show `build: v1.7-ecosystem-intelligence` and clean flags for R2, SQL, D1, Vectorize and embeddings. `/healthz` is deliberately small and unauthenticated for later MAST keep-awake use.
 
 Use `POST /v1/db/test-cleanup` with `dry_run:true` before deleting smoke-test records.
 
@@ -283,6 +283,6 @@ curl "$HIVE_URL/v1/workflow-presets" -H "Authorization: Bearer $ADMIN_BEARER_TOK
 curl "$HIVE_URL/v1/files/r2-lanes" -H "Authorization: Bearer $ADMIN_BEARER_TOKEN"
 ```
 
-`/health` should show `build: v1.6-workflow-presets-r2-lanes`, `workflow_presets_enabled: true`, and `r2_ecosystem_lanes_enabled: true`.
+`/health` should show `build: v1.7-ecosystem-intelligence`, `workflow_presets_enabled: true`, and `r2_ecosystem_lanes_enabled: true`.
 
 Keep MAST keep-awake pings gentle on Koyeb Free. Use `/healthz`, not authenticated file/chat endpoints.

@@ -163,3 +163,16 @@ Completed:
 - Added `/v1/files/r2-lanes` and `/v1/files/r2-lanes/public-url`.
 
 Next logical phase: a minimal UI cockpit that can upload/select files, choose a workflow preset, ask a question, and show retrieval metadata/source chunks without needing the full dashboard yet.
+
+## v1.7 – Ecosystem Intelligence
+
+Completed in this stage:
+
+- MAST-friendly ecosystem status endpoint.
+- Cross-lane ecosystem metadata search over D1.
+- Recent ecosystem metadata grouping by lane.
+- Shared skills metadata search/list endpoints.
+- Bounded R2 lane discovery previews.
+- R2 lane public URL awareness retained from v1.6.
+
+The next likely phase is a minimal operator UI over these endpoints rather than more backend storage plumbing.
