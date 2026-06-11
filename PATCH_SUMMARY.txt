@@ -1,7 +1,25 @@
-HIVE v1.8 skill registry import patch-only files. Apply over v1.7-ecosystem-intelligence.
+HIVE v1.9-v1.12 Skill Intelligence Bundle
 
-Adds:
-- R2 shared skill-pool manifest/search-document importer.
-- D1 indexing for skills under lane hive_skills/source_type skill_descriptor.
-- Skills status, import, categories, list and search filters.
-- v1.8 docs, env settings and smoke script.
+Applied cumulative backend upgrades:
+
+v1.9 Intelligent Skill Search
+- Weighted skill search across title, slug, tags, hive_lane, catalogue_category, repos, priority, risk and indexable_text.
+- Search returns score, matched_terms, matched_fields and score_breakdown.
+- Added skill lookup/filter routes: /v1/skills/get, /v1/skills/by-repo, /v1/skills/by-risk, /v1/skills/by-lane.
+
+v1.10 Skill Recommendation Engine
+- Added POST /v1/skills/recommend.
+- Task-based ranked recommendations with repo/lane/risk filters.
+- Adds registry-only safety note and execution policy metadata.
+
+v1.11 Skill Routing / Orchestration
+- Added POST /v1/skills/route.
+- Produces review-gated route plan with primary skill and candidate skills.
+- No auto-install or auto-execution.
+
+v1.12 Shared Ecosystem Execution Layer
+- Added POST /v1/ecosystem/execution-plan.
+- Produces a plan-only shared execution layer response for HIVE/AIMS/RAMS/Website tasks.
+- Includes dry-run, approval gate and Koyeb Free safety guardrails.
+
+Build marker: v1.12-shared-ecosystem-execution-layer
