@@ -25,7 +25,7 @@ def test_health_reports_v15_free_tier_limits(monkeypatch, tmp_path) -> None:
     _reset_settings(monkeypatch, tmp_path)
     client = TestClient(app)
     body = client.get("/health").json()
-    assert body["build"] == "v1.6-workflow-presets-r2-lanes"
+    assert body["build"] == "v1.7-ecosystem-intelligence"
     assert body["free_tier"]["enabled"] is True
     assert "zip_extract_max_members" in body["free_tier"]["ingestion_limits"]
 
