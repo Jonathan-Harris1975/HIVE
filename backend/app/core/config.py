@@ -1,5 +1,5 @@
 from functools import lru_cache
-from typing import List
+from typing import Any, List
 
 from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -47,6 +47,36 @@ class Settings(BaseSettings):
     r2_read_timeout_seconds: int = 20
     r2_max_attempts: int = 2
     r2_addressing_style: str = "path"
+
+    # v1.6 ecosystem R2 lane registry. These envs let HIVE understand where
+    # AIMS/RAMS/website/podcast artefacts live without granting new write paths.
+    r2_bucket_art: str = Field("", validation_alias=AliasChoices("R2_BUCKET_ART"))
+    r2_bucket_audits: str = Field("", validation_alias=AliasChoices("R2_BUCKET_AUDITS"))
+    r2_bucket_blog: str = Field("", validation_alias=AliasChoices("R2_BUCKET_BLOG"))
+    r2_bucket_blog_images: str = Field("", validation_alias=AliasChoices("R2_BUCKET_BLOG_IMAGES"))
+    r2_bucket_blog_rss: str = Field("", validation_alias=AliasChoices("R2_BUCKET_BLOG_RSS"))
+    r2_bucket_brand_assets: str = Field("", validation_alias=AliasChoices("R2_BUCKET_BRAND_ASSETS"))
+    r2_bucket_meta: str = Field("", validation_alias=AliasChoices("R2_BUCKET_META"))
+    r2_bucket_meta_system: str = Field("", validation_alias=AliasChoices("R2_BUCKET_META_SYSTEM"))
+    r2_bucket_podcast: str = Field("", validation_alias=AliasChoices("R2_BUCKET_PODCAST"))
+    r2_bucket_podcast_rss_feeds: str = Field("", validation_alias=AliasChoices("R2_BUCKET_PODCAST_RSS_FEEDS"))
+    r2_bucket_rss_feeds: str = Field("", validation_alias=AliasChoices("R2_BUCKET_RSS_FEEDS"))
+    r2_bucket_transcripts: str = Field("", validation_alias=AliasChoices("R2_BUCKET_TRANSCRIPTS"))
+    r2_bucket_hive_skills: str = Field("", validation_alias=AliasChoices("R2_BUCKET_HIVE_SKILLS"))
+    r2_public_base_url_art: str = Field("", validation_alias=AliasChoices("R2_PUBLIC_BASE_URL_ART"))
+    r2_public_base_url_audits: str = Field("", validation_alias=AliasChoices("R2_PUBLIC_BASE_URL_AUDITS"))
+    r2_public_base_url_blog: str = Field("", validation_alias=AliasChoices("R2_PUBLIC_BASE_URL_BLOG"))
+    r2_public_base_url_blog_images: str = Field("", validation_alias=AliasChoices("R2_PUBLIC_BASE_URL_BLOG_IMAGES"))
+    r2_public_base_url_blog_rss: str = Field("", validation_alias=AliasChoices("R2_PUBLIC_BASE_URL_BLOG_RSS"))
+    r2_public_base_url_brand_assets: str = Field("", validation_alias=AliasChoices("R2_PUBLIC_BASE_URL_BRAND_ASSETS"))
+    r2_public_base_url_meta: str = Field("", validation_alias=AliasChoices("R2_PUBLIC_BASE_URL_META"))
+    r2_public_base_url_meta_system: str = Field("", validation_alias=AliasChoices("R2_PUBLIC_BASE_URL_META_SYSTEM"))
+    r2_public_base_url_podcast: str = Field("", validation_alias=AliasChoices("R2_PUBLIC_BASE_URL_PODCAST"))
+    r2_public_base_url_podcast_rss: str = Field("", validation_alias=AliasChoices("R2_PUBLIC_BASE_URL_PODCAST_RSS"))
+    r2_public_base_url_rss: str = Field("", validation_alias=AliasChoices("R2_PUBLIC_BASE_URL_RSS"))
+    r2_public_base_url_transcript: str = Field("", validation_alias=AliasChoices("R2_PUBLIC_BASE_URL_TRANSCRIPT"))
+    r2_public_base_url_transcript_html: str = Field("", validation_alias=AliasChoices("R2_PUBLIC_BASE_URL_TRANSCRIPT_HTML"))
+    r2_public_base_url_hive_skills: str = Field("", validation_alias=AliasChoices("R2_PUBLIC_BASE_URL_HIVE_SKILLS"))
 
     # Optional SQL persistence. HIVE v1 works without this; enable when you want
     # conversation/message/file/cost records in SQLite or Koyeb/PostgreSQL.
@@ -168,6 +198,50 @@ class Settings(BaseSettings):
             return ""
         return f"https://{self.cf_r2_account_id}.r2.cloudflarestorage.com"
 
+
+    @property
+    def r2_ecosystem_lanes(self) -> list[dict[str, Any]]:
+        lanes = [
+            ("uploads", self.cf_r2_bucket, self.cf_r2_public_base_url, "Primary HIVE upload/read bucket"),
+            ("audits", self.r2_bucket_audits, self.r2_public_base_url_audits, "RAMS/AIMS audit reports"),
+            ("art", self.r2_bucket_art, self.r2_public_base_url_art, "Podcast cover art"),
+            ("blog", self.r2_bucket_blog, self.r2_public_base_url_blog, "Published blog artefacts"),
+            ("blog_images", self.r2_bucket_blog_images, self.r2_public_base_url_blog_images, "Blog imagery"),
+            ("blog_rss", self.r2_bucket_blog_rss, self.r2_public_base_url_blog_rss, "Blog RSS feed"),
+            ("brand_assets", self.r2_bucket_brand_assets, self.r2_public_base_url_brand_assets, "Shared brand assets"),
+            ("meta", self.r2_bucket_meta, self.r2_public_base_url_meta, "Podcast metadata"),
+            ("meta_system", self.r2_bucket_meta_system, self.r2_public_base_url_meta_system, "System metadata"),
+            ("podcast", self.r2_bucket_podcast, self.r2_public_base_url_podcast, "Podcast audio/pages"),
+            ("podcast_rss", self.r2_bucket_podcast_rss_feeds, self.r2_public_base_url_podcast_rss, "Podcast RSS feeds"),
+            ("rss", self.r2_bucket_rss_feeds, self.r2_public_base_url_rss, "AI/news RSS feeds"),
+            ("transcripts", self.r2_bucket_transcripts, self.r2_public_base_url_transcript, "Podcast transcripts"),
+            ("transcript_html", self.r2_bucket_transcripts, self.r2_public_base_url_transcript_html, "Transcript HTML mirror"),
+            ("hive_skills", self.r2_bucket_hive_skills, self.r2_public_base_url_hive_skills, "Shared HIVE/AIMS/RAMS skills pool"),
+        ]
+        payload: list[dict[str, Any]] = []
+        for name, bucket, public_base_url, description in lanes:
+            payload.append({
+                "lane": name,
+                "bucket": bucket or None,
+                "public_base_url": public_base_url.rstrip("/") if public_base_url else None,
+                "configured": bool(bucket or public_base_url),
+                "description": description,
+                "primary_upload_lane": name == "uploads",
+            })
+        return payload
+
+    def public_url_for_r2_lane(self, lane: str, key: str) -> str | None:
+        clean_lane = (lane or "").strip().lower().replace("-", "_")
+        clean_key = (key or "").lstrip("/")
+        for item in self.r2_ecosystem_lanes:
+            if item["lane"] == clean_lane:
+                base = item.get("public_base_url")
+                return f"{base}/{clean_key}" if base and clean_key else base
+        return None
+
+    @property
+    def configured_r2_ecosystem_lane_count(self) -> int:
+        return sum(1 for item in self.r2_ecosystem_lanes if item.get("configured"))
 
     @property
     def zip_extract_supported_suffix_set(self) -> set[str]:
