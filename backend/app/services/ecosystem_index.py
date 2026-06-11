@@ -47,7 +47,7 @@ def ecosystem_status(settings: Settings) -> dict[str, object]:
     configured_lanes = [item for item in lanes if item.get("configured")]
     return {
         "ok": True,
-        "build_stage_hint": "v1.7-ecosystem-intelligence",
+        "build_stage_hint": "v1.8-skill-registry-import",
         "free_tier": bool(settings.hive_free_tier_mode),
         "services": {
             "postgres": {"configured": sql.enabled, "dialect": sql.dialect if sql.enabled else None},
@@ -140,7 +140,7 @@ def skills_search(*, settings: Settings, query: str | None = None, limit: int = 
         payload = recent_ecosystem_metadata(settings=settings, lane="hive_skills", limit=limit)
     payload["lane_public_base_url"] = settings.public_url_for_r2_lane("hive_skills", "")
     payload["manifest_hint"] = settings.public_url_for_r2_lane("hive_skills", "index/skills-manifest.json")
-    payload["note"] = "v1.7 searches D1 skill metadata first. Bucket object discovery/search can be expanded after the skills manifest format is stable."
+    payload["note"] = "v1.8 searches imported D1 skill metadata. Run POST /v1/skills/import-manifest to index the R2 shared skill pool."
     return payload
 
 
