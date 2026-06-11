@@ -71,9 +71,10 @@ class R2Storage:
             )
         return self._client
 
-    def public_url_for_key(self, key: str) -> str | None:
-        if self.settings.cf_r2_public_base_url:
-            return f"{self.settings.cf_r2_public_base_url.rstrip('/')}/{key}"
+    def public_url_for_key(self, key: str, public_base_url: str | None = None) -> str | None:
+        base = public_base_url or self.settings.cf_r2_public_base_url
+        if base:
+            return f"{base.rstrip('/')}/{key}"
         return None
 
     def put_file(self, path: Path, key: str, content_type: str | None = None) -> StoredObject:
@@ -96,18 +97,25 @@ class R2Storage:
     def list_keys(self, prefix: str = "", limit: int = 1000) -> list[str]:
         return [item.key for item in self.list_objects(prefix=prefix, limit=limit)]
 
-    def list_objects(self, prefix: str = "", limit: int = 100) -> list[ObjectSummary]:
+    def list_objects(
+        self,
+        prefix: str = "",
+        limit: int = 100,
+        bucket: str | None = None,
+        public_base_url: str | None = None,
+    ) -> list[ObjectSummary]:
         safe_limit = max(1, min(int(limit), 1000))
+        bucket_name = bucket or self.settings.cf_r2_bucket
         try:
             response = self.client().list_objects_v2(
-                Bucket=self.settings.cf_r2_bucket,
+                Bucket=bucket_name,
                 Prefix=prefix,
                 MaxKeys=safe_limit,
             )
         except ClientError as exc:
-            raise RuntimeError(f"R2 list failed for prefix {prefix!r}: {_format_client_error(exc)}") from exc
+            raise RuntimeError(f"R2 list failed for bucket {bucket_name!r} prefix {prefix!r}: {_format_client_error(exc)}") from exc
         except BotoCoreError as exc:
-            raise RuntimeError(f"R2 list failed for prefix {prefix!r}: {exc}") from exc
+            raise RuntimeError(f"R2 list failed for bucket {bucket_name!r} prefix {prefix!r}: {exc}") from exc
 
         objects: list[ObjectSummary] = []
         for item in response.get("Contents", []):
@@ -120,7 +128,7 @@ class R2Storage:
                     key=key,
                     size_bytes=int(item.get("Size") or 0),
                     last_modified=last_modified,
-                    public_url=self.public_url_for_key(key),
+                    public_url=self.public_url_for_key(key, public_base_url=public_base_url),
                 )
             )
         return objects

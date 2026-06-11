@@ -198,6 +198,50 @@ class D1MetadataStore:
             row["metadata"] = _json_or_none(row.pop("metadata_json", None))
         return {"ok": True, "enabled": True, "count": len(rows), "items": rows}
 
+
+    def search_metadata(self, *, query: str, lane: str | None = None, limit: int = 50) -> dict[str, object]:
+        """Search lightweight ecosystem metadata using bounded LIKE matching.
+
+        This intentionally avoids D1 FTS requirements so v1.7 works on the
+        existing hive_ecosystem_metadata table.
+        """
+
+        if not self.enabled:
+            return {"ok": False, "enabled": False}
+        safe_limit = max(1, min(int(limit or 50), 500))
+        q = f"%{(query or '').strip()}%"
+        if lane:
+            result = self.query(
+                """
+                SELECT id, lane, source_type, source_id, title, url, metadata_json, created_at, updated_at
+                FROM hive_ecosystem_metadata
+                WHERE lane = ?
+                  AND (
+                    title LIKE ? OR source_type LIKE ? OR source_id LIKE ? OR url LIKE ? OR metadata_json LIKE ?
+                  )
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """,
+                [lane, q, q, q, q, q, safe_limit],
+            )
+        else:
+            result = self.query(
+                """
+                SELECT id, lane, source_type, source_id, title, url, metadata_json, created_at, updated_at
+                FROM hive_ecosystem_metadata
+                WHERE title LIKE ? OR source_type LIKE ? OR source_id LIKE ? OR url LIKE ? OR metadata_json LIKE ?
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """,
+                [q, q, q, q, q, safe_limit],
+            )
+        if not result.get("ok"):
+            return result
+        rows = _extract_d1_rows(result.get("result"))
+        for row in rows:
+            row["metadata"] = _json_or_none(row.pop("metadata_json", None))
+        return {"ok": True, "enabled": True, "query": query, "lane": lane, "count": len(rows), "items": rows}
+
     def query(self, sql: str, params: list[Any] | None = None) -> dict[str, object]:
         if not self.enabled:
             return {"ok": False, "message": "D1 metadata store disabled or not configured."}
