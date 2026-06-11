@@ -89,3 +89,22 @@ Recommended split remains:
 - PostgreSQL: durable source of truth for conversations, files, chunks and cost events.
 
 Rotate Cloudflare API tokens after accidental exposure. Update the Koyeb secret, redeploy, and verify `/v1/vectorize/diagnostics`.
+
+## v1.6 R2 ecosystem lanes
+
+The following public, non-secret R2 lane envs are recognised by HIVE:
+
+- `R2_BUCKET_AUDITS` / `R2_PUBLIC_BASE_URL_AUDITS`
+- `R2_BUCKET_BLOG` / `R2_PUBLIC_BASE_URL_BLOG`
+- `R2_BUCKET_BLOG_IMAGES` / `R2_PUBLIC_BASE_URL_BLOG_IMAGES`
+- `R2_BUCKET_BLOG_RSS` / `R2_PUBLIC_BASE_URL_BLOG_RSS`
+- `R2_BUCKET_BRAND_ASSETS` / `R2_PUBLIC_BASE_URL_BRAND_ASSETS`
+- `R2_BUCKET_META` / `R2_PUBLIC_BASE_URL_META`
+- `R2_BUCKET_META_SYSTEM` / `R2_PUBLIC_BASE_URL_META_SYSTEM`
+- `R2_BUCKET_PODCAST` / `R2_PUBLIC_BASE_URL_PODCAST`
+- `R2_BUCKET_PODCAST_RSS_FEEDS` / `R2_PUBLIC_BASE_URL_PODCAST_RSS`
+- `R2_BUCKET_RSS_FEEDS` / `R2_PUBLIC_BASE_URL_RSS`
+- `R2_BUCKET_TRANSCRIPTS` / `R2_PUBLIC_BASE_URL_TRANSCRIPT`
+- `R2_BUCKET_HIVE_SKILLS` / `R2_PUBLIC_BASE_URL_HIVE_SKILLS`
+
+Use `GET /v1/files/r2-lanes` to inspect the configured registry. Use `GET /v1/files/r2-lanes/public-url?lane=audits&key=...` to safely build a public URL. This build does not yet add multi-bucket write automation; that is deliberate to avoid accidental cross-bucket writes while HIVE is still on the free web service.

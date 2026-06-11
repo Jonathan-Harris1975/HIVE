@@ -129,3 +129,17 @@ The endpoint returns `stage`, `timings`, and `error_code:"chat_with_file_timeout
 For file answers, HIVE should prefer chunked retrieval over raw prompt stuffing. Vectorize is allowed to improve semantic matching, but SQL chunks remain the source of truth. If Vectorize or embeddings fail, HIVE should fall back to SQL chunk search rather than blocking file chat.
 
 Responses should expose retrieval metadata so operators can tell whether an answer used Vectorize or SQL fallback.
+
+## v1.6 preset policy
+
+Workflow presets do not bypass model routing. They tune the mode, retrieval defaults and output framing before the normal model router chooses or validates the model.
+
+Default stance:
+
+- Audit/content/podcast/eBook presets use Brand/Audit framing where appropriate.
+- Repo/debug and CI/log presets use Code framing.
+- SQL fallback remains enabled for all presets.
+- `ci_log_analysis` prefers SQL retrieval first because exact log terms are usually more useful and cheaper than semantic search.
+- Presets are free-tier safe by default and avoid expanding chunk limits into heavy background work.
+
+The model router still respects explicit `model` when supplied by the caller.

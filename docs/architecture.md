@@ -194,3 +194,27 @@ File-chat responses surface `retrieval_source`, `vector_hits`, `sql_fallback_hit
 HIVE now treats archive ingestion as a bounded transformation, not a background-heavy extraction worker. Raw uploaded ZIPs remain in R2. `/v1/files/zip/extract-text` reads the ZIP, extracts text from supported members into a single derived text artefact, stores that artefact back through the normal upload path, and can immediately create SQL chunks for retrieval.
 
 PostgreSQL remains the source of truth for file metadata and chunks. Vectorize remains an optional semantic accelerator over SQL chunk IDs. Koyeb free-tier protection is provided by explicit member, byte, character and recursion limits.
+
+## v1.6 workflow and lane architecture
+
+HIVE v1.6 adds a lightweight workflow layer above file-chat. The API remains simple, but `workflow_preset` now controls the safest default mode, retrieval behaviour and output framing for common operational tasks.
+
+```text
+Stored file / extracted artefact
+  -> optional workflow preset
+  -> preset-tuned chunk retrieval
+  -> Vectorize semantic lookup when enabled
+  -> SQL fallback/source of truth
+  -> answer + retrieval_summary + source_chunks[]
+```
+
+The current presets are:
+
+- `audit_report_review`
+- `repo_debug_bundle`
+- `ci_log_analysis`
+- `social_content_qa`
+- `podcast_episode_review`
+- `ebook_keyword_review`
+
+The R2 ecosystem lane registry is metadata-first. It records configured bucket names and public base URLs for uploads, audits, blog artefacts, images, RSS feeds, brand assets, podcast artefacts, transcripts and HIVE skills. The primary upload lane remains the only direct read/write storage adapter in this build. This keeps Koyeb free-tier behaviour predictable while letting HIVE understand where wider AIMS/RAMS/website/podcast artefacts live.

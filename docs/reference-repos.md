@@ -42,3 +42,9 @@ Borrow ideas, not code baggage.
 ## v1.4 note
 
 HIVE has now moved beyond reference-study mode into its own operational architecture: FastAPI on Koyeb, R2 for file bodies, PostgreSQL for durable operational state, D1 for ecosystem metadata, and Vectorize/Workers AI for optional semantic retrieval. Reference repos remain inspiration only.
+
+## v1.6 ecosystem lanes
+
+HIVE now recognises AIMS/RAMS/website/podcast artefact lanes through R2 bucket and public-base-url envs. This lets HIVE understand where audit reports, podcast transcripts, RSS feeds, blog artefacts, brand assets and the shared `hive-skills` bucket live.
+
+In this build, lane support is registry/public-URL aware only. Direct multi-bucket ingestion should be added later behind explicit allowlists and tests, once the first HIVE workflows over extracted audit/report bundles are stable.

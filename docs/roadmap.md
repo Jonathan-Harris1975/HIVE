@@ -149,3 +149,17 @@ Completed:
 - MAST keep-awake support through `/healthz`.
 
 Next logical phase: real-world audit/report ZIP testing, then targeted UI/ops-console affordances for selecting extracted artefacts and asking questions over them.
+
+## v1.6 Workflow presets and R2 lanes
+
+Completed:
+
+- Added workflow presets for audit review, repo/debug bundles, CI/log analysis, social content QA, podcast review and eBook keyword review.
+- Added `GET /v1/workflow-presets`.
+- Added `workflow_preset` support to `/v1/chat/with-file`.
+- Added grounded `source_chunks[]` metadata for UI citations.
+- Added `retrieval_summary` with confidence and fallback notes.
+- Added safe R2 ecosystem lane registry for the user's AIMS/RAMS/website/podcast/skills buckets.
+- Added `/v1/files/r2-lanes` and `/v1/files/r2-lanes/public-url`.
+
+Next logical phase: a minimal UI cockpit that can upload/select files, choose a workflow preset, ask a question, and show retrieval metadata/source chunks without needing the full dashboard yet.
