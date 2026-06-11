@@ -161,6 +161,10 @@ class Settings(BaseSettings):
     zip_extract_max_depth: int = Field(2, validation_alias=AliasChoices("ZIP_EXTRACT_MAX_DEPTH"))
     zip_extract_supported_suffixes: str = Field(".txt,.md,.log,.json,.csv,.html,.htm,.pdf,.docx,.xlsx", validation_alias=AliasChoices("ZIP_EXTRACT_SUPPORTED_SUFFIXES"))
 
+    # v1.8 shared skill pool importer. Bounded for Koyeb Free; skills live in R2 and D1 stores catalogue metadata.
+    skill_registry_import_max_items: int = Field(250, validation_alias=AliasChoices("SKILL_REGISTRY_IMPORT_MAX_ITEMS"))
+    skill_registry_import_timeout_seconds: int = Field(20, validation_alias=AliasChoices("SKILL_REGISTRY_IMPORT_TIMEOUT_SECONDS"))
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def parse_cors_origins(cls, value: str | list[str]) -> list[str]:

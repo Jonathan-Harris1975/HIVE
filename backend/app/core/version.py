@@ -1,1 +1,1 @@
-BUILD_STAGE = "v1.7-ecosystem-intelligence"
+BUILD_STAGE = "v1.8-skill-registry-import"
