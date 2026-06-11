@@ -19,9 +19,9 @@ This is **not** a ChatLima/Kanari/OrChat fork. Those projects are reference arch
 
 ## Current status
 
-**Build stage:** `v1.5-ingestion-expansion-free-tier`.
+**Build stage:** `v1.6-workflow-presets-r2-lanes`.
 
-HIVE now has working OpenRouter chat/model routing, R2/local upload storage, JSON/base64 uploads, stored ZIP inspection, SQL persistence, SQL chunk retrieval, Cloudflare D1 metadata, Cloudflare Workers AI embeddings, and Cloudflare Vectorize semantic retrieval. v1.4 adds clearer retrieval metadata, Vectorize index diagnostics, safe smoke-test cleanup, token-rotation guidance, larger ingestion tests, and a minimal `/healthz` endpoint for future MAST keep-awake checks.
+HIVE now has working OpenRouter chat/model routing, R2/local upload storage, JSON/base64 uploads, stored ZIP inspection/extraction, SQL persistence, SQL chunk retrieval, Cloudflare D1 metadata, Cloudflare Workers AI embeddings, and Cloudflare Vectorize semantic retrieval. v1.6 adds workflow presets, grounded `source_chunks[]` metadata, retrieval summaries, and an R2 ecosystem lane registry for AIMS/RAMS/website/podcast/skills buckets.
 
 ## Recommended v1 architecture
 
@@ -72,9 +72,13 @@ Recommended Koyeb path: use the `Dockerfile`. See `docs/koyeb-deployment.md`.
 - `GET /v1/files/list`
 - `GET /v1/files/read?key=uploads/...`
 - `GET /v1/files/public-url?key=uploads/...`
+- `GET /v1/files/r2-lanes`
+- `GET /v1/files/r2-lanes/public-url?lane=audits&key=reports/latest.html`
 - `GET /v1/files/zip/inspect?key=uploads/...`
 - `POST /v1/chat/with-file`
   - Supports `dry_run:true` / `skip_model:true` for file-read and prompt-build diagnostics.
+  - Supports `workflow_preset` values such as `audit_report_review`, `repo_debug_bundle`, `ci_log_analysis`, `social_content_qa`, `podcast_episode_review`, and `ebook_keyword_review`.
+- `GET /v1/workflow-presets`
 - `GET /v1/db/diagnostics`
 - `POST /v1/db/init`
 - `GET /v1/db/conversations`
@@ -414,7 +418,7 @@ Token hygiene: rotate Cloudflare/OpenRouter/admin tokens after any accidental pa
 
 ## v1.5 ingestion expansion for Koyeb free tier
 
-Build stage `v1.5-ingestion-expansion-free-tier` adds bounded archive/document ingestion without turning HIVE into a heavy always-on worker. This matters because the current deployment is on a free Koyeb web service.
+Build stage `v1.6-workflow-presets-r2-lanes` adds bounded archive/document ingestion without turning HIVE into a heavy always-on worker. This matters because the current deployment is on a free Koyeb web service.
 
 New/expanded capabilities:
 
@@ -436,3 +440,48 @@ ZIP_EXTRACT_MAX_DEPTH=2
 ```
 
 The intended real workflow is now: upload an audit/report ZIP to R2, extract a bounded text artefact, chunk it into PostgreSQL, optionally Vectorize those chunks, and ask HIVE questions over the extracted package.
+
+## v1.6 workflow presets and R2 lane registry
+
+Build stage `v1.6-workflow-presets-r2-lanes` turns HIVE from a generic file-aware chatbot into a small private ops analyst with labelled workflows.
+
+Workflow presets currently available:
+
+- `audit_report_review` for RAMS/AIMS audit bundles and QA findings.
+- `repo_debug_bundle` for repo ZIPs, stack traces, CI artefacts and patch planning.
+- `ci_log_analysis` for exact log/error triage using cheap SQL retrieval first.
+- `social_content_qa` for brand/content quality review.
+- `podcast_episode_review` for transcript, metadata and amplification checks.
+- `ebook_keyword_review` for catalogue/keyword review without inventing marketplace data.
+
+A file-chat request can now include:
+
+```json
+{
+  "object_key": "uploads/example/audit-extracted.txt",
+  "message": "Summarise the highest-risk findings.",
+  "workflow_preset": "audit_report_review",
+  "dry_run": true
+}
+```
+
+Preset responses include:
+
+- `workflow_preset` with the selected preset details.
+- `retrieval_metadata` for Vectorize/SQL behaviour.
+- `retrieval_summary` with confidence and fallback notes.
+- `source_chunks[]` with compact chunk IDs, object keys, scores and excerpts for UI citations.
+
+The R2 ecosystem lane registry reads the bucket/base-url envs for audits, blog, podcast, transcripts, RSS, brand assets and HIVE skills. In v1.6 this is safe registry/public-URL awareness first; primary upload/read still uses the main HIVE upload bucket. Multi-bucket read/write can be added later if the workflows prove useful.
+Run the local v1.6 smoke helper after deployment:
+
+```bash
+ADMIN_BEARER_TOKEN=your-token python scripts/v16_smoke.py
+```
+
+To include a dry-run preset chat check:
+
+```bash
+ADMIN_BEARER_TOKEN=your-token HIVE_TEST_OBJECT_KEY=uploads/.../file.txt python scripts/v16_smoke.py
+```
+
