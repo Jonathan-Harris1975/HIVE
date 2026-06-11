@@ -192,6 +192,165 @@ def search_skills_catalogue(
     }
 
 
+
+
+def get_skill_detail(*, settings: Settings, skill_id: str) -> dict[str, object]:
+    """Return one indexed skill by id, reference prefix, slug or title."""
+
+    needle = _normalise_lookup(skill_id)
+    payload = _skill_records(settings=settings, query=None, limit=500)
+    if not payload.get("ok"):
+        return payload
+    for item in payload.get("items", []):
+        meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+        candidates = [
+            item.get("id"),
+            item.get("source_id"),
+            item.get("title"),
+            meta.get("skill_id"),
+            meta.get("reference_prefix"),
+            meta.get("slug"),
+            meta.get("name"),
+            meta.get("search_document_id"),
+        ]
+        if needle in {_normalise_lookup(str(value)) for value in candidates if value}:
+            enriched = _score_skill_item(item, str(skill_id or ""))
+            enriched["execution_policy"] = _execution_policy_for_skill(enriched)
+            return {"ok": True, "lane": SKILL_LANE, "skill": enriched, **_skill_manifest_hints(settings)}
+    return {"ok": False, "lane": SKILL_LANE, "error_code": "skill_not_found", "skill_id": skill_id, **_skill_manifest_hints(settings)}
+
+
+def skills_by_repo(*, settings: Settings, repo: str, limit: int = 100) -> dict[str, object]:
+    return list_skills_catalogue(settings=settings, limit=limit, repo=repo)
+
+
+def skills_by_risk(*, settings: Settings, risk_level: str, limit: int = 100) -> dict[str, object]:
+    return list_skills_catalogue(settings=settings, limit=limit, risk_level=risk_level)
+
+
+def skills_by_lane(*, settings: Settings, hive_lane: str, limit: int = 100) -> dict[str, object]:
+    return list_skills_catalogue(settings=settings, limit=limit, hive_lane=hive_lane)
+
+
+def recommend_skills(
+    *,
+    settings: Settings,
+    task: str,
+    repo: str | None = None,
+    hive_lane: str | None = None,
+    risk_ceiling: str | None = None,
+    limit: int = 10,
+) -> dict[str, object]:
+    """Recommend skills for a task using weighted D1 catalogue metadata.
+
+    This is deliberately a recommendation/router layer, not an auto-install or
+    auto-execution layer. HIVE should explain the safest candidate set first.
+    """
+
+    q = " ".join((task or "").strip().split())[:500]
+    if not q:
+        return {"ok": False, "error_code": "missing_task", "message": "task is required."}
+    payload = _skill_records(settings=settings, query=None, limit=500)
+    if not payload.get("ok"):
+        return payload
+    items = _filter_skill_items(
+        payload.get("items", []),
+        repo=repo,
+        hive_lane=hive_lane,
+        priority_tier=None,
+        risk_level=None,
+    )
+    if risk_ceiling:
+        items = [item for item in items if _risk_allowed(item, risk_ceiling)]
+    scored = [_score_skill_item(item, q, recommendation_mode=True) for item in items]
+    scored.sort(key=lambda item: float(item.get("score") or 0), reverse=True)
+    selected = scored[: max(1, min(int(limit or 10), 50))]
+    return {
+        "ok": True,
+        "lane": SKILL_LANE,
+        "task": q,
+        "count": len(selected),
+        "recommendations": [_recommendation_summary(item) for item in selected],
+        "items": selected,
+        "filters": _filters(repo=repo, hive_lane=hive_lane, risk_ceiling=risk_ceiling),
+        "safety_note": "Recommendations are registry-only. HIVE does not install or execute repo skills without a later explicit execution gate.",
+        **_skill_manifest_hints(settings),
+    }
+
+
+def route_skill_request(
+    *,
+    settings: Settings,
+    task: str,
+    repo: str | None = None,
+    hive_lane: str | None = None,
+    limit: int = 5,
+) -> dict[str, object]:
+    recs = recommend_skills(settings=settings, task=task, repo=repo, hive_lane=hive_lane, limit=limit)
+    if not recs.get("ok"):
+        return recs
+    items = recs.get("items", [])
+    primary = items[0] if items else None
+    route = _route_plan(task=task, primary=primary, candidates=items)
+    return {
+        "ok": True,
+        "task": recs.get("task"),
+        "repo": repo,
+        "hive_lane": hive_lane,
+        "primary_skill": _recommendation_summary(primary) if isinstance(primary, dict) else None,
+        "candidate_count": len(items),
+        "candidate_skills": [_recommendation_summary(item) for item in items],
+        "route_plan": route,
+        "execution_policy": "review_gated",
+        "free_tier_note": "Routing is metadata-only and safe for Koyeb Free; no background execution is started.",
+        **_skill_manifest_hints(settings),
+    }
+
+
+def shared_execution_plan(
+    *,
+    settings: Settings,
+    task: str,
+    repo: str | None = None,
+    workflow_preset: str | None = None,
+    limit: int = 5,
+) -> dict[str, object]:
+    """Return a shared ecosystem execution plan without running tools.
+
+    v1.12 intentionally stops at plan generation. The next safe step is to add
+    explicit per-skill execution adapters and approval gates.
+    """
+
+    routed = route_skill_request(settings=settings, task=task, repo=repo, hive_lane=None, limit=limit)
+    if not routed.get("ok"):
+        return routed
+    steps = [
+        {"step": 1, "name": "classify_task", "description": "Confirm repo/lane/workflow intent and risk level."},
+        {"step": 2, "name": "select_skills", "description": "Use HIVE skill registry recommendations as the candidate set."},
+        {"step": 3, "name": "load_sources", "description": "Collect relevant R2/D1/PostgreSQL evidence before proposing changes."},
+        {"step": 4, "name": "dry_run", "description": "Produce a dry-run output or patch plan; no live repo/system mutation."},
+        {"step": 5, "name": "approval_gate", "description": "Require explicit approval before any future execution adapter runs."},
+    ]
+    return {
+        "ok": True,
+        "build_stage_hint": "v1.12-shared-ecosystem-execution-layer",
+        "task": task,
+        "repo": repo,
+        "workflow_preset": workflow_preset,
+        "execution_mode": "plan_only",
+        "can_execute_now": False,
+        "requires_approval": True,
+        "routed_skill_plan": routed,
+        "shared_steps": steps,
+        "guardrails": {
+            "no_auto_install": True,
+            "no_background_jobs_on_koyeb_free": True,
+            "dry_run_first": True,
+            "risk_gates_required": ["medium", "high"],
+        },
+        "next_adapter_layer": "v1.13 can add explicit execution adapters for selected low-risk registry tasks.",
+    }
+
 def skill_categories(settings: Settings, limit: int = 500) -> dict[str, object]:
     payload = _skill_records(settings=settings, query=None, limit=limit)
     if not payload.get("ok"):
@@ -300,16 +459,61 @@ def _catalogue_category(metadata: dict[str, Any], tags: list[str]) -> str:
     return (metadata.get("hive_lane") or "general").strip().lower().replace(" ", "-")
 
 
-def _score_skill_item(item: dict[str, Any], query: str) -> dict[str, object]:
+def _score_skill_item(item: dict[str, Any], query: str, recommendation_mode: bool = False) -> dict[str, object]:
     meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
-    haystack = " ".join(str(part or "") for part in [item.get("title"), item.get("source_type"), item.get("source_id"), meta, item.get("url")]).lower()
-    terms = [term for term in query.lower().split() if len(term) > 1]
-    matched = [term for term in terms if term in haystack]
+    terms = _query_terms(query)
+    field_values = {
+        "title": str(item.get("title") or ""),
+        "slug": str(meta.get("slug") or ""),
+        "tags": " ".join(str(tag) for tag in (meta.get("tags") or [])),
+        "hive_lane": str(meta.get("hive_lane") or ""),
+        "catalogue_category": str(meta.get("catalogue_category") or ""),
+        "repos": " ".join(str(repo) for repo in (meta.get("repos") or [])),
+        "priority_tier": str(meta.get("priority_tier") or ""),
+        "risk_level": str(meta.get("risk_level") or ""),
+        "indexable_text": str(meta.get("indexable_text") or ""),
+        "url": str(item.get("url") or ""),
+    }
+    weights = {
+        "title": 12,
+        "slug": 10,
+        "tags": 8,
+        "hive_lane": 7,
+        "catalogue_category": 5,
+        "repos": 3,
+        "priority_tier": 2,
+        "risk_level": 1,
+        "indexable_text": 2,
+        "url": 1,
+    }
+    matched_terms: list[str] = []
+    matched_fields: dict[str, list[str]] = {}
+    raw_score = 0.0
+    for field, text in field_values.items():
+        normalised = _normalise_text(text)
+        field_matches = [term for term in terms if _term_matches(term, normalised)]
+        if not field_matches:
+            continue
+        matched_fields[field] = field_matches
+        matched_terms.extend(field_matches)
+        raw_score += weights.get(field, 1) * len(set(field_matches))
+    if recommendation_mode:
+        raw_score += _priority_boost(meta)
+        raw_score += _risk_boost(meta)
+    max_possible = max(1.0, len(terms) * sum(weights.values()) * 0.35)
+    score = min(100.0, round((raw_score / max_possible) * 100, 2)) if terms else 0.0
     payload = dict(item)
-    payload["score"] = round(len(matched) / max(1, len(terms)), 3)
-    payload["matched_terms"] = matched
+    payload["score"] = score
+    payload["matched_terms"] = sorted(set(matched_terms))
+    payload["matched_fields"] = matched_fields
+    payload["score_breakdown"] = {
+        "raw_score": round(raw_score, 2),
+        "term_count": len(terms),
+        "recommendation_mode": recommendation_mode,
+        "priority_boost": _priority_boost(meta) if recommendation_mode else 0,
+        "risk_boost": _risk_boost(meta) if recommendation_mode else 0,
+    }
     return payload
-
 
 def _filter_skill_items(
     items: list[dict[str, Any]],
@@ -398,6 +602,107 @@ def _skill_manifest_hints(settings: Settings) -> dict[str, object]:
         "skills_index_hint": settings.public_url_for_r2_lane(SKILL_LANE, SKILLS_INDEX_KEY),
     }
 
+
+
+
+def _normalise_lookup(value: str) -> str:
+    return _normalise_text(value).replace("skill:", "").strip()
+
+
+def _normalise_text(value: str) -> str:
+    return " ".join(str(value or "").lower().replace("_", " ").replace("-", " ").replace("/", " ").split())
+
+
+def _query_terms(query: str) -> list[str]:
+    raw = _normalise_text(query)
+    stop = {"the", "and", "for", "with", "from", "this", "that", "into", "over", "using"}
+    return [term for term in raw.split() if len(term) > 1 and term not in stop]
+
+
+def _term_matches(term: str, normalised_text: str) -> bool:
+    if term in normalised_text:
+        return True
+    # Small synonym bridge for current ecosystem wording.
+    synonyms = {
+        "rss": ["feed", "feeds"],
+        "rewrite": ["rewriting", "rewrites", "content", "copy"],
+        "podseo": ["podcast seo", "podcast"],
+        "podcast": ["podseo"],
+        "seo": ["aeo", "geo", "search"],
+    }
+    return any(alias in normalised_text for alias in synonyms.get(term, []))
+
+
+def _priority_boost(meta: dict[str, Any]) -> float:
+    value = str(meta.get("priority_tier") or "").lower()
+    if "p0" in value:
+        return 8.0
+    if "p1" in value:
+        return 5.0
+    if "p2" in value:
+        return 2.0
+    return 0.0
+
+
+def _risk_boost(meta: dict[str, Any]) -> float:
+    value = str(meta.get("risk_level") or "").lower()
+    if value == "low":
+        return 4.0
+    if value == "medium":
+        return 1.5
+    if value == "high":
+        return -2.0
+    return 0.0
+
+
+def _risk_allowed(item: dict[str, Any], risk_ceiling: str) -> bool:
+    order = {"low": 1, "medium": 2, "high": 3}
+    meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    current = order.get(str(meta.get("risk_level") or "").lower(), 3)
+    ceiling = order.get(str(risk_ceiling or "").lower(), 3)
+    return current <= ceiling
+
+
+def _recommendation_summary(item: dict[str, Any] | None) -> dict[str, object] | None:
+    if not isinstance(item, dict):
+        return None
+    meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    return {
+        "skill_id": meta.get("skill_id") or item.get("source_id"),
+        "title": item.get("title"),
+        "score": item.get("score"),
+        "priority_tier": meta.get("priority_tier"),
+        "risk_level": meta.get("risk_level"),
+        "hive_lane": meta.get("hive_lane"),
+        "repos": meta.get("repos") or [],
+        "matched_terms": item.get("matched_terms") or [],
+        "matched_fields": item.get("matched_fields") or {},
+        "descriptor_url": meta.get("descriptor_url") or item.get("url"),
+        "execution_policy": _execution_policy_for_skill(item),
+    }
+
+
+def _execution_policy_for_skill(item: dict[str, Any]) -> dict[str, object]:
+    meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    risk = str(meta.get("risk_level") or "medium").lower()
+    return {
+        "risk_level": risk,
+        "auto_execute_allowed": False,
+        "review_required": risk in {"medium", "high"},
+        "install_allowed": False,
+        "notes": "Registry routing only. Review descriptor and repo impact before any execution/install step.",
+    }
+
+
+def _route_plan(task: str, primary: dict[str, Any] | None, candidates: list[dict[str, Any]]) -> list[dict[str, object]]:
+    primary_summary = _recommendation_summary(primary) if isinstance(primary, dict) else None
+    return [
+        {"step": 1, "name": "understand_task", "description": f"Classify request: {task[:160]}"},
+        {"step": 2, "name": "select_primary_skill", "description": "Pick highest-scoring registry candidate.", "primary_skill": primary_summary},
+        {"step": 3, "name": "gather_evidence", "description": "Load relevant repo/R2/D1 evidence before suggesting changes."},
+        {"step": 4, "name": "dry_run_response", "description": "Return a reviewable plan/output only; do not mutate systems."},
+        {"step": 5, "name": "approval_gate", "description": "Require explicit approval before any future execution adapter runs."},
+    ]
 
 def _filters(**kwargs: str | None) -> dict[str, str]:
     return {key: value for key, value in kwargs.items() if value}
