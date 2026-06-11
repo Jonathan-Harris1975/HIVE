@@ -7,6 +7,7 @@ from app.api.db import router as db_router
 from app.api.health import router as health_router
 from app.api.models import router as models_router
 from app.api.vectorize import router as vectorize_router
+from app.api.workflows import router as workflows_router
 from app.core.config import get_settings
 
 settings = get_settings()
@@ -26,3 +27,4 @@ app.include_router(chat_router, prefix="/v1")
 app.include_router(files_router, prefix="/v1")
 app.include_router(db_router, prefix="/v1")
 app.include_router(vectorize_router, prefix="/v1")
+app.include_router(workflows_router, prefix="/v1")
