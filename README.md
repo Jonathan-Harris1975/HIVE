@@ -19,7 +19,7 @@ This is **not** a ChatLima/Kanari/OrChat fork. Those projects are reference arch
 
 ## Current status
 
-**Build stage:** `v1.7-ecosystem-intelligence`.
+**Build stage:** `v1.8-skill-registry-import`.
 
 HIVE now has working OpenRouter chat/model routing, R2/local upload storage, JSON/base64 uploads, stored ZIP inspection/extraction, SQL persistence, SQL chunk retrieval, Cloudflare D1 metadata, Cloudflare Workers AI embeddings, and Cloudflare Vectorize semantic retrieval. v1.6 adds workflow presets, grounded `source_chunks[]` metadata, retrieval summaries, and an R2 ecosystem lane registry for AIMS/RAMS/website/podcast/skills buckets.
 
@@ -418,7 +418,7 @@ Token hygiene: rotate Cloudflare/OpenRouter/admin tokens after any accidental pa
 
 ## v1.5 ingestion expansion for Koyeb free tier
 
-Build stage `v1.7-ecosystem-intelligence` adds bounded archive/document ingestion without turning HIVE into a heavy always-on worker. This matters because the current deployment is on a free Koyeb web service.
+Build stage `v1.8-skill-registry-import` adds bounded archive/document ingestion without turning HIVE into a heavy always-on worker. This matters because the current deployment is on a free Koyeb web service.
 
 New/expanded capabilities:
 
@@ -443,7 +443,7 @@ The intended real workflow is now: upload an audit/report ZIP to R2, extract a b
 
 ## v1.6 workflow presets and R2 lane registry
 
-Build stage `v1.7-ecosystem-intelligence` turns HIVE from a generic file-aware chatbot into a small private ops analyst with labelled workflows.
+Build stage `v1.8-skill-registry-import` turns HIVE from a generic file-aware chatbot into a small private ops analyst with labelled workflows.
 
 Workflow presets currently available:
 
@@ -488,7 +488,7 @@ ADMIN_BEARER_TOKEN=your-token HIVE_TEST_OBJECT_KEY=uploads/.../file.txt python s
 
 ## v1.7 Ecosystem Intelligence
 
-Build stage `v1.7-ecosystem-intelligence` adds lightweight cross-lane discovery without turning HIVE into a heavy background crawler. PostgreSQL chunks, Cloudflare Vectorize, D1 metadata, and the R2 lane registry remain separate, bounded layers.
+Build stage `v1.8-skill-registry-import` adds lightweight cross-lane discovery without turning HIVE into a heavy background crawler. PostgreSQL chunks, Cloudflare Vectorize, D1 metadata, and the R2 lane registry remain separate, bounded layers.
 
 New endpoints:
 
@@ -500,3 +500,39 @@ New endpoints:
 - `GET /v1/skills/list` – lists recent indexed skills metadata.
 
 Free-tier note: v1.7 deliberately avoids large bucket walks, background polling, and recursive object reads. Use D1 metadata as the discovery index and R2 discovery only for small previews or diagnostics.
+
+## v1.8 Skill Registry Import
+
+Build stage `v1.8-skill-registry-import` imports the R2 shared skill pool into D1 so HIVE can list, search and categorise skills for HIVE, RAMS, AIMS and Website without cloning the bucket into each repo.
+
+New endpoints:
+
+```text
+GET  /v1/skills/status
+POST /v1/skills/import-manifest
+GET  /v1/skills/categories
+GET  /v1/skills/list
+GET  /v1/skills/search
+```
+
+The importer reads the compact `hive_skills/index/search-documents.json` object generated from `HIVE_skills_availability_register_v2_repo_mapped.xlsx` and the descriptor JSON files. It stores catalogue metadata in D1 under lane `hive_skills` and source type `skill_descriptor`.
+
+Safe first run:
+
+```bash
+curl -X POST "$HIVE_URL/v1/skills/import-manifest" \
+  -H "Authorization: Bearer $ADMIN_BEARER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"dry_run":true}'
+```
+
+Then import:
+
+```bash
+curl -X POST "$HIVE_URL/v1/skills/import-manifest" \
+  -H "Authorization: Bearer $ADMIN_BEARER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"dry_run":false}'
+```
+
+The design stays Koyeb-Free friendly: one compact manifest fetch, bounded imports, no background crawler, and D1 remains the catalogue index.
