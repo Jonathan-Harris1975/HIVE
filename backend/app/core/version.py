@@ -1,1 +1,1 @@
-BUILD_STAGE = "v1.8-skill-registry-import"
+BUILD_STAGE = "v1.12-shared-ecosystem-execution-layer"
