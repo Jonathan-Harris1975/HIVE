@@ -24,6 +24,11 @@ from app.services.brand_modes import build_system_prompt
 from app.services.context_manager import ContextWindow
 from app.services.model_router import Mode, ModelRouter
 from app.services.openrouter import OpenRouterClient
+from app.services.workflow_presets import (
+    allowed_workflow_presets,
+    apply_workflow_preset_to_request,
+    get_workflow_preset,
+)
 from app.services.embeddings import CloudflareEmbeddingsClient
 from app.storage.local_blob import LocalBlobStorage
 from app.storage.r2 import R2Storage
@@ -114,6 +119,11 @@ class ChatWithFileRequest(BaseModel):
     chunk_limit: int | None = Field(None, ge=1, le=30)
     auto_chunk: bool = Field(False, description="If use_chunks is true and no chunks exist, read the file and create chunks first.")
     test_run_id: str | None = Field(None, max_length=120)
+    workflow_preset: str | None = Field(
+        None,
+        max_length=80,
+        description="Optional v1.6 preset such as audit_report_review, repo_debug_bundle, ci_log_analysis, social_content_qa, podcast_episode_review, or ebook_keyword_review.",
+    )
 
 
 @router.post("/files/upload")
@@ -224,6 +234,44 @@ def public_url(
         "public_url": url,
         "public_base_url_configured": bool(settings.cf_r2_public_base_url),
     }
+
+
+@router.get("/files/r2-lanes")
+def r2_lanes(settings: Settings = Depends(get_settings)) -> dict[str, object]:
+    """Return configured R2 ecosystem lanes without exposing credentials.
+
+    v1.6 uses this as a registry so HIVE can reason about AIMS/RAMS/website/
+    podcast artefact locations. Only the primary uploads lane is read/write via
+    the existing R2 adapter; the other lanes are metadata/public-URL aware first.
+    """
+
+    lanes = settings.r2_ecosystem_lanes
+    return {
+        "ok": True,
+        "count": len(lanes),
+        "configured_count": sum(1 for item in lanes if item.get("configured")),
+        "primary_upload_lane": "uploads",
+        "lanes": lanes,
+        "note": "Non-upload lanes are registry/public-URL aware first; multi-bucket read/write can be added later if needed.",
+    }
+
+
+@router.get("/files/r2-lanes/public-url")
+def r2_lane_public_url(
+    lane: str = Query(..., min_length=1, max_length=80),
+    key: str = Query("", max_length=2048),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    """Build a public URL for a configured ecosystem R2 lane/key pair."""
+
+    url = settings.public_url_for_r2_lane(lane, key)
+    if not url:
+        allowed = [item["lane"] for item in settings.r2_ecosystem_lanes]
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"message": "Unknown or unconfigured R2 lane/base URL.", "allowed_lanes": allowed},
+        )
+    return {"ok": True, "lane": lane, "key": key.lstrip("/"), "public_url": url}
 
 
 @router.get("/files/read")
@@ -621,6 +669,20 @@ async def chat_with_file(
     hosted smoke-test runners do not get stuck behind an opaque timeout.
     """
 
+    workflow_preset = get_workflow_preset(request.workflow_preset)
+    if request.workflow_preset and workflow_preset is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": "Unknown workflow_preset.",
+                "workflow_preset": request.workflow_preset,
+                "allowed_presets": allowed_workflow_presets(),
+            },
+        )
+    if workflow_preset is not None:
+        request = apply_workflow_preset_to_request(request, workflow_preset)
+    workflow_metadata = workflow_preset.safe_dict() if workflow_preset else None
+
     timings: dict[str, float | None] = {
         "validate_key_seconds": None,
         "read_file_seconds": None,
@@ -801,10 +863,13 @@ async def chat_with_file(
             "selected_model": selected_model,
             "fallback_models": fallback_models,
             "effective_mode": str(effective_mode),
+            "workflow_preset": workflow_metadata,
             "prompt_message_count": len(payload.get("messages", [])),
             "file_excerpt_chars": len(excerpt),
             "source": source,
             "retrieval_metadata": retrieval_metadata,
+            "retrieval_summary": _retrieval_summary(retrieval_metadata, workflow_metadata),
+            "source_chunks": _source_chunks_metadata(chunks if request.use_chunks else []),
             "source_citation": {
                 "label": source_label,
                 "object_key": obj.key,
@@ -881,6 +946,7 @@ async def chat_with_file(
             "empty_reply": empty_reply,
             "source": source,
             "retrieval_metadata": retrieval_metadata,
+            "workflow_preset": workflow_metadata,
             "timings": timings,
             "test_run_id": request.test_run_id,
         },
@@ -899,12 +965,15 @@ async def chat_with_file(
         "error_code": completion.get("hive_error_code"),
         "attempts": completion.get("hive_attempts"),
         "stage": "complete",
+        "workflow_preset": workflow_metadata,
         "timings": _finalise_timings(timings, total_started),
         "conversation_id": db_record.get("conversation_id") or request.conversation_id,
         "db_recorded": bool(db_record.get("ok")),
         "db_error": db_record.get("error"),
         "source": source,
         "retrieval_metadata": retrieval_metadata,
+        "retrieval_summary": _retrieval_summary(retrieval_metadata, workflow_metadata),
+        "source_chunks": _source_chunks_metadata(chunks if request.use_chunks else []),
         "source_citation": {
             "label": source_label,
             "object_key": obj.key,
@@ -1159,8 +1228,16 @@ def _build_file_chat_payload(
         "system",
         "Answer using the attached file content only where relevant. "
         "Do not print the object key or public URL inside the answer; "
-        "the API returns source metadata separately.",
+        "the API returns source metadata separately. When source_chunks are returned, make the answer traceable to the evidence.",
     )
+    preset = get_workflow_preset(request.workflow_preset)
+    if preset:
+        window.add(
+            "system",
+            "Workflow preset: "
+            f"{preset.name}. {preset.prompt_instruction} "
+            f"Preferred output shape: {preset.output_shape}.",
+        )
     for turn in request.history:
         window.add(turn.role, turn.content)
     window.add(
@@ -1268,6 +1345,70 @@ def _retrieval_metadata(retrieval: dict[str, object] | None, chunks: list[dict[s
     }
 
 
+def _source_chunks_metadata(chunks: list[dict[str, object]], *, excerpt_chars: int = 360) -> list[dict[str, object]]:
+    """Return compact evidence metadata for UI citations and answer grounding."""
+
+    source_chunks: list[dict[str, object]] = []
+    for chunk in chunks:
+        content = str(chunk.get("content") or chunk.get("content_preview") or "")
+        metadata = chunk.get("metadata") if isinstance(chunk.get("metadata"), dict) else {}
+        source_chunks.append(
+            {
+                "chunk_id": chunk.get("id"),
+                "object_key": chunk.get("object_key"),
+                "chunk_index": chunk.get("chunk_index"),
+                "char_start": chunk.get("char_start"),
+                "char_end": chunk.get("char_end"),
+                "score": chunk.get("score"),
+                "vector_score": chunk.get("vector_score"),
+                "retrieval_source": metadata.get("retrieval_source") or metadata.get("source") or chunk.get("retrieval_source"),
+                "source_archive_object_key": metadata.get("source_archive_object_key"),
+                "excerpt": content[:excerpt_chars],
+            }
+        )
+    return source_chunks
+
+
+def _retrieval_summary(
+    retrieval_metadata: dict[str, object] | None,
+    workflow_metadata: dict[str, object] | None = None,
+) -> dict[str, object]:
+    if not retrieval_metadata:
+        return {
+            "retrieval_source": "raw_file",
+            "confidence": "medium",
+            "reason": "Raw bounded file excerpt was used instead of chunk retrieval.",
+            "workflow_preset": workflow_metadata.get("name") if workflow_metadata else None,
+        }
+
+    vector_hits = int(retrieval_metadata.get("vector_hits") or 0)
+    sql_hits = int(retrieval_metadata.get("sql_fallback_hits") or 0)
+    chunks_used = int(retrieval_metadata.get("chunks_used") or 0)
+    fallback_used = bool(retrieval_metadata.get("fallback_used"))
+    if vector_hits > 0 and not fallback_used:
+        confidence = "high"
+        reason = "Vectorize returned source chunks and SQL remained available as fallback."
+    elif sql_hits > 0 or chunks_used > 0:
+        confidence = "medium"
+        reason = "SQL chunk evidence was used; good for exact terms and logs, less semantic than Vectorize."
+    else:
+        confidence = "low"
+        reason = "No source chunks were returned for this query."
+
+    return {
+        "workflow_preset": workflow_metadata.get("name") if workflow_metadata else None,
+        "retrieval_source": retrieval_metadata.get("retrieval_source"),
+        "retrieval_mode": retrieval_metadata.get("retrieval_mode"),
+        "fallback_used": fallback_used,
+        "vector_hits": vector_hits,
+        "sql_fallback_hits": sql_hits,
+        "chunks_used": chunks_used,
+        "confidence": confidence,
+        "reason": reason,
+        "output_shape": workflow_metadata.get("output_shape") if workflow_metadata else None,
+    }
+
+
 def _chunk_source_metadata(
     clean_key: str,
     settings: Settings,
@@ -1326,6 +1467,8 @@ def _chat_with_file_model_error_response(
         "timings": timings,
         "source": source,
         "retrieval_metadata": retrieval_metadata,
+        "retrieval_summary": _retrieval_summary(retrieval_metadata, None),
+        "source_chunks": [],
         "source_citation": {
             "label": source_label,
             "object_key": obj.key,

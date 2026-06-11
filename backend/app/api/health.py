@@ -25,6 +25,10 @@ async def health() -> dict[str, object]:
             "bucket_configured": bool(settings.cf_r2_bucket),
             "endpoint_configured": bool(settings.r2_endpoint_url),
             "public_base_url_configured": bool(settings.cf_r2_public_base_url),
+            "ecosystem_lane_count": settings.configured_r2_ecosystem_lane_count,
+            "ecosystem_lanes_configured": [
+                item["lane"] for item in settings.r2_ecosystem_lanes if item.get("configured")
+            ],
         },
         "sql": {
             "configured": sql.enabled,
@@ -51,6 +55,8 @@ async def health() -> dict[str, object]:
         "build": BUILD_STAGE,
         "app": settings.app_name,
         "env": settings.app_env,
+        "workflow_presets_enabled": True,
+        "r2_ecosystem_lanes_enabled": True,
         "free_tier": {
             "enabled": settings.hive_free_tier_mode,
             "platform": "koyeb-free-web-service" if settings.hive_free_tier_mode else None,
