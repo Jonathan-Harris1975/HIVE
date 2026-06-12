@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from app.core.config import Settings
+from app.core.version import BUILD_STAGE
 from app.services.model_router import Mode
 
 
@@ -209,7 +210,7 @@ def allowed_workflow_presets() -> list[str]:
 def workflow_presets_payload(settings: Settings) -> dict[str, Any]:
     return {
         "ok": True,
-        "build_stage_hint": "v1.9-intelligent-skill-search",
+        "build_stage_hint": BUILD_STAGE,
         "free_tier": settings.hive_free_tier_mode,
         "default_retrieval": "hybrid vector + SQL fallback" if settings.vectorize_enabled else "SQL fallback",
         "presets": [preset.safe_dict() for preset in _PRESETS.values()],

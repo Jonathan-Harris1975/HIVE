@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.core.config import Settings
+from app.core.version import BUILD_STAGE
 from app.storage.d1 import D1MetadataStore
 from app.storage.r2 import R2Storage
 from app.storage.sql_store import SqlStore
@@ -47,7 +48,7 @@ def ecosystem_status(settings: Settings) -> dict[str, object]:
     configured_lanes = [item for item in lanes if item.get("configured")]
     return {
         "ok": True,
-        "build_stage_hint": "v1.9-intelligent-skill-search",
+        "build_stage_hint": BUILD_STAGE,
         "free_tier": bool(settings.hive_free_tier_mode),
         "services": {
             "postgres": {"configured": sql.enabled, "dialect": sql.dialect if sql.enabled else None},

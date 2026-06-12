@@ -8,6 +8,7 @@ from typing import Any
 import httpx
 
 from app.core.config import Settings
+from app.core.version import BUILD_STAGE
 from app.storage.d1 import D1MetadataStore
 
 SKILL_LANE = "hive_skills"
@@ -44,7 +45,7 @@ def skills_registry_status(settings: Settings) -> dict[str, object]:
     count_payload = _d1_skill_counts(d1)
     return {
         "ok": True,
-        "build_stage_hint": "v1.9-intelligent-skill-search",
+        "build_stage_hint": BUILD_STAGE,
         "lane": SKILL_LANE,
         "configured": bool(base),
         "public_base_url": base,
@@ -57,7 +58,7 @@ def skills_registry_status(settings: Settings) -> dict[str, object]:
             "count_probe": count_payload,
         },
         "source_of_truth": "R2 hive-skills descriptors + HIVE_skills_availability_register_v2_repo_mapped.xlsx",
-        "note": "v1.9 adds weighted local skill search, filters and lookup endpoints on top of the imported D1 catalogue.",
+        "note": "v1.16 consolidates weighted skill search, recommendation, routing, review queue and evidence-pack endpoints into one clean build line.",
     }
 
 
@@ -277,6 +278,145 @@ def skills_by_risk(*, settings: Settings, risk_level: str, limit: int = 100) -> 
 
 def skills_by_lane(*, settings: Settings, hive_lane: str, limit: int = 100) -> dict[str, object]:
     return list_skills_catalogue(settings=settings, hive_lane=hive_lane, limit=limit) | {"lookup": "hive_lane", "value": hive_lane}
+
+
+def recommend_skills(
+    *,
+    settings: Settings,
+    task: str,
+    repo: str | None = None,
+    hive_lane: str | None = None,
+    risk_ceiling: str | None = None,
+    limit: int = 10,
+) -> dict[str, object]:
+    """Recommend skills for a task without executing anything.
+
+    v1.16 keeps recommendations metadata-only. It scores the imported D1
+    catalogue, applies optional repo/lane/risk filters, and returns a reviewable
+    candidate set for routing or execution-review planning.
+    """
+
+    q = " ".join((task or "").strip().split())[:500]
+    if not q:
+        return {"ok": False, "error_code": "missing_task", "message": "task is required.", **_skill_manifest_hints(settings)}
+    payload = _skill_records(settings=settings, query=None, limit=500)
+    if not payload.get("ok"):
+        return payload
+    items = _filter_skill_items(
+        payload.get("items", []),
+        repo=repo,
+        hive_lane=hive_lane,
+        priority_tier=None,
+        risk_level=None,
+    )
+    if risk_ceiling:
+        items = [item for item in items if _risk_allowed(item, risk_ceiling)]
+    scored = [_score_skill_item(item, q) for item in items]
+    # Keep useful results first, but allow a small fallback set so the operator
+    # still receives a bounded reviewable candidate list for niche tasks.
+    scored.sort(
+        key=lambda item: (
+            float(item.get("score") or 0),
+            _priority_sort_value(str((item.get("metadata") or {}).get("priority_tier") or "")),
+            str(item.get("title") or "").lower(),
+        ),
+        reverse=True,
+    )
+    selected = scored[: max(1, min(int(limit or 10), 50))]
+    return {
+        "ok": True,
+        "build_stage_hint": BUILD_STAGE,
+        "lane": SKILL_LANE,
+        "task": q,
+        "count": len(selected),
+        "recommendations": [_recommendation_summary(item) for item in selected],
+        "items": selected,
+        "filters": _filters(repo=repo, hive_lane=hive_lane, risk_ceiling=risk_ceiling),
+        "recommendation_mode": "weighted_local_d1_catalogue",
+        "safety_note": "Recommendations are registry-only. HIVE does not install or execute repo skills without an explicit review gate.",
+        **_skill_manifest_hints(settings),
+    }
+
+
+def route_skill_request(
+    *,
+    settings: Settings,
+    task: str,
+    repo: str | None = None,
+    hive_lane: str | None = None,
+    limit: int = 5,
+) -> dict[str, object]:
+    """Create a review-gated skill routing plan without execution."""
+
+    recs = recommend_skills(settings=settings, task=task, repo=repo, hive_lane=hive_lane, limit=limit)
+    if not recs.get("ok"):
+        return recs
+    items = recs.get("items", []) if isinstance(recs.get("items"), list) else []
+    primary = items[0] if items else None
+    route = _route_plan(task=task, primary=primary, candidates=items)
+    return {
+        "ok": True,
+        "build_stage_hint": BUILD_STAGE,
+        "task": recs.get("task"),
+        "repo": repo,
+        "hive_lane": hive_lane,
+        "primary_skill": _recommendation_summary(primary) if isinstance(primary, dict) else None,
+        "candidate_count": len(items),
+        "candidate_skills": [_recommendation_summary(item) for item in items],
+        "route_plan": route,
+        "execution_policy": "review_gated",
+        "can_execute_now": False,
+        "free_tier_note": "Routing is metadata-only and safe for Koyeb Free; no background execution is started.",
+        **_skill_manifest_hints(settings),
+    }
+
+
+def shared_execution_plan(
+    *,
+    settings: Settings,
+    task: str,
+    repo: str | None = None,
+    workflow_preset: str | None = None,
+    limit: int = 5,
+) -> dict[str, object]:
+    """Return a shared ecosystem execution plan without running tools.
+
+    v1.16 consolidates the v1.9 skill-search branch with v1.14/v1.15 review
+    queue and evidence-pack features. This function is intentionally plan-only:
+    it does not install skills, mutate repos, write exports, or start background
+    execution.
+    """
+
+    routed = route_skill_request(settings=settings, task=task, repo=repo, hive_lane=None, limit=limit)
+    if not routed.get("ok"):
+        return routed
+    steps = [
+        {"step": 1, "name": "classify_task", "description": "Confirm repo/lane/workflow intent and risk level."},
+        {"step": 2, "name": "select_skills", "description": "Use HIVE skill registry recommendations as the candidate set."},
+        {"step": 3, "name": "load_sources", "description": "Collect relevant R2/D1/PostgreSQL evidence before proposing changes."},
+        {"step": 4, "name": "dry_run", "description": "Produce a dry-run output or patch plan; no live repo/system mutation."},
+        {"step": 5, "name": "approval_gate", "description": "Require explicit approval before any future execution adapter runs."},
+    ]
+    return {
+        "ok": True,
+        "build_stage_hint": BUILD_STAGE,
+        "task": task,
+        "repo": repo,
+        "workflow_preset": workflow_preset,
+        "execution_mode": "plan_only",
+        "can_execute_now": False,
+        "requires_approval": True,
+        "routed_skill_plan": routed,
+        "shared_steps": steps,
+        "guardrails": {
+            "no_auto_install": True,
+            "no_background_jobs_on_koyeb_free": True,
+            "dry_run_first": True,
+            "review_queue_required": True,
+            "risk_gates_required": ["medium", "high"],
+        },
+        "next_adapter_layer": "Future execution adapters must remain explicit, allow-listed and review-gated.",
+    }
 
 def skill_categories(settings: Settings, limit: int = 500) -> dict[str, object]:
     payload = _skill_records(settings=settings, query=None, limit=limit)
@@ -584,6 +724,57 @@ def _skill_manifest_hints(settings: Settings) -> dict[str, object]:
         "skills_index_hint": settings.public_url_for_r2_lane(SKILL_LANE, SKILLS_INDEX_KEY),
     }
 
+
+
+def _risk_allowed(item: dict[str, Any], risk_ceiling: str) -> bool:
+    order = {"low": 1, "medium": 2, "high": 3}
+    meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    current = order.get(str(meta.get("risk_level") or "").lower(), 3)
+    ceiling = order.get(str(risk_ceiling or "").lower(), 3)
+    return current <= ceiling
+
+
+def _recommendation_summary(item: dict[str, Any] | None) -> dict[str, object] | None:
+    if not isinstance(item, dict):
+        return None
+    meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    return {
+        "skill_id": meta.get("skill_id") or item.get("source_id"),
+        "title": item.get("title"),
+        "score": item.get("score"),
+        "priority_tier": meta.get("priority_tier"),
+        "risk_level": meta.get("risk_level"),
+        "hive_lane": meta.get("hive_lane"),
+        "repos": meta.get("repos") or [],
+        "matched_terms": item.get("matched_terms") or [],
+        "matched_fields": item.get("matched_fields") or {},
+        "score_explanation": item.get("score_explanation"),
+        "descriptor_url": meta.get("descriptor_url") or item.get("url"),
+        "execution_policy": _execution_policy_for_skill(item),
+    }
+
+
+def _execution_policy_for_skill(item: dict[str, Any]) -> dict[str, object]:
+    meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    risk = str(meta.get("risk_level") or "medium").lower()
+    return {
+        "risk_level": risk,
+        "auto_execute_allowed": False,
+        "review_required": risk in {"medium", "high"},
+        "install_allowed": False,
+        "notes": "Registry routing only. Review descriptor and repo impact before any execution/install step.",
+    }
+
+
+def _route_plan(task: str, primary: dict[str, Any] | None, candidates: list[dict[str, Any]]) -> list[dict[str, object]]:
+    primary_summary = _recommendation_summary(primary) if isinstance(primary, dict) else None
+    return [
+        {"step": 1, "name": "understand_task", "description": f"Classify request: {task[:160]}"},
+        {"step": 2, "name": "select_primary_skill", "description": "Pick highest-scoring registry candidate.", "primary_skill": primary_summary},
+        {"step": 3, "name": "gather_evidence", "description": "Load relevant repo/R2/D1 evidence before suggesting changes."},
+        {"step": 4, "name": "dry_run_response", "description": "Return a reviewable plan/output only; do not mutate systems."},
+        {"step": 5, "name": "approval_gate", "description": "Require explicit approval before any future execution adapter runs."},
+    ]
 
 def _filters(**kwargs: str | None) -> dict[str, str]:
     return {key: value for key, value in kwargs.items() if value}
