@@ -10,6 +10,7 @@ from app.api.vectorize import router as vectorize_router
 from app.api.workflows import router as workflows_router
 from app.api.ecosystem import router as ecosystem_router
 from app.api.skills import router as skills_router
+from app.api.execution import router as execution_router
 from app.api.system import router as system_router
 from app.core.config import get_settings
 
@@ -33,4 +34,5 @@ app.include_router(vectorize_router, prefix="/v1")
 app.include_router(workflows_router, prefix="/v1")
 app.include_router(ecosystem_router, prefix="/v1")
 app.include_router(skills_router, prefix="/v1")
+app.include_router(execution_router, prefix="/v1")
 app.include_router(system_router, prefix="/v1")
