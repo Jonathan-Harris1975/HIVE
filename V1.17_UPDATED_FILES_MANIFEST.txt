@@ -1,0 +1,25 @@
+HIVE v1.17 registry integrity updated files
+
+README.md
+docs/CHANGELOG.md
+docs/architecture.md
+docs/koyeb-deployment.md
+docs/roadmap.md
+frontend-placeholder/README.md
+scripts/v117_registry_integrity_smoke.py
+docs/releases/v1.16-skill-search-review-integration.md
+docs/releases/v1.17-registry-integrity.md
+backend/tests/test_health_operational.py
+backend/tests/test_v113_repo_hygiene.py
+backend/tests/test_v114_execution_review_queue.py
+backend/tests/test_v115_review_evidence_pack.py
+backend/tests/test_v15_ingestion_expansion.py
+backend/tests/test_v16_workflow_presets_r2_lanes.py
+backend/tests/test_v17_ecosystem_intelligence.py
+backend/tests/test_v18_skill_registry_import.py
+backend/tests/test_v19_to_v112_skill_intelligence.py
+backend/tests/test_vectorize_foundation.py
+backend/tests/test_v117_registry_integrity.py
+backend/app/api/skills.py
+backend/app/core/version.py
+backend/app/services/skill_registry.py
