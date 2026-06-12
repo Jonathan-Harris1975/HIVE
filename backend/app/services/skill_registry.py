@@ -778,3 +778,195 @@ def _route_plan(task: str, primary: dict[str, Any] | None, candidates: list[dict
 
 def _filters(**kwargs: str | None) -> dict[str, str]:
     return {key: value for key, value in kwargs.items() if value}
+
+
+VALID_PRIORITY_TIERS = {"P0 - Foundation", "P1 - High", "P2 - Useful"}
+VALID_RISK_LEVELS = {"low", "medium", "high"}
+VALID_REPOS = {"HIVE", "RAMS", "AIMS", "Website"}
+
+
+def skill_registry_integrity_report(*, settings: Settings, limit: int = 500) -> dict[str, object]:
+    """Return read-only integrity checks for the imported shared skill registry.
+
+    v1.17 focuses on registry trust before any stronger routing/execution layer.
+    It validates the D1 catalogue against the R2 descriptor/public URL metadata
+    and reports duplicates, missing fields, invalid taxonomy values and likely
+    orphan candidates. It never deletes or repairs records.
+    """
+
+    payload = _skill_records(settings=settings, query=None, limit=max(1, min(int(limit or 500), 1000)))
+    if not payload.get("ok"):
+        return payload | {"build_stage_hint": BUILD_STAGE}
+    items = payload.get("items", []) if isinstance(payload.get("items"), list) else []
+    duplicates = _skill_duplicate_report(items)
+    missing = _skill_missing_report(items)
+    taxonomy = _skill_taxonomy_report(items)
+    orphans = _skill_orphan_report(settings=settings, items=items)
+    stats = _skill_stats_from_items([item.get("metadata") for item in items if isinstance(item.get("metadata"), dict)])
+    issue_count = sum(
+        len(group)
+        for group in [
+            duplicates.get("skill_ids", []),
+            duplicates.get("slugs", []),
+            duplicates.get("object_keys", []),
+            missing.get("records", []),
+            taxonomy.get("records", []),
+            orphans.get("records", []),
+        ]
+    )
+    registry_health = 100 if not items else max(0, round(100 - min(issue_count, len(items)) / len(items) * 100, 2))
+    return {
+        "ok": True,
+        "build_stage_hint": BUILD_STAGE,
+        "lane": SKILL_LANE,
+        "source": "d1:hive_ecosystem_metadata",
+        "checked_count": len(items),
+        "registry_health": registry_health,
+        "issue_count": issue_count,
+        "duplicates": duplicates,
+        "missing": missing,
+        "taxonomy": taxonomy,
+        "orphans": orphans,
+        "stats": stats,
+        "safety_note": "Read-only integrity report. v1.17 does not delete, install, execute, or mutate skills.",
+        **_skill_manifest_hints(settings),
+    }
+
+
+def skill_registry_duplicates(*, settings: Settings, limit: int = 500) -> dict[str, object]:
+    payload = _skill_records(settings=settings, query=None, limit=max(1, min(int(limit or 500), 1000)))
+    if not payload.get("ok"):
+        return payload | {"build_stage_hint": BUILD_STAGE}
+    items = payload.get("items", []) if isinstance(payload.get("items"), list) else []
+    duplicates = _skill_duplicate_report(items)
+    return {"ok": True, "build_stage_hint": BUILD_STAGE, "lane": SKILL_LANE, "checked_count": len(items), "duplicates": duplicates, **_skill_manifest_hints(settings)}
+
+
+def skill_registry_missing(*, settings: Settings, limit: int = 500) -> dict[str, object]:
+    payload = _skill_records(settings=settings, query=None, limit=max(1, min(int(limit or 500), 1000)))
+    if not payload.get("ok"):
+        return payload | {"build_stage_hint": BUILD_STAGE}
+    items = payload.get("items", []) if isinstance(payload.get("items"), list) else []
+    missing = _skill_missing_report(items)
+    taxonomy = _skill_taxonomy_report(items)
+    return {"ok": True, "build_stage_hint": BUILD_STAGE, "lane": SKILL_LANE, "checked_count": len(items), "missing": missing, "taxonomy": taxonomy, **_skill_manifest_hints(settings)}
+
+
+def skill_registry_orphans(*, settings: Settings, limit: int = 500) -> dict[str, object]:
+    payload = _skill_records(settings=settings, query=None, limit=max(1, min(int(limit or 500), 1000)))
+    if not payload.get("ok"):
+        return payload | {"build_stage_hint": BUILD_STAGE}
+    items = payload.get("items", []) if isinstance(payload.get("items"), list) else []
+    orphans = _skill_orphan_report(settings=settings, items=items)
+    return {"ok": True, "build_stage_hint": BUILD_STAGE, "lane": SKILL_LANE, "checked_count": len(items), "orphans": orphans, **_skill_manifest_hints(settings)}
+
+
+def rebuild_skills_index(*, settings: Settings, dry_run: bool = True, limit: int | None = None) -> dict[str, object]:
+    """Rebuild the D1 skill catalogue from the R2 search document manifest.
+
+    This is a thin guarded wrapper around the existing importer so operators have
+    a clear v1.17 maintenance endpoint. Dry-run remains the default.
+    """
+
+    result = import_skills_manifest(settings=settings, dry_run=dry_run, limit=limit)
+    result["build_stage_hint"] = BUILD_STAGE
+    result["operation"] = "rebuild_skills_index"
+    result["safety_note"] = "Dry-run first. Live rebuild upserts D1 metadata only; it does not modify R2 descriptors or execute skills."
+    return result
+
+
+def _skill_duplicate_report(items: list[dict[str, Any]]) -> dict[str, object]:
+    buckets: dict[str, dict[str, list[dict[str, object]]]] = {
+        "skill_ids": defaultdict(list),
+        "slugs": defaultdict(list),
+        "object_keys": defaultdict(list),
+        "search_document_ids": defaultdict(list),
+    }
+    for item in items:
+        meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+        record = {
+            "id": item.get("id"),
+            "title": item.get("title"),
+            "source_id": item.get("source_id"),
+            "descriptor_url": meta.get("descriptor_url") or item.get("url"),
+        }
+        values = {
+            "skill_ids": _normalise_skill_id(str(meta.get("skill_id") or item.get("source_id") or "")),
+            "slugs": str(meta.get("slug") or item.get("title") or "").strip().lower(),
+            "object_keys": str(meta.get("object_key") or "").strip(),
+            "search_document_ids": str(meta.get("search_document_id") or item.get("id") or "").strip(),
+        }
+        for field, value in values.items():
+            if value:
+                buckets[field][value].append(record)
+    return {
+        field: [{"value": value, "count": len(records), "records": records} for value, records in bucket.items() if len(records) > 1]
+        for field, bucket in buckets.items()
+    }
+
+
+def _skill_missing_report(items: list[dict[str, Any]]) -> dict[str, object]:
+    required = ["skill_id", "slug", "name", "object_key", "descriptor_url", "priority_tier", "hive_lane", "risk_level", "repos", "tags", "catalogue_category", "indexable_text"]
+    records: list[dict[str, object]] = []
+    for item in items:
+        meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+        missing = []
+        for field in required:
+            value = meta.get(field)
+            if value is None or value == "" or value == []:
+                missing.append(field)
+        if missing:
+            records.append({"id": item.get("id"), "title": item.get("title"), "missing_fields": missing})
+    return {"count": len(records), "records": records[:100], "truncated": len(records) > 100}
+
+
+def _skill_taxonomy_report(items: list[dict[str, Any]]) -> dict[str, object]:
+    records: list[dict[str, object]] = []
+    for item in items:
+        meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+        issues: list[str] = []
+        priority = str(meta.get("priority_tier") or "").strip()
+        risk = str(meta.get("risk_level") or "").strip().lower()
+        repos = [str(repo).strip() for repo in (meta.get("repos") or [])]
+        if priority and priority not in VALID_PRIORITY_TIERS:
+            issues.append(f"invalid_priority_tier:{priority}")
+        if risk and risk not in VALID_RISK_LEVELS:
+            issues.append(f"invalid_risk_level:{risk}")
+        invalid_repos = [repo for repo in repos if repo not in VALID_REPOS]
+        if invalid_repos:
+            issues.append(f"invalid_repos:{','.join(invalid_repos)}")
+        if not str(meta.get("hive_lane") or "").strip():
+            issues.append("missing_hive_lane")
+        if issues:
+            records.append({"id": item.get("id"), "title": item.get("title"), "issues": issues})
+    return {"count": len(records), "records": records[:100], "truncated": len(records) > 100}
+
+
+def _skill_orphan_report(*, settings: Settings, items: list[dict[str, Any]]) -> dict[str, object]:
+    base = (settings.public_url_for_r2_lane(SKILL_LANE, "") or "").rstrip("/")
+    records: list[dict[str, object]] = []
+    for item in items:
+        meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+        object_key = str(meta.get("object_key") or "").lstrip("/")
+        descriptor_url = str(meta.get("descriptor_url") or item.get("url") or "").strip()
+        issues: list[str] = []
+        if object_key and base:
+            expected = f"{base}/{object_key}"
+            if descriptor_url and descriptor_url != expected:
+                issues.append("descriptor_url_mismatch")
+        if not descriptor_url:
+            issues.append("descriptor_url_missing")
+        if not object_key:
+            issues.append("object_key_missing")
+        if item.get("lane") != SKILL_LANE:
+            issues.append("wrong_lane")
+        if item.get("source_type") != "skill_descriptor":
+            issues.append("wrong_source_type")
+        if issues:
+            records.append({"id": item.get("id"), "title": item.get("title"), "issues": issues, "object_key": object_key, "descriptor_url": descriptor_url})
+    return {
+        "count": len(records),
+        "records": records[:100],
+        "truncated": len(records) > 100,
+        "note": "Orphan check is metadata-based in v1.17; it does not walk or fetch every R2 descriptor on Koyeb Free.",
+    }
