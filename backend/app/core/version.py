@@ -1,1 +1,1 @@
-BUILD_STAGE = "v1.12-shared-ecosystem-execution-layer"
+BUILD_STAGE = "v1.13-repo-hygiene-cleanup"
