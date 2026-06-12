@@ -19,9 +19,9 @@ This is **not** a ChatLima/Kanari/OrChat fork. Those projects are reference arch
 
 ## Current status
 
-**Build stage:** `v1.8-skill-registry-import`.
+**Build stage:** `v1.12-shared-ecosystem-execution-layer`.
 
-HIVE now has working OpenRouter chat/model routing, R2/local upload storage, JSON/base64 uploads, stored ZIP inspection/extraction, SQL persistence, SQL chunk retrieval, Cloudflare D1 metadata, Cloudflare Workers AI embeddings, and Cloudflare Vectorize semantic retrieval. v1.6 adds workflow presets, grounded `source_chunks[]` metadata, retrieval summaries, and an R2 ecosystem lane registry for AIMS/RAMS/website/podcast/skills buckets.
+HIVE now has working OpenRouter chat/model routing, R2/local upload storage, bounded document/ZIP ingestion, SQL persistence, SQL chunk retrieval, Cloudflare D1 metadata, Cloudflare Workers AI embeddings, Cloudflare Vectorize semantic retrieval, workflow presets, R2 ecosystem lanes, imported shared skills, weighted skill search, review-gated skill routing, and a plan-only shared ecosystem execution layer.
 
 ## Recommended v1 architecture
 
@@ -91,6 +91,22 @@ Recommended Koyeb path: use the `Dockerfile`. See `docs/koyeb-deployment.md`.
 - `GET /v1/files/vector-search`
 - `POST /v1/db/ecosystem-metadata`
 - `GET /v1/db/ecosystem-metadata`
+- `GET /v1/ecosystem/status`
+- `GET /v1/ecosystem/search?q=...`
+- `GET /v1/ecosystem/recent`
+- `GET /v1/files/r2-discovery`
+- `GET /v1/skills/status`
+- `POST /v1/skills/import-manifest`
+- `GET /v1/skills/categories`
+- `GET /v1/skills/list`
+- `GET /v1/skills/search?q=...`
+- `GET /v1/skills/get?id=S194`
+- `GET /v1/skills/by-repo?repo=AIMS`
+- `GET /v1/skills/by-risk?risk=high`
+- `GET /v1/skills/by-lane?lane=SEO/AEO/GEO`
+- `POST /v1/skills/recommend`
+- `POST /v1/skills/route`
+- `POST /v1/ecosystem/execution-plan`
 
 
 
@@ -418,7 +434,7 @@ Token hygiene: rotate Cloudflare/OpenRouter/admin tokens after any accidental pa
 
 ## v1.5 ingestion expansion for Koyeb free tier
 
-Build stage `v1.8-skill-registry-import` adds bounded archive/document ingestion without turning HIVE into a heavy always-on worker. This matters because the current deployment is on a free Koyeb web service.
+Build stage `v1.12-shared-ecosystem-execution-layer` adds bounded archive/document ingestion without turning HIVE into a heavy always-on worker. This matters because the current deployment is on a free Koyeb web service.
 
 New/expanded capabilities:
 
@@ -443,7 +459,7 @@ The intended real workflow is now: upload an audit/report ZIP to R2, extract a b
 
 ## v1.6 workflow presets and R2 lane registry
 
-Build stage `v1.8-skill-registry-import` turns HIVE from a generic file-aware chatbot into a small private ops analyst with labelled workflows.
+Build stage `v1.12-shared-ecosystem-execution-layer` turns HIVE from a generic file-aware chatbot into a small private ops analyst with labelled workflows.
 
 Workflow presets currently available:
 
@@ -488,7 +504,7 @@ ADMIN_BEARER_TOKEN=your-token HIVE_TEST_OBJECT_KEY=uploads/.../file.txt python s
 
 ## v1.7 Ecosystem Intelligence
 
-Build stage `v1.8-skill-registry-import` adds lightweight cross-lane discovery without turning HIVE into a heavy background crawler. PostgreSQL chunks, Cloudflare Vectorize, D1 metadata, and the R2 lane registry remain separate, bounded layers.
+Build stage `v1.12-shared-ecosystem-execution-layer` adds lightweight cross-lane discovery without turning HIVE into a heavy background crawler. PostgreSQL chunks, Cloudflare Vectorize, D1 metadata, and the R2 lane registry remain separate, bounded layers.
 
 New endpoints:
 
@@ -503,7 +519,7 @@ Free-tier note: v1.7 deliberately avoids large bucket walks, background polling,
 
 ## v1.8 Skill Registry Import
 
-Build stage `v1.8-skill-registry-import` imports the R2 shared skill pool into D1 so HIVE can list, search and categorise skills for HIVE, RAMS, AIMS and Website without cloning the bucket into each repo.
+Build stage `v1.12-shared-ecosystem-execution-layer` imports the R2 shared skill pool into D1 so HIVE can list, search and categorise skills for HIVE, RAMS, AIMS and Website without cloning the bucket into each repo.
 
 New endpoints:
 
@@ -536,3 +552,50 @@ curl -X POST "$HIVE_URL/v1/skills/import-manifest" \
 ```
 
 The design stays Koyeb-Free friendly: one compact manifest fetch, bounded imports, no background crawler, and D1 remains the catalogue index.
+
+
+## v1.9 Intelligent Skill Search
+
+Build stage `v1.12-shared-ecosystem-execution-layer` includes weighted skill search over the imported D1 skill catalogue. Search scores title, slug, tags, hive lane, catalogue category, repo mapping, priority, risk and `indexable_text`. Responses include `score`, `matched_terms`, `matched_fields` and `score_breakdown` so the future UI can explain why a skill was selected.
+
+Useful endpoints:
+
+```text
+GET /v1/skills/search?q=RSS%20rewrite
+GET /v1/skills/get?id=S194
+GET /v1/skills/by-repo?repo=AIMS
+GET /v1/skills/by-risk?risk=high
+GET /v1/skills/by-lane?lane=SEO/AEO/GEO
+```
+
+## v1.10 Skill Recommendation Engine
+
+`POST /v1/skills/recommend` ranks registry skills for a task. It supports repo, lane and risk-ceiling filters. It returns registry-only recommendations and explicitly does not install or execute skills.
+
+Example:
+
+```json
+{
+  "task": "review podcast SEO and fresh signal opportunities",
+  "repo": "AIMS",
+  "risk_ceiling": "medium",
+  "limit": 5
+}
+```
+
+## v1.11 Skill Routing / Orchestration
+
+`POST /v1/skills/route` converts recommendations into a review-gated route plan. It selects a primary skill, keeps candidate skills visible, and returns dry-run/approval steps. No repo mutation, install, deployment, or background execution happens in v1.11.
+
+## v1.12 Shared Ecosystem Execution Layer
+
+`POST /v1/ecosystem/execution-plan` creates a shared plan for HIVE/AIMS/RAMS/Website work. The layer is deliberately **plan-only** and suitable for Koyeb Free: classify the task, select candidate skills, gather evidence, produce a dry-run plan, then require explicit approval before any future adapter can run.
+
+The safety boundary is part of the contract:
+
+- no automatic skill install
+- no repo mutation
+- no deployment trigger
+- no background job on Koyeb Free
+- dry-run first
+- explicit approval required for future execution adapters
