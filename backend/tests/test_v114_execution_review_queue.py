@@ -68,7 +68,7 @@ def _fake_plan(**kwargs):
 
 
 def test_v114_build_stage():
-    assert BUILD_STAGE == "v1.14-execution-review-queue"
+    assert BUILD_STAGE == "v1.15-review-evidence-pack"
 
 
 def test_create_execution_review_dry_run(monkeypatch):

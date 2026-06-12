@@ -25,7 +25,7 @@ def test_health_reports_v15_free_tier_limits(monkeypatch, tmp_path) -> None:
     _reset_settings(monkeypatch, tmp_path)
     client = TestClient(app)
     body = client.get("/health").json()
-    assert body["build"] == "v1.14-execution-review-queue"
+    assert body["build"] == "v1.15-review-evidence-pack"
     assert body["free_tier"]["enabled"] is True
     assert "zip_extract_max_members" in body["free_tier"]["ingestion_limits"]
 

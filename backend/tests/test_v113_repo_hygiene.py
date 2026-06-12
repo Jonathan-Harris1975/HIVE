@@ -3,7 +3,7 @@ from app.services.repo_hygiene import repo_hygiene_report
 
 
 def test_build_stage_is_v113():
-    assert BUILD_STAGE == "v1.14-execution-review-queue"
+    assert BUILD_STAGE == "v1.15-review-evidence-pack"
 
 
 def test_repo_hygiene_report_detects_orphan_and_duplicates(tmp_path):
