@@ -2,7 +2,7 @@
 
 ## Current build
 
-`v1.14-execution-review-queue`
+`v1.15-review-evidence-pack`
 
 ## Completed stages
 
@@ -25,10 +25,22 @@ v1.13 should add explicit low-risk execution adapters only after review, for exa
 - dry-run patch planning
 - MAST-triggered health/status reports
 
-## v1.14 Execution Review Queue
+## v1.15 Execution Review Queue
 
 Status: implemented.
 
 Adds D1-backed execution review records and approval decisions for plan-only skill routes. This stage prepares the future operator UI by making recommended actions visible, reviewable and auditable without granting automatic execution.
 
 Next likely stage: explicit low-risk adapter prototypes behind allowlists and dry-run-first gates.
+
+## v1.15 Review Evidence Packs
+
+Adds audit-trail and evidence-pack endpoints for execution review plans. This gives the future UI a structured review artefact before any execution adapter exists.
+
+Still deferred:
+
+- automatic skill execution
+- repo mutations
+- deploy triggers
+- background workers
+- R2 export persistence

@@ -248,7 +248,7 @@ curl https://YOUR-KOYEB-APP.koyeb.app/health
 curl https://YOUR-KOYEB-APP.koyeb.app/healthz
 ```
 
-`/health` should show `build: v1.14-execution-review-queue` and clean flags for R2, SQL, D1, Vectorize and embeddings. `/healthz` is deliberately small and unauthenticated for later MAST keep-awake use.
+`/health` should show `build: v1.15-review-evidence-pack` and clean flags for R2, SQL, D1, Vectorize and embeddings. `/healthz` is deliberately small and unauthenticated for later MAST keep-awake use.
 
 Use `POST /v1/db/test-cleanup` with `dry_run:true` before deleting smoke-test records.
 
@@ -283,7 +283,7 @@ curl "$HIVE_URL/v1/workflow-presets" -H "Authorization: Bearer $ADMIN_BEARER_TOK
 curl "$HIVE_URL/v1/files/r2-lanes" -H "Authorization: Bearer $ADMIN_BEARER_TOKEN"
 ```
 
-`/health` should show `build: v1.14-execution-review-queue`, `workflow_presets_enabled: true`, and `r2_ecosystem_lanes_enabled: true`.
+`/health` should show `build: v1.15-review-evidence-pack`, `workflow_presets_enabled: true`, and `r2_ecosystem_lanes_enabled: true`.
 
 Keep MAST keep-awake pings gentle on Koyeb Free. Use `/healthz`, not authenticated file/chat endpoints.
 
@@ -301,7 +301,7 @@ The importer uses `R2_PUBLIC_BASE_URL_HIVE_SKILLS` and reads `index/search-docum
 
 ## v1.12 deployment verification
 
-After deploying v1.14, verify the inherited v1.12 endpoints plus the v1.14 review queue:
+After deploying v1.15, verify the inherited v1.12 endpoints plus the v1.15 review queue:
 
 ```bash
 curl "$HIVE_URL/health"
@@ -310,11 +310,11 @@ curl -X POST "$HIVE_URL/v1/skills/recommend" -H "Authorization: Bearer $ADMIN_BE
 curl -X POST "$HIVE_URL/v1/ecosystem/execution-plan" -H "Authorization: Bearer $ADMIN_BEARER_TOKEN" -H "Content-Type: application/json" -d '{"task":"review podcast SEO workflow","repo":"AIMS"}'
 ```
 
-`/health` should report `build: v1.14-execution-review-queue`. The new execution layer is plan-only and safe for Koyeb Free.
+`/health` should report `build: v1.15-review-evidence-pack`. The new execution layer is plan-only and safe for Koyeb Free.
 
-## v1.14 deployment verification
+## v1.15 deployment verification
 
-After deploying v1.14, check:
+After deploying v1.15, check:
 
 ```bash
 curl "$HIVE_BASE_URL/health"
@@ -330,4 +330,4 @@ curl -X POST "$HIVE_BASE_URL/v1/execution-reviews" \
   -d '{"task":"Review podcast SEO workflow","repo":"AIMS","workflow_preset":"podcast_episode_review","dry_run":true}'
 ```
 
-The endpoint should return `can_execute_now:false`. v1.14 does not start background jobs and is suitable for Koyeb Free.
+The endpoint should return `can_execute_now:false`. v1.15 does not start background jobs and is suitable for Koyeb Free.

@@ -234,8 +234,14 @@ D1 skill catalogue
 
 The execution layer does not mutate repos, install skills, run deploys or start background workers. It returns reviewable plans for HIVE/AIMS/RAMS/Website workflows and keeps PostgreSQL, D1, R2, Vectorize and the skill registry as separate, bounded layers.
 
-## v1.14 execution review queue
+## v1.15 execution review queue
 
 The execution review queue sits between skill routing and any future execution adapter. It stores reviewable plan records in D1 using lane `hive_execution_reviews`. Each record contains the routed skill plan, task, repo, workflow preset, review gate state and decision log.
 
 The queue is intentionally non-executing. Even an `approved` review keeps `can_execute_now:false`. Later builds may add explicit adapters for selected low-risk operations, but those adapters should read this queue rather than bypass it.
+
+## v1.15 review evidence packs
+
+The evidence-pack layer sits on top of the execution review queue. It turns a stored D1 review record into a UI/export friendly artefact with task metadata, primary skill evidence, candidate skills, shared execution steps, guardrails, decision log and audit timeline.
+
+v1.15 remains plan-only. Evidence packs are inline responses and do not run skills, mutate repos, upload exports to R2 or start background work.
