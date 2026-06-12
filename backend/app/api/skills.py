@@ -9,7 +9,10 @@ from app.services.skill_registry import (
     get_skill_catalogue_item,
     import_skills_manifest,
     list_skills_catalogue,
+    recommend_skills,
+    route_skill_request,
     search_skills_catalogue,
+    shared_execution_plan,
     skill_categories,
     skills_by_lane,
     skills_by_repo,
@@ -24,6 +27,28 @@ class SkillManifestImportRequest(BaseModel):
     dry_run: bool = True
     limit: int | None = Field(None, ge=1, le=1000)
     search_documents_url: str | None = Field(None, max_length=2048)
+
+
+class SkillRecommendationRequest(BaseModel):
+    task: str = Field(..., min_length=1, max_length=1000)
+    repo: str | None = Field(None, max_length=40)
+    hive_lane: str | None = Field(None, max_length=120)
+    risk_ceiling: str | None = Field(None, max_length=40)
+    limit: int = Field(10, ge=1, le=50)
+
+
+class SkillRouteRequest(BaseModel):
+    task: str = Field(..., min_length=1, max_length=1000)
+    repo: str | None = Field(None, max_length=40)
+    hive_lane: str | None = Field(None, max_length=120)
+    limit: int = Field(5, ge=1, le=25)
+
+
+class SharedExecutionPlanRequest(BaseModel):
+    task: str = Field(..., min_length=1, max_length=1200)
+    repo: str | None = Field(None, max_length=40)
+    workflow_preset: str | None = Field(None, max_length=120)
+    limit: int = Field(5, ge=1, le=25)
 
 
 @router.get("/skills/status")
@@ -146,4 +171,53 @@ def list_skills(
         hive_lane=hive_lane,
         priority_tier=priority_tier,
         risk_level=risk_level,
+    )
+
+
+@router.post("/skills/recommend")
+def recommend(
+    payload: SkillRecommendationRequest,
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    """Recommend registry skills for a task without executing anything."""
+
+    return recommend_skills(
+        settings=settings,
+        task=payload.task,
+        repo=payload.repo,
+        hive_lane=payload.hive_lane,
+        risk_ceiling=payload.risk_ceiling,
+        limit=payload.limit,
+    )
+
+
+@router.post("/skills/route")
+def route(
+    payload: SkillRouteRequest,
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    """Create a review-gated skill routing plan for a task."""
+
+    return route_skill_request(
+        settings=settings,
+        task=payload.task,
+        repo=payload.repo,
+        hive_lane=payload.hive_lane,
+        limit=payload.limit,
+    )
+
+
+@router.post("/ecosystem/execution-plan")
+def execution_plan(
+    payload: SharedExecutionPlanRequest,
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    """Return a shared ecosystem execution plan; does not mutate systems."""
+
+    return shared_execution_plan(
+        settings=settings,
+        task=payload.task,
+        repo=payload.repo,
+        workflow_preset=payload.workflow_preset,
+        limit=payload.limit,
     )
