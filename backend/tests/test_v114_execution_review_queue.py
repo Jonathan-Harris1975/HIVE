@@ -68,7 +68,7 @@ def _fake_plan(**kwargs):
 
 
 def test_v114_build_stage():
-    assert BUILD_STAGE == "v1.16-skill-search-review-integration"
+    assert BUILD_STAGE == "v1.17-registry-integrity"
 
 
 def test_create_execution_review_dry_run(monkeypatch):
