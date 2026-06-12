@@ -36,3 +36,15 @@ The future operator UI should treat HIVE as a plan-first private ops console:
 ## v1.13 UI Note
 
 The future HIVE UI can expose repo hygiene as a read-only diagnostics panel showing duplicate groups, orphan candidates and the dry-run deletion manifest. No delete button should be added until a later explicit approval-gated workflow exists.
+
+## v1.17 UI Note
+
+The operator UI should expose skill-registry integrity as a read-only diagnostics card before stronger routing/execution controls are added:
+
+- `/v1/skills/integrity` for overall registry health.
+- `/v1/skills/duplicates` for duplicate IDs/slugs/object keys.
+- `/v1/skills/missing` for missing fields and invalid taxonomy values.
+- `/v1/skills/orphans` for descriptor URL/object-key mismatches.
+- `/v1/skills/rebuild-index` as a dry-run-first maintenance action.
+
+Do not offer live rebuild without a confirmation screen, and do not offer deletion or skill execution from the integrity panel.
