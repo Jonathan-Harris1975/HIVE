@@ -8,6 +8,7 @@ from typing import Any
 import httpx
 
 from app.core.config import Settings
+from app.core.version import BUILD_STAGE
 from app.storage.d1 import D1MetadataStore
 
 SKILL_LANE = "hive_skills"
@@ -24,7 +25,7 @@ def skills_registry_status(settings: Settings) -> dict[str, object]:
     count_payload = _d1_skill_counts(d1)
     return {
         "ok": True,
-        "build_stage_hint": "v1.8-skill-registry-import",
+        "build_stage_hint": BUILD_STAGE,
         "lane": SKILL_LANE,
         "configured": bool(base),
         "public_base_url": base,
@@ -37,7 +38,7 @@ def skills_registry_status(settings: Settings) -> dict[str, object]:
             "count_probe": count_payload,
         },
         "source_of_truth": "R2 hive-skills descriptors + HIVE_skills_availability_register_v2_repo_mapped.xlsx",
-        "note": "v1.8 imports R2 skill search documents into D1 for fast catalogue/list/search operations.",
+        "note": "v1.12 uses the imported R2 skill registry for intelligent search, recommendations, review-gated routing, and plan-only shared execution.",
     }
 
 
@@ -333,7 +334,7 @@ def shared_execution_plan(
     ]
     return {
         "ok": True,
-        "build_stage_hint": "v1.12-shared-ecosystem-execution-layer",
+        "build_stage_hint": BUILD_STAGE,
         "task": task,
         "repo": repo,
         "workflow_preset": workflow_preset,
