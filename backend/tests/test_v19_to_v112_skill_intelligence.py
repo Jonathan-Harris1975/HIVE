@@ -131,7 +131,7 @@ def test_v112_shared_execution_plan_is_plan_only(monkeypatch):
     )
 
     assert result["ok"] is True
-    assert result["build_stage_hint"] == "v1.12-shared-ecosystem-execution-layer"
+    assert result["build_stage_hint"] == "v1.13-repo-hygiene-cleanup"
     assert result["execution_mode"] == "plan_only"
     assert result["can_execute_now"] is False
     assert result["guardrails"]["no_auto_install"] is True
