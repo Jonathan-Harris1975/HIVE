@@ -42,7 +42,7 @@ def main() -> None:
         "task": "review podcast SEO workflow evidence pack",
         "repo": "AIMS",
         "workflow_preset": "podcast_episode_review",
-        "requested_by": "v1.15-smoke",
+        "requested_by": "v1.16-smoke",
         "dry_run": False,
     })
     print("CREATE", json.dumps(created, indent=2))
@@ -51,7 +51,7 @@ def main() -> None:
         raise SystemExit("No plan_id returned.")
     decision = request("POST", f"/v1/execution-reviews/{plan_id}/decision", {
         "decision": "needs_changes",
-        "reviewer": "v1.15-smoke",
+        "reviewer": "v1.16-smoke",
         "note": "Evidence-pack smoke test decision.",
     })
     print("DECISION", json.dumps(decision, indent=2))

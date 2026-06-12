@@ -51,7 +51,7 @@ created = request("POST", "/v1/execution-reviews", {
     "task": "Review podcast SEO workflow and suggest the safest next action.",
     "repo": "AIMS",
     "workflow_preset": "podcast_episode_review",
-    "requested_by": "v1.15-smoke",
+    "requested_by": "v1.16-smoke",
     "limit": 5,
     "dry_run": not LIVE,
 })
@@ -68,7 +68,7 @@ if LIVE and created_ok:
     if APPROVE:
         decision = request("POST", f"/v1/execution-reviews/{plan_id}/decision", {
             "decision": "approved",
-            "reviewer": "v1.15-smoke",
+            "reviewer": "v1.16-smoke",
             "note": "Smoke approval; still no execution.",
         })
         show("4. Record non-executing approval decision", decision)
