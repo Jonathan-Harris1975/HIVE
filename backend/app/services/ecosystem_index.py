@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.core.config import Settings
-from app.core.version import BUILD_STAGE
 from app.storage.d1 import D1MetadataStore
 from app.storage.r2 import R2Storage
 from app.storage.sql_store import SqlStore
@@ -48,7 +47,7 @@ def ecosystem_status(settings: Settings) -> dict[str, object]:
     configured_lanes = [item for item in lanes if item.get("configured")]
     return {
         "ok": True,
-        "build_stage_hint": BUILD_STAGE,
+        "build_stage_hint": "v1.9-intelligent-skill-search",
         "free_tier": bool(settings.hive_free_tier_mode),
         "services": {
             "postgres": {"configured": sql.enabled, "dialect": sql.dialect if sql.enabled else None},
@@ -141,7 +140,7 @@ def skills_search(*, settings: Settings, query: str | None = None, limit: int = 
         payload = recent_ecosystem_metadata(settings=settings, lane="hive_skills", limit=limit)
     payload["lane_public_base_url"] = settings.public_url_for_r2_lane("hive_skills", "")
     payload["manifest_hint"] = settings.public_url_for_r2_lane("hive_skills", "index/skills-manifest.json")
-    payload["note"] = "v1.15 searches imported D1 skill metadata and can hand recommendations into the execution review queue. Run POST /v1/skills/import-manifest if the shared skill pool has not yet been indexed."
+    payload["note"] = "v1.8 searches imported D1 skill metadata. Run POST /v1/skills/import-manifest to index the R2 shared skill pool."
     return payload
 
 
