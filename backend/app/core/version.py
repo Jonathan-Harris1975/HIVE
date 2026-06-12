@@ -1,1 +1,1 @@
-BUILD_STAGE = "v1.16-skill-search-review-integration"
+BUILD_STAGE = "v1.17-registry-integrity"
