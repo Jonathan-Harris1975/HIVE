@@ -31,3 +31,8 @@ The future operator UI should treat HIVE as a plan-first private ops console:
 - Recommendations from `/v1/skills/recommend` should show why a skill was selected before any route is accepted.
 - Routes from `/v1/skills/route` and plans from `/v1/ecosystem/execution-plan` are review-gated and must be presented as dry-run plans, not live execution.
 - The UI should clearly label `can_execute_now:false` and approval gates until v1.13+ adds explicit execution adapters.
+
+
+## v1.13 UI Note
+
+The future HIVE UI can expose repo hygiene as a read-only diagnostics panel showing duplicate groups, orphan candidates and the dry-run deletion manifest. No delete button should be added until a later explicit approval-gated workflow exists.
