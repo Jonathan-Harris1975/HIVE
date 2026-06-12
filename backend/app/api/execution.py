@@ -8,6 +8,9 @@ from app.core.security import require_admin
 from app.services.execution_reviews import (
     create_execution_review_plan,
     decide_execution_review_plan,
+    execution_review_audit_trail,
+    execution_review_evidence_pack,
+    export_execution_review_pack,
     get_execution_review_plan,
     list_execution_review_plans,
 )
@@ -28,6 +31,10 @@ class ExecutionReviewDecisionRequest(BaseModel):
     decision: str = Field(..., min_length=1, max_length=40)
     reviewer: str | None = Field(None, max_length=120)
     note: str | None = Field(None, max_length=1000)
+
+
+class ExecutionReviewExportRequest(BaseModel):
+    format: str = Field("json", min_length=2, max_length=20)
 
 
 @router.post("/execution-reviews")
@@ -86,3 +93,28 @@ def decide_review(
         reviewer=payload.reviewer,
         note=payload.note,
     )
+
+
+@router.get("/execution-reviews/{plan_id}/audit-trail")
+def review_audit_trail(plan_id: str, settings: Settings = Depends(get_settings)) -> dict[str, object]:
+    """Return the decision timeline for one execution review."""
+
+    return execution_review_audit_trail(settings=settings, plan_id=plan_id)
+
+
+@router.get("/execution-reviews/{plan_id}/evidence-pack")
+def review_evidence_pack(plan_id: str, settings: Settings = Depends(get_settings)) -> dict[str, object]:
+    """Return a UI/export friendly evidence pack for one execution review."""
+
+    return execution_review_evidence_pack(settings=settings, plan_id=plan_id)
+
+
+@router.post("/execution-reviews/{plan_id}/export")
+def export_review_evidence_pack(
+    plan_id: str,
+    payload: ExecutionReviewExportRequest,
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    """Return an inline JSON or Markdown evidence-pack export."""
+
+    return export_execution_review_pack(settings=settings, plan_id=plan_id, export_format=payload.format)
