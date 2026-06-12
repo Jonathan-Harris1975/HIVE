@@ -203,3 +203,26 @@ The v1.9 layer fixes the v1.8 limitation where phrase searches such as `RSS rewr
 - indexable text
 
 Returned records include `matched_terms`, `matched_fields` and `score_explanation` so the future UI and review queue can explain why a skill was found.
+
+## v1.10-v1.16 Skill Intelligence and Review Integration
+
+Status: implemented and consolidated.
+
+- Skill recommendation endpoint.
+- Review-gated skill routing endpoint.
+- Shared ecosystem execution-plan endpoint.
+- D1-backed execution review queue.
+- Audit trail and evidence-pack endpoints.
+- Plan-only safety model preserved: no repo mutation, no skill execution, no background jobs.
+
+## v1.17 – Registry Integrity
+
+Status: implemented.
+
+- Add `/v1/skills/integrity` for an overall registry health report.
+- Add `/v1/skills/duplicates` for duplicate skill IDs, slugs, object keys and search-document IDs.
+- Add `/v1/skills/missing` for required metadata and taxonomy validation.
+- Add `/v1/skills/orphans` for descriptor URL/object-key/lane/source-type mismatch checks.
+- Add `/v1/skills/rebuild-index` as a dry-run-first D1 catalogue maintenance endpoint.
+
+Next logical phase: use integrity status as a prerequisite gate for stronger recommendation/routing workflows and later operator UI controls.

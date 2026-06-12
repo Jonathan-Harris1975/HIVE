@@ -245,3 +245,17 @@ The queue is intentionally non-executing. Even an `approved` review keeps `can_e
 The evidence-pack layer sits on top of the execution review queue. It turns a stored D1 review record into a UI/export friendly artefact with task metadata, primary skill evidence, candidate skills, shared execution steps, guardrails, decision log and audit timeline.
 
 v1.15 remains plan-only. Evidence packs are inline responses and do not run skills, mutate repos, upload exports to R2 or start background work.
+
+## v1.17 Registry Integrity Layer
+
+The shared skills catalogue is now treated as a governed registry rather than a loose list of descriptors. HIVE keeps R2 as the descriptor source of truth and D1 as the searchable catalogue, then validates the D1 records through read-only integrity endpoints.
+
+The registry integrity layer checks:
+
+- duplicate skill IDs, slugs, object keys and search-document IDs;
+- required metadata fields;
+- priority tier, risk level and repo taxonomy;
+- descriptor URL/object-key consistency;
+- D1 lane and source-type consistency.
+
+`/v1/skills/rebuild-index` is deliberately dry-run-first and only upserts D1 metadata from the shared R2 search documents. It does not mutate R2, install packages, execute skills or write to repos.

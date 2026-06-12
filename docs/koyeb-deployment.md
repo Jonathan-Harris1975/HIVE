@@ -248,7 +248,7 @@ curl https://YOUR-KOYEB-APP.koyeb.app/health
 curl https://YOUR-KOYEB-APP.koyeb.app/healthz
 ```
 
-`/health` should show `build: v1.16-skill-search-review-integration` and clean flags for R2, SQL, D1, Vectorize and embeddings. `/healthz` is deliberately small and unauthenticated for later MAST keep-awake use.
+`/health` should show `build: v1.17-registry-integrity` and clean flags for R2, SQL, D1, Vectorize and embeddings. `/healthz` is deliberately small and unauthenticated for later MAST keep-awake use.
 
 Use `POST /v1/db/test-cleanup` with `dry_run:true` before deleting smoke-test records.
 
@@ -283,7 +283,7 @@ curl "$HIVE_URL/v1/workflow-presets" -H "Authorization: Bearer $ADMIN_BEARER_TOK
 curl "$HIVE_URL/v1/files/r2-lanes" -H "Authorization: Bearer $ADMIN_BEARER_TOKEN"
 ```
 
-`/health` should show `build: v1.16-skill-search-review-integration`, `workflow_presets_enabled: true`, and `r2_ecosystem_lanes_enabled: true`.
+`/health` should show `build: v1.17-registry-integrity`, `workflow_presets_enabled: true`, and `r2_ecosystem_lanes_enabled: true`.
 
 Keep MAST keep-awake pings gentle on Koyeb Free. Use `/healthz`, not authenticated file/chat endpoints.
 
@@ -300,7 +300,7 @@ The importer uses `R2_PUBLIC_BASE_URL_HIVE_SKILLS` and reads `index/search-docum
 
 ## v1.9 Intelligent Skill Search Checks
 
-After deploy, `/health` should show `build: v1.16-skill-search-review-integration`.
+After deploy, `/health` should show `build: v1.17-registry-integrity`.
 
 Useful checks:
 
@@ -311,3 +311,27 @@ curl "$HIVE_URL/v1/skills/by-risk?risk=high&limit=10" -H "Authorization: Bearer 
 ```
 
 The search layer is bounded and free-tier safe because it reads the imported D1 catalogue rather than walking R2 buckets.
+
+## v1.17 registry integrity smoke checks
+
+After deploying `v1.17-registry-integrity`, run:
+
+```bash
+curl "$HIVE_URL/health"
+
+curl "$HIVE_URL/v1/skills/integrity?limit=500" \
+  -H "Authorization: Bearer $ADMIN_BEARER_TOKEN"
+
+curl -X POST "$HIVE_URL/v1/skills/rebuild-index" \
+  -H "Authorization: Bearer $ADMIN_BEARER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"dry_run":true}'
+```
+
+For script-based checks:
+
+```bash
+ADMIN_BEARER_TOKEN=... python scripts/v117_registry_integrity_smoke.py
+```
+
+Keep live rebuilds explicit. The endpoint is safe for Koyeb Free because it performs one bounded manifest import and does not run background jobs.
