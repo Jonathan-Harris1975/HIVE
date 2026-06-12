@@ -10,10 +10,15 @@ from app.services.skill_registry import (
     import_skills_manifest,
     list_skills_catalogue,
     recommend_skills,
+    rebuild_skills_index,
     route_skill_request,
     search_skills_catalogue,
     shared_execution_plan,
     skill_categories,
+    skill_registry_duplicates,
+    skill_registry_integrity_report,
+    skill_registry_missing,
+    skill_registry_orphans,
     skills_by_lane,
     skills_by_repo,
     skills_by_risk,
@@ -27,6 +32,11 @@ class SkillManifestImportRequest(BaseModel):
     dry_run: bool = True
     limit: int | None = Field(None, ge=1, le=1000)
     search_documents_url: str | None = Field(None, max_length=2048)
+
+
+class SkillIndexRebuildRequest(BaseModel):
+    dry_run: bool = True
+    limit: int | None = Field(None, ge=1, le=1000)
 
 
 class SkillRecommendationRequest(BaseModel):
@@ -75,6 +85,56 @@ def import_manifest(
         limit=payload.limit,
         search_documents_url=payload.search_documents_url,
     )
+
+
+@router.get("/skills/integrity")
+def integrity(
+    limit: int = Query(500, ge=1, le=1000),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    """Return read-only skill-registry integrity and drift checks."""
+
+    return skill_registry_integrity_report(settings=settings, limit=limit)
+
+
+@router.get("/skills/duplicates")
+def duplicates(
+    limit: int = Query(500, ge=1, le=1000),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    """Return duplicate skill IDs, slugs, object keys and search-document IDs."""
+
+    return skill_registry_duplicates(settings=settings, limit=limit)
+
+
+@router.get("/skills/missing")
+def missing(
+    limit: int = Query(500, ge=1, le=1000),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    """Return missing required skill fields and invalid taxonomy values."""
+
+    return skill_registry_missing(settings=settings, limit=limit)
+
+
+@router.get("/skills/orphans")
+def orphans(
+    limit: int = Query(500, ge=1, le=1000),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    """Return likely orphan/mismatched skill registry records without deleting anything."""
+
+    return skill_registry_orphans(settings=settings, limit=limit)
+
+
+@router.post("/skills/rebuild-index")
+def rebuild_index(
+    payload: SkillIndexRebuildRequest,
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    """Rebuild the D1 skill index from the R2 shared search-document manifest."""
+
+    return rebuild_skills_index(settings=settings, dry_run=payload.dry_run, limit=payload.limit)
 
 
 @router.get("/skills/categories")
