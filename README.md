@@ -19,7 +19,7 @@ This is **not** a ChatLima/Kanari/OrChat fork. Those projects are reference arch
 
 ## Current status
 
-**Build stage:** `v1.12-shared-ecosystem-execution-layer`.
+**Build stage:** `v1.13-repo-hygiene-cleanup`.
 
 HIVE now has working OpenRouter chat/model routing, R2/local upload storage, bounded document/ZIP ingestion, SQL persistence, SQL chunk retrieval, Cloudflare D1 metadata, Cloudflare Workers AI embeddings, Cloudflare Vectorize semantic retrieval, workflow presets, R2 ecosystem lanes, imported shared skills, weighted skill search, review-gated skill routing, and a plan-only shared ecosystem execution layer.
 
@@ -434,7 +434,7 @@ Token hygiene: rotate Cloudflare/OpenRouter/admin tokens after any accidental pa
 
 ## v1.5 ingestion expansion for Koyeb free tier
 
-Build stage `v1.12-shared-ecosystem-execution-layer` adds bounded archive/document ingestion without turning HIVE into a heavy always-on worker. This matters because the current deployment is on a free Koyeb web service.
+Build stage `v1.13-repo-hygiene-cleanup` adds bounded archive/document ingestion without turning HIVE into a heavy always-on worker. This matters because the current deployment is on a free Koyeb web service.
 
 New/expanded capabilities:
 
@@ -459,7 +459,7 @@ The intended real workflow is now: upload an audit/report ZIP to R2, extract a b
 
 ## v1.6 workflow presets and R2 lane registry
 
-Build stage `v1.12-shared-ecosystem-execution-layer` turns HIVE from a generic file-aware chatbot into a small private ops analyst with labelled workflows.
+Build stage `v1.13-repo-hygiene-cleanup` turns HIVE from a generic file-aware chatbot into a small private ops analyst with labelled workflows.
 
 Workflow presets currently available:
 
@@ -504,7 +504,7 @@ ADMIN_BEARER_TOKEN=your-token HIVE_TEST_OBJECT_KEY=uploads/.../file.txt python s
 
 ## v1.7 Ecosystem Intelligence
 
-Build stage `v1.12-shared-ecosystem-execution-layer` adds lightweight cross-lane discovery without turning HIVE into a heavy background crawler. PostgreSQL chunks, Cloudflare Vectorize, D1 metadata, and the R2 lane registry remain separate, bounded layers.
+Build stage `v1.13-repo-hygiene-cleanup` adds lightweight cross-lane discovery without turning HIVE into a heavy background crawler. PostgreSQL chunks, Cloudflare Vectorize, D1 metadata, and the R2 lane registry remain separate, bounded layers.
 
 New endpoints:
 
@@ -519,7 +519,7 @@ Free-tier note: v1.7 deliberately avoids large bucket walks, background polling,
 
 ## v1.8 Skill Registry Import
 
-Build stage `v1.12-shared-ecosystem-execution-layer` imports the R2 shared skill pool into D1 so HIVE can list, search and categorise skills for HIVE, RAMS, AIMS and Website without cloning the bucket into each repo.
+Build stage `v1.13-repo-hygiene-cleanup` imports the R2 shared skill pool into D1 so HIVE can list, search and categorise skills for HIVE, RAMS, AIMS and Website without cloning the bucket into each repo.
 
 New endpoints:
 
@@ -556,7 +556,7 @@ The design stays Koyeb-Free friendly: one compact manifest fetch, bounded import
 
 ## v1.9 Intelligent Skill Search
 
-Build stage `v1.12-shared-ecosystem-execution-layer` includes weighted skill search over the imported D1 skill catalogue. Search scores title, slug, tags, hive lane, catalogue category, repo mapping, priority, risk and `indexable_text`. Responses include `score`, `matched_terms`, `matched_fields` and `score_breakdown` so the future UI can explain why a skill was selected.
+Build stage `v1.13-repo-hygiene-cleanup` includes weighted skill search over the imported D1 skill catalogue. Search scores title, slug, tags, hive lane, catalogue category, repo mapping, priority, risk and `indexable_text`. Responses include `score`, `matched_terms`, `matched_fields` and `score_breakdown` so the future UI can explain why a skill was selected.
 
 Useful endpoints:
 
@@ -599,3 +599,30 @@ The safety boundary is part of the contract:
 - no background job on Koyeb Free
 - dry-run first
 - explicit approval required for future execution adapters
+
+
+## v1.13 Repo Hygiene Cleanup
+
+Build stage `v1.13-repo-hygiene-cleanup` adds a read-only repo hygiene layer for duplicate/orphan discovery. It is designed to keep HIVE patch releases tidy without letting the service delete files by itself.
+
+New endpoint:
+
+```text
+GET /v1/system/repo-hygiene
+```
+
+The report includes:
+
+- duplicate content groups, based on SHA-256 for bounded-size files
+- duplicate filename groups for manual review
+- orphan/local artefact candidates such as `.pyc`, `.tmp`, `.bak`, `.orig`, `.rej`, `.DS_Store`
+- generated patch/release artefact candidates accidentally committed into the repo
+- a dry-run deletion manifest
+
+Safety rule: v1.13 never deletes files. It returns reviewable paths only. Cleanup should be committed separately from feature changes.
+
+Smoke script:
+
+```bash
+ADMIN_BEARER_TOKEN=your-token python scripts/v113_repo_hygiene_smoke.py
+```
