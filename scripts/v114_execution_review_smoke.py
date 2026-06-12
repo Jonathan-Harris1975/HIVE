@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""HIVE v1.14 execution-review queue smoke test.
+"""HIVE v1.15 execution-review queue smoke test.
 
 Standard-library only. Safe for ReqBin/Trinket/local use. Creates a dry-run plan
 by default, then lists the review queue. Set HIVE_CREATE_LIVE_REVIEW=true to
@@ -51,7 +51,7 @@ created = request("POST", "/v1/execution-reviews", {
     "task": "Review podcast SEO workflow and suggest the safest next action.",
     "repo": "AIMS",
     "workflow_preset": "podcast_episode_review",
-    "requested_by": "v1.14-smoke",
+    "requested_by": "v1.15-smoke",
     "limit": 5,
     "dry_run": not LIVE,
 })
@@ -68,7 +68,7 @@ if LIVE and created_ok:
     if APPROVE:
         decision = request("POST", f"/v1/execution-reviews/{plan_id}/decision", {
             "decision": "approved",
-            "reviewer": "v1.14-smoke",
+            "reviewer": "v1.15-smoke",
             "note": "Smoke approval; still no execution.",
         })
         show("4. Record non-executing approval decision", decision)
