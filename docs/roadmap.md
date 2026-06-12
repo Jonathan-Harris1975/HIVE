@@ -2,7 +2,7 @@
 
 ## Current build
 
-`v1.12-shared-ecosystem-execution-layer`
+`v1.14-execution-review-queue`
 
 ## Completed stages
 
@@ -24,3 +24,11 @@ v1.13 should add explicit low-risk execution adapters only after review, for exa
 - skill descriptor inspection
 - dry-run patch planning
 - MAST-triggered health/status reports
+
+## v1.14 Execution Review Queue
+
+Status: implemented.
+
+Adds D1-backed execution review records and approval decisions for plan-only skill routes. This stage prepares the future operator UI by making recommended actions visible, reviewable and auditable without granting automatic execution.
+
+Next likely stage: explicit low-risk adapter prototypes behind allowlists and dry-run-first gates.
