@@ -1,18 +1,13 @@
-HIVE v1.13 Repo Hygiene Cleanup
+HIVE v1.14 Execution Review Queue
 
-Updated files only patch set.
+Applied updates:
+- Build marker: v1.14-execution-review-queue
+- Added D1-backed execution review queue service
+- Added /v1/execution-reviews endpoints
+- Added decision logging for approved/rejected/needs_changes/archived
+- Kept execution plan layer non-executing and review-gated
+- Added v1.14 Python smoke script
+- Updated README and docs for v1.14
 
-Adds:
-- BUILD_STAGE = v1.13-repo-hygiene-cleanup
-- Read-only GET /v1/system/repo-hygiene endpoint
-- Duplicate content detection using bounded SHA-256 hashing
-- Duplicate filename review groups
-- Orphan/local artefact candidate detection
-- Generated patch/release artefact candidate detection
-- Dry-run deletion manifest, with no automatic deletion
-- v1.13 smoke script
-- v1.13 tests and documentation updates
-
-Safety:
-- No repo file deletion is performed by the API.
-- Manual review is required before any cleanup commit.
+Safety note:
+Approval does not execute skills. can_execute_now remains false in v1.14.
