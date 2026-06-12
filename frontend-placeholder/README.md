@@ -22,3 +22,12 @@ Future UI work should show:
 - Retrieval metadata from file-chat responses: `retrieval_source`, `vector_hits`, `sql_fallback_hits`, and `fallback_used`.
 - Cost summary from `/v1/db/cost-summary`.
 - Vectorize diagnostics from `/v1/vectorize/diagnostics`.
+
+## v1.12 UI direction
+
+The future operator UI should treat HIVE as a plan-first private ops console:
+
+- Skill search results from `/v1/skills/search` should show score, matched terms and risk level.
+- Recommendations from `/v1/skills/recommend` should show why a skill was selected before any route is accepted.
+- Routes from `/v1/skills/route` and plans from `/v1/ecosystem/execution-plan` are review-gated and must be presented as dry-run plans, not live execution.
+- The UI should clearly label `can_execute_now:false` and approval gates until v1.13+ adds explicit execution adapters.
