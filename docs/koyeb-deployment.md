@@ -248,7 +248,7 @@ curl https://YOUR-KOYEB-APP.koyeb.app/health
 curl https://YOUR-KOYEB-APP.koyeb.app/healthz
 ```
 
-`/health` should show `build: v1.15-review-evidence-pack` and clean flags for R2, SQL, D1, Vectorize and embeddings. `/healthz` is deliberately small and unauthenticated for later MAST keep-awake use.
+`/health` should show `build: v1.9-intelligent-skill-search` and clean flags for R2, SQL, D1, Vectorize and embeddings. `/healthz` is deliberately small and unauthenticated for later MAST keep-awake use.
 
 Use `POST /v1/db/test-cleanup` with `dry_run:true` before deleting smoke-test records.
 
@@ -283,7 +283,7 @@ curl "$HIVE_URL/v1/workflow-presets" -H "Authorization: Bearer $ADMIN_BEARER_TOK
 curl "$HIVE_URL/v1/files/r2-lanes" -H "Authorization: Bearer $ADMIN_BEARER_TOKEN"
 ```
 
-`/health` should show `build: v1.15-review-evidence-pack`, `workflow_presets_enabled: true`, and `r2_ecosystem_lanes_enabled: true`.
+`/health` should show `build: v1.9-intelligent-skill-search`, `workflow_presets_enabled: true`, and `r2_ecosystem_lanes_enabled: true`.
 
 Keep MAST keep-awake pings gentle on Koyeb Free. Use `/healthz`, not authenticated file/chat endpoints.
 
@@ -298,36 +298,16 @@ SKILL_REGISTRY_IMPORT_TIMEOUT_SECONDS=20
 
 The importer uses `R2_PUBLIC_BASE_URL_HIVE_SKILLS` and reads `index/search-documents.json`. Run it as a manual endpoint, not a background process, on Koyeb Free.
 
+## v1.9 Intelligent Skill Search Checks
 
-## v1.12 deployment verification
+After deploy, `/health` should show `build: v1.9-intelligent-skill-search`.
 
-After deploying v1.15, verify the inherited v1.12 endpoints plus the v1.15 review queue:
-
-```bash
-curl "$HIVE_URL/health"
-curl "$HIVE_URL/v1/skills/search?q=podcast%20seo" -H "Authorization: Bearer $ADMIN_BEARER_TOKEN"
-curl -X POST "$HIVE_URL/v1/skills/recommend" -H "Authorization: Bearer $ADMIN_BEARER_TOKEN" -H "Content-Type: application/json" -d '{"task":"podcast SEO","limit":5}'
-curl -X POST "$HIVE_URL/v1/ecosystem/execution-plan" -H "Authorization: Bearer $ADMIN_BEARER_TOKEN" -H "Content-Type: application/json" -d '{"task":"review podcast SEO workflow","repo":"AIMS"}'
-```
-
-`/health` should report `build: v1.15-review-evidence-pack`. The new execution layer is plan-only and safe for Koyeb Free.
-
-## v1.15 deployment verification
-
-After deploying v1.15, check:
+Useful checks:
 
 ```bash
-curl "$HIVE_BASE_URL/health"
-curl "$HIVE_BASE_URL/v1/execution-reviews?limit=10" -H "Authorization: Bearer $ADMIN_BEARER_TOKEN"
+curl "$HIVE_URL/v1/skills/search?q=RSS%20rewrite&limit=10" -H "Authorization: Bearer $ADMIN_BEARER_TOKEN"
+curl "$HIVE_URL/v1/skills/by-repo?repo=AIMS&limit=10" -H "Authorization: Bearer $ADMIN_BEARER_TOKEN"
+curl "$HIVE_URL/v1/skills/by-risk?risk=high&limit=10" -H "Authorization: Bearer $ADMIN_BEARER_TOKEN"
 ```
 
-Create a safe dry-run review plan:
-
-```bash
-curl -X POST "$HIVE_BASE_URL/v1/execution-reviews" \
-  -H "Authorization: Bearer $ADMIN_BEARER_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"task":"Review podcast SEO workflow","repo":"AIMS","workflow_preset":"podcast_episode_review","dry_run":true}'
-```
-
-The endpoint should return `can_execute_now:false`. v1.15 does not start background jobs and is suitable for Koyeb Free.
+The search layer is bounded and free-tier safe because it reads the imported D1 catalogue rather than walking R2 buckets.
