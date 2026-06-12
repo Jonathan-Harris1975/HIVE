@@ -218,3 +218,18 @@ The current presets are:
 - `ebook_keyword_review`
 
 The R2 ecosystem lane registry is metadata-first. It records configured bucket names and public base URLs for uploads, audits, blog artefacts, images, RSS feeds, brand assets, podcast artefacts, transcripts and HIVE skills. The primary upload lane remains the only direct read/write storage adapter in this build. This keeps Koyeb free-tier behaviour predictable while letting HIVE understand where wider AIMS/RAMS/website/podcast artefacts live.
+
+
+## v1.12 shared ecosystem execution layer
+
+HIVE now contains a plan-only skill intelligence stack:
+
+```text
+D1 skill catalogue
+  -> weighted skill search
+  -> recommendation engine
+  -> review-gated routing
+  -> shared ecosystem execution plan
+```
+
+The execution layer does not mutate repos, install skills, run deploys or start background workers. It returns reviewable plans for HIVE/AIMS/RAMS/Website workflows and keeps PostgreSQL, D1, R2, Vectorize and the skill registry as separate, bounded layers.

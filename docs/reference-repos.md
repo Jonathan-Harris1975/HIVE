@@ -48,3 +48,8 @@ HIVE has now moved beyond reference-study mode into its own operational architec
 HIVE now recognises AIMS/RAMS/website/podcast artefact lanes through R2 bucket and public-base-url envs. This lets HIVE understand where audit reports, podcast transcripts, RSS feeds, blog artefacts, brand assets and the shared `hive-skills` bucket live.
 
 In this build, lane support is registry/public-URL aware only. Direct multi-bucket ingestion should be added later behind explicit allowlists and tests, once the first HIVE workflows over extracted audit/report bundles are stable.
+
+
+## v1.12 reference boundary
+
+The skill catalogue can map skills to HIVE, RAMS, AIMS and Website, but reference status does not mean execution authority. Skills are registry entries until a future adapter and approval gate explicitly allows a read-only or low-risk operation.

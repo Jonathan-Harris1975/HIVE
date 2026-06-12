@@ -108,3 +108,15 @@ The following public, non-secret R2 lane envs are recognised by HIVE:
 - `R2_BUCKET_HIVE_SKILLS` / `R2_PUBLIC_BASE_URL_HIVE_SKILLS`
 
 Use `GET /v1/files/r2-lanes` to inspect the configured registry. Use `GET /v1/files/r2-lanes/public-url?lane=audits&key=...` to safely build a public URL. This build does not yet add multi-bucket write automation; that is deliberate to avoid accidental cross-bucket writes while HIVE is still on the free web service.
+
+
+## v1.12 Cloudflare role
+
+Cloudflare services remain specialised rather than blended:
+
+- R2 stores raw files, artefacts and skill descriptors.
+- D1 stores ecosystem and skill catalogue metadata.
+- Vectorize provides semantic retrieval for file chunks.
+- Workers AI produces embeddings.
+
+Skill search/recommendation uses D1 metadata first. Future semantic skill search can add Vectorize later, but D1 remains the catalogue source for explainable routing.

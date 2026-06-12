@@ -143,3 +143,8 @@ Default stance:
 - Presets are free-tier safe by default and avoid expanding chunk limits into heavy background work.
 
 The model router still respects explicit `model` when supplied by the caller.
+
+
+## v1.12 skill-routing model policy
+
+Skill search, recommendation, routing and execution-plan endpoints are metadata-first and should not require a model call. When a later workflow asks HIVE to explain or draft from a route plan, normal model routing still applies: explicit model wins, then mode/preset selects the default, with free-first fallback unless paid fallback is enabled.
