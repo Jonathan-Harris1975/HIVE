@@ -1,1 +1,1 @@
-BUILD_STAGE = "v1.9-intelligent-skill-search"
+BUILD_STAGE = "v1.16-skill-search-review-integration"
