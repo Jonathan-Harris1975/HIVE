@@ -38,7 +38,7 @@ def skills_registry_status(settings: Settings) -> dict[str, object]:
             "count_probe": count_payload,
         },
         "source_of_truth": "R2 hive-skills descriptors + HIVE_skills_availability_register_v2_repo_mapped.xlsx",
-        "note": "v1.14 uses the imported R2 skill registry with intelligent search, recommendations, review-gated routing, plan-only shared execution, and a D1 execution review queue.",
+        "note": "v1.15 uses the imported R2 skill registry with intelligent search, recommendations, review-gated routing, plan-only shared execution, and a D1 execution review queue.",
     }
 
 
@@ -318,7 +318,7 @@ def shared_execution_plan(
 ) -> dict[str, object]:
     """Return a shared ecosystem execution plan without running tools.
 
-    v1.14 stores reviewable execution plans and decisions. The next safe step is to add
+    v1.15 stores reviewable execution plans and decisions. The next safe step is to add
     explicit per-skill execution adapters behind allowlists and dry-run gates.
     """
 

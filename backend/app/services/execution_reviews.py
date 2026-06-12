@@ -32,7 +32,7 @@ def create_execution_review_plan(
 ) -> dict[str, object]:
     """Create a reviewable execution plan record in D1.
 
-    v1.14 is still intentionally plan/review only. This endpoint does not run
+    v1.15 is still intentionally plan/review only. This endpoint does not run
     tools, mutate repos, install skills, or create background jobs. It stores a
     plan so the future UI can show an approval queue.
     """
@@ -238,6 +238,145 @@ def decide_execution_review_plan(
     }
 
 
+
+def execution_review_audit_trail(*, settings: Settings, plan_id: str) -> dict[str, object]:
+    """Return a compact audit trail for one execution review plan.
+
+    This is UI/export friendly and deliberately read-only.
+    """
+
+    detail = get_execution_review_plan(settings=settings, plan_id=plan_id)
+    if not detail.get("ok"):
+        return detail
+    item = detail.get("review") if isinstance(detail.get("review"), dict) else {}
+    meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    decision_log = meta.get("decision_log") if isinstance(meta.get("decision_log"), list) else []
+    timeline = [
+        {
+            "event": "created",
+            "at": meta.get("created_at") or item.get("created_at"),
+            "actor": meta.get("requested_by") or "hive-user",
+            "status": "pending_review",
+            "note": "Execution review plan created.",
+        }
+    ]
+    for entry in decision_log:
+        if isinstance(entry, dict):
+            timeline.append({
+                "event": "decision",
+                "at": entry.get("decided_at"),
+                "actor": entry.get("reviewer") or "hive-user",
+                "status": entry.get("decision"),
+                "note": entry.get("note"),
+            })
+    return {
+        "ok": True,
+        "enabled": True,
+        "build_stage_hint": BUILD_STAGE,
+        "lane": EXECUTION_REVIEW_LANE,
+        "plan_id": plan_id,
+        "status": meta.get("status") or "unknown",
+        "timeline": timeline,
+        "decision_count": len(decision_log),
+        "safety_note": _safety_note(),
+    }
+
+
+def execution_review_evidence_pack(*, settings: Settings, plan_id: str) -> dict[str, object]:
+    """Build a read-only evidence pack for one review plan.
+
+    The pack is intended for the future UI and for copy/paste review outside HIVE.
+    It contains the plan, candidate skills, decision trail and safety guardrails,
+    but never executes an action.
+    """
+
+    detail = get_execution_review_plan(settings=settings, plan_id=plan_id)
+    if not detail.get("ok"):
+        return detail
+    item = detail.get("review") if isinstance(detail.get("review"), dict) else {}
+    meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    plan = meta.get("plan") if isinstance(meta.get("plan"), dict) else {}
+    routed = plan.get("routed_skill_plan") if isinstance(plan.get("routed_skill_plan"), dict) else {}
+    primary = routed.get("primary_skill") if isinstance(routed.get("primary_skill"), dict) else None
+    candidates = routed.get("candidate_skills") if isinstance(routed.get("candidate_skills"), list) else []
+    audit = execution_review_audit_trail(settings=settings, plan_id=plan_id)
+    pack = {
+        "plan_id": plan_id,
+        "status": meta.get("status") or "unknown",
+        "task": meta.get("task"),
+        "repo": meta.get("repo"),
+        "workflow_preset": meta.get("workflow_preset"),
+        "requested_by": meta.get("requested_by"),
+        "created_at": meta.get("created_at") or item.get("created_at"),
+        "updated_at": meta.get("updated_at") or item.get("updated_at"),
+        "execution_mode": "plan_only",
+        "can_execute_now": False,
+        "requires_approval": True,
+        "primary_skill": primary,
+        "candidate_skills": candidates,
+        "candidate_count": len(candidates),
+        "shared_steps": plan.get("shared_steps") or [],
+        "guardrails": plan.get("guardrails") or {},
+        "review_gate": meta.get("review_gate") or {},
+        "decision_log": meta.get("decision_log") if isinstance(meta.get("decision_log"), list) else [],
+        "audit_timeline": audit.get("timeline") if audit.get("ok") else [],
+        "source_record": {
+            "lane": item.get("lane"),
+            "source_type": item.get("source_type"),
+            "source_id": item.get("source_id"),
+            "title": item.get("title"),
+        },
+    }
+    return {
+        "ok": True,
+        "enabled": True,
+        "build_stage_hint": BUILD_STAGE,
+        "lane": EXECUTION_REVIEW_LANE,
+        "plan_id": plan_id,
+        "evidence_pack": pack,
+        "export_formats": ["json", "markdown"],
+        "safety_note": _safety_note(),
+    }
+
+
+def export_execution_review_pack(*, settings: Settings, plan_id: str, export_format: str = "json") -> dict[str, object]:
+    """Return an inline export document for a review evidence pack.
+
+    Export is response-only in v1.15. It does not write to R2 or trigger a job.
+    """
+
+    pack_payload = execution_review_evidence_pack(settings=settings, plan_id=plan_id)
+    if not pack_payload.get("ok"):
+        return pack_payload
+    pack = pack_payload.get("evidence_pack") if isinstance(pack_payload.get("evidence_pack"), dict) else {}
+    fmt = (export_format or "json").strip().lower()
+    if fmt not in {"json", "markdown", "md"}:
+        return {"ok": False, "error_code": "unsupported_export_format", "allowed_formats": ["json", "markdown"], "format": export_format}
+    if fmt in {"markdown", "md"}:
+        content_type = "text/markdown; charset=utf-8"
+        filename = f"{plan_id}-evidence-pack.md"
+        content = _evidence_pack_markdown(pack)
+        fmt = "markdown"
+    else:
+        content_type = "application/json; charset=utf-8"
+        filename = f"{plan_id}-evidence-pack.json"
+        content = json.dumps(pack, indent=2, ensure_ascii=False, default=str)
+    return {
+        "ok": True,
+        "enabled": True,
+        "build_stage_hint": BUILD_STAGE,
+        "lane": EXECUTION_REVIEW_LANE,
+        "plan_id": plan_id,
+        "format": fmt,
+        "filename": filename,
+        "content_type": content_type,
+        "content_chars": len(content),
+        "export_document": content,
+        "storage": "inline_response_only",
+        "can_execute_now": False,
+        "safety_note": _safety_note(),
+    }
+
 def _get_review_item(d1: D1MetadataStore, plan_id: str) -> dict[str, Any] | None:
     result = d1.query(
         """
@@ -316,4 +455,52 @@ def _clean_status(value: str | None) -> str:
 
 
 def _safety_note() -> str:
-    return "v1.14 stores reviewable plans only. HIVE does not execute skills, mutate repos, or start background jobs from this queue."
+    return "v1.15 stores reviewable plans, decisions and evidence packs only. HIVE does not execute skills, mutate repos, or start background jobs from this queue."
+
+
+def _evidence_pack_markdown(pack: dict[str, Any]) -> str:
+    primary = pack.get("primary_skill") if isinstance(pack.get("primary_skill"), dict) else {}
+    lines = [
+        f"# HIVE Execution Review Evidence Pack",
+        "",
+        f"- Plan ID: `{pack.get('plan_id')}`",
+        f"- Status: `{pack.get('status')}`",
+        f"- Task: {pack.get('task')}",
+        f"- Repo: {pack.get('repo') or 'not specified'}",
+        f"- Workflow preset: {pack.get('workflow_preset') or 'not specified'}",
+        f"- Execution mode: `{pack.get('execution_mode')}`",
+        f"- Can execute now: `{pack.get('can_execute_now')}`",
+        "",
+        "## Primary skill",
+        "",
+        f"- Skill: {primary.get('name') or primary.get('title') or 'none'}",
+        f"- Skill ID: {primary.get('skill_id') or primary.get('source_id') or 'none'}",
+        f"- Risk: {primary.get('risk_level') or 'unknown'}",
+        "",
+        "## Candidate skills",
+        "",
+    ]
+    candidates = pack.get("candidate_skills") if isinstance(pack.get("candidate_skills"), list) else []
+    if candidates:
+        for index, item in enumerate(candidates, start=1):
+            if isinstance(item, dict):
+                lines.append(f"{index}. {item.get('name') or item.get('title') or item.get('skill_id')} — {item.get('risk_level') or 'unknown'}")
+    else:
+        lines.append("No candidate skills recorded.")
+    lines.extend(["", "## Audit timeline", ""])
+    timeline = pack.get("audit_timeline") if isinstance(pack.get("audit_timeline"), list) else []
+    if timeline:
+        for event in timeline:
+            if isinstance(event, dict):
+                lines.append(f"- {event.get('at')}: {event.get('event')} / {event.get('status')} by {event.get('actor')} — {event.get('note') or ''}")
+    else:
+        lines.append("No audit events recorded.")
+    lines.extend(["", "## Guardrails", ""])
+    guardrails = pack.get("guardrails") if isinstance(pack.get("guardrails"), dict) else {}
+    if guardrails:
+        for key, value in guardrails.items():
+            lines.append(f"- `{key}`: `{value}`")
+    else:
+        lines.append("No guardrails recorded.")
+    lines.extend(["", "HIVE v1.15 evidence packs are review artefacts only. They do not execute skills or mutate repos."])
+    return "\n".join(lines) + "\n"

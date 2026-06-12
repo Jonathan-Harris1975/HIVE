@@ -141,7 +141,7 @@ def skills_search(*, settings: Settings, query: str | None = None, limit: int = 
         payload = recent_ecosystem_metadata(settings=settings, lane="hive_skills", limit=limit)
     payload["lane_public_base_url"] = settings.public_url_for_r2_lane("hive_skills", "")
     payload["manifest_hint"] = settings.public_url_for_r2_lane("hive_skills", "index/skills-manifest.json")
-    payload["note"] = "v1.14 searches imported D1 skill metadata and can hand recommendations into the execution review queue. Run POST /v1/skills/import-manifest if the shared skill pool has not yet been indexed."
+    payload["note"] = "v1.15 searches imported D1 skill metadata and can hand recommendations into the execution review queue. Run POST /v1/skills/import-manifest if the shared skill pool has not yet been indexed."
     return payload
 
 
