@@ -1,0 +1,13 @@
+HIVE v1.14 Execution Review Queue
+
+Applied updates:
+- Build marker: v1.14-execution-review-queue
+- Added D1-backed execution review queue service
+- Added /v1/execution-reviews endpoints
+- Added decision logging for approved/rejected/needs_changes/archived
+- Kept execution plan layer non-executing and review-gated
+- Added v1.14 Python smoke script
+- Updated README and docs for v1.14
+
+Safety note:
+Approval does not execute skills. can_execute_now remains false in v1.14.
