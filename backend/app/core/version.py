@@ -1,1 +1,1 @@
-BUILD_STAGE = "v1.17-registry-integrity"
+BUILD_STAGE = "v1.19-controlled-execution-preview"
