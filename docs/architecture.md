@@ -259,3 +259,13 @@ The registry integrity layer checks:
 - D1 lane and source-type consistency.
 
 `/v1/skills/rebuild-index` is deliberately dry-run-first and only upserts D1 metadata from the shared R2 search documents. It does not mutate R2, install packages, execute skills or write to repos.
+
+## v1.18/v1.19 Workflow Graph and Controlled Preview Layer
+
+The workflow graph layer converts task, repo, workflow preset and skill-routing context into a UI-friendly graph:
+
+```text
+request -> classify -> recommend_skills -> collect_evidence -> dry_run_output -> risk_gate -> review_queue -> adapter_execution(blocked)
+```
+
+The controlled execution preview layer then annotates graph nodes with statuses, blockers and next actions. It is deliberately non-executing. Adapter execution is disabled in v1.19 and `can_execute_now` remains `false`.

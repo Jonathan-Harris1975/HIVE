@@ -226,3 +226,11 @@ Status: implemented.
 - Add `/v1/skills/rebuild-index` as a dry-run-first D1 catalogue maintenance endpoint.
 
 Next logical phase: use integrity status as a prerequisite gate for stronger recommendation/routing workflows and later operator UI controls.
+
+## v1.18-v1.19 Workflow Graphs and Controlled Preview
+
+Status: implemented.
+
+The v1.18/v1.19 line adds graph-shaped planning and controlled execution preview semantics. This is the correct bridge before any real execution adapter work. HIVE can show the operator what would happen, what is blocked, what requires review, and why execution is not yet available.
+
+Next logical direction: operator-dashboard API polish and eventual allow-listed dry-run adapters, still behind review gates.
