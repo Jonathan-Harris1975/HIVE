@@ -19,7 +19,7 @@ This is **not** a ChatLima/Kanari/OrChat fork. Those projects are reference arch
 
 ## Current status
 
-**Build stage:** `v1.19-controlled-execution-preview`.
+**Build stage:** `v1.22-workflow-simulation-persistence`.
 
 HIVE now has working OpenRouter chat/model routing, R2/local upload storage, JSON/base64 uploads, stored ZIP inspection/extraction, SQL persistence, SQL chunk retrieval, Cloudflare D1 metadata, Cloudflare Workers AI embeddings, Cloudflare Vectorize semantic retrieval, workflow presets, R2 ecosystem lane awareness, weighted skill search, review-gated execution planning, evidence packs, and v1.17 skill-registry integrity checks.
 
@@ -423,7 +423,7 @@ Token hygiene: rotate Cloudflare/OpenRouter/admin tokens after any accidental pa
 
 ## v1.5 ingestion expansion for Koyeb free tier
 
-Build stage `v1.19-controlled-execution-preview` adds bounded archive/document ingestion without turning HIVE into a heavy always-on worker. This matters because the current deployment is on a free Koyeb web service.
+Build stage `v1.22-workflow-simulation-persistence` adds bounded archive/document ingestion without turning HIVE into a heavy always-on worker. This matters because the current deployment is on a free Koyeb web service.
 
 New/expanded capabilities:
 
@@ -448,7 +448,7 @@ The intended real workflow is now: upload an audit/report ZIP to R2, extract a b
 
 ## v1.6 workflow presets and R2 lane registry
 
-Build stage `v1.19-controlled-execution-preview` turns HIVE from a generic file-aware chatbot into a small private ops analyst with labelled workflows.
+Build stage `v1.22-workflow-simulation-persistence` turns HIVE from a generic file-aware chatbot into a small private ops analyst with labelled workflows.
 
 Workflow presets currently available:
 
@@ -493,7 +493,7 @@ ADMIN_BEARER_TOKEN=your-token HIVE_TEST_OBJECT_KEY=uploads/.../file.txt python s
 
 ## v1.7 Ecosystem Intelligence
 
-Build stage `v1.19-controlled-execution-preview` adds lightweight cross-lane discovery without turning HIVE into a heavy background crawler. PostgreSQL chunks, Cloudflare Vectorize, D1 metadata, and the R2 lane registry remain separate, bounded layers.
+Build stage `v1.22-workflow-simulation-persistence` adds lightweight cross-lane discovery without turning HIVE into a heavy background crawler. PostgreSQL chunks, Cloudflare Vectorize, D1 metadata, and the R2 lane registry remain separate, bounded layers.
 
 New endpoints:
 
@@ -508,7 +508,7 @@ Free-tier note: v1.7 deliberately avoids large bucket walks, background polling,
 
 ## v1.8 Skill Registry Import
 
-Build stage `v1.19-controlled-execution-preview` imports the R2 shared skill pool into D1 so HIVE can list, search and categorise skills for HIVE, RAMS, AIMS and Website without cloning the bucket into each repo.
+Build stage `v1.22-workflow-simulation-persistence` imports the R2 shared skill pool into D1 so HIVE can list, search and categorise skills for HIVE, RAMS, AIMS and Website without cloning the bucket into each repo.
 
 New endpoints:
 
@@ -544,7 +544,7 @@ The design stays Koyeb-Free friendly: one compact manifest fetch, bounded import
 
 ## v1.9 Intelligent Skill Search
 
-Build stage `v1.19-controlled-execution-preview` upgrades the v1.8 D1 skill catalogue with weighted local search and lookup helpers. HIVE now searches across title, slug, tags, HIVE lane, catalogue category, repo membership and indexable text, with transparent `matched_terms`, `matched_fields` and `score_explanation` returned in search results.
+Build stage `v1.22-workflow-simulation-persistence` upgrades the v1.8 D1 skill catalogue with weighted local search and lookup helpers. HIVE now searches across title, slug, tags, HIVE lane, catalogue category, repo membership and indexable text, with transparent `matched_terms`, `matched_fields` and `score_explanation` returned in search results.
 
 New/expanded endpoints:
 
@@ -561,7 +561,7 @@ This is still catalogue/discovery only. It does not install skills, mutate repos
 
 ## v1.17 Registry Integrity
 
-Current build stage: `v1.19-controlled-execution-preview`.
+Current build stage: `v1.22-workflow-simulation-persistence`.
 
 v1.17 keeps the v1.16 skill search, recommendation, routing, review queue and evidence-pack features, then adds registry trust checks for the imported shared skill pool. This matters before any stronger automation because HIVE needs to know whether the 201 imported skills have duplicate IDs, missing descriptors, invalid taxonomy values or lane/source mismatches.
 
@@ -585,7 +585,7 @@ ADMIN_BEARER_TOKEN=... python scripts/v117_registry_integrity_smoke.py
 
 ## v1.16 Skill Search Review Integration
 
-Current build stage: `v1.19-controlled-execution-preview`.
+Current build stage: `v1.22-workflow-simulation-persistence`.
 
 This release consolidates the intelligent skill-search branch with the execution review queue and evidence-pack work. It restores the missing shared execution-plan service, keeps weighted skill search, and preserves the review-gated plan-only safety model.
 
@@ -604,7 +604,7 @@ Safety note: v1.16 does not execute skills, install packages, mutate repos, writ
 
 ## v1.18/v1.19 Workflow Graphs and Controlled Execution Preview
 
-Current build stage: `v1.19-controlled-execution-preview`.
+Current build stage: `v1.22-workflow-simulation-persistence`.
 
 HIVE now turns skill routing and shared execution plans into graph-shaped workflow previews for the future operator UI.
 
@@ -631,3 +631,22 @@ can_execute_now=false
 ```
 
 This is the bridge between the review queue/evidence packs and the future operator dashboard.
+
+
+## v1.20-v1.22 Execution Preview Persistence and Simulation
+
+Current build stage: `v1.22-workflow-simulation-persistence`.
+
+The v1.20-v1.22 line turns controlled execution preview into a persistent, reviewable planning layer while keeping HIVE non-executing. It adds D1-backed preview history, reusable policy profiles, and deterministic workflow simulation.
+
+New endpoints:
+
+```text
+POST /v1/execution-preview/save
+GET  /v1/execution-preview/history
+GET  /v1/execution-preview/{preview_id}
+GET  /v1/execution-preview/policy-profiles
+POST /v1/workflow-simulation
+```
+
+Safety remains unchanged: `can_execute_now` is always false. HIVE does not execute skills, mutate repos, install packages, write R2 exports, or start background jobs from these endpoints.
