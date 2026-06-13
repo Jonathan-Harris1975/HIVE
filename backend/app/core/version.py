@@ -1,1 +1,1 @@
-BUILD_STAGE = "v1.19-controlled-execution-preview"
+BUILD_STAGE = "v1.22-workflow-simulation-persistence"
