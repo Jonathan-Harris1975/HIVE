@@ -19,7 +19,7 @@ This is **not** a ChatLima/Kanari/OrChat fork. Those projects are reference arch
 
 ## Current status
 
-**Build stage:** `v1.17-registry-integrity`.
+**Build stage:** `v1.19-controlled-execution-preview`.
 
 HIVE now has working OpenRouter chat/model routing, R2/local upload storage, JSON/base64 uploads, stored ZIP inspection/extraction, SQL persistence, SQL chunk retrieval, Cloudflare D1 metadata, Cloudflare Workers AI embeddings, Cloudflare Vectorize semantic retrieval, workflow presets, R2 ecosystem lane awareness, weighted skill search, review-gated execution planning, evidence packs, and v1.17 skill-registry integrity checks.
 
@@ -423,7 +423,7 @@ Token hygiene: rotate Cloudflare/OpenRouter/admin tokens after any accidental pa
 
 ## v1.5 ingestion expansion for Koyeb free tier
 
-Build stage `v1.17-registry-integrity` adds bounded archive/document ingestion without turning HIVE into a heavy always-on worker. This matters because the current deployment is on a free Koyeb web service.
+Build stage `v1.19-controlled-execution-preview` adds bounded archive/document ingestion without turning HIVE into a heavy always-on worker. This matters because the current deployment is on a free Koyeb web service.
 
 New/expanded capabilities:
 
@@ -448,7 +448,7 @@ The intended real workflow is now: upload an audit/report ZIP to R2, extract a b
 
 ## v1.6 workflow presets and R2 lane registry
 
-Build stage `v1.17-registry-integrity` turns HIVE from a generic file-aware chatbot into a small private ops analyst with labelled workflows.
+Build stage `v1.19-controlled-execution-preview` turns HIVE from a generic file-aware chatbot into a small private ops analyst with labelled workflows.
 
 Workflow presets currently available:
 
@@ -493,7 +493,7 @@ ADMIN_BEARER_TOKEN=your-token HIVE_TEST_OBJECT_KEY=uploads/.../file.txt python s
 
 ## v1.7 Ecosystem Intelligence
 
-Build stage `v1.17-registry-integrity` adds lightweight cross-lane discovery without turning HIVE into a heavy background crawler. PostgreSQL chunks, Cloudflare Vectorize, D1 metadata, and the R2 lane registry remain separate, bounded layers.
+Build stage `v1.19-controlled-execution-preview` adds lightweight cross-lane discovery without turning HIVE into a heavy background crawler. PostgreSQL chunks, Cloudflare Vectorize, D1 metadata, and the R2 lane registry remain separate, bounded layers.
 
 New endpoints:
 
@@ -508,7 +508,7 @@ Free-tier note: v1.7 deliberately avoids large bucket walks, background polling,
 
 ## v1.8 Skill Registry Import
 
-Build stage `v1.17-registry-integrity` imports the R2 shared skill pool into D1 so HIVE can list, search and categorise skills for HIVE, RAMS, AIMS and Website without cloning the bucket into each repo.
+Build stage `v1.19-controlled-execution-preview` imports the R2 shared skill pool into D1 so HIVE can list, search and categorise skills for HIVE, RAMS, AIMS and Website without cloning the bucket into each repo.
 
 New endpoints:
 
@@ -544,7 +544,7 @@ The design stays Koyeb-Free friendly: one compact manifest fetch, bounded import
 
 ## v1.9 Intelligent Skill Search
 
-Build stage `v1.17-registry-integrity` upgrades the v1.8 D1 skill catalogue with weighted local search and lookup helpers. HIVE now searches across title, slug, tags, HIVE lane, catalogue category, repo membership and indexable text, with transparent `matched_terms`, `matched_fields` and `score_explanation` returned in search results.
+Build stage `v1.19-controlled-execution-preview` upgrades the v1.8 D1 skill catalogue with weighted local search and lookup helpers. HIVE now searches across title, slug, tags, HIVE lane, catalogue category, repo membership and indexable text, with transparent `matched_terms`, `matched_fields` and `score_explanation` returned in search results.
 
 New/expanded endpoints:
 
@@ -561,7 +561,7 @@ This is still catalogue/discovery only. It does not install skills, mutate repos
 
 ## v1.17 Registry Integrity
 
-Current build stage: `v1.17-registry-integrity`.
+Current build stage: `v1.19-controlled-execution-preview`.
 
 v1.17 keeps the v1.16 skill search, recommendation, routing, review queue and evidence-pack features, then adds registry trust checks for the imported shared skill pool. This matters before any stronger automation because HIVE needs to know whether the 201 imported skills have duplicate IDs, missing descriptors, invalid taxonomy values or lane/source mismatches.
 
@@ -585,7 +585,7 @@ ADMIN_BEARER_TOKEN=... python scripts/v117_registry_integrity_smoke.py
 
 ## v1.16 Skill Search Review Integration
 
-Current build stage: `v1.17-registry-integrity`.
+Current build stage: `v1.19-controlled-execution-preview`.
 
 This release consolidates the intelligent skill-search branch with the execution review queue and evidence-pack work. It restores the missing shared execution-plan service, keeps weighted skill search, and preserves the review-gated plan-only safety model.
 
@@ -601,3 +601,33 @@ Key endpoint families now expected in this line:
 - `/v1/execution-reviews/{plan_id}/audit-trail` and `/evidence-pack` – review evidence outputs.
 
 Safety note: v1.16 does not execute skills, install packages, mutate repos, write exports to R2, or start background jobs. It creates reviewable plans only.
+
+## v1.18/v1.19 Workflow Graphs and Controlled Execution Preview
+
+Current build stage: `v1.19-controlled-execution-preview`.
+
+HIVE now turns skill routing and shared execution plans into graph-shaped workflow previews for the future operator UI.
+
+New endpoints:
+
+```text
+GET  /v1/workflow-graphs/templates
+POST /v1/workflow-graphs/build
+GET  /v1/execution-preview/policies
+POST /v1/execution-preview
+```
+
+These endpoints are planning and preview endpoints only. They do not execute skills, mutate repositories, install packages, write exports to R2, or start background jobs. This keeps HIVE safe for Koyeb Free while making the future execution model visible and reviewable.
+
+The controlled preview response includes:
+
+```text
+workflow_graph
+step_statuses
+blockers
+policies
+next_required_actions
+can_execute_now=false
+```
+
+This is the bridge between the review queue/evidence packs and the future operator dashboard.

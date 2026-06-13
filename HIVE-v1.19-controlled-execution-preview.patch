@@ -1,0 +1,1290 @@
+diff -ruN hive_v119_orig/HIVE-main/README.md hive_v119_work/HIVE-main/README.md
+--- hive_v119_orig/HIVE-main/README.md	2026-06-12 13:52:02.000000000 +0000
++++ hive_v119_work/HIVE-main/README.md	2026-06-13 04:13:57.677325669 +0000
+@@ -19,7 +19,7 @@
+ 
+ ## Current status
+ 
+-**Build stage:** `v1.17-registry-integrity`.
++**Build stage:** `v1.19-controlled-execution-preview`.
+ 
+ HIVE now has working OpenRouter chat/model routing, R2/local upload storage, JSON/base64 uploads, stored ZIP inspection/extraction, SQL persistence, SQL chunk retrieval, Cloudflare D1 metadata, Cloudflare Workers AI embeddings, Cloudflare Vectorize semantic retrieval, workflow presets, R2 ecosystem lane awareness, weighted skill search, review-gated execution planning, evidence packs, and v1.17 skill-registry integrity checks.
+ 
+@@ -423,7 +423,7 @@
+ 
+ ## v1.5 ingestion expansion for Koyeb free tier
+ 
+-Build stage `v1.17-registry-integrity` adds bounded archive/document ingestion without turning HIVE into a heavy always-on worker. This matters because the current deployment is on a free Koyeb web service.
++Build stage `v1.19-controlled-execution-preview` adds bounded archive/document ingestion without turning HIVE into a heavy always-on worker. This matters because the current deployment is on a free Koyeb web service.
+ 
+ New/expanded capabilities:
+ 
+@@ -448,7 +448,7 @@
+ 
+ ## v1.6 workflow presets and R2 lane registry
+ 
+-Build stage `v1.17-registry-integrity` turns HIVE from a generic file-aware chatbot into a small private ops analyst with labelled workflows.
++Build stage `v1.19-controlled-execution-preview` turns HIVE from a generic file-aware chatbot into a small private ops analyst with labelled workflows.
+ 
+ Workflow presets currently available:
+ 
+@@ -493,7 +493,7 @@
+ 
+ ## v1.7 Ecosystem Intelligence
+ 
+-Build stage `v1.17-registry-integrity` adds lightweight cross-lane discovery without turning HIVE into a heavy background crawler. PostgreSQL chunks, Cloudflare Vectorize, D1 metadata, and the R2 lane registry remain separate, bounded layers.
++Build stage `v1.19-controlled-execution-preview` adds lightweight cross-lane discovery without turning HIVE into a heavy background crawler. PostgreSQL chunks, Cloudflare Vectorize, D1 metadata, and the R2 lane registry remain separate, bounded layers.
+ 
+ New endpoints:
+ 
+@@ -508,7 +508,7 @@
+ 
+ ## v1.8 Skill Registry Import
+ 
+-Build stage `v1.17-registry-integrity` imports the R2 shared skill pool into D1 so HIVE can list, search and categorise skills for HIVE, RAMS, AIMS and Website without cloning the bucket into each repo.
++Build stage `v1.19-controlled-execution-preview` imports the R2 shared skill pool into D1 so HIVE can list, search and categorise skills for HIVE, RAMS, AIMS and Website without cloning the bucket into each repo.
+ 
+ New endpoints:
+ 
+@@ -544,7 +544,7 @@
+ 
+ ## v1.9 Intelligent Skill Search
+ 
+-Build stage `v1.17-registry-integrity` upgrades the v1.8 D1 skill catalogue with weighted local search and lookup helpers. HIVE now searches across title, slug, tags, HIVE lane, catalogue category, repo membership and indexable text, with transparent `matched_terms`, `matched_fields` and `score_explanation` returned in search results.
++Build stage `v1.19-controlled-execution-preview` upgrades the v1.8 D1 skill catalogue with weighted local search and lookup helpers. HIVE now searches across title, slug, tags, HIVE lane, catalogue category, repo membership and indexable text, with transparent `matched_terms`, `matched_fields` and `score_explanation` returned in search results.
+ 
+ New/expanded endpoints:
+ 
+@@ -561,7 +561,7 @@
+ 
+ ## v1.17 Registry Integrity
+ 
+-Current build stage: `v1.17-registry-integrity`.
++Current build stage: `v1.19-controlled-execution-preview`.
+ 
+ v1.17 keeps the v1.16 skill search, recommendation, routing, review queue and evidence-pack features, then adds registry trust checks for the imported shared skill pool. This matters before any stronger automation because HIVE needs to know whether the 201 imported skills have duplicate IDs, missing descriptors, invalid taxonomy values or lane/source mismatches.
+ 
+@@ -585,7 +585,7 @@
+ 
+ ## v1.16 Skill Search Review Integration
+ 
+-Current build stage: `v1.17-registry-integrity`.
++Current build stage: `v1.19-controlled-execution-preview`.
+ 
+ This release consolidates the intelligent skill-search branch with the execution review queue and evidence-pack work. It restores the missing shared execution-plan service, keeps weighted skill search, and preserves the review-gated plan-only safety model.
+ 
+@@ -601,3 +601,33 @@
+ - `/v1/execution-reviews/{plan_id}/audit-trail` and `/evidence-pack` – review evidence outputs.
+ 
+ Safety note: v1.16 does not execute skills, install packages, mutate repos, write exports to R2, or start background jobs. It creates reviewable plans only.
++
++## v1.18/v1.19 Workflow Graphs and Controlled Execution Preview
++
++Current build stage: `v1.19-controlled-execution-preview`.
++
++HIVE now turns skill routing and shared execution plans into graph-shaped workflow previews for the future operator UI.
++
++New endpoints:
++
++```text
++GET  /v1/workflow-graphs/templates
++POST /v1/workflow-graphs/build
++GET  /v1/execution-preview/policies
++POST /v1/execution-preview
++```
++
++These endpoints are planning and preview endpoints only. They do not execute skills, mutate repositories, install packages, write exports to R2, or start background jobs. This keeps HIVE safe for Koyeb Free while making the future execution model visible and reviewable.
++
++The controlled preview response includes:
++
++```text
++workflow_graph
++step_statuses
++blockers
++policies
++next_required_actions
++can_execute_now=false
++```
++
++This is the bridge between the review queue/evidence packs and the future operator dashboard.
+diff -ruN hive_v119_orig/HIVE-main/backend/.pytest_cache/.gitignore hive_v119_work/HIVE-main/backend/.pytest_cache/.gitignore
+--- hive_v119_orig/HIVE-main/backend/.pytest_cache/.gitignore	1970-01-01 00:00:00.000000000 +0000
++++ hive_v119_work/HIVE-main/backend/.pytest_cache/.gitignore	2026-06-13 04:14:53.439141326 +0000
+@@ -0,0 +1,2 @@
++# Created by pytest automatically.
++*
+diff -ruN hive_v119_orig/HIVE-main/backend/.pytest_cache/CACHEDIR.TAG hive_v119_work/HIVE-main/backend/.pytest_cache/CACHEDIR.TAG
+--- hive_v119_orig/HIVE-main/backend/.pytest_cache/CACHEDIR.TAG	1970-01-01 00:00:00.000000000 +0000
++++ hive_v119_work/HIVE-main/backend/.pytest_cache/CACHEDIR.TAG	2026-06-13 04:14:53.439180685 +0000
+@@ -0,0 +1,4 @@
++Signature: 8a477f597d28d172789f06886806bc55
++# This file is a cache directory tag created by pytest.
++# For information about cache directory tags, see:
++#	https://bford.info/cachedir/spec.html
+diff -ruN hive_v119_orig/HIVE-main/backend/.pytest_cache/README.md hive_v119_work/HIVE-main/backend/.pytest_cache/README.md
+--- hive_v119_orig/HIVE-main/backend/.pytest_cache/README.md	1970-01-01 00:00:00.000000000 +0000
++++ hive_v119_work/HIVE-main/backend/.pytest_cache/README.md	2026-06-13 04:14:53.439095422 +0000
+@@ -0,0 +1,8 @@
++# pytest cache directory #
++
++This directory contains data from the pytest's cache plugin,
++which provides the `--lf` and `--ff` options, as well as the `cache` fixture.
++
++**Do not** commit this to version control.
++
++See [the docs](https://docs.pytest.org/en/stable/how-to/cache.html) for more information.
+diff -ruN hive_v119_orig/HIVE-main/backend/.pytest_cache/v/cache/nodeids hive_v119_work/HIVE-main/backend/.pytest_cache/v/cache/nodeids
+--- hive_v119_orig/HIVE-main/backend/.pytest_cache/v/cache/nodeids	1970-01-01 00:00:00.000000000 +0000
++++ hive_v119_work/HIVE-main/backend/.pytest_cache/v/cache/nodeids	2026-06-13 04:14:53.439414542 +0000
+@@ -0,0 +1,115 @@
++[
++  "tests/test_brand_modes.py::test_auto_resolved_audit_prompt_gets_brand_glossary",
++  "tests/test_brand_modes.py::test_brand_prompt_defines_rams_for_hive_context",
++  "tests/test_chunking.py::test_query_terms_and_score_chunk",
++  "tests/test_chunking.py::test_split_text_into_chunks_preserves_overlap_and_metadata",
++  "tests/test_chunking.py::test_split_text_rejects_tiny_chunk_size",
++  "tests/test_context_manager.py::test_context_trimming_keeps_recent_messages",
++  "tests/test_context_manager.py::test_estimate_tokens_never_zero",
++  "tests/test_database_layer.py::test_chat_payload_hydrates_persisted_history",
++  "tests/test_database_layer.py::test_d1_env_aliases",
++  "tests/test_database_layer.py::test_database_env_aliases",
++  "tests/test_database_layer.py::test_postgres_statement_timeout_can_be_disabled",
++  "tests/test_database_layer.py::test_postgres_statement_timeout_sql_uses_safe_literal",
++  "tests/test_database_layer.py::test_sql_store_cleanup_test_records_dry_run_and_delete",
++  "tests/test_database_layer.py::test_sql_store_file_upsert_rewrites_without_transaction_poison",
++  "tests/test_database_layer.py::test_sql_store_lists_conversations_files_and_costs",
++  "tests/test_database_layer.py::test_sql_store_ping_write_is_ephemeral",
++  "tests/test_database_layer.py::test_sql_store_records_chat_and_file",
++  "tests/test_database_layer.py::test_sql_store_records_lists_and_searches_file_chunks",
++  "tests/test_database_layer.py::test_sql_store_reuses_existing_conversation_without_poisoning_transaction",
++  "tests/test_database_layer.py::test_sqlite_store_initialises_schema",
++  "tests/test_file_read_and_chat.py::test_chat_with_file_can_use_persisted_chunks",
++  "tests/test_file_read_and_chat.py::test_chat_with_file_dry_run_skips_model_and_returns_timings",
++  "tests/test_file_read_and_chat.py::test_chat_with_file_injects_bounded_file_context",
++  "tests/test_file_read_and_chat.py::test_chat_with_file_model_timeout_returns_structured_diagnostic",
++  "tests/test_file_read_and_chat.py::test_chat_with_file_returns_empty_reply_diagnostic",
++  "tests/test_file_read_and_chat.py::test_file_chunk_endpoints_with_sql_store",
++  "tests/test_file_read_and_chat.py::test_file_diagnostics_returns_list_probe_error",
++  "tests/test_file_read_and_chat.py::test_file_list_runtime_error_returns_json_diagnostics",
++  "tests/test_file_read_and_chat.py::test_list_files_returns_uploaded_local_object",
++  "tests/test_file_read_and_chat.py::test_public_url_endpoint_returns_local_none",
++  "tests/test_file_read_and_chat.py::test_read_file_rejects_path_traversal",
++  "tests/test_file_read_and_chat.py::test_read_file_returns_uploaded_text_content",
++  "tests/test_file_read_and_chat.py::test_upload_base64_rejects_invalid_payload",
++  "tests/test_file_read_and_chat.py::test_upload_base64_text_endpoint",
++  "tests/test_file_read_and_chat.py::test_upload_base64_zip_and_inspect",
++  "tests/test_file_read_and_chat.py::test_zip_inspect_rejects_non_zip",
++  "tests/test_health_operational.py::test_health_reports_v14_build_and_storage_flags",
++  "tests/test_health_operational.py::test_healthz_is_minimal_for_mast_keepawake",
++  "tests/test_large_ingestion.py::test_docx_and_xlsx_text_extraction_for_document_ingestion",
++  "tests/test_large_ingestion.py::test_large_text_upload_chunks_successfully",
++  "tests/test_large_ingestion.py::test_larger_zip_inspection_keeps_preview_bounded",
++  "tests/test_model_router.py::test_auto_mode_resolves_aims_rams_to_audit_prompt_mode",
++  "tests/test_model_router.py::test_brand_mode_routes_to_audit_model",
++  "tests/test_model_router.py::test_fallbacks_exclude_selected_model",
++  "tests/test_model_router.py::test_model_router_detects_audit",
++  "tests/test_model_router.py::test_paid_fallbacks_are_blocked_by_default",
++  "tests/test_model_router.py::test_paid_fallbacks_can_be_enabled",
++  "tests/test_model_router.py::test_requested_model_overrides_default",
++  "tests/test_openrouter_preflight.py::test_chat_completion_does_not_call_invalid_primary",
++  "tests/test_openrouter_preflight.py::test_chat_completion_retries_empty_visible_reply",
++  "tests/test_openrouter_preflight.py::test_chat_completion_returns_empty_reply_diagnostic_when_all_attempts_empty",
++  "tests/test_openrouter_preflight.py::test_chat_completion_returns_structured_failure_instead_of_raising_502",
++  "tests/test_openrouter_preflight.py::test_free_only_mode_reorders_non_free_primary_behind_free_fallback",
++  "tests/test_openrouter_preflight.py::test_payload_attempts_respects_max_fallback_attempts",
++  "tests/test_openrouter_preflight.py::test_payload_attempts_skip_invalid_model_and_use_free_fallback",
++  "tests/test_openrouter_preflight.py::test_payload_attempts_still_prefers_free_fallback_when_preflight_is_disabled",
++  "tests/test_openrouter_preflight.py::test_preflight_does_not_filter_controlled_fallback_aliases",
++  "tests/test_openrouter_preflight.py::test_preflight_keeps_free_fallback_when_all_candidates_would_be_filtered",
++  "tests/test_settings_env_aliases.py::test_openrouter_app_name_can_set_title_and_app_name",
++  "tests/test_settings_env_aliases.py::test_r2_short_env_aliases_are_supported",
++  "tests/test_sse.py::test_heartbeat_stream_does_not_duplicate_done",
++  "tests/test_sse.py::test_heartbeat_stream_error_done_is_false",
++  "tests/test_upload_text.py::test_upload_text_endpoint_uses_json_and_local_storage",
++  "tests/test_upload_text.py::test_upload_text_sanitises_filename",
++  "tests/test_v113_repo_hygiene.py::test_build_stage_is_v113",
++  "tests/test_v113_repo_hygiene.py::test_repo_hygiene_report_detects_orphan_and_duplicates",
++  "tests/test_v113_repo_hygiene.py::test_repo_hygiene_report_is_read_only",
++  "tests/test_v114_execution_review_queue.py::test_create_execution_review_dry_run",
++  "tests/test_v114_execution_review_queue.py::test_create_list_and_decide_execution_review",
++  "tests/test_v114_execution_review_queue.py::test_v114_build_stage",
++  "tests/test_v115_review_evidence_pack.py::test_evidence_pack_audit_trail_and_exports",
++  "tests/test_v115_review_evidence_pack.py::test_v115_build_stage",
++  "tests/test_v117_registry_integrity.py::test_v117_build_marker",
++  "tests/test_v117_registry_integrity.py::test_v117_duplicate_and_missing_detection",
++  "tests/test_v117_registry_integrity.py::test_v117_integrity_report_clean_registry",
++  "tests/test_v117_registry_integrity.py::test_v117_rebuild_index_defaults_to_dry_run",
++  "tests/test_v119_workflow_graphs.py::test_v118_workflow_graph_builds_nodes_and_edges",
++  "tests/test_v119_workflow_graphs.py::test_v118_workflow_templates_are_plan_only",
++  "tests/test_v119_workflow_graphs.py::test_v119_build_marker",
++  "tests/test_v119_workflow_graphs.py::test_v119_execution_preview_blocks_adapters",
++  "tests/test_v119_workflow_graphs.py::test_v119_policies_are_non_executing",
++  "tests/test_v15_ingestion_expansion.py::test_docx_chunking_uses_document_extractor",
++  "tests/test_v15_ingestion_expansion.py::test_health_reports_v15_free_tier_limits",
++  "tests/test_v15_ingestion_expansion.py::test_xlsx_extraction_is_bounded",
++  "tests/test_v15_ingestion_expansion.py::test_zip_extract_text_chunks_nested_archive",
++  "tests/test_v16_workflow_presets_r2_lanes.py::test_chat_with_file_applies_audit_preset_and_returns_source_chunks",
++  "tests/test_v16_workflow_presets_r2_lanes.py::test_preset_aliases_are_supported",
++  "tests/test_v16_workflow_presets_r2_lanes.py::test_r2_lanes_endpoint_uses_new_ecosystem_envs",
++  "tests/test_v16_workflow_presets_r2_lanes.py::test_unknown_workflow_preset_is_rejected",
++  "tests/test_v16_workflow_presets_r2_lanes.py::test_v16_health_reports_workflow_and_r2_lane_flags",
++  "tests/test_v16_workflow_presets_r2_lanes.py::test_workflow_presets_endpoint_lists_presets",
++  "tests/test_v17_ecosystem_intelligence.py::test_ecosystem_search_requires_query",
++  "tests/test_v17_ecosystem_intelligence.py::test_ecosystem_status_is_mast_friendly",
++  "tests/test_v17_ecosystem_intelligence.py::test_r2_discovery_handles_unconfigured_storage_without_crashing",
++  "tests/test_v17_ecosystem_intelligence.py::test_skills_list_and_search_return_safe_disabled_d1_response",
++  "tests/test_v18_skill_registry_import.py::test_extract_search_documents_and_stats",
++  "tests/test_v18_skill_registry_import.py::test_import_manifest_is_safe_when_d1_disabled",
++  "tests/test_v18_skill_registry_import.py::test_skill_document_mapping_preserves_categories",
++  "tests/test_v18_skill_registry_import.py::test_skills_status_exposes_v18_manifest_hints",
++  "tests/test_v19_intelligent_skill_search.py::test_v19_skill_document_mapping_still_preserves_descriptor_url",
++  "tests/test_v19_intelligent_skill_search.py::test_v19_weighted_skill_search_matches_split_terms",
++  "tests/test_v19_intelligent_skill_search.py::test_v19_weighted_skill_search_uses_synonyms",
++  "tests/test_v19_to_v112_skill_intelligence.py::test_v110_recommendation_engine_respects_repo_and_risk",
++  "tests/test_v19_to_v112_skill_intelligence.py::test_v111_route_plan_is_review_gated",
++  "tests/test_v19_to_v112_skill_intelligence.py::test_v112_shared_execution_plan_is_plan_only",
++  "tests/test_v19_to_v112_skill_intelligence.py::test_v19_weighted_skill_search_scores_relevant_fields",
++  "tests/test_vectorize_foundation.py::test_vector_search_falls_back_to_sql_chunks_when_vectorize_disabled",
++  "tests/test_vectorize_foundation.py::test_vectorize_client_disabled_without_gate",
++  "tests/test_vectorize_foundation.py::test_vectorize_diagnostics_endpoint_is_safe_when_disabled",
++  "tests/test_vectorize_foundation.py::test_vectorize_env_aliases_are_supported",
++  "tests/test_vectorize_foundation.py::test_vectorize_upsert_uses_cloudflare_vectors_multipart_part",
++  "tests/test_zip_ingestion.py::test_inspect_zip_counts_members",
++  "tests/test_zip_ingestion.py::test_rejects_zip_path_traversal"
++]
+\ No newline at end of file
+Binary files hive_v119_orig/HIVE-main/backend/app/__pycache__/__init__.cpython-313.pyc and hive_v119_work/HIVE-main/backend/app/__pycache__/__init__.cpython-313.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/app/__pycache__/main.cpython-313.pyc and hive_v119_work/HIVE-main/backend/app/__pycache__/main.cpython-313.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/app/api/__pycache__/__init__.cpython-313.pyc and hive_v119_work/HIVE-main/backend/app/api/__pycache__/__init__.cpython-313.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/app/api/__pycache__/chat.cpython-313.pyc and hive_v119_work/HIVE-main/backend/app/api/__pycache__/chat.cpython-313.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/app/api/__pycache__/db.cpython-313.pyc and hive_v119_work/HIVE-main/backend/app/api/__pycache__/db.cpython-313.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/app/api/__pycache__/ecosystem.cpython-313.pyc and hive_v119_work/HIVE-main/backend/app/api/__pycache__/ecosystem.cpython-313.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/app/api/__pycache__/execution.cpython-313.pyc and hive_v119_work/HIVE-main/backend/app/api/__pycache__/execution.cpython-313.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/app/api/__pycache__/files.cpython-313.pyc and hive_v119_work/HIVE-main/backend/app/api/__pycache__/files.cpython-313.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/app/api/__pycache__/health.cpython-313.pyc and hive_v119_work/HIVE-main/backend/app/api/__pycache__/health.cpython-313.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/app/api/__pycache__/models.cpython-313.pyc and hive_v119_work/HIVE-main/backend/app/api/__pycache__/models.cpython-313.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/app/api/__pycache__/skills.cpython-313.pyc and hive_v119_work/HIVE-main/backend/app/api/__pycache__/skills.cpython-313.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/app/api/__pycache__/system.cpython-313.pyc and hive_v119_work/HIVE-main/backend/app/api/__pycache__/system.cpython-313.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/app/api/__pycache__/vectorize.cpython-313.pyc and hive_v119_work/HIVE-main/backend/app/api/__pycache__/vectorize.cpython-313.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/app/api/__pycache__/workflow_graphs.cpython-313.pyc and hive_v119_work/HIVE-main/backend/app/api/__pycache__/workflow_graphs.cpython-313.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/app/api/__pycache__/workflows.cpython-313.pyc and hive_v119_work/HIVE-main/backend/app/api/__pycache__/workflows.cpython-313.pyc differ
+diff -ruN hive_v119_orig/HIVE-main/backend/app/api/workflow_graphs.py hive_v119_work/HIVE-main/backend/app/api/workflow_graphs.py
+--- hive_v119_orig/HIVE-main/backend/app/api/workflow_graphs.py	1970-01-01 00:00:00.000000000 +0000
++++ hive_v119_work/HIVE-main/backend/app/api/workflow_graphs.py	2026-06-13 04:13:16.091818108 +0000
+@@ -0,0 +1,76 @@
++from __future__ import annotations
++
++from fastapi import APIRouter, Depends
++from pydantic import BaseModel, Field
++
++from app.core.config import Settings, get_settings
++from app.core.security import require_admin
++from app.services.workflow_graphs import (
++    build_workflow_graph,
++    controlled_execution_preview,
++    execution_preview_policies,
++    workflow_graph_templates,
++)
++
++router = APIRouter(tags=["workflow-graphs"], dependencies=[Depends(require_admin)])
++
++
++class WorkflowGraphBuildRequest(BaseModel):
++    task: str = Field(..., min_length=1, max_length=1200)
++    repo: str | None = Field(None, max_length=40)
++    workflow_preset: str | None = Field(None, max_length=120)
++    template: str | None = Field(None, max_length=80)
++    limit: int = Field(5, ge=1, le=25)
++
++
++class ExecutionPreviewRequest(WorkflowGraphBuildRequest):
++    approval_state: str | None = Field(None, max_length=40)
++
++
++@router.get("/workflow-graphs/templates")
++def templates() -> dict[str, object]:
++    """Return workflow graph templates for UI/planning use."""
++
++    return workflow_graph_templates()
++
++
++@router.post("/workflow-graphs/build")
++def build_graph(
++    payload: WorkflowGraphBuildRequest,
++    settings: Settings = Depends(get_settings),
++) -> dict[str, object]:
++    """Build a graph-shaped review plan without executing anything."""
++
++    return build_workflow_graph(
++        settings=settings,
++        task=payload.task,
++        repo=payload.repo,
++        workflow_preset=payload.workflow_preset,
++        template=payload.template,
++        limit=payload.limit,
++    )
++
++
++@router.get("/execution-preview/policies")
++def preview_policies() -> dict[str, object]:
++    """Return the controlled-preview policy map."""
++
++    return execution_preview_policies()
++
++
++@router.post("/execution-preview")
++def preview_execution(
++    payload: ExecutionPreviewRequest,
++    settings: Settings = Depends(get_settings),
++) -> dict[str, object]:
++    """Preview controlled execution status without running adapters."""
++
++    return controlled_execution_preview(
++        settings=settings,
++        task=payload.task,
++        repo=payload.repo,
++        workflow_preset=payload.workflow_preset,
++        template=payload.template,
++        limit=payload.limit,
++        approval_state=payload.approval_state,
++    )
+Binary files hive_v119_orig/HIVE-main/backend/app/core/__pycache__/__init__.cpython-313.pyc and hive_v119_work/HIVE-main/backend/app/core/__pycache__/__init__.cpython-313.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/app/core/__pycache__/config.cpython-313.pyc and hive_v119_work/HIVE-main/backend/app/core/__pycache__/config.cpython-313.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/app/core/__pycache__/security.cpython-313.pyc and hive_v119_work/HIVE-main/backend/app/core/__pycache__/security.cpython-313.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/app/core/__pycache__/sse.cpython-313.pyc and hive_v119_work/HIVE-main/backend/app/core/__pycache__/sse.cpython-313.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/app/core/__pycache__/version.cpython-313.pyc and hive_v119_work/HIVE-main/backend/app/core/__pycache__/version.cpython-313.pyc differ
+diff -ruN hive_v119_orig/HIVE-main/backend/app/core/version.py hive_v119_work/HIVE-main/backend/app/core/version.py
+--- hive_v119_orig/HIVE-main/backend/app/core/version.py	2026-06-12 13:48:16.000000000 +0000
++++ hive_v119_work/HIVE-main/backend/app/core/version.py	2026-06-13 04:13:17.264880667 +0000
+@@ -1 +1 @@
+-BUILD_STAGE = "v1.17-registry-integrity"
++BUILD_STAGE = "v1.19-controlled-execution-preview"
+Binary files hive_v119_orig/HIVE-main/backend/app/ingestion/__pycache__/__init__.cpython-313.pyc and hive_v119_work/HIVE-main/backend/app/ingestion/__pycache__/__init__.cpython-313.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/app/ingestion/__pycache__/chunking.cpython-313.pyc and hive_v119_work/HIVE-main/backend/app/ingestion/__pycache__/chunking.cpython-313.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/app/ingestion/__pycache__/file_ingestion.cpython-313.pyc and hive_v119_work/HIVE-main/backend/app/ingestion/__pycache__/file_ingestion.cpython-313.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/app/ingestion/__pycache__/text_extractors.cpython-313.pyc and hive_v119_work/HIVE-main/backend/app/ingestion/__pycache__/text_extractors.cpython-313.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/app/ingestion/__pycache__/zip_ingestion.cpython-313.pyc and hive_v119_work/HIVE-main/backend/app/ingestion/__pycache__/zip_ingestion.cpython-313.pyc differ
+diff -ruN hive_v119_orig/HIVE-main/backend/app/main.py hive_v119_work/HIVE-main/backend/app/main.py
+--- hive_v119_orig/HIVE-main/backend/app/main.py	2026-06-12 13:39:04.000000000 +0000
++++ hive_v119_work/HIVE-main/backend/app/main.py	2026-06-13 04:13:17.264560190 +0000
+@@ -8,6 +8,7 @@
+ from app.api.models import router as models_router
+ from app.api.vectorize import router as vectorize_router
+ from app.api.workflows import router as workflows_router
++from app.api.workflow_graphs import router as workflow_graphs_router
+ from app.api.ecosystem import router as ecosystem_router
+ from app.api.skills import router as skills_router
+ from app.api.execution import router as execution_router
+@@ -32,6 +33,7 @@
+ app.include_router(db_router, prefix="/v1")
+ app.include_router(vectorize_router, prefix="/v1")
+ app.include_router(workflows_router, prefix="/v1")
++app.include_router(workflow_graphs_router, prefix="/v1")
+ app.include_router(ecosystem_router, prefix="/v1")
+ app.include_router(skills_router, prefix="/v1")
+ app.include_router(execution_router, prefix="/v1")
+Binary files hive_v119_orig/HIVE-main/backend/app/services/__pycache__/__init__.cpython-313.pyc and hive_v119_work/HIVE-main/backend/app/services/__pycache__/__init__.cpython-313.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/app/services/__pycache__/brand_modes.cpython-313.pyc and hive_v119_work/HIVE-main/backend/app/services/__pycache__/brand_modes.cpython-313.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/app/services/__pycache__/context_manager.cpython-313.pyc and hive_v119_work/HIVE-main/backend/app/services/__pycache__/context_manager.cpython-313.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/app/services/__pycache__/ecosystem_index.cpython-313.pyc and hive_v119_work/HIVE-main/backend/app/services/__pycache__/ecosystem_index.cpython-313.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/app/services/__pycache__/embeddings.cpython-313.pyc and hive_v119_work/HIVE-main/backend/app/services/__pycache__/embeddings.cpython-313.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/app/services/__pycache__/execution_reviews.cpython-313.pyc and hive_v119_work/HIVE-main/backend/app/services/__pycache__/execution_reviews.cpython-313.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/app/services/__pycache__/model_router.cpython-313.pyc and hive_v119_work/HIVE-main/backend/app/services/__pycache__/model_router.cpython-313.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/app/services/__pycache__/openrouter.cpython-313.pyc and hive_v119_work/HIVE-main/backend/app/services/__pycache__/openrouter.cpython-313.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/app/services/__pycache__/repo_hygiene.cpython-313.pyc and hive_v119_work/HIVE-main/backend/app/services/__pycache__/repo_hygiene.cpython-313.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/app/services/__pycache__/skill_registry.cpython-313.pyc and hive_v119_work/HIVE-main/backend/app/services/__pycache__/skill_registry.cpython-313.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/app/services/__pycache__/workflow_graphs.cpython-313.pyc and hive_v119_work/HIVE-main/backend/app/services/__pycache__/workflow_graphs.cpython-313.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/app/services/__pycache__/workflow_presets.cpython-313.pyc and hive_v119_work/HIVE-main/backend/app/services/__pycache__/workflow_presets.cpython-313.pyc differ
+diff -ruN hive_v119_orig/HIVE-main/backend/app/services/workflow_graphs.py hive_v119_work/HIVE-main/backend/app/services/workflow_graphs.py
+--- hive_v119_orig/HIVE-main/backend/app/services/workflow_graphs.py	1970-01-01 00:00:00.000000000 +0000
++++ hive_v119_work/HIVE-main/backend/app/services/workflow_graphs.py	2026-06-13 04:13:16.084931000 +0000
+@@ -0,0 +1,372 @@
++from __future__ import annotations
++
++from datetime import datetime, timezone
++from typing import Any
++from uuid import uuid4
++
++from app.core.config import Settings
++from app.core.version import BUILD_STAGE
++from app.services.skill_registry import shared_execution_plan
++
++WORKFLOW_GRAPH_TEMPLATES: dict[str, dict[str, object]] = {
++    "audit_review": {
++        "label": "Audit review workflow",
++        "description": "Review RAMS/AIMS audit bundles, collect evidence, propose future-facing fixes, and queue review.",
++        "recommended_presets": ["audit_report_review", "ci_log_analysis"],
++        "default_repo": "RAMS",
++        "free_tier_safe": True,
++    },
++    "repo_debug": {
++        "label": "Repo/debug workflow",
++        "description": "Classify repo/log issues, identify candidate skills, and produce a review-gated patch plan.",
++        "recommended_presets": ["repo_debug_bundle", "ci_log_analysis"],
++        "default_repo": "HIVE",
++        "free_tier_safe": True,
++    },
++    "content_qa": {
++        "label": "Content QA workflow",
++        "description": "Review social, blog, RSS, podcast or eBook content against brand and QA gates.",
++        "recommended_presets": ["social_content_qa", "podcast_episode_review", "ebook_keyword_review"],
++        "default_repo": "AIMS",
++        "free_tier_safe": True,
++    },
++    "skills_registry": {
++        "label": "Skills registry workflow",
++        "description": "Search, recommend, route and review shared skills without installing or executing them.",
++        "recommended_presets": [],
++        "default_repo": "HIVE",
++        "free_tier_safe": True,
++    },
++}
++
++CONTROLLED_EXECUTION_POLICIES = {
++    "plan_only": {
++        "enabled": True,
++        "can_execute_now": False,
++        "description": "Generate a reviewable plan without running skills or mutating systems.",
++    },
++    "review_gate_required": {
++        "enabled": True,
++        "can_execute_now": False,
++        "description": "A human review decision is required before any future adapter can run.",
++    },
++    "adapter_allowlist_required": {
++        "enabled": True,
++        "can_execute_now": False,
++        "description": "Future execution adapters must be explicit, allow-listed and dry-run first.",
++    },
++    "koyeb_free_safe": {
++        "enabled": True,
++        "can_execute_now": False,
++        "description": "No background jobs, long loops, installs, repo mutations or large batch execution on Koyeb Free.",
++    },
++}
++
++
++def workflow_graph_templates() -> dict[str, object]:
++    """Return static workflow graph templates for the future UI."""
++
++    return {
++        "ok": True,
++        "build_stage_hint": BUILD_STAGE,
++        "count": len(WORKFLOW_GRAPH_TEMPLATES),
++        "templates": WORKFLOW_GRAPH_TEMPLATES,
++        "note": "Templates are UI/planning hints only. They do not execute skills or mutate repos.",
++    }
++
++
++def build_workflow_graph(
++    *,
++    settings: Settings,
++    task: str,
++    repo: str | None = None,
++    workflow_preset: str | None = None,
++    template: str | None = None,
++    limit: int = 5,
++) -> dict[str, object]:
++    """Build a graph-shaped, review-gated workflow plan.
++
++    v1.18 adds a graph model inspired by lightweight workflow/run-plan tools,
++    but keeps HIVE firmly plan-only. The graph is designed for UI rendering and
++    review decisions, not execution.
++    """
++
++    clean_task = " ".join((task or "").strip().split())[:1200]
++    if not clean_task:
++        return {"ok": False, "error_code": "missing_task", "message": "task is required."}
++
++    selected_template = _normalise_template(template, workflow_preset, repo)
++    plan = shared_execution_plan(
++        settings=settings,
++        task=clean_task,
++        repo=repo or str(WORKFLOW_GRAPH_TEMPLATES[selected_template].get("default_repo") or "HIVE"),
++        workflow_preset=workflow_preset,
++        limit=limit,
++    )
++    if not plan.get("ok"):
++        return plan
++
++    graph_id = f"workflow-graph-{uuid4()}"
++    candidate_skills = _candidate_skills_from_plan(plan)
++    risk_summary = _risk_summary(candidate_skills)
++    nodes = _workflow_nodes(
++        task=clean_task,
++        template=selected_template,
++        plan=plan,
++        candidate_skills=candidate_skills,
++        risk_summary=risk_summary,
++    )
++    edges = _workflow_edges(nodes)
++    return {
++        "ok": True,
++        "build_stage_hint": BUILD_STAGE,
++        "graph_id": graph_id,
++        "template": selected_template,
++        "task": clean_task,
++        "repo": plan.get("repo"),
++        "workflow_preset": workflow_preset,
++        "execution_mode": "plan_only_graph",
++        "can_execute_now": False,
++        "requires_approval": True,
++        "node_count": len(nodes),
++        "edge_count": len(edges),
++        "nodes": nodes,
++        "edges": edges,
++        "risk_summary": risk_summary,
++        "candidate_skills": candidate_skills,
++        "source_plan": plan,
++        "free_tier_note": "Graph building is synchronous and bounded; no background execution starts on Koyeb Free.",
++        "safety_note": _safety_note(),
++    }
++
++
++def controlled_execution_preview(
++    *,
++    settings: Settings,
++    task: str,
++    repo: str | None = None,
++    workflow_preset: str | None = None,
++    template: str | None = None,
++    limit: int = 5,
++    approval_state: str | None = None,
++) -> dict[str, object]:
++    """Return a controlled execution preview with step statuses.
++
++    v1.19 is still non-executing. It models what would be required for future
++    execution adapters and clearly marks every runnable-looking step as blocked
++    by review/adapter gates.
++    """
++
++    graph = build_workflow_graph(
++        settings=settings,
++        task=task,
++        repo=repo,
++        workflow_preset=workflow_preset,
++        template=template,
++        limit=limit,
++    )
++    if not graph.get("ok"):
++        return graph
++
++    approval = _normalise_approval_state(approval_state)
++    statuses = _execution_step_statuses(graph, approval_state=approval)
++    blocked = [item for item in statuses if item.get("status") in {"blocked", "review_required"}]
++    return {
++        "ok": True,
++        "build_stage_hint": BUILD_STAGE,
++        "preview_id": f"execution-preview-{uuid4()}",
++        "task": graph.get("task"),
++        "repo": graph.get("repo"),
++        "workflow_preset": workflow_preset,
++        "template": graph.get("template"),
++        "execution_mode": "controlled_preview_only",
++        "approval_state": approval,
++        "can_execute_now": False,
++        "requires_approval": True,
++        "adapter_execution_enabled": False,
++        "step_count": len(statuses),
++        "blocked_count": len(blocked),
++        "step_statuses": statuses,
++        "policies": CONTROLLED_EXECUTION_POLICIES,
++        "workflow_graph": graph,
++        "next_required_actions": _next_required_actions(approval, blocked),
++        "safety_note": _safety_note(),
++    }
++
++
++def execution_preview_policies() -> dict[str, object]:
++    return {
++        "ok": True,
++        "build_stage_hint": BUILD_STAGE,
++        "policies": CONTROLLED_EXECUTION_POLICIES,
++        "can_execute_now": False,
++        "note": "v1.19 exposes execution preview semantics only. Adapter execution remains unavailable.",
++    }
++
++
++def _normalise_template(template: str | None, workflow_preset: str | None, repo: str | None) -> str:
++    candidate = (template or "").strip().lower().replace("-", "_")
++    if candidate in WORKFLOW_GRAPH_TEMPLATES:
++        return candidate
++    preset = (workflow_preset or "").strip().lower()
++    if "audit" in preset:
++        return "audit_review"
++    if "repo" in preset or "ci" in preset or (repo or "").strip().lower() == "hive":
++        return "repo_debug"
++    if "social" in preset or "podcast" in preset or "ebook" in preset:
++        return "content_qa"
++    if "skill" in preset:
++        return "skills_registry"
++    return "skills_registry"
++
++
++def _candidate_skills_from_plan(plan: dict[str, object]) -> list[dict[str, object]]:
++    routed = plan.get("routed_skill_plan") if isinstance(plan.get("routed_skill_plan"), dict) else {}
++    candidates = routed.get("candidate_skills") if isinstance(routed.get("candidate_skills"), list) else []
++    return [item for item in candidates if isinstance(item, dict)][:25]
++
++
++def _risk_summary(candidate_skills: list[dict[str, object]]) -> dict[str, object]:
++    counts = {"low": 0, "medium": 0, "high": 0, "unknown": 0}
++    for item in candidate_skills:
++        risk = str(item.get("risk_level") or "unknown").strip().lower()
++        counts[risk if risk in counts else "unknown"] += 1
++    highest = "high" if counts["high"] else "medium" if counts["medium"] else "low" if counts["low"] else "unknown"
++    return {
++        "candidate_count": len(candidate_skills),
++        "by_risk": counts,
++        "highest_risk": highest,
++        "review_required": highest in {"medium", "high", "unknown"} or bool(candidate_skills),
++    }
++
++
++def _workflow_nodes(
++    *,
++    task: str,
++    template: str,
++    plan: dict[str, object],
++    candidate_skills: list[dict[str, object]],
++    risk_summary: dict[str, object],
++) -> list[dict[str, object]]:
++    return [
++        {
++            "id": "request",
++            "type": "input",
++            "label": "Operator request",
++            "status": "complete",
++            "summary": task,
++        },
++        {
++            "id": "classify",
++            "type": "decision",
++            "label": "Classify workflow",
++            "status": "planned",
++            "summary": f"Template: {template}; repo: {plan.get('repo') or 'unspecified'}.",
++        },
++        {
++            "id": "recommend_skills",
++            "type": "skill_selection",
++            "label": "Recommend skills",
++            "status": "planned",
++            "summary": f"{len(candidate_skills)} candidate skill(s) selected from the D1 registry.",
++            "skill_ids": [item.get("skill_id") for item in candidate_skills if item.get("skill_id")],
++        },
++        {
++            "id": "collect_evidence",
++            "type": "evidence",
++            "label": "Collect evidence",
++            "status": "planned",
++            "summary": "Use R2 lanes, D1 metadata, SQL chunks and Vectorize only where already configured.",
++        },
++        {
++            "id": "dry_run_output",
++            "type": "dry_run",
++            "label": "Generate dry-run output",
++            "status": "planned",
++            "summary": "Produce a reviewable output or patch plan without live changes.",
++        },
++        {
++            "id": "risk_gate",
++            "type": "gate",
++            "label": "Risk gate",
++            "status": "review_required" if risk_summary.get("review_required") else "planned",
++            "summary": f"Highest candidate risk: {risk_summary.get('highest_risk')}.",
++            "risk_summary": risk_summary,
++        },
++        {
++            "id": "review_queue",
++            "type": "approval",
++            "label": "Execution review queue",
++            "status": "review_required",
++            "summary": "A review decision is required before any future adapter could run.",
++        },
++        {
++            "id": "adapter_execution",
++            "type": "blocked_execution",
++            "label": "Future adapter execution",
++            "status": "blocked",
++            "summary": "Blocked in v1.19. No adapters, repo mutations, installs or background jobs are enabled.",
++        },
++    ]
++
++
++def _workflow_edges(nodes: list[dict[str, object]]) -> list[dict[str, object]]:
++    edges: list[dict[str, object]] = []
++    for left, right in zip(nodes, nodes[1:]):
++        edges.append({"from": left["id"], "to": right["id"], "type": "sequential"})
++    return edges
++
++
++def _execution_step_statuses(graph: dict[str, object], *, approval_state: str) -> list[dict[str, object]]:
++    statuses = []
++    for node in graph.get("nodes", []):
++        if not isinstance(node, dict):
++            continue
++        node_id = str(node.get("id") or "")
++        status = str(node.get("status") or "planned")
++        can_run = False
++        blocker = None
++        if node_id == "adapter_execution":
++            status = "blocked"
++            blocker = "execution_adapters_disabled_in_v1_19"
++        elif node_id in {"risk_gate", "review_queue"}:
++            status = "review_required" if approval_state != "approved" else "approved_but_execution_still_disabled"
++            blocker = None if approval_state == "approved" else "human_review_required"
++        elif node_id == "request":
++            status = "complete"
++        statuses.append(
++            {
++                "node_id": node_id,
++                "label": node.get("label"),
++                "type": node.get("type"),
++                "status": status,
++                "can_run": can_run,
++                "blocker": blocker,
++                "summary": node.get("summary"),
++            }
++        )
++    return statuses
++
++
++def _normalise_approval_state(value: str | None) -> str:
++    candidate = (value or "pending_review").strip().lower().replace("-", "_")
++    if candidate in {"approved", "rejected", "needs_changes", "archived", "pending_review"}:
++        return candidate
++    return "pending_review"
++
++
++def _next_required_actions(approval_state: str, blocked: list[dict[str, object]]) -> list[str]:
++    actions = []
++    if approval_state != "approved":
++        actions.append("Create or update an execution review decision before any future adapter can run.")
++    if blocked:
++        actions.append("Keep execution adapters disabled until an explicit allow-list and dry-run adapter layer exists.")
++    actions.append("Use the evidence pack endpoint to review sources, candidate skills and risk notes.")
++    return actions
++
++
++def _safety_note() -> str:
++    return (
++        "v1.19 is controlled-preview only. HIVE does not execute skills, mutate repos, "
++        "install packages, write exports, or start background jobs from these endpoints."
++    )
+Binary files hive_v119_orig/HIVE-main/backend/app/storage/__pycache__/__init__.cpython-313.pyc and hive_v119_work/HIVE-main/backend/app/storage/__pycache__/__init__.cpython-313.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/app/storage/__pycache__/d1.cpython-313.pyc and hive_v119_work/HIVE-main/backend/app/storage/__pycache__/d1.cpython-313.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/app/storage/__pycache__/local_blob.cpython-313.pyc and hive_v119_work/HIVE-main/backend/app/storage/__pycache__/local_blob.cpython-313.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/app/storage/__pycache__/r2.cpython-313.pyc and hive_v119_work/HIVE-main/backend/app/storage/__pycache__/r2.cpython-313.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/app/storage/__pycache__/sql_store.cpython-313.pyc and hive_v119_work/HIVE-main/backend/app/storage/__pycache__/sql_store.cpython-313.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/app/storage/__pycache__/vectorize.cpython-313.pyc and hive_v119_work/HIVE-main/backend/app/storage/__pycache__/vectorize.cpython-313.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/tests/__pycache__/test_brand_modes.cpython-313-pytest-9.0.2.pyc and hive_v119_work/HIVE-main/backend/tests/__pycache__/test_brand_modes.cpython-313-pytest-9.0.2.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/tests/__pycache__/test_chunking.cpython-313-pytest-9.0.2.pyc and hive_v119_work/HIVE-main/backend/tests/__pycache__/test_chunking.cpython-313-pytest-9.0.2.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/tests/__pycache__/test_context_manager.cpython-313-pytest-9.0.2.pyc and hive_v119_work/HIVE-main/backend/tests/__pycache__/test_context_manager.cpython-313-pytest-9.0.2.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/tests/__pycache__/test_database_layer.cpython-313-pytest-9.0.2.pyc and hive_v119_work/HIVE-main/backend/tests/__pycache__/test_database_layer.cpython-313-pytest-9.0.2.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/tests/__pycache__/test_file_read_and_chat.cpython-313-pytest-9.0.2.pyc and hive_v119_work/HIVE-main/backend/tests/__pycache__/test_file_read_and_chat.cpython-313-pytest-9.0.2.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/tests/__pycache__/test_health_operational.cpython-313-pytest-9.0.2.pyc and hive_v119_work/HIVE-main/backend/tests/__pycache__/test_health_operational.cpython-313-pytest-9.0.2.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/tests/__pycache__/test_large_ingestion.cpython-313-pytest-9.0.2.pyc and hive_v119_work/HIVE-main/backend/tests/__pycache__/test_large_ingestion.cpython-313-pytest-9.0.2.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/tests/__pycache__/test_model_router.cpython-313-pytest-9.0.2.pyc and hive_v119_work/HIVE-main/backend/tests/__pycache__/test_model_router.cpython-313-pytest-9.0.2.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/tests/__pycache__/test_openrouter_preflight.cpython-313-pytest-9.0.2.pyc and hive_v119_work/HIVE-main/backend/tests/__pycache__/test_openrouter_preflight.cpython-313-pytest-9.0.2.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/tests/__pycache__/test_settings_env_aliases.cpython-313-pytest-9.0.2.pyc and hive_v119_work/HIVE-main/backend/tests/__pycache__/test_settings_env_aliases.cpython-313-pytest-9.0.2.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/tests/__pycache__/test_sse.cpython-313-pytest-9.0.2.pyc and hive_v119_work/HIVE-main/backend/tests/__pycache__/test_sse.cpython-313-pytest-9.0.2.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/tests/__pycache__/test_upload_text.cpython-313-pytest-9.0.2.pyc and hive_v119_work/HIVE-main/backend/tests/__pycache__/test_upload_text.cpython-313-pytest-9.0.2.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/tests/__pycache__/test_v113_repo_hygiene.cpython-313-pytest-9.0.2.pyc and hive_v119_work/HIVE-main/backend/tests/__pycache__/test_v113_repo_hygiene.cpython-313-pytest-9.0.2.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/tests/__pycache__/test_v114_execution_review_queue.cpython-313-pytest-9.0.2.pyc and hive_v119_work/HIVE-main/backend/tests/__pycache__/test_v114_execution_review_queue.cpython-313-pytest-9.0.2.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/tests/__pycache__/test_v115_review_evidence_pack.cpython-313-pytest-9.0.2.pyc and hive_v119_work/HIVE-main/backend/tests/__pycache__/test_v115_review_evidence_pack.cpython-313-pytest-9.0.2.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/tests/__pycache__/test_v117_registry_integrity.cpython-313-pytest-9.0.2.pyc and hive_v119_work/HIVE-main/backend/tests/__pycache__/test_v117_registry_integrity.cpython-313-pytest-9.0.2.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/tests/__pycache__/test_v119_workflow_graphs.cpython-313-pytest-9.0.2.pyc and hive_v119_work/HIVE-main/backend/tests/__pycache__/test_v119_workflow_graphs.cpython-313-pytest-9.0.2.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/tests/__pycache__/test_v15_ingestion_expansion.cpython-313-pytest-9.0.2.pyc and hive_v119_work/HIVE-main/backend/tests/__pycache__/test_v15_ingestion_expansion.cpython-313-pytest-9.0.2.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/tests/__pycache__/test_v16_workflow_presets_r2_lanes.cpython-313-pytest-9.0.2.pyc and hive_v119_work/HIVE-main/backend/tests/__pycache__/test_v16_workflow_presets_r2_lanes.cpython-313-pytest-9.0.2.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/tests/__pycache__/test_v17_ecosystem_intelligence.cpython-313-pytest-9.0.2.pyc and hive_v119_work/HIVE-main/backend/tests/__pycache__/test_v17_ecosystem_intelligence.cpython-313-pytest-9.0.2.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/tests/__pycache__/test_v18_skill_registry_import.cpython-313-pytest-9.0.2.pyc and hive_v119_work/HIVE-main/backend/tests/__pycache__/test_v18_skill_registry_import.cpython-313-pytest-9.0.2.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/tests/__pycache__/test_v19_intelligent_skill_search.cpython-313-pytest-9.0.2.pyc and hive_v119_work/HIVE-main/backend/tests/__pycache__/test_v19_intelligent_skill_search.cpython-313-pytest-9.0.2.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/tests/__pycache__/test_v19_to_v112_skill_intelligence.cpython-313-pytest-9.0.2.pyc and hive_v119_work/HIVE-main/backend/tests/__pycache__/test_v19_to_v112_skill_intelligence.cpython-313-pytest-9.0.2.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/tests/__pycache__/test_vectorize_foundation.cpython-313-pytest-9.0.2.pyc and hive_v119_work/HIVE-main/backend/tests/__pycache__/test_vectorize_foundation.cpython-313-pytest-9.0.2.pyc differ
+Binary files hive_v119_orig/HIVE-main/backend/tests/__pycache__/test_zip_ingestion.cpython-313-pytest-9.0.2.pyc and hive_v119_work/HIVE-main/backend/tests/__pycache__/test_zip_ingestion.cpython-313-pytest-9.0.2.pyc differ
+diff -ruN hive_v119_orig/HIVE-main/backend/tests/test_health_operational.py hive_v119_work/HIVE-main/backend/tests/test_health_operational.py
+--- hive_v119_orig/HIVE-main/backend/tests/test_health_operational.py	2026-06-12 13:49:56.000000000 +0000
++++ hive_v119_work/HIVE-main/backend/tests/test_health_operational.py	2026-06-13 04:13:57.544995928 +0000
+@@ -14,7 +14,7 @@
+     assert response.status_code == 200
+     body = response.json()
+     assert body["ok"] is True
+-    assert body["build"] == "v1.17-registry-integrity"
++    assert body["build"] == "v1.19-controlled-execution-preview"
+     assert "storage_flags" in body
+     assert set(body["storage_flags"]).issuperset({"r2", "sql", "d1", "vectorize", "embeddings"})
+ 
+@@ -29,5 +29,5 @@
+     body = response.json()
+     assert body["ok"] is True
+     assert body["app"] == "JH Ops Chat"
+-    assert body["build"] == "v1.17-registry-integrity"
++    assert body["build"] == "v1.19-controlled-execution-preview"
+     assert body["free_tier"] is True
+diff -ruN hive_v119_orig/HIVE-main/backend/tests/test_v113_repo_hygiene.py hive_v119_work/HIVE-main/backend/tests/test_v113_repo_hygiene.py
+--- hive_v119_orig/HIVE-main/backend/tests/test_v113_repo_hygiene.py	2026-06-12 13:49:56.000000000 +0000
++++ hive_v119_work/HIVE-main/backend/tests/test_v113_repo_hygiene.py	2026-06-13 04:13:57.545442512 +0000
+@@ -3,7 +3,7 @@
+ 
+ 
+ def test_build_stage_is_v113():
+-    assert BUILD_STAGE == "v1.17-registry-integrity"
++    assert BUILD_STAGE == "v1.19-controlled-execution-preview"
+ 
+ 
+ def test_repo_hygiene_report_detects_orphan_and_duplicates(tmp_path):
+diff -ruN hive_v119_orig/HIVE-main/backend/tests/test_v114_execution_review_queue.py hive_v119_work/HIVE-main/backend/tests/test_v114_execution_review_queue.py
+--- hive_v119_orig/HIVE-main/backend/tests/test_v114_execution_review_queue.py	2026-06-12 13:49:56.000000000 +0000
++++ hive_v119_work/HIVE-main/backend/tests/test_v114_execution_review_queue.py	2026-06-13 04:13:57.545578506 +0000
+@@ -68,7 +68,7 @@
+ 
+ 
+ def test_v114_build_stage():
+-    assert BUILD_STAGE == "v1.17-registry-integrity"
++    assert BUILD_STAGE == "v1.19-controlled-execution-preview"
+ 
+ 
+ def test_create_execution_review_dry_run(monkeypatch):
+diff -ruN hive_v119_orig/HIVE-main/backend/tests/test_v115_review_evidence_pack.py hive_v119_work/HIVE-main/backend/tests/test_v115_review_evidence_pack.py
+--- hive_v119_orig/HIVE-main/backend/tests/test_v115_review_evidence_pack.py	2026-06-12 13:49:56.000000000 +0000
++++ hive_v119_work/HIVE-main/backend/tests/test_v115_review_evidence_pack.py	2026-06-13 04:13:57.545684111 +0000
+@@ -66,7 +66,7 @@
+ 
+ 
+ def test_v115_build_stage():
+-    assert BUILD_STAGE == "v1.17-registry-integrity"
++    assert BUILD_STAGE == "v1.19-controlled-execution-preview"
+ 
+ 
+ def test_evidence_pack_audit_trail_and_exports(monkeypatch):
+diff -ruN hive_v119_orig/HIVE-main/backend/tests/test_v117_registry_integrity.py hive_v119_work/HIVE-main/backend/tests/test_v117_registry_integrity.py
+--- hive_v119_orig/HIVE-main/backend/tests/test_v117_registry_integrity.py	2026-06-12 13:50:20.000000000 +0000
++++ hive_v119_work/HIVE-main/backend/tests/test_v117_registry_integrity.py	2026-06-13 04:13:57.548322509 +0000
+@@ -41,7 +41,7 @@
+ 
+ 
+ def test_v117_build_marker() -> None:
+-    assert BUILD_STAGE == "v1.17-registry-integrity"
++    assert BUILD_STAGE == "v1.19-controlled-execution-preview"
+ 
+ 
+ def test_v117_integrity_report_clean_registry(monkeypatch) -> None:
+@@ -54,7 +54,7 @@
+     result = registry.skill_registry_integrity_report(settings=SETTINGS)
+ 
+     assert result["ok"] is True
+-    assert result["build_stage_hint"] == "v1.17-registry-integrity"
++    assert result["build_stage_hint"] == "v1.19-controlled-execution-preview"
+     assert result["checked_count"] == 1
+     assert result["issue_count"] == 0
+     assert result["registry_health"] == 100
+diff -ruN hive_v119_orig/HIVE-main/backend/tests/test_v119_workflow_graphs.py hive_v119_work/HIVE-main/backend/tests/test_v119_workflow_graphs.py
+--- hive_v119_orig/HIVE-main/backend/tests/test_v119_workflow_graphs.py	1970-01-01 00:00:00.000000000 +0000
++++ hive_v119_work/HIVE-main/backend/tests/test_v119_workflow_graphs.py	2026-06-13 04:14:38.036908513 +0000
+@@ -0,0 +1,88 @@
++from __future__ import annotations
++
++from app.core.version import BUILD_STAGE
++from app.services import workflow_graphs
++
++
++class _SettingsStub:
++    def public_url_for_r2_lane(self, lane: str, key: str) -> str:
++        return "https://skills.example.test"
++
++
++SETTINGS = _SettingsStub()
++
++
++def _fake_shared_execution_plan(**kwargs):
++    return {
++        "ok": True,
++        "build_stage_hint": BUILD_STAGE,
++        "task": kwargs.get("task"),
++        "repo": kwargs.get("repo"),
++        "workflow_preset": kwargs.get("workflow_preset"),
++        "execution_mode": "plan_only",
++        "can_execute_now": False,
++        "requires_approval": True,
++        "routed_skill_plan": {
++            "candidate_skills": [
++                {"skill_id": "S194", "title": "podcast-seo", "risk_level": "low"},
++                {"skill_id": "S198", "title": "sentry-cli", "risk_level": "medium"},
++            ]
++        },
++    }
++
++
++def test_v119_build_marker() -> None:
++    assert BUILD_STAGE == "v1.19-controlled-execution-preview"
++
++
++def test_v118_workflow_templates_are_plan_only() -> None:
++    result = workflow_graphs.workflow_graph_templates()
++    assert result["ok"] is True
++    assert result["build_stage_hint"] == BUILD_STAGE
++    assert result["count"] >= 3
++    assert result["templates"]["repo_debug"]["free_tier_safe"] is True
++
++
++def test_v118_workflow_graph_builds_nodes_and_edges(monkeypatch) -> None:
++    monkeypatch.setattr(workflow_graphs, "shared_execution_plan", _fake_shared_execution_plan)
++    result = workflow_graphs.build_workflow_graph(
++        settings=SETTINGS,
++        task="review podcast SEO workflow",
++        repo="AIMS",
++        workflow_preset="podcast_episode_review",
++        limit=2,
++    )
++    assert result["ok"] is True
++    assert result["build_stage_hint"] == BUILD_STAGE
++    assert result["execution_mode"] == "plan_only_graph"
++    assert result["can_execute_now"] is False
++    assert result["node_count"] == 8
++    assert result["edge_count"] == 7
++    assert result["risk_summary"]["highest_risk"] == "medium"
++    assert result["nodes"][-1]["status"] == "blocked"
++
++
++def test_v119_execution_preview_blocks_adapters(monkeypatch) -> None:
++    monkeypatch.setattr(workflow_graphs, "shared_execution_plan", _fake_shared_execution_plan)
++    result = workflow_graphs.controlled_execution_preview(
++        settings=SETTINGS,
++        task="triage production monitoring issue",
++        repo="AIMS",
++        approval_state="approved",
++        limit=2,
++    )
++    assert result["ok"] is True
++    assert result["build_stage_hint"] == BUILD_STAGE
++    assert result["execution_mode"] == "controlled_preview_only"
++    assert result["can_execute_now"] is False
++    assert result["adapter_execution_enabled"] is False
++    adapter = [item for item in result["step_statuses"] if item["node_id"] == "adapter_execution"][0]
++    assert adapter["status"] == "blocked"
++    assert adapter["blocker"] == "execution_adapters_disabled_in_v1_19"
++
++
++def test_v119_policies_are_non_executing() -> None:
++    result = workflow_graphs.execution_preview_policies()
++    assert result["ok"] is True
++    assert result["can_execute_now"] is False
++    assert result["policies"]["adapter_allowlist_required"]["can_execute_now"] is False
+diff -ruN hive_v119_orig/HIVE-main/backend/tests/test_v15_ingestion_expansion.py hive_v119_work/HIVE-main/backend/tests/test_v15_ingestion_expansion.py
+--- hive_v119_orig/HIVE-main/backend/tests/test_v15_ingestion_expansion.py	2026-06-12 13:49:56.000000000 +0000
++++ hive_v119_work/HIVE-main/backend/tests/test_v15_ingestion_expansion.py	2026-06-13 04:13:57.545791308 +0000
+@@ -25,7 +25,7 @@
+     _reset_settings(monkeypatch, tmp_path)
+     client = TestClient(app)
+     body = client.get("/health").json()
+-    assert body["build"] == "v1.17-registry-integrity"
++    assert body["build"] == "v1.19-controlled-execution-preview"
+     assert body["free_tier"]["enabled"] is True
+     assert "zip_extract_max_members" in body["free_tier"]["ingestion_limits"]
+ 
+diff -ruN hive_v119_orig/HIVE-main/backend/tests/test_v16_workflow_presets_r2_lanes.py hive_v119_work/HIVE-main/backend/tests/test_v16_workflow_presets_r2_lanes.py
+--- hive_v119_orig/HIVE-main/backend/tests/test_v16_workflow_presets_r2_lanes.py	2026-06-12 13:49:56.000000000 +0000
++++ hive_v119_work/HIVE-main/backend/tests/test_v16_workflow_presets_r2_lanes.py	2026-06-13 04:13:57.547470759 +0000
+@@ -31,7 +31,7 @@
+ 
+     body = client.get("/health").json()
+ 
+-    assert body["build"] == "v1.17-registry-integrity"
++    assert body["build"] == "v1.19-controlled-execution-preview"
+     assert body["workflow_presets_enabled"] is True
+     assert body["r2_ecosystem_lanes_enabled"] is True
+     lanes = body["storage_flags"]["r2"]["ecosystem_lanes_configured"]
+diff -ruN hive_v119_orig/HIVE-main/backend/tests/test_v17_ecosystem_intelligence.py hive_v119_work/HIVE-main/backend/tests/test_v17_ecosystem_intelligence.py
+--- hive_v119_orig/HIVE-main/backend/tests/test_v17_ecosystem_intelligence.py	2026-06-12 13:49:56.000000000 +0000
++++ hive_v119_work/HIVE-main/backend/tests/test_v17_ecosystem_intelligence.py	2026-06-13 04:13:57.547736543 +0000
+@@ -36,7 +36,7 @@
+     body = client.get("/v1/ecosystem/status").json()
+ 
+     assert body["ok"] is True
+-    assert body["build_stage_hint"] == "v1.17-registry-integrity"
++    assert body["build_stage_hint"] == "v1.19-controlled-execution-preview"
+     assert body["services"]["skills"]["configured"] is True
+     assert body["services"]["vectorize"]["configured"] is True
+     assert body["recommended_mast_probe"] == "/v1/ecosystem/status"
+diff -ruN hive_v119_orig/HIVE-main/backend/tests/test_v18_skill_registry_import.py hive_v119_work/HIVE-main/backend/tests/test_v18_skill_registry_import.py
+--- hive_v119_orig/HIVE-main/backend/tests/test_v18_skill_registry_import.py	2026-06-12 13:49:56.000000000 +0000
++++ hive_v119_work/HIVE-main/backend/tests/test_v18_skill_registry_import.py	2026-06-13 04:13:57.547878095 +0000
+@@ -26,7 +26,7 @@
+     body = client.get("/v1/skills/status").json()
+ 
+     assert body["ok"] is True
+-    assert body["build_stage_hint"] == "v1.17-registry-integrity"
++    assert body["build_stage_hint"] == "v1.19-controlled-execution-preview"
+     assert body["search_documents_url"] == "https://skills.example.test/index/search-documents.json"
+     assert body["shared_manifest_url"] == "https://skills.example.test/manifests/shared-skill-pool-manifest.json"
+ 
+diff -ruN hive_v119_orig/HIVE-main/backend/tests/test_v19_to_v112_skill_intelligence.py hive_v119_work/HIVE-main/backend/tests/test_v19_to_v112_skill_intelligence.py
+--- hive_v119_orig/HIVE-main/backend/tests/test_v19_to_v112_skill_intelligence.py	2026-06-12 13:49:56.000000000 +0000
++++ hive_v119_work/HIVE-main/backend/tests/test_v19_to_v112_skill_intelligence.py	2026-06-13 04:13:57.548050369 +0000
+@@ -131,7 +131,7 @@
+     )
+ 
+     assert result["ok"] is True
+-    assert result["build_stage_hint"] == "v1.17-registry-integrity"
++    assert result["build_stage_hint"] == "v1.19-controlled-execution-preview"
+     assert result["execution_mode"] == "plan_only"
+     assert result["can_execute_now"] is False
+     assert result["guardrails"]["no_auto_install"] is True
+diff -ruN hive_v119_orig/HIVE-main/backend/tests/test_vectorize_foundation.py hive_v119_work/HIVE-main/backend/tests/test_vectorize_foundation.py
+--- hive_v119_orig/HIVE-main/backend/tests/test_vectorize_foundation.py	2026-06-12 13:49:56.000000000 +0000
++++ hive_v119_work/HIVE-main/backend/tests/test_vectorize_foundation.py	2026-06-13 04:13:57.548164131 +0000
+@@ -62,7 +62,7 @@
+     assert response.status_code == 200
+     body = response.json()
+     assert body["ok"] is True
+-    assert body["build"] == "v1.17-registry-integrity"
++    assert body["build"] == "v1.19-controlled-execution-preview"
+     assert body["sql_chunks_source_of_truth"] is True
+     assert body["vectorize"]["enabled"] is False
+ 
+diff -ruN hive_v119_orig/HIVE-main/docs/CHANGELOG.md hive_v119_work/HIVE-main/docs/CHANGELOG.md
+--- hive_v119_orig/HIVE-main/docs/CHANGELOG.md	2026-06-12 13:51:36.000000000 +0000
++++ hive_v119_work/HIVE-main/docs/CHANGELOG.md	2026-06-13 04:13:57.651846510 +0000
+@@ -1,6 +1,6 @@
+ # HIVE Changelog
+ 
+-## v1.17-registry-integrity
++## v1.19-controlled-execution-preview
+ 
+ - Added read-only skill-registry integrity checks.
+ - Added duplicate, missing-field, taxonomy and orphan/mismatch reports for imported shared skills.
+@@ -17,3 +17,16 @@
+ - Removed stale `__pycache__`/`.pyc` artefacts and duplicate stale core service copies.
+ - Preserved review-gated, plan-only safety: no live execution or repo mutation.
+ 
++
++## v1.19-controlled-execution-preview
++
++- Added workflow graph templates and graph-shaped plan generation for the future HIVE operator UI.
++- Added controlled execution preview responses with node statuses, blockers and next required actions.
++- Added `/v1/workflow-graphs/templates`, `/v1/workflow-graphs/build`, `/v1/execution-preview/policies` and `/v1/execution-preview`.
++- Kept execution fully disabled: no skills are run, no repos are mutated, no packages are installed and no background jobs are started.
++- Kept the system Koyeb Free friendly with bounded synchronous planning only.
++
++## v1.18-workflow-graph-planning
++
++- Introduced graph-shaped workflow planning as the bridge between skill routing and a future UI.
++- Added standard nodes for request classification, skill recommendation, evidence collection, dry-run output, risk gate, review queue and blocked adapter execution.
+diff -ruN hive_v119_orig/HIVE-main/docs/architecture.md hive_v119_work/HIVE-main/docs/architecture.md
+--- hive_v119_orig/HIVE-main/docs/architecture.md	2026-06-12 13:52:44.000000000 +0000
++++ hive_v119_work/HIVE-main/docs/architecture.md	2026-06-13 04:13:57.690824814 +0000
+@@ -259,3 +259,13 @@
+ - D1 lane and source-type consistency.
+ 
+ `/v1/skills/rebuild-index` is deliberately dry-run-first and only upserts D1 metadata from the shared R2 search documents. It does not mutate R2, install packages, execute skills or write to repos.
++
++## v1.18/v1.19 Workflow Graph and Controlled Preview Layer
++
++The workflow graph layer converts task, repo, workflow preset and skill-routing context into a UI-friendly graph:
++
++```text
++request -> classify -> recommend_skills -> collect_evidence -> dry_run_output -> risk_gate -> review_queue -> adapter_execution(blocked)
++```
++
++The controlled execution preview layer then annotates graph nodes with statuses, blockers and next actions. It is deliberately non-executing. Adapter execution is disabled in v1.19 and `can_execute_now` remains `false`.
+diff -ruN hive_v119_orig/HIVE-main/docs/koyeb-deployment.md hive_v119_work/HIVE-main/docs/koyeb-deployment.md
+--- hive_v119_orig/HIVE-main/docs/koyeb-deployment.md	2026-06-12 13:52:44.000000000 +0000
++++ hive_v119_work/HIVE-main/docs/koyeb-deployment.md	2026-06-13 04:13:57.543874738 +0000
+@@ -248,7 +248,7 @@
+ curl https://YOUR-KOYEB-APP.koyeb.app/healthz
+ ```
+ 
+-`/health` should show `build: v1.17-registry-integrity` and clean flags for R2, SQL, D1, Vectorize and embeddings. `/healthz` is deliberately small and unauthenticated for later MAST keep-awake use.
++`/health` should show `build: v1.19-controlled-execution-preview` and clean flags for R2, SQL, D1, Vectorize and embeddings. `/healthz` is deliberately small and unauthenticated for later MAST keep-awake use.
+ 
+ Use `POST /v1/db/test-cleanup` with `dry_run:true` before deleting smoke-test records.
+ 
+@@ -283,7 +283,7 @@
+ curl "$HIVE_URL/v1/files/r2-lanes" -H "Authorization: Bearer $ADMIN_BEARER_TOKEN"
+ ```
+ 
+-`/health` should show `build: v1.17-registry-integrity`, `workflow_presets_enabled: true`, and `r2_ecosystem_lanes_enabled: true`.
++`/health` should show `build: v1.19-controlled-execution-preview`, `workflow_presets_enabled: true`, and `r2_ecosystem_lanes_enabled: true`.
+ 
+ Keep MAST keep-awake pings gentle on Koyeb Free. Use `/healthz`, not authenticated file/chat endpoints.
+ 
+@@ -300,7 +300,7 @@
+ 
+ ## v1.9 Intelligent Skill Search Checks
+ 
+-After deploy, `/health` should show `build: v1.17-registry-integrity`.
++After deploy, `/health` should show `build: v1.19-controlled-execution-preview`.
+ 
+ Useful checks:
+ 
+@@ -314,7 +314,7 @@
+ 
+ ## v1.17 registry integrity smoke checks
+ 
+-After deploying `v1.17-registry-integrity`, run:
++After deploying `v1.19-controlled-execution-preview`, run:
+ 
+ ```bash
+ curl "$HIVE_URL/health"
+diff -ruN hive_v119_orig/HIVE-main/docs/releases/v1.16-skill-search-review-integration.md hive_v119_work/HIVE-main/docs/releases/v1.16-skill-search-review-integration.md
+--- hive_v119_orig/HIVE-main/docs/releases/v1.16-skill-search-review-integration.md	2026-06-12 13:49:56.000000000 +0000
++++ hive_v119_work/HIVE-main/docs/releases/v1.16-skill-search-review-integration.md	2026-06-13 04:13:57.544257899 +0000
+@@ -23,7 +23,7 @@
+ ## Build marker
+ 
+ ```text
+-v1.17-registry-integrity
++v1.19-controlled-execution-preview
+ ```
+ 
+ ## Verification
+diff -ruN hive_v119_orig/HIVE-main/docs/releases/v1.17-registry-integrity.md hive_v119_work/HIVE-main/docs/releases/v1.17-registry-integrity.md
+--- hive_v119_orig/HIVE-main/docs/releases/v1.17-registry-integrity.md	2026-06-12 13:51:32.000000000 +0000
++++ hive_v119_work/HIVE-main/docs/releases/v1.17-registry-integrity.md	2026-06-13 04:13:57.544401296 +0000
+@@ -1,6 +1,6 @@
+ # HIVE v1.17 Registry Integrity
+ 
+-Build marker: `v1.17-registry-integrity`
++Build marker: `v1.19-controlled-execution-preview`
+ 
+ v1.17 is a consolidation and trust release. It keeps the v1.16 skill-search, recommendation, routing, review-queue and evidence-pack features, then adds read-only registry integrity checks so HIVE can validate the imported shared skills catalogue before later recommendation/routing work becomes more active.
+ 
+diff -ruN hive_v119_orig/HIVE-main/docs/releases/v1.18-workflow-graph-planning.md hive_v119_work/HIVE-main/docs/releases/v1.18-workflow-graph-planning.md
+--- hive_v119_orig/HIVE-main/docs/releases/v1.18-workflow-graph-planning.md	1970-01-01 00:00:00.000000000 +0000
++++ hive_v119_work/HIVE-main/docs/releases/v1.18-workflow-graph-planning.md	2026-06-13 04:13:57.659838982 +0000
+@@ -0,0 +1,17 @@
++# HIVE v1.18 – Workflow Graph Planning
++
++Build path: consolidated into `v1.19-controlled-execution-preview`.
++
++v1.18 adds a graph model for HIVE workflow planning. It converts skill recommendations and shared execution plans into nodes and edges that a future UI can render.
++
++## Added
++
++- Workflow graph templates.
++- Graph-shaped plan generation.
++- Node status metadata.
++- Sequential edges for UI display.
++- Free-tier-safe synchronous graph building.
++
++## Safety
++
++This release is planning-only. It does not execute skills, mutate repositories, install packages, create background jobs or write external exports.
+diff -ruN hive_v119_orig/HIVE-main/docs/releases/v1.19-controlled-execution-preview.md hive_v119_work/HIVE-main/docs/releases/v1.19-controlled-execution-preview.md
+--- hive_v119_orig/HIVE-main/docs/releases/v1.19-controlled-execution-preview.md	1970-01-01 00:00:00.000000000 +0000
++++ hive_v119_work/HIVE-main/docs/releases/v1.19-controlled-execution-preview.md	2026-06-13 04:13:57.666295178 +0000
+@@ -0,0 +1,28 @@
++# HIVE v1.19 – Controlled Execution Preview
++
++Build marker: `v1.19-controlled-execution-preview`.
++
++v1.19 adds controlled execution preview semantics on top of workflow graphs. HIVE can now show what *would* need to happen before execution while still refusing to execute anything directly.
++
++## Added
++
++- `GET /v1/workflow-graphs/templates`
++- `POST /v1/workflow-graphs/build`
++- `GET /v1/execution-preview/policies`
++- `POST /v1/execution-preview`
++- Step statuses for graph nodes.
++- Blocker metadata for review gates and disabled adapters.
++- Next-required-actions list for future UI and MAST hand-off.
++
++## Safety policy
++
++v1.19 remains non-executing:
++
++- No skill execution.
++- No repo mutation.
++- No package install.
++- No R2 export write.
++- No background jobs.
++- No adapter execution.
++
++Even if a plan is approved, `can_execute_now` remains `false` until a future explicit adapter layer is implemented and reviewed.
+diff -ruN hive_v119_orig/HIVE-main/docs/roadmap.md hive_v119_work/HIVE-main/docs/roadmap.md
+--- hive_v119_orig/HIVE-main/docs/roadmap.md	2026-06-12 13:52:26.000000000 +0000
++++ hive_v119_work/HIVE-main/docs/roadmap.md	2026-06-13 04:13:57.683907913 +0000
+@@ -226,3 +226,11 @@
+ - Add `/v1/skills/rebuild-index` as a dry-run-first D1 catalogue maintenance endpoint.
+ 
+ Next logical phase: use integrity status as a prerequisite gate for stronger recommendation/routing workflows and later operator UI controls.
++
++## v1.18-v1.19 Workflow Graphs and Controlled Preview
++
++Status: implemented.
++
++The v1.18/v1.19 line adds graph-shaped planning and controlled execution preview semantics. This is the correct bridge before any real execution adapter work. HIVE can show the operator what would happen, what is blocked, what requires review, and why execution is not yet available.
++
++Next logical direction: operator-dashboard API polish and eventual allow-listed dry-run adapters, still behind review gates.
+diff -ruN hive_v119_orig/HIVE-main/scripts/v118_workflow_graph_smoke.py hive_v119_work/HIVE-main/scripts/v118_workflow_graph_smoke.py
+--- hive_v119_orig/HIVE-main/scripts/v118_workflow_graph_smoke.py	1970-01-01 00:00:00.000000000 +0000
++++ hive_v119_work/HIVE-main/scripts/v118_workflow_graph_smoke.py	2026-06-13 04:14:38.043735129 +0000
+@@ -0,0 +1,31 @@
++#!/usr/bin/env python3
++"""HIVE v1.18 workflow graph smoke script."""
++from __future__ import annotations
++
++import json
++import os
++import urllib.request
++
++BASE_URL = os.environ.get("HIVE_BASE_URL", "https://liable-loreen-jonathanharris-57884580.koyeb.app")
++TOKEN = os.environ.get("ADMIN_BEARER_TOKEN", "")
++
++
++def call(method: str, path: str, payload: dict | None = None):
++    body = json.dumps(payload).encode() if payload is not None else None
++    req = urllib.request.Request(
++        BASE_URL + path,
++        data=body,
++        method=method,
++        headers={"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"},
++    )
++    with urllib.request.urlopen(req, timeout=60) as res:
++        return json.loads(res.read().decode())
++
++
++print(json.dumps(call("GET", "/v1/workflow-graphs/templates"), indent=2))
++print(json.dumps(call("POST", "/v1/workflow-graphs/build", {
++    "task": "Review podcast SEO workflow and propose a safe plan.",
++    "repo": "AIMS",
++    "workflow_preset": "podcast_episode_review",
++    "limit": 5,
++}), indent=2))
+diff -ruN hive_v119_orig/HIVE-main/scripts/v119_execution_preview_smoke.py hive_v119_work/HIVE-main/scripts/v119_execution_preview_smoke.py
+--- hive_v119_orig/HIVE-main/scripts/v119_execution_preview_smoke.py	1970-01-01 00:00:00.000000000 +0000
++++ hive_v119_work/HIVE-main/scripts/v119_execution_preview_smoke.py	2026-06-13 04:14:38.050401044 +0000
+@@ -0,0 +1,32 @@
++#!/usr/bin/env python3
++"""HIVE v1.19 controlled execution preview smoke script."""
++from __future__ import annotations
++
++import json
++import os
++import urllib.request
++
++BASE_URL = os.environ.get("HIVE_BASE_URL", "https://liable-loreen-jonathanharris-57884580.koyeb.app")
++TOKEN = os.environ.get("ADMIN_BEARER_TOKEN", "")
++
++
++def call(method: str, path: str, payload: dict | None = None):
++    body = json.dumps(payload).encode() if payload is not None else None
++    req = urllib.request.Request(
++        BASE_URL + path,
++        data=body,
++        method=method,
++        headers={"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"},
++    )
++    with urllib.request.urlopen(req, timeout=60) as res:
++        return json.loads(res.read().decode())
++
++
++print(json.dumps(call("GET", "/v1/execution-preview/policies"), indent=2))
++print(json.dumps(call("POST", "/v1/execution-preview", {
++    "task": "Triage a failed RAMS audit and propose a review-gated plan.",
++    "repo": "RAMS",
++    "workflow_preset": "audit_report_review",
++    "approval_state": "pending_review",
++    "limit": 5,
++}), indent=2))
