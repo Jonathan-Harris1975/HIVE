@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
@@ -7,6 +8,7 @@ from uuid import uuid4
 from app.core.config import Settings
 from app.core.version import BUILD_STAGE
 from app.services.skill_registry import shared_execution_plan
+from app.storage.d1 import D1MetadataStore
 
 WORKFLOW_GRAPH_TEMPLATES: dict[str, dict[str, object]] = {
     "audit_review": {
@@ -39,6 +41,9 @@ WORKFLOW_GRAPH_TEMPLATES: dict[str, dict[str, object]] = {
     },
 }
 
+EXECUTION_PREVIEW_LANE = "execution_previews"
+EXECUTION_PREVIEW_SOURCE_TYPE = "execution_preview"
+
 CONTROLLED_EXECUTION_POLICIES = {
     "plan_only": {
         "enabled": True,
@@ -61,6 +66,55 @@ CONTROLLED_EXECUTION_POLICIES = {
         "description": "No background jobs, long loops, installs, repo mutations or large batch execution on Koyeb Free.",
     },
 }
+
+POLICY_PROFILES: dict[str, dict[str, object]] = {
+    "readonly": {
+        "label": "Read-only",
+        "can_execute_now": False,
+        "allows_repo_mutation": False,
+        "allows_r2_write": False,
+        "requires_human_approval": False,
+        "description": "Inspection, search, evidence-pack and simulation only.",
+    },
+    "review_required": {
+        "label": "Review required",
+        "can_execute_now": False,
+        "allows_repo_mutation": False,
+        "allows_r2_write": False,
+        "requires_human_approval": True,
+        "description": "A reviewer must approve the plan before any future adapter can be considered.",
+    },
+    "repo_safe": {
+        "label": "Repo safe",
+        "can_execute_now": False,
+        "allows_repo_mutation": False,
+        "allows_r2_write": False,
+        "requires_human_approval": True,
+        "description": "May discuss repo changes, but cannot write files, push commits or run installers.",
+    },
+    "r2_write_allowed": {
+        "label": "R2 write allowed later",
+        "can_execute_now": False,
+        "allows_repo_mutation": False,
+        "allows_r2_write": False,
+        "requires_human_approval": True,
+        "description": "Profiles future export-to-R2 behaviour, but v1.22 still stores preview evidence in D1 only.",
+    },
+    "human_approval_required": {
+        "label": "Human approval required",
+        "can_execute_now": False,
+        "allows_repo_mutation": False,
+        "allows_r2_write": False,
+        "requires_human_approval": True,
+        "description": "Conservative default for any medium/high-risk plan.",
+    },
+}
+
+
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 def workflow_graph_templates() -> dict[str, object]:
@@ -152,7 +206,7 @@ def controlled_execution_preview(
 ) -> dict[str, object]:
     """Return a controlled execution preview with step statuses.
 
-    v1.19 is still non-executing. It models what would be required for future
+    v1.22 remains non-executing. It models what would be required for future
     execution adapters and clearly marks every runnable-looking step as blocked
     by review/adapter gates.
     """
@@ -200,7 +254,7 @@ def execution_preview_policies() -> dict[str, object]:
         "build_stage_hint": BUILD_STAGE,
         "policies": CONTROLLED_EXECUTION_POLICIES,
         "can_execute_now": False,
-        "note": "v1.19 exposes execution preview semantics only. Adapter execution remains unavailable.",
+        "note": "v1.22 persists and simulates execution previews only. Adapter execution remains unavailable.",
     }
 
 
@@ -305,7 +359,7 @@ def _workflow_nodes(
             "type": "blocked_execution",
             "label": "Future adapter execution",
             "status": "blocked",
-            "summary": "Blocked in v1.19. No adapters, repo mutations, installs or background jobs are enabled.",
+            "summary": "Blocked in v1.22. No adapters, repo mutations, installs or background jobs are enabled.",
         },
     ]
 
@@ -328,7 +382,7 @@ def _execution_step_statuses(graph: dict[str, object], *, approval_state: str) -
         blocker = None
         if node_id == "adapter_execution":
             status = "blocked"
-            blocker = "execution_adapters_disabled_in_v1_19"
+            blocker = "execution_adapters_disabled_in_v1_22"
         elif node_id in {"risk_gate", "review_queue"}:
             status = "review_required" if approval_state != "approved" else "approved_but_execution_still_disabled"
             blocker = None if approval_state == "approved" else "human_review_required"
@@ -367,6 +421,382 @@ def _next_required_actions(approval_state: str, blocked: list[dict[str, object]]
 
 def _safety_note() -> str:
     return (
-        "v1.19 is controlled-preview only. HIVE does not execute skills, mutate repos, "
+        "v1.22 is persisted simulation/preview only. HIVE does not execute skills, mutate repos, "
         "install packages, write exports, or start background jobs from these endpoints."
     )
+
+
+
+def execution_policy_profiles() -> dict[str, object]:
+    """Return reusable approval/policy profiles for the future operator UI."""
+
+    return {
+        "ok": True,
+        "build_stage_hint": BUILD_STAGE,
+        "count": len(POLICY_PROFILES),
+        "profiles": POLICY_PROFILES,
+        "can_execute_now": False,
+        "note": "Policy profiles describe review gates only. v1.22 still does not execute skills or mutate repos.",
+    }
+
+
+def simulate_workflow_execution(
+    *,
+    settings: Settings,
+    task: str,
+    repo: str | None = None,
+    workflow_preset: str | None = None,
+    template: str | None = None,
+    limit: int = 5,
+    approval_state: str | None = None,
+    policy_profile: str | None = None,
+) -> dict[str, object]:
+    """Run a pretend-mode simulation over a controlled execution preview.
+
+    The simulation estimates services, risk, cost class and blockers. It does
+    not execute adapters, mutate repos, write R2 objects or start background
+    work. It is intentionally deterministic and cheap for Koyeb Free.
+    """
+
+    preview = controlled_execution_preview(
+        settings=settings,
+        task=task,
+        repo=repo,
+        workflow_preset=workflow_preset,
+        template=template,
+        limit=limit,
+        approval_state=approval_state,
+    )
+    if not preview.get("ok"):
+        return preview
+    graph = preview.get("workflow_graph") if isinstance(preview.get("workflow_graph"), dict) else {}
+    risk_summary = graph.get("risk_summary") if isinstance(graph.get("risk_summary"), dict) else {}
+    candidate_skills = graph.get("candidate_skills") if isinstance(graph.get("candidate_skills"), list) else []
+    selected_profile = _normalise_policy_profile(policy_profile, risk_summary)
+    required_services = _required_services_for_graph(graph)
+    cost_estimate = _simulation_cost_estimate(candidate_skills, required_services)
+    missing_prerequisites = _simulation_missing_prerequisites(preview, selected_profile)
+    rollback_notes = _simulation_rollback_notes(required_services)
+    affected = _affected_surfaces(preview, graph)
+    return {
+        "ok": True,
+        "build_stage_hint": BUILD_STAGE,
+        "simulation_id": f"execution-simulation-{uuid4()}",
+        "preview_id": preview.get("preview_id"),
+        "task": preview.get("task"),
+        "repo": preview.get("repo"),
+        "workflow_preset": workflow_preset,
+        "policy_profile": selected_profile,
+        "policy": POLICY_PROFILES[selected_profile],
+        "execution_mode": "pretend_simulation_only",
+        "can_execute_now": False,
+        "adapter_execution_enabled": False,
+        "required_services": required_services,
+        "affected_repos": affected["repos"],
+        "affected_buckets": affected["buckets"],
+        "risk_summary": risk_summary,
+        "estimated_cost": cost_estimate,
+        "missing_prerequisites": missing_prerequisites,
+        "rollback_notes": rollback_notes,
+        "workflow_graph": graph,
+        "controlled_preview": preview,
+        "next_required_actions": preview.get("next_required_actions", []) + [
+            "Save the preview if it needs to appear in the operator review history.",
+            "Keep all future adapter behaviour behind a separate allow-list and dry-run gate.",
+        ],
+        "safety_note": _safety_note(),
+    }
+
+
+def save_execution_preview(
+    *,
+    settings: Settings,
+    task: str,
+    repo: str | None = None,
+    workflow_preset: str | None = None,
+    template: str | None = None,
+    limit: int = 5,
+    approval_state: str | None = None,
+    requested_by: str | None = None,
+    policy_profile: str | None = None,
+    dry_run: bool = False,
+) -> dict[str, object]:
+    """Persist a controlled execution preview/simulation record in D1.
+
+    Dry-run returns the record that would be saved. Live mode stores D1 metadata
+    only; it does not execute anything.
+    """
+
+    simulation = simulate_workflow_execution(
+        settings=settings,
+        task=task,
+        repo=repo,
+        workflow_preset=workflow_preset,
+        template=template,
+        limit=limit,
+        approval_state=approval_state,
+        policy_profile=policy_profile,
+    )
+    if not simulation.get("ok"):
+        return simulation
+    now = _now()
+    preview_id = str(simulation.get("preview_id") or f"execution-preview-{uuid4()}")
+    metadata = {
+        "preview_id": preview_id,
+        "simulation_id": simulation.get("simulation_id"),
+        "task": simulation.get("task"),
+        "repo": simulation.get("repo"),
+        "workflow_preset": workflow_preset,
+        "template": template,
+        "requested_by": requested_by or "hive-user",
+        "approval_state": approval_state or "pending_review",
+        "policy_profile": simulation.get("policy_profile"),
+        "status": "preview_saved" if not dry_run else "dry_run",
+        "created_at": now,
+        "updated_at": now,
+        "execution_mode": "persisted_preview_only",
+        "can_execute_now": False,
+        "simulation": simulation,
+    }
+    item_id = preview_id
+    title = _preview_title(str(simulation.get("task") or preview_id))
+    if dry_run:
+        return {
+            "ok": True,
+            "enabled": True,
+            "dry_run": True,
+            "build_stage_hint": BUILD_STAGE,
+            "lane": EXECUTION_PREVIEW_LANE,
+            "preview_id": preview_id,
+            "would_save": metadata,
+            "can_execute_now": False,
+            "safety_note": _safety_note(),
+        }
+    d1 = D1MetadataStore(settings)
+    if not d1.enabled:
+        return {"ok": False, "enabled": False, "error_code": "d1_disabled"}
+    result = d1.upsert_metadata(
+        item_id=item_id,
+        lane=EXECUTION_PREVIEW_LANE,
+        source_type=EXECUTION_PREVIEW_SOURCE_TYPE,
+        source_id=preview_id,
+        title=title,
+        url=None,
+        metadata=metadata,
+    )
+    return {
+        "ok": bool(result.get("ok")),
+        "enabled": True,
+        "dry_run": False,
+        "build_stage_hint": BUILD_STAGE,
+        "lane": EXECUTION_PREVIEW_LANE,
+        "preview_id": preview_id,
+        "d1_result": result,
+        "preview": metadata,
+        "can_execute_now": False,
+        "safety_note": _safety_note(),
+    }
+
+
+def list_saved_execution_previews(
+    *,
+    settings: Settings,
+    repo: str | None = None,
+    policy_profile: str | None = None,
+    limit: int = 50,
+) -> dict[str, object]:
+    d1 = D1MetadataStore(settings)
+    if not d1.enabled:
+        return {"ok": False, "enabled": False, "error_code": "d1_disabled"}
+    result = d1.list_metadata(lane=EXECUTION_PREVIEW_LANE, limit=limit)
+    if not result.get("ok"):
+        return result
+    items = []
+    for item in result.get("items", []):
+        if not isinstance(item, dict):
+            continue
+        summary = _preview_summary(item)
+        if repo and str(summary.get("repo") or "").lower() != repo.lower():
+            continue
+        if policy_profile and str(summary.get("policy_profile") or "").lower() != policy_profile.lower():
+            continue
+        items.append(summary)
+    return {
+        "ok": True,
+        "enabled": True,
+        "build_stage_hint": BUILD_STAGE,
+        "lane": EXECUTION_PREVIEW_LANE,
+        "count": len(items),
+        "items": items,
+        "can_execute_now": False,
+        "safety_note": _safety_note(),
+    }
+
+
+def get_saved_execution_preview(*, settings: Settings, preview_id: str) -> dict[str, object]:
+    d1 = D1MetadataStore(settings)
+    if not d1.enabled:
+        return {"ok": False, "enabled": False, "error_code": "d1_disabled"}
+    item = _get_preview_item(d1, preview_id)
+    if not item:
+        return {"ok": False, "enabled": True, "error_code": "execution_preview_not_found", "preview_id": preview_id}
+    return {
+        "ok": True,
+        "enabled": True,
+        "build_stage_hint": BUILD_STAGE,
+        "lane": EXECUTION_PREVIEW_LANE,
+        "preview_id": preview_id,
+        "preview": item,
+        "can_execute_now": False,
+        "safety_note": _safety_note(),
+    }
+
+
+def _get_preview_item(d1: D1MetadataStore, preview_id: str) -> dict[str, Any] | None:
+    result = d1.query(
+        """
+        SELECT id, lane, source_type, source_id, title, url, metadata_json, created_at, updated_at
+        FROM hive_ecosystem_metadata
+        WHERE lane = ? AND id = ?
+        LIMIT 1
+        """,
+        [EXECUTION_PREVIEW_LANE, preview_id],
+    )
+    if not result.get("ok"):
+        return None
+    for row in _extract_d1_rows(result.get("result")):
+        row["metadata"] = _json_or_none(row.pop("metadata_json", None))
+        return row
+    return None
+
+
+def _extract_d1_rows(result: Any) -> list[dict[str, Any]]:
+    if isinstance(result, list):
+        rows: list[dict[str, Any]] = []
+        for item in result:
+            if isinstance(item, dict):
+                nested = item.get("results")
+                if isinstance(nested, list):
+                    rows.extend(row for row in nested if isinstance(row, dict))
+                elif all(key in item for key in ("id", "lane", "source_type")):
+                    rows.append(item)
+        return rows
+    if isinstance(result, dict):
+        nested = result.get("results")
+        if isinstance(nested, list):
+            return [row for row in nested if isinstance(row, dict)]
+    return []
+
+
+def _json_or_none(value: Any) -> Any:
+    if value in {None, ""}:
+        return None
+    try:
+        return json.loads(value)
+    except (TypeError, json.JSONDecodeError):
+        return value
+
+
+def _preview_title(task: str) -> str:
+    trimmed = " ".join(task.split())[:96]
+    return f"Execution preview: {trimmed}" if trimmed else "Execution preview"
+
+
+def _preview_summary(item: dict[str, Any]) -> dict[str, object]:
+    meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    simulation = meta.get("simulation") if isinstance(meta.get("simulation"), dict) else {}
+    return {
+        "id": item.get("id"),
+        "preview_id": meta.get("preview_id") or item.get("id"),
+        "simulation_id": meta.get("simulation_id"),
+        "title": item.get("title"),
+        "task": meta.get("task"),
+        "repo": meta.get("repo"),
+        "workflow_preset": meta.get("workflow_preset"),
+        "policy_profile": meta.get("policy_profile"),
+        "approval_state": meta.get("approval_state"),
+        "status": meta.get("status"),
+        "risk_summary": simulation.get("risk_summary") if isinstance(simulation.get("risk_summary"), dict) else {},
+        "estimated_cost": simulation.get("estimated_cost") if isinstance(simulation.get("estimated_cost"), dict) else {},
+        "can_execute_now": False,
+        "created_at": item.get("created_at"),
+        "updated_at": item.get("updated_at"),
+    }
+
+
+def _normalise_policy_profile(value: str | None, risk_summary: dict[str, object]) -> str:
+    candidate = (value or "").strip().lower().replace("-", "_")
+    if candidate in POLICY_PROFILES:
+        return candidate
+    highest = str(risk_summary.get("highest_risk") or "unknown").lower()
+    if highest in {"medium", "high", "unknown"}:
+        return "human_approval_required"
+    return "readonly"
+
+
+def _required_services_for_graph(graph: dict[str, object]) -> list[dict[str, object]]:
+    services = [
+        {"service": "D1", "purpose": "metadata, review records and saved previews", "required": True},
+        {"service": "PostgreSQL", "purpose": "conversation/file/chunk memory where relevant", "required": False},
+        {"service": "R2", "purpose": "source artefacts/evidence packs where already configured", "required": False},
+        {"service": "Vectorize", "purpose": "semantic retrieval over chunks/skills when available", "required": False},
+        {"service": "OpenRouter", "purpose": "answer/summary generation outside preview-only simulation", "required": False},
+    ]
+    candidate_count = len(graph.get("candidate_skills", []) if isinstance(graph.get("candidate_skills"), list) else [])
+    if candidate_count:
+        services.append({"service": "hive-skills R2 lane", "purpose": "skill descriptors and registry metadata", "required": True})
+    return services
+
+
+def _simulation_cost_estimate(candidate_skills: list[dict[str, object]], required_services: list[dict[str, object]]) -> dict[str, object]:
+    skill_count = len(candidate_skills)
+    service_count = len(required_services)
+    if skill_count <= 2:
+        cost_class = "low"
+    elif skill_count <= 8:
+        cost_class = "medium"
+    else:
+        cost_class = "high"
+    return {
+        "cost_class": cost_class,
+        "estimated_model_calls": 0,
+        "estimated_d1_reads": max(1, skill_count),
+        "estimated_r2_reads": 0,
+        "estimated_vector_queries": 0,
+        "service_touch_count": service_count,
+        "note": "Simulation is deterministic and does not call models, write R2, or run adapters.",
+    }
+
+
+def _simulation_missing_prerequisites(preview: dict[str, object], policy_profile: str) -> list[str]:
+    missing = []
+    if preview.get("approval_state") != "approved":
+        missing.append("human_review_approval")
+    if policy_profile != "readonly":
+        missing.append("future_adapter_allowlist")
+    missing.append("execution_adapter_layer_not_enabled")
+    return missing
+
+
+def _simulation_rollback_notes(required_services: list[dict[str, object]]) -> list[str]:
+    notes = ["No rollback is required for v1.22 simulation because no external mutation occurs."]
+    touched = [item.get("service") for item in required_services]
+    if "D1" in touched:
+        notes.append("Saved previews can be removed from the D1 execution_previews lane if needed.")
+    return notes
+
+
+def _affected_surfaces(preview: dict[str, object], graph: dict[str, object]) -> dict[str, list[str]]:
+    repos = []
+    repo = preview.get("repo") or graph.get("repo")
+    if repo:
+        repos.append(str(repo))
+    candidates = graph.get("candidate_skills") if isinstance(graph.get("candidate_skills"), list) else []
+    for item in candidates:
+        if isinstance(item, dict):
+            for repo_name in item.get("repos", []) if isinstance(item.get("repos"), list) else []:
+                name = str(repo_name)
+                if name not in repos:
+                    repos.append(name)
+    buckets = ["hive-skills"] if candidates else []
+    return {"repos": repos[:10], "buckets": buckets}
