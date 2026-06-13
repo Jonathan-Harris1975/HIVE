@@ -8,6 +8,7 @@ from app.api.health import router as health_router
 from app.api.models import router as models_router
 from app.api.vectorize import router as vectorize_router
 from app.api.workflows import router as workflows_router
+from app.api.workflow_graphs import router as workflow_graphs_router
 from app.api.ecosystem import router as ecosystem_router
 from app.api.skills import router as skills_router
 from app.api.execution import router as execution_router
@@ -32,6 +33,7 @@ app.include_router(files_router, prefix="/v1")
 app.include_router(db_router, prefix="/v1")
 app.include_router(vectorize_router, prefix="/v1")
 app.include_router(workflows_router, prefix="/v1")
+app.include_router(workflow_graphs_router, prefix="/v1")
 app.include_router(ecosystem_router, prefix="/v1")
 app.include_router(skills_router, prefix="/v1")
 app.include_router(execution_router, prefix="/v1")
