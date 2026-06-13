@@ -26,7 +26,7 @@ def test_skills_status_exposes_v18_manifest_hints(monkeypatch, tmp_path) -> None
     body = client.get("/v1/skills/status").json()
 
     assert body["ok"] is True
-    assert body["build_stage_hint"] == "v1.17-registry-integrity"
+    assert body["build_stage_hint"] == "v1.19-controlled-execution-preview"
     assert body["search_documents_url"] == "https://skills.example.test/index/search-documents.json"
     assert body["shared_manifest_url"] == "https://skills.example.test/manifests/shared-skill-pool-manifest.json"
 
