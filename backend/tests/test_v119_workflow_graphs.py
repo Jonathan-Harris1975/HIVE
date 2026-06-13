@@ -32,7 +32,7 @@ def _fake_shared_execution_plan(**kwargs):
 
 
 def test_v119_build_marker() -> None:
-    assert BUILD_STAGE == "v1.19-controlled-execution-preview"
+    assert BUILD_STAGE == "v1.22-workflow-simulation-persistence"
 
 
 def test_v118_workflow_templates_are_plan_only() -> None:
@@ -78,7 +78,7 @@ def test_v119_execution_preview_blocks_adapters(monkeypatch) -> None:
     assert result["adapter_execution_enabled"] is False
     adapter = [item for item in result["step_statuses"] if item["node_id"] == "adapter_execution"][0]
     assert adapter["status"] == "blocked"
-    assert adapter["blocker"] == "execution_adapters_disabled_in_v1_19"
+    assert adapter["blocker"] == "execution_adapters_disabled_in_v1_22"
 
 
 def test_v119_policies_are_non_executing() -> None:

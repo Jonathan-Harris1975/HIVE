@@ -66,7 +66,7 @@ def _fake_plan(**kwargs):
 
 
 def test_v115_build_stage():
-    assert BUILD_STAGE == "v1.19-controlled-execution-preview"
+    assert BUILD_STAGE == "v1.22-workflow-simulation-persistence"
 
 
 def test_evidence_pack_audit_trail_and_exports(monkeypatch):

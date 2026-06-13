@@ -41,7 +41,7 @@ def _valid_item(skill_id: str = "S194", slug: str = "podcast-seo") -> dict[str, 
 
 
 def test_v117_build_marker() -> None:
-    assert BUILD_STAGE == "v1.19-controlled-execution-preview"
+    assert BUILD_STAGE == "v1.22-workflow-simulation-persistence"
 
 
 def test_v117_integrity_report_clean_registry(monkeypatch) -> None:
@@ -54,7 +54,7 @@ def test_v117_integrity_report_clean_registry(monkeypatch) -> None:
     result = registry.skill_registry_integrity_report(settings=SETTINGS)
 
     assert result["ok"] is True
-    assert result["build_stage_hint"] == "v1.19-controlled-execution-preview"
+    assert result["build_stage_hint"] == "v1.22-workflow-simulation-persistence"
     assert result["checked_count"] == 1
     assert result["issue_count"] == 0
     assert result["registry_health"] == 100
