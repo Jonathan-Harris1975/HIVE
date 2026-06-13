@@ -1,6 +1,17 @@
+# Changelog
+
+## v1.22-workflow-simulation-persistence
+
+- Added deterministic pretend-mode workflow simulation via `POST /v1/workflow-simulation`.
+- Added reusable execution policy profiles via `GET /v1/execution-preview/policy-profiles`.
+- Added D1-backed execution preview persistence via `POST /v1/execution-preview/save`, `GET /v1/execution-preview/history`, and `GET /v1/execution-preview/{preview_id}`.
+- Preserved the non-executing safety model: no adapters, repo mutation, package installs, R2 writes, or background jobs.
+- Added v1.20, v1.21 and v1.22 smoke scripts plus regression tests.
+
+
 # HIVE Changelog
 
-## v1.19-controlled-execution-preview
+## v1.22-workflow-simulation-persistence
 
 - Added read-only skill-registry integrity checks.
 - Added duplicate, missing-field, taxonomy and orphan/mismatch reports for imported shared skills.
@@ -18,7 +29,7 @@
 - Preserved review-gated, plan-only safety: no live execution or repo mutation.
 
 
-## v1.19-controlled-execution-preview
+## v1.22-workflow-simulation-persistence
 
 - Added workflow graph templates and graph-shaped plan generation for the future HIVE operator UI.
 - Added controlled execution preview responses with node statuses, blockers and next required actions.

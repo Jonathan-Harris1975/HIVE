@@ -269,3 +269,17 @@ request -> classify -> recommend_skills -> collect_evidence -> dry_run_output ->
 ```
 
 The controlled execution preview layer then annotates graph nodes with statuses, blockers and next actions. It is deliberately non-executing. Adapter execution is disabled in v1.19 and `can_execute_now` remains `false`.
+
+
+## v1.20-v1.22 Preview Persistence, Policy Profiles and Simulation
+
+The v1.20-v1.22 layer sits above workflow graphs and controlled execution preview. It stores preview records in D1, exposes reusable policy profiles, and simulates what a workflow would require before any future execution adapter exists.
+
+Data remains split deliberately:
+
+- D1 stores lightweight preview metadata and simulation summaries.
+- PostgreSQL remains the conversation/file/chunk persistence layer.
+- R2 remains artefact storage.
+- Vectorize remains semantic retrieval.
+
+The simulation endpoint is deterministic and free-tier friendly. It estimates service touches, risk class, affected repos/buckets and missing prerequisites without model calls or external mutations.

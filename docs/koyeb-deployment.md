@@ -248,7 +248,7 @@ curl https://YOUR-KOYEB-APP.koyeb.app/health
 curl https://YOUR-KOYEB-APP.koyeb.app/healthz
 ```
 
-`/health` should show `build: v1.19-controlled-execution-preview` and clean flags for R2, SQL, D1, Vectorize and embeddings. `/healthz` is deliberately small and unauthenticated for later MAST keep-awake use.
+`/health` should show `build: v1.22-workflow-simulation-persistence` and clean flags for R2, SQL, D1, Vectorize and embeddings. `/healthz` is deliberately small and unauthenticated for later MAST keep-awake use.
 
 Use `POST /v1/db/test-cleanup` with `dry_run:true` before deleting smoke-test records.
 
@@ -283,7 +283,7 @@ curl "$HIVE_URL/v1/workflow-presets" -H "Authorization: Bearer $ADMIN_BEARER_TOK
 curl "$HIVE_URL/v1/files/r2-lanes" -H "Authorization: Bearer $ADMIN_BEARER_TOKEN"
 ```
 
-`/health` should show `build: v1.19-controlled-execution-preview`, `workflow_presets_enabled: true`, and `r2_ecosystem_lanes_enabled: true`.
+`/health` should show `build: v1.22-workflow-simulation-persistence`, `workflow_presets_enabled: true`, and `r2_ecosystem_lanes_enabled: true`.
 
 Keep MAST keep-awake pings gentle on Koyeb Free. Use `/healthz`, not authenticated file/chat endpoints.
 
@@ -300,7 +300,7 @@ The importer uses `R2_PUBLIC_BASE_URL_HIVE_SKILLS` and reads `index/search-docum
 
 ## v1.9 Intelligent Skill Search Checks
 
-After deploy, `/health` should show `build: v1.19-controlled-execution-preview`.
+After deploy, `/health` should show `build: v1.22-workflow-simulation-persistence`.
 
 Useful checks:
 
@@ -314,7 +314,7 @@ The search layer is bounded and free-tier safe because it reads the imported D1 
 
 ## v1.17 registry integrity smoke checks
 
-After deploying `v1.19-controlled-execution-preview`, run:
+After deploying `v1.22-workflow-simulation-persistence`, run:
 
 ```bash
 curl "$HIVE_URL/health"

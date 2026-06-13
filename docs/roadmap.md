@@ -234,3 +234,12 @@ Status: implemented.
 The v1.18/v1.19 line adds graph-shaped planning and controlled execution preview semantics. This is the correct bridge before any real execution adapter work. HIVE can show the operator what would happen, what is blocked, what requires review, and why execution is not yet available.
 
 Next logical direction: operator-dashboard API polish and eventual allow-listed dry-run adapters, still behind review gates.
+
+
+## v1.20-v1.22 Complete
+
+- v1.20: Execution preview persistence.
+- v1.21: Approval gates and policy profiles.
+- v1.22: Pretend-mode workflow simulation.
+
+The next logical branch is an operator dashboard API or R2 export writing for evidence packs, but only after review-gated preview history is stable in production.
