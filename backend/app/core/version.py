@@ -1,1 +1,1 @@
-BUILD_STAGE = "v1.22-workflow-simulation-persistence"
+BUILD_STAGE = "v1.23-hive-ui-api-contract"
