@@ -30,6 +30,10 @@ class TestCleanupRequest(BaseModel):
     dry_run: bool = True
 
 
+class ConversationRenameRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200)
+
+
 @router.get("/db/diagnostics")
 def database_diagnostics(settings: Settings = Depends(get_settings)) -> dict[str, object]:
     """Return safe SQL/D1 diagnostics without exposing secrets."""
@@ -135,6 +139,27 @@ def get_conversation(
     """Return one persisted conversation and its recent messages."""
 
     return SqlStore(settings).get_conversation(conversation_id, limit=limit)
+
+
+@router.patch("/db/conversations/{conversation_id}")
+def rename_conversation(
+    conversation_id: str,
+    payload: ConversationRenameRequest,
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    """Rename one persisted conversation."""
+
+    return SqlStore(settings).rename_conversation(conversation_id, payload.title)
+
+
+@router.delete("/db/conversations/{conversation_id}")
+def delete_conversation(
+    conversation_id: str,
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    """Delete a conversation together with its messages and cost events."""
+
+    return SqlStore(settings).delete_conversation(conversation_id)
 
 
 @router.get("/db/files")

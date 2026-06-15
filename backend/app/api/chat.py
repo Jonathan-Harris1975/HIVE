@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from typing import Literal
+import uuid
+from collections.abc import AsyncIterator
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
@@ -71,10 +73,113 @@ async def chat_stream(
     request: ChatRequest,
     settings: Settings = Depends(get_settings),
 ) -> StreamingResponse:
-    payload, fallback_models = build_payload(request, settings)
+    """Stream a chat response and persist the completed turn.
+
+    A conversation identifier is allocated before the first token and emitted as a
+    ``meta`` SSE event. The final ``done`` event includes persistence status so the
+    frontend can update its sidebar without issuing a second write request.
+    """
+
+    conversation_id = request.conversation_id or str(uuid.uuid4())
+    request_with_id = request.model_copy(update={"conversation_id": conversation_id})
+    payload, fallback_models = build_payload(request_with_id, settings)
+    stream = _stream_and_record_chat(
+        request=request_with_id,
+        payload=payload,
+        fallback_models=fallback_models,
+        settings=settings,
+    )
+    return StreamingResponse(heartbeat_stream(stream), media_type="text/event-stream")
+
+
+async def _stream_and_record_chat(
+    *,
+    request: ChatRequest,
+    payload: dict[str, object],
+    fallback_models: list[str],
+    settings: Settings,
+) -> AsyncIterator[dict[str, Any]]:
+    conversation_id = request.conversation_id or str(uuid.uuid4())
     client = OpenRouterClient(settings)
-    stream = heartbeat_stream(client.stream_chat_completion(payload, fallback_models=fallback_models))
-    return StreamingResponse(stream, media_type="text/event-stream")
+    reply_parts: list[str] = []
+    recorded = False
+
+    yield {
+        "event": "meta",
+        "type": "conversation",
+        "conversation_id": conversation_id,
+    }
+
+    try:
+        async for event in client.stream_chat_completion(payload, fallback_models=fallback_models):
+            event_name = str(event.get("event") or "message")
+            if event_name == "token":
+                content = event.get("content")
+                if isinstance(content, str):
+                    reply_parts.append(content)
+                yield event
+                continue
+
+            if event_name == "done":
+                result = _record_streamed_turn(
+                    request=request,
+                    event=event,
+                    reply="".join(reply_parts),
+                    conversation_id=conversation_id,
+                    settings=settings,
+                    stream_ended_early=False,
+                )
+                recorded = True
+                yield {
+                    **event,
+                    "conversation_id": conversation_id,
+                    "db_recorded": bool(result.get("ok")),
+                    "db_error": result.get("error"),
+                }
+                return
+
+            yield event
+    finally:
+        # A browser tab can close halfway through an SSE response. Preserve any text
+        # already generated so the database and conversation list do not silently
+        # diverge from what the user saw.
+        if not recorded and reply_parts:
+            _record_streamed_turn(
+                request=request,
+                event={"ok": False},
+                reply="".join(reply_parts),
+                conversation_id=conversation_id,
+                settings=settings,
+                stream_ended_early=True,
+            )
+
+
+def _record_streamed_turn(
+    *,
+    request: ChatRequest,
+    event: dict[str, Any],
+    reply: str,
+    conversation_id: str,
+    settings: Settings,
+    stream_ended_early: bool,
+) -> dict[str, object]:
+    usage = event.get("usage")
+    finish_ok = bool(event.get("ok")) and not stream_ended_early
+    return SqlStore(settings).record_chat(
+        conversation_id=conversation_id,
+        mode=str(request.mode),
+        user_message=request.message,
+        assistant_reply=reply,
+        model_used=str(event.get("model_used")) if event.get("model_used") else None,
+        provider=str(event.get("provider")) if event.get("provider") else None,
+        usage=usage if isinstance(usage, dict) else None,
+        metadata={
+            "endpoint": "/v1/chat/stream",
+            "ok": finish_ok,
+            "stream_ended_early": stream_ended_early,
+            "test_run_id": request.test_run_id,
+        },
+    )
 
 
 @router.post("/chat")
