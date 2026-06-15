@@ -136,7 +136,14 @@ class SqlStore:
 
         try:
             with self._transaction() as cur:
-                self._upsert_conversation(cur, conv_id, mode, model_used, created)
+                self._upsert_conversation(
+                    cur,
+                    conv_id,
+                    mode,
+                    model_used,
+                    created,
+                    title=_default_conversation_title(user_message),
+                )
                 self._insert_message(cur, conv_id, "user", user_message or "", None, None, None, None, metadata_json, created)
                 self._insert_message(
                     cur,
@@ -405,6 +412,78 @@ class SqlStore:
             return {"ok": True, "enabled": True, "count": len(rows), "conversations": rows}
         except Exception as exc:  # pragma: no cover
             return {"ok": False, "enabled": True, "error": str(exc)}
+
+    def rename_conversation(self, conversation_id: str, title: str) -> dict[str, object]:
+        if not self.enabled:
+            return {"ok": False, "enabled": False}
+        clean_title = " ".join((title or "").split()).strip()
+        if not clean_title:
+            return {"ok": False, "enabled": True, "error": "title_required"}
+        p = self._param()
+        try:
+            with self._transaction() as cur:
+                cur.execute(
+                    f"UPDATE hive_conversations SET title={p}, updated_at={p} WHERE id={p}",
+                    (clean_title[:200], _now(), conversation_id),
+                )
+                updated = int(cur.rowcount or 0)
+            if updated == 0:
+                return {
+                    "ok": False,
+                    "enabled": True,
+                    "error": "conversation_not_found",
+                    "conversation_id": conversation_id,
+                }
+            return {
+                "ok": True,
+                "enabled": True,
+                "conversation_id": conversation_id,
+                "title": clean_title[:200],
+            }
+        except Exception as exc:  # pragma: no cover
+            return {
+                "ok": False,
+                "enabled": True,
+                "conversation_id": conversation_id,
+                "error": str(exc),
+            }
+
+    def delete_conversation(self, conversation_id: str) -> dict[str, object]:
+        if not self.enabled:
+            return {"ok": False, "enabled": False}
+        p = self._param()
+        try:
+            with self._transaction() as cur:
+                cur.execute(f"SELECT id FROM hive_conversations WHERE id={p}", (conversation_id,))
+                exists = cur.fetchone() is not None
+                if not exists:
+                    return {
+                        "ok": False,
+                        "enabled": True,
+                        "error": "conversation_not_found",
+                        "conversation_id": conversation_id,
+                    }
+                cur.execute(f"DELETE FROM hive_cost_events WHERE conversation_id={p}", (conversation_id,))
+                cost_events_deleted = int(cur.rowcount or 0)
+                cur.execute(f"DELETE FROM hive_messages WHERE conversation_id={p}", (conversation_id,))
+                messages_deleted = int(cur.rowcount or 0)
+                cur.execute(f"DELETE FROM hive_conversations WHERE id={p}", (conversation_id,))
+                conversations_deleted = int(cur.rowcount or 0)
+            return {
+                "ok": conversations_deleted == 1,
+                "enabled": True,
+                "conversation_id": conversation_id,
+                "conversations_deleted": conversations_deleted,
+                "messages_deleted": messages_deleted,
+                "cost_events_deleted": cost_events_deleted,
+            }
+        except Exception as exc:  # pragma: no cover
+            return {
+                "ok": False,
+                "enabled": True,
+                "conversation_id": conversation_id,
+                "error": str(exc),
+            }
 
     def get_conversation(self, conversation_id: str, *, limit: int = 100) -> dict[str, object]:
         if not self.enabled:
@@ -829,18 +908,27 @@ class SqlStore:
     def _select_one_sql(self) -> str:
         return "SELECT 1"
 
-    def _upsert_conversation(self, cur: Any, conv_id: str, mode: str, model: str | None, now: str) -> None:
+    def _upsert_conversation(
+        self,
+        cur: Any,
+        conv_id: str,
+        mode: str,
+        model: str | None,
+        now: str,
+        *,
+        title: str | None = None,
+    ) -> None:
         p = self._param()
         cur.execute(
             f"""
-            INSERT INTO hive_conversations (id, mode, model, created_at, updated_at)
-            VALUES ({p}, {p}, {p}, {p}, {p})
+            INSERT INTO hive_conversations (id, mode, model, title, created_at, updated_at)
+            VALUES ({p}, {p}, {p}, {p}, {p}, {p})
             ON CONFLICT(id) DO UPDATE SET
               mode=excluded.mode,
               model=excluded.model,
               updated_at=excluded.updated_at
             """,
-            (conv_id, mode, model, now, now),
+            (conv_id, mode, model, title, now, now),
         )
 
     def _insert_message(
@@ -1004,6 +1092,15 @@ class DatabaseUrlBuilder:
         if settings.is_dev:
             return "sqlite:///./local-data/hive.sqlite3"
         return ""
+
+
+def _default_conversation_title(message: str, *, max_length: int = 72) -> str | None:
+    clean = " ".join((message or "").split()).strip()
+    if not clean:
+        return None
+    if len(clean) <= max_length:
+        return clean
+    return clean[: max_length - 1].rstrip() + "…"
 
 
 def _json_or_none(value: Any) -> Any:
