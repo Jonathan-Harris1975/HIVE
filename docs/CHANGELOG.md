@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.23-hive-ui-api-contract
+
+- Persisted streamed `/v1/chat/stream` user and assistant turns in the SQL conversation store.
+- Emitted the conversation ID before the first model token and returned persistence status in the final SSE event.
+- Preserved partially generated streamed responses when a client disconnects after receiving tokens.
+- Generated bounded conversation titles from the first user message.
+- Added conversation rename and cascade-style delete API operations for HIVE-UI.
+- Added regression coverage for streamed persistence and conversation lifecycle operations.
+
 ## v1.22-workflow-simulation-persistence
 
 - Added deterministic pretend-mode workflow simulation via `POST /v1/workflow-simulation`.
