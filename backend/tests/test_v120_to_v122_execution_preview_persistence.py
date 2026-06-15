@@ -74,7 +74,7 @@ def _fake_shared_execution_plan(**kwargs):
 
 
 def test_v122_build_marker():
-    assert BUILD_STAGE == "v1.22-workflow-simulation-persistence"
+    assert BUILD_STAGE == "v1.23-hive-ui-api-contract"
 
 
 def test_v121_policy_profiles_are_non_executing():

@@ -399,3 +399,45 @@ def test_sql_store_cleanup_test_records_dry_run_and_delete(tmp_path: Path) -> No
     assert store.list_conversations(limit=10)["count"] == 0
     assert store.list_files(limit=10)["count"] == 0
     assert store.list_file_chunks(object_key="uploads/run-clean/file.txt")["count"] == 0
+
+
+def test_conversation_titles_rename_and_delete(tmp_path: Path) -> None:
+    db_path = tmp_path / "hive.sqlite3"
+    settings = Settings(
+        APP_ENV="test",
+        DATABASE_ENABLED=True,
+        DATABASE_URL=f"sqlite:///{db_path}",
+    )
+    store = SqlStore(settings)
+    assert store.init_schema()["ok"] is True
+
+    recorded = store.record_chat(
+        conversation_id="conv-manage",
+        mode="general",
+        user_message="This is the automatically generated conversation title",
+        assistant_reply="Recorded.",
+        model_used="test/model",
+        provider="test",
+        usage={"total_tokens": 2, "cost": 0.001},
+    )
+    assert recorded["ok"] is True
+
+    before = store.get_conversation("conv-manage")
+    assert before["conversation"]["title"] == "This is the automatically generated conversation title"
+
+    renamed = store.rename_conversation("conv-manage", "Renamed conversation")
+    assert renamed == {
+        "ok": True,
+        "enabled": True,
+        "conversation_id": "conv-manage",
+        "title": "Renamed conversation",
+    }
+    after = store.get_conversation("conv-manage")
+    assert after["conversation"]["title"] == "Renamed conversation"
+
+    deleted = store.delete_conversation("conv-manage")
+    assert deleted["ok"] is True
+    assert deleted["conversations_deleted"] == 1
+    assert deleted["messages_deleted"] == 2
+    assert deleted["cost_events_deleted"] == 1
+    assert store.get_conversation("conv-manage")["error"] == "conversation_not_found"

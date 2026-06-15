@@ -32,7 +32,7 @@ def _fake_shared_execution_plan(**kwargs):
 
 
 def test_v119_build_marker() -> None:
-    assert BUILD_STAGE == "v1.22-workflow-simulation-persistence"
+    assert BUILD_STAGE == "v1.23-hive-ui-api-contract"
 
 
 def test_v118_workflow_templates_are_plan_only() -> None:
