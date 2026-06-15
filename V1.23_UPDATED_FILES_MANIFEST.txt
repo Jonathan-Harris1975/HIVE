@@ -1,0 +1,31 @@
+HIVE v1.23 HIVE-UI API contract updated files
+
+Backend code
+- backend/app/api/chat.py
+- backend/app/api/db.py
+- backend/app/core/version.py
+- backend/app/storage/sql_store.py
+
+Tests
+- backend/tests/test_database_layer.py
+- backend/tests/test_stream_persistence.py
+- backend/tests/test_health_operational.py
+- backend/tests/test_v113_repo_hygiene.py
+- backend/tests/test_v114_execution_review_queue.py
+- backend/tests/test_v115_review_evidence_pack.py
+- backend/tests/test_v117_registry_integrity.py
+- backend/tests/test_v119_workflow_graphs.py
+- backend/tests/test_v120_to_v122_execution_preview_persistence.py
+- backend/tests/test_v15_ingestion_expansion.py
+- backend/tests/test_v16_workflow_presets_r2_lanes.py
+- backend/tests/test_v17_ecosystem_intelligence.py
+- backend/tests/test_v18_skill_registry_import.py
+- backend/tests/test_v19_to_v112_skill_intelligence.py
+- backend/tests/test_vectorize_foundation.py
+
+Documentation
+- README.md
+- docs/CHANGELOG.md
+- docs/koyeb-deployment.md
+- docs/releases/v1.23-hive-ui-api-contract.md
+- V1.23_UPDATED_FILES_MANIFEST.txt

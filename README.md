@@ -19,9 +19,9 @@ This is **not** a ChatLima/Kanari/OrChat fork. Those projects are reference arch
 
 ## Current status
 
-**Build stage:** `v1.22-workflow-simulation-persistence`.
+**Build stage:** `v1.23-hive-ui-api-contract`.
 
-HIVE now has working OpenRouter chat/model routing, R2/local upload storage, JSON/base64 uploads, stored ZIP inspection/extraction, SQL persistence, SQL chunk retrieval, Cloudflare D1 metadata, Cloudflare Workers AI embeddings, Cloudflare Vectorize semantic retrieval, workflow presets, R2 ecosystem lane awareness, weighted skill search, review-gated execution planning, evidence packs, and v1.17 skill-registry integrity checks.
+HIVE now has working OpenRouter chat/model routing, persistent streaming conversations for HIVE-UI, conversation rename/delete support, R2/local upload storage, JSON/base64 uploads, stored ZIP inspection/extraction, SQL persistence, SQL chunk retrieval, Cloudflare D1 metadata, Cloudflare Workers AI embeddings, Cloudflare Vectorize semantic retrieval, workflow presets, R2 ecosystem lane awareness, weighted skill search, review-gated execution planning, evidence packs, and registry integrity checks.
 
 ## Recommended v1 architecture
 
@@ -83,6 +83,8 @@ Recommended Koyeb path: use the `Dockerfile`. See `docs/koyeb-deployment.md`.
 - `POST /v1/db/init`
 - `GET /v1/db/conversations`
 - `GET /v1/db/conversations/{conversation_id}`
+- `PATCH /v1/db/conversations/{conversation_id}`
+- `DELETE /v1/db/conversations/{conversation_id}`
 - `GET /v1/db/files`
 - `GET /v1/db/cost-summary`
 - `POST /v1/db/test-cleanup` - dry-run-first smoke-test SQL cleanup by `test_run_id` and/or object-key prefix.
@@ -271,7 +273,7 @@ D1_MAX_ATTEMPTS=2
 
 ### Persistence retrieval and conversation resume
 
-Once `DATABASE_ENABLED=true` and `/v1/db/init` has run, HIVE automatically records non-streaming `/v1/chat`, `/v1/chat/with-file`, upload metadata and model usage/cost events.
+Once `DATABASE_ENABLED=true` and `/v1/db/init` has run, HIVE automatically records `/v1/chat`, completed or interrupted `/v1/chat/stream` turns, `/v1/chat/with-file`, upload metadata and model usage/cost events. Streaming chat allocates a conversation ID before the first token and emits it in an SSE `meta` event so HIVE-UI can bind the visible thread to SQL immediately.
 
 Retrieve recent conversations:
 
@@ -287,13 +289,27 @@ curl -X GET "https://YOUR-KOYEB-APP.koyeb.app/v1/db/conversations/CONVERSATION_I
   -H "Authorization: Bearer YOUR_ADMIN_BEARER_TOKEN"
 ```
 
+Rename or delete a conversation:
+
+```bash
+curl -X PATCH "https://YOUR-KOYEB-APP.koyeb.app/v1/db/conversations/CONVERSATION_ID" \
+  -H "Authorization: Bearer YOUR_ADMIN_BEARER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"title":"June audit investigation"}'
+
+curl -X DELETE "https://YOUR-KOYEB-APP.koyeb.app/v1/db/conversations/CONVERSATION_ID" \
+  -H "Authorization: Bearer YOUR_ADMIN_BEARER_TOKEN"
+```
+
+Conversation titles are generated from the first user message and can then be renamed by HIVE-UI. Delete removes the conversation, messages and associated cost events.
+
 Resume context in `/v1/chat` by sending the previous `conversation_id`. HIVE will hydrate recent user/assistant turns from SQL before adding the new message:
 
 ```bash
 curl -X POST "https://YOUR-KOYEB-APP.koyeb.app/v1/chat" \
   -H "Authorization: Bearer YOUR_ADMIN_BEARER_TOKEN" \
   -H "Content-Type: application/json" \
-  -d "{"conversation_id":"CONVERSATION_ID","message":"Continue from the previous answer in one sentence.","mode":"general","db_history_limit":20}"
+  -d '{"conversation_id":"CONVERSATION_ID","message":"Continue from the previous answer in one sentence.","mode":"general","db_history_limit":20}'
 ```
 
 Inspect persisted file metadata and model costs:
@@ -423,7 +439,7 @@ Token hygiene: rotate Cloudflare/OpenRouter/admin tokens after any accidental pa
 
 ## v1.5 ingestion expansion for Koyeb free tier
 
-Build stage `v1.22-workflow-simulation-persistence` adds bounded archive/document ingestion without turning HIVE into a heavy always-on worker. This matters because the current deployment is on a free Koyeb web service.
+Build stage `v1.23-hive-ui-api-contract` adds bounded archive/document ingestion without turning HIVE into a heavy always-on worker. This matters because the current deployment is on a free Koyeb web service.
 
 New/expanded capabilities:
 
@@ -448,7 +464,7 @@ The intended real workflow is now: upload an audit/report ZIP to R2, extract a b
 
 ## v1.6 workflow presets and R2 lane registry
 
-Build stage `v1.22-workflow-simulation-persistence` turns HIVE from a generic file-aware chatbot into a small private ops analyst with labelled workflows.
+Build stage `v1.23-hive-ui-api-contract` turns HIVE from a generic file-aware chatbot into a small private ops analyst with labelled workflows.
 
 Workflow presets currently available:
 
@@ -493,7 +509,7 @@ ADMIN_BEARER_TOKEN=your-token HIVE_TEST_OBJECT_KEY=uploads/.../file.txt python s
 
 ## v1.7 Ecosystem Intelligence
 
-Build stage `v1.22-workflow-simulation-persistence` adds lightweight cross-lane discovery without turning HIVE into a heavy background crawler. PostgreSQL chunks, Cloudflare Vectorize, D1 metadata, and the R2 lane registry remain separate, bounded layers.
+Build stage `v1.23-hive-ui-api-contract` adds lightweight cross-lane discovery without turning HIVE into a heavy background crawler. PostgreSQL chunks, Cloudflare Vectorize, D1 metadata, and the R2 lane registry remain separate, bounded layers.
 
 New endpoints:
 
@@ -508,7 +524,7 @@ Free-tier note: v1.7 deliberately avoids large bucket walks, background polling,
 
 ## v1.8 Skill Registry Import
 
-Build stage `v1.22-workflow-simulation-persistence` imports the R2 shared skill pool into D1 so HIVE can list, search and categorise skills for HIVE, RAMS, AIMS and Website without cloning the bucket into each repo.
+Build stage `v1.23-hive-ui-api-contract` imports the R2 shared skill pool into D1 so HIVE can list, search and categorise skills for HIVE, RAMS, AIMS and Website without cloning the bucket into each repo.
 
 New endpoints:
 
@@ -544,7 +560,7 @@ The design stays Koyeb-Free friendly: one compact manifest fetch, bounded import
 
 ## v1.9 Intelligent Skill Search
 
-Build stage `v1.22-workflow-simulation-persistence` upgrades the v1.8 D1 skill catalogue with weighted local search and lookup helpers. HIVE now searches across title, slug, tags, HIVE lane, catalogue category, repo membership and indexable text, with transparent `matched_terms`, `matched_fields` and `score_explanation` returned in search results.
+Build stage `v1.23-hive-ui-api-contract` upgrades the v1.8 D1 skill catalogue with weighted local search and lookup helpers. HIVE now searches across title, slug, tags, HIVE lane, catalogue category, repo membership and indexable text, with transparent `matched_terms`, `matched_fields` and `score_explanation` returned in search results.
 
 New/expanded endpoints:
 
@@ -561,7 +577,7 @@ This is still catalogue/discovery only. It does not install skills, mutate repos
 
 ## v1.17 Registry Integrity
 
-Current build stage: `v1.22-workflow-simulation-persistence`.
+Current build stage: `v1.23-hive-ui-api-contract`.
 
 v1.17 keeps the v1.16 skill search, recommendation, routing, review queue and evidence-pack features, then adds registry trust checks for the imported shared skill pool. This matters before any stronger automation because HIVE needs to know whether the 201 imported skills have duplicate IDs, missing descriptors, invalid taxonomy values or lane/source mismatches.
 
@@ -585,7 +601,7 @@ ADMIN_BEARER_TOKEN=... python scripts/v117_registry_integrity_smoke.py
 
 ## v1.16 Skill Search Review Integration
 
-Current build stage: `v1.22-workflow-simulation-persistence`.
+Current build stage: `v1.23-hive-ui-api-contract`.
 
 This release consolidates the intelligent skill-search branch with the execution review queue and evidence-pack work. It restores the missing shared execution-plan service, keeps weighted skill search, and preserves the review-gated plan-only safety model.
 
@@ -604,7 +620,7 @@ Safety note: v1.16 does not execute skills, install packages, mutate repos, writ
 
 ## v1.18/v1.19 Workflow Graphs and Controlled Execution Preview
 
-Current build stage: `v1.22-workflow-simulation-persistence`.
+Current build stage: `v1.23-hive-ui-api-contract`.
 
 HIVE now turns skill routing and shared execution plans into graph-shaped workflow previews for the future operator UI.
 
@@ -635,7 +651,7 @@ This is the bridge between the review queue/evidence packs and the future operat
 
 ## v1.20-v1.22 Execution Preview Persistence and Simulation
 
-Current build stage: `v1.22-workflow-simulation-persistence`.
+Current build stage: `v1.23-hive-ui-api-contract`.
 
 The v1.20-v1.22 line turns controlled execution preview into a persistent, reviewable planning layer while keeping HIVE non-executing. It adds D1-backed preview history, reusable policy profiles, and deterministic workflow simulation.
 
