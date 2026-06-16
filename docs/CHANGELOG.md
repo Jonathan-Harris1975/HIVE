@@ -1,3 +1,12 @@
+## 16 June 2026 production-readiness hardening
+
+- Added bounded operational R2 readiness probes for every required lane and governed shared-skill objects.
+- Added a governed R2 search-document fallback when D1 is unavailable.
+- Injected bounded skill excerpts and provenance into authorised model requests while treating skill text as untrusted data.
+- Restricted skill imports to the configured HTTPS source, disabled redirects and bounded response size.
+- Normalised and URL-encoded public R2 object keys, rejecting direct and encoded traversal.
+- Corrected AIMS and RAMS liveness defaults to `/livez`.
+
 > **Document status:** Production reference  
 > **Last reviewed:** 16 June 2026  
 > **Operational authority:** Current repository README, SECURITY policy and operations guide.
