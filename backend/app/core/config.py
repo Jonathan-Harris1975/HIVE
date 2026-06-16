@@ -1,17 +1,27 @@
 from functools import lru_cache
-from typing import Any, List
+from typing import Annotated, Any
 
 from pydantic import AliasChoices, Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore", populate_by_name=True)
 
     app_name: str = Field("JH Ops Chat", validation_alias=AliasChoices("APP_NAME", "OPENROUTER_APP_NAME"))
-    app_env: str = "development"
-    admin_bearer_token: str = "change-me-local-only"
-    cors_origins: List[str] = Field(default_factory=lambda: ["http://localhost:5173"])
+    app_env: str = Field("development", validation_alias=AliasChoices("APP_ENV"))
+    app_version: str = Field("1.23.1-production", validation_alias=AliasChoices("APP_VERSION"))
+    admin_bearer_token: str = Field("change-me-local-only", validation_alias=AliasChoices("ADMIN_BEARER_TOKEN"))
+    cors_origins: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["http://localhost:5173"], validation_alias=AliasChoices("CORS_ORIGINS"))
+    allowed_hosts: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["*"], validation_alias=AliasChoices("ALLOWED_HOSTS"))
+    api_docs_enabled: bool = Field(False, validation_alias=AliasChoices("API_DOCS_ENABLED"))
+    security_headers_enabled: bool = Field(True, validation_alias=AliasChoices("SECURITY_HEADERS_ENABLED"))
+    request_logging_enabled: bool = Field(True, validation_alias=AliasChoices("REQUEST_LOGGING_ENABLED"))
+    trusted_hosts_enabled: bool = Field(True, validation_alias=AliasChoices("TRUSTED_HOSTS_ENABLED"))
+    max_request_body_bytes: int = Field(110 * 1024 * 1024, validation_alias=AliasChoices("MAX_REQUEST_BODY_BYTES"))
+    production_require_openrouter: bool = Field(True, validation_alias=AliasChoices("PRODUCTION_REQUIRE_OPENROUTER"))
+    production_require_r2: bool = Field(True, validation_alias=AliasChoices("PRODUCTION_REQUIRE_R2"))
+    production_require_database: bool = Field(False, validation_alias=AliasChoices("PRODUCTION_REQUIRE_DATABASE"))
 
     openrouter_api_key: str = ""
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
@@ -165,9 +175,9 @@ class Settings(BaseSettings):
     skill_registry_import_max_items: int = Field(250, validation_alias=AliasChoices("SKILL_REGISTRY_IMPORT_MAX_ITEMS"))
     skill_registry_import_timeout_seconds: int = Field(20, validation_alias=AliasChoices("SKILL_REGISTRY_IMPORT_TIMEOUT_SECONDS"))
 
-    @field_validator("cors_origins", mode="before")
+    @field_validator("cors_origins", "allowed_hosts", mode="before")
     @classmethod
-    def parse_cors_origins(cls, value: str | list[str]) -> list[str]:
+    def parse_comma_separated_list(cls, value: str | list[str]) -> list[str]:
         if isinstance(value, str):
             return [item.strip() for item in value.split(",") if item.strip()]
         return value
@@ -175,6 +185,15 @@ class Settings(BaseSettings):
     @property
     def is_dev(self) -> bool:
         return self.app_env.lower() in {"dev", "development", "local", "test"}
+
+    @property
+    def expose_api_docs(self) -> bool:
+        return self.is_dev or self.api_docs_enabled
+
+    @property
+    def effective_allowed_hosts(self) -> list[str]:
+        hosts = [item.strip() for item in self.allowed_hosts if item.strip()]
+        return hosts or ["*"]
 
 
     @property
