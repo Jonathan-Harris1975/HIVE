@@ -1,4 +1,15 @@
+> **Document status:** Production reference  
+> **Last reviewed:** 16 June 2026  
+> **Operational authority:** Current repository README, SECURITY policy and operations guide.
+
 # Changelog
+
+## 2026.06.16 — Ecosystem health update
+
+- Added authenticated ecosystem repository-health aggregation.
+- Added HIVE-UI, AIMS, RAMS, MAST, IRS and website health configuration.
+- Added production CI for tests, linting, preflight and container build.
+- Refreshed production, security and operations documentation.
 
 ## v1.23-hive-ui-api-contract
 

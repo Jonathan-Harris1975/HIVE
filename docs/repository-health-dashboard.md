@@ -1,3 +1,7 @@
+> **Document status:** Production reference  
+> **Last reviewed:** 16 June 2026  
+> **Operational authority:** Current repository README, SECURITY policy and operations guide.
+
 # Repository and Service Health Dashboard
 
 HIVE exposes an authenticated ecosystem health summary for HIVE-UI:

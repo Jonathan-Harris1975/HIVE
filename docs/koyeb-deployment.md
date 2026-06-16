@@ -1,3 +1,7 @@
+> **Document status:** Production reference  
+> **Last reviewed:** 16 June 2026  
+> **Operational authority:** Current repository README, SECURITY policy and operations guide.
+
 # Koyeb deployment
 
 HIVE now includes two deployment paths so Koyeb can deploy it without guessing.

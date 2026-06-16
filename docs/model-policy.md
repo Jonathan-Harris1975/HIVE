@@ -1,3 +1,7 @@
+> **Document status:** Production reference  
+> **Last reviewed:** 16 June 2026  
+> **Operational authority:** Current repository README, SECURITY policy and operations guide.
+
 # HIVE model policy
 
 HIVE keeps model choice configurable through environment variables rather than hard-coding one provider or one dated model ID.
