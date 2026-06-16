@@ -1,0 +1,33 @@
+HIVE backend production hardening
+
+Modified:
+- .dockerignore
+- .env.example
+- Dockerfile
+- backend/app/core/config.py
+- backend/app/core/security.py
+- backend/app/main.py
+- backend/pyproject.toml
+- requirements.txt
+- scripts/start.sh
+
+Added:
+- FROZEN_FILES_SHA256.txt
+- HIVE-PRODUCTION-READINESS-REPORT.md
+- .github/dependabot.yml
+- .github/workflows/backend-ci.yml
+- PRODUCTION_READY_UPDATED_FILES_MANIFEST.txt
+- SECURITY.md
+- backend/app/api/runtime.py
+- backend/app/core/middleware.py
+- backend/app/core/production.py
+- backend/tests/test_production_readiness.py
+- docs/production-readiness.md
+- docs/releases/v1.23.1-production-hardening.md
+- requirements.in
+- requirements.lock
+- requirements-dev.txt
+- scripts/production_preflight.py
+- scripts/production_smoke.sh
+
+Frozen files listed by the owner were not modified.

@@ -19,3 +19,6 @@ dist
 build
 .DS_Store
 *.zip
+backend/tests
+docs
+frontend-placeholder
