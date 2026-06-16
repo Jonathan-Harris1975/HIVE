@@ -1,0 +1,53 @@
+name: HIVE production verification
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hive-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: python -m pip install --requirement requirements.txt --requirement requirements-dev.txt
+      - run: PYTHONPATH=backend python -m pytest backend/tests -q
+      - run: python -m ruff check backend/app backend/tests scripts
+      - run: python -m pip check
+      - name: Production configuration preflight
+        env:
+          APP_ENV: production
+          ADMIN_BEARER_TOKEN: ci-admin-token-with-sufficient-length
+          OPENROUTER_API_KEY: ci-openrouter-token-with-sufficient-length
+          R2_ACCOUNT_ID: 00000000000000000000000000000000
+          R2_ACCESS_KEY_ID: ci-r2-access-key
+          R2_SECRET_ACCESS_KEY: ci-r2-secret-key-with-sufficient-length
+          R2_BUCKET_UPLOADS: hive
+          R2_ENDPOINT_URL: https://00000000000000000000000000000000.r2.cloudflarestorage.com
+          CORS_ORIGINS: https://hive.jonathan-harris.online
+          ALLOWED_HOSTS: hive-ci.example.invalid
+          DATABASE_ENABLED: 'false'
+          D1_ENABLED: 'false'
+          VECTORIZE_ENABLED: 'false'
+          EMBEDDINGS_ENABLED: 'false'
+        run: PYTHONPATH=backend python scripts/production_preflight.py
+
+  container:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t hive:ci .
