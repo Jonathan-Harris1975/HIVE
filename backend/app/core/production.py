@@ -128,6 +128,19 @@ def build_readiness_report(settings: Settings) -> ReadinessReport:
         )
     )
 
+    multi_bucket_read_complete = bool(
+        settings.r2_read_access_key_id and settings.r2_read_secret_access_key
+    )
+    checks.append(
+        _check(
+            "r2_multi_bucket_read",
+            not settings.r2_multi_bucket_read_enabled or multi_bucket_read_complete,
+            "Scoped multi-bucket R2 read access is configured.",
+            "R2_MULTI_BUCKET_READ_ENABLED=true but the read-only access key or secret is missing.",
+            required=production and settings.r2_multi_bucket_read_enabled,
+        )
+    )
+
     database_ready = settings.database_enabled and bool(settings.sql_database_url)
     database_required = production and settings.production_require_database
     checks.append(

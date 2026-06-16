@@ -10,7 +10,7 @@ class Settings(BaseSettings):
 
     app_name: str = Field("JH Ops Chat", validation_alias=AliasChoices("APP_NAME", "OPENROUTER_APP_NAME"))
     app_env: str = Field("development", validation_alias=AliasChoices("APP_ENV"))
-    app_version: str = Field("1.23.1-production", validation_alias=AliasChoices("APP_VERSION"))
+    app_version: str = Field("1.24.0-production", validation_alias=AliasChoices("APP_VERSION"))
     admin_bearer_token: str = Field("change-me-local-only", validation_alias=AliasChoices("ADMIN_BEARER_TOKEN"))
     cors_origins: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["http://localhost:5173"], validation_alias=AliasChoices("CORS_ORIGINS"))
     allowed_hosts: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["*"], validation_alias=AliasChoices("ALLOWED_HOSTS"))
@@ -57,6 +57,11 @@ class Settings(BaseSettings):
     r2_read_timeout_seconds: int = 20
     r2_max_attempts: int = 2
     r2_addressing_style: str = "path"
+    r2_multi_bucket_read_enabled: bool = Field(False, validation_alias=AliasChoices("R2_MULTI_BUCKET_READ_ENABLED"))
+    r2_read_access_key_id: str = Field("", validation_alias=AliasChoices("R2_READ_ACCESS_KEY_ID"))
+    r2_read_secret_access_key: str = Field("", validation_alias=AliasChoices("R2_READ_SECRET_ACCESS_KEY"))
+    r2_multi_bucket_max_scan_keys: int = Field(5000, validation_alias=AliasChoices("R2_MULTI_BUCKET_MAX_SCAN_KEYS"))
+    r2_download_max_bytes: int = Field(512 * 1024 * 1024, validation_alias=AliasChoices("R2_DOWNLOAD_MAX_BYTES"))
 
     # v1.6 ecosystem R2 lane registry. These envs let HIVE understand where
     # AIMS/RAMS/website/podcast artefacts live without granting new write paths.
@@ -242,16 +247,68 @@ class Settings(BaseSettings):
             ("hive_skills", self.r2_bucket_hive_skills, self.r2_public_base_url_hive_skills, "Shared HIVE/AIMS/RAMS skills pool"),
         ]
         payload: list[dict[str, Any]] = []
+        write_credentials_configured = bool(
+            self.r2_endpoint_url
+            and self.cf_r2_access_key_id
+            and self.cf_r2_secret_access_key
+            and self.cf_r2_bucket
+        )
+        read_credentials_configured = bool(
+            self.r2_multi_bucket_read_enabled
+            and self.r2_endpoint_url
+            and self.r2_read_access_key_id
+            and self.r2_read_secret_access_key
+        )
         for name, bucket, public_base_url, description in lanes:
+            primary = name == "uploads"
+            configured = bool(bucket or public_base_url)
+            readable = bool(bucket) and (write_credentials_configured if primary else read_credentials_configured)
+            writable = bool(bucket) and primary and write_credentials_configured
+            if writable:
+                access_mode = "read_write"
+            elif readable:
+                access_mode = "read_only"
+            elif configured:
+                access_mode = "registry_only"
+            else:
+                access_mode = "unavailable"
             payload.append({
                 "lane": name,
                 "bucket": bucket or None,
                 "public_base_url": public_base_url.rstrip("/") if public_base_url else None,
-                "configured": bool(bucket or public_base_url),
+                "configured": configured,
                 "description": description,
-                "primary_upload_lane": name == "uploads",
+                "primary_upload_lane": primary,
+                "readable": readable,
+                "writable": writable,
+                "access_mode": access_mode,
+                "chat_supported": readable,
             })
         return payload
+
+    def r2_lane(self, lane: str) -> dict[str, Any] | None:
+        clean_lane = (lane or "").strip().lower().replace("-", "_")
+        aliases = {
+            "upload": "uploads",
+            "skills": "hive_skills",
+            "podcast_rss_feeds": "podcast_rss",
+            "rss_feeds": "rss",
+            "transcript": "transcripts",
+        }
+        clean_lane = aliases.get(clean_lane, clean_lane)
+        for item in self.r2_ecosystem_lanes:
+            if item["lane"] == clean_lane:
+                return item
+        return None
+
+    @property
+    def r2_read_credentials_configured(self) -> bool:
+        return bool(
+            self.r2_multi_bucket_read_enabled
+            and self.r2_endpoint_url
+            and self.r2_read_access_key_id
+            and self.r2_read_secret_access_key
+        )
 
     def public_url_for_r2_lane(self, lane: str, key: str) -> str | None:
         clean_lane = (lane or "").strip().lower().replace("-", "_")
