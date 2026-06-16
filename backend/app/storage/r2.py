@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, BinaryIO
+from urllib.parse import quote, unquote
 
 import boto3
 from botocore.client import Config
@@ -141,8 +142,12 @@ class R2Storage:
             if public_base_url is _DEFAULT_PUBLIC_BASE
             else public_base_url
         )
+        clean_key = (key or "").replace("\\", "/").lstrip("/")
+        decoded_key = unquote(clean_key)
+        if not clean_key or any(part in {"", ".", ".."} for part in decoded_key.split("/")):
+            return None
         if isinstance(base, str) and base:
-            return f"{base.rstrip('/')}/{key}"
+            return f"{base.rstrip('/')}/{quote(clean_key, safe='/~')}"
         return None
 
     def put_file(self, path: Path, key: str, content_type: str | None = None) -> StoredObject:
@@ -335,7 +340,9 @@ class R2Storage:
             head = self.client(read_only=read_only).head_object(Bucket=bucket_name, Key=key)
             size_bytes = int(head.get("ContentLength") or 0)
             if size_bytes > max_bytes:
-                raise ValueError(f"Object is {size_bytes} bytes; max read size is {max_bytes} bytes")
+                raise ValueError(
+                    f"Object is {size_bytes} bytes; max read size is {max_bytes} bytes"
+                )
             response = self.client(read_only=read_only).get_object(Bucket=bucket_name, Key=key)
             content = response["Body"].read(max_bytes + 1)
         except ValueError:
@@ -379,7 +386,9 @@ class R2Storage:
         size_bytes = int(response.get("ContentLength") or 0)
         if max_bytes is not None and size_bytes > max_bytes:
             response["Body"].close()
-            raise ValueError(f"Object is {size_bytes} bytes; max download size is {max_bytes} bytes")
+            raise ValueError(
+                f"Object is {size_bytes} bytes; max download size is {max_bytes} bytes"
+            )
         return ObjectStream(
             key=key,
             bucket=bucket_name,
