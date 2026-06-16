@@ -1,0 +1,14 @@
+REPO_HEALTH_ENABLED=true
+REPO_HEALTH_TIMEOUT_SECONDS=6
+REPO_HEALTH_CACHE_SECONDS=30
+AIMS_HEALTH_URL=https://app.jonathan-harris.online/health
+AIMS_OPERATIONAL_HEALTH_URL=https://app.jonathan-harris.online/ops/health
+RAMS_HEALTH_URL=https://mod.jonathan-harris.online/health
+RAMS_READINESS_URL=https://mod.jonathan-harris.online/readiness
+RAMS_HEALTH_BEARER_TOKEN={{ secret.RMS_API_KEY }}
+IRS_HEALTH_URL=https://images.jonathan-harris.online/
+WEBSITE_HEALTH_URL=https://jonathan-harris.online/
+# Add the exact production values before deployment:
+# HIVE_UI_HEALTH_URL=https://your-hive-ui-domain.example/
+# MAST_HEALTH_URL=https://your-mast-domain.example/health
+# MAST_STATUS_URL=https://your-mast-domain.example/status

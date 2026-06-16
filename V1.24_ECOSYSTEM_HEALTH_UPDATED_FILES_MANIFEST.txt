@@ -1,0 +1,16 @@
+HIVE ecosystem health update
+
+Modified:
+- .env.example
+- backend/app/api/system.py
+- backend/app/core/config.py
+
+Added:
+- backend/app/services/repo_health.py
+- backend/tests/test_repo_health_dashboard.py
+- docs/repository-health-dashboard.md
+- HIVE-REPO-HEALTH-KOYEB-ENV-PATCH.txt
+- V1.24_ECOSYSTEM_HEALTH_UPDATED_FILES_MANIFEST.txt
+
+Owner-frozen files were not modified.
+Verification: 139 backend tests passed.
