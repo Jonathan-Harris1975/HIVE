@@ -60,7 +60,11 @@ class OpenRouterClient:
         url = f"{self.settings.openrouter_base_url.rstrip('/')}/models"
         timeout = max(1.0, float(self.settings.openrouter_model_list_timeout_seconds))
         async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.get(url, headers=self._headers())
+            response = await client.get(
+                url,
+                headers=self._headers(),
+                params={"output_modalities": "all"},
+            )
             response.raise_for_status()
             payload = response.json()
             models = payload.get("data", []) if isinstance(payload, dict) else []
