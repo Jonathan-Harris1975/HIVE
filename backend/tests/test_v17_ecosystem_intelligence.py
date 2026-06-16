@@ -24,6 +24,7 @@ def test_ecosystem_status_is_mast_friendly(monkeypatch, tmp_path) -> None:
         tmp_path,
         R2_BUCKET_HIVE_SKILLS="hive-skills",
         R2_PUBLIC_BASE_URL_HIVE_SKILLS="https://skills.example.test",
+        SKILL_REGISTRY_FALLBACK_ENABLED=False,
         VECTORIZE_ENABLED="true",
         VECTORIZE_API_TOKEN="token",
         VECTORIZE_ACCOUNT_ID="account",
@@ -48,6 +49,7 @@ def test_skills_list_and_search_return_safe_disabled_d1_response(monkeypatch, tm
         tmp_path,
         R2_BUCKET_HIVE_SKILLS="hive-skills",
         R2_PUBLIC_BASE_URL_HIVE_SKILLS="https://skills.example.test",
+        SKILL_REGISTRY_FALLBACK_ENABLED=False,
     )
     client = TestClient(app)
 
