@@ -48,7 +48,9 @@ class ProductionConfigurationError(RuntimeError):
     pass
 
 
-def _check(name: str, ok: bool, success: str, failure: str, *, required: bool = False) -> ReadinessCheck:
+def _check(
+    name: str, ok: bool, success: str, failure: str, *, required: bool = False
+) -> ReadinessCheck:
     if ok:
         return ReadinessCheck(name=name, status="ok", message=success, required=required)
     return ReadinessCheck(
@@ -141,12 +143,53 @@ def build_readiness_report(settings: Settings) -> ReadinessReport:
         )
     )
 
+    configured_lanes = {str(item["lane"]): item for item in settings.r2_ecosystem_lanes}
+    required_lane_names = settings.required_r2_read_lane_names
+    unknown_required_lanes = [name for name in required_lane_names if name not in configured_lanes]
+    unreadable_required_lanes = [
+        name
+        for name in required_lane_names
+        if name in configured_lanes and not bool(configured_lanes[name].get("readable"))
+    ]
+    lane_contract_ok = not unknown_required_lanes and not unreadable_required_lanes
+    lane_failure_parts: list[str] = []
+    if unknown_required_lanes:
+        lane_failure_parts.append(f"unknown lanes: {', '.join(unknown_required_lanes)}")
+    if unreadable_required_lanes:
+        lane_failure_parts.append(f"unreadable lanes: {', '.join(unreadable_required_lanes)}")
+    checks.append(
+        _check(
+            "r2_required_lanes",
+            lane_contract_ok,
+            f"All {len(required_lane_names)} required R2 lanes have server-side read access.",
+            "Required R2 lane contract is incomplete (" + "; ".join(lane_failure_parts) + ").",
+            required=production and settings.production_require_r2 and bool(required_lane_names),
+        )
+    )
+
+    skills_lane = configured_lanes.get("hive_skills") or {}
+    skills_contract_ok = bool(
+        skills_lane.get("bucket")
+        and skills_lane.get("public_base_url")
+        and (skills_lane.get("readable") or settings.skill_registry_fallback_enabled)
+    )
+    checks.append(
+        _check(
+            "shared_skills_source",
+            skills_contract_ok or not (production and settings.production_require_r2),
+            "The shared skills bucket, public source and retrieval path are configured.",
+            "Production requires the HIVE shared skills bucket and public base URL, with either scoped R2 reads or the bounded public fallback enabled.",
+            required=production and settings.production_require_r2,
+        )
+    )
+
     database_ready = settings.database_enabled and bool(settings.sql_database_url)
     database_required = production and settings.production_require_database
     checks.append(
         _check(
             "database",
-            database_ready or (not settings.database_enabled and not settings.production_require_database),
+            database_ready
+            or (not settings.database_enabled and not settings.production_require_database),
             "SQL persistence is configured.",
             "SQL persistence is enabled or required, but DATABASE_URL/fields are incomplete.",
             required=database_required or (production and settings.database_enabled),
@@ -165,7 +208,9 @@ def build_readiness_report(settings: Settings) -> ReadinessReport:
     )
 
     vectorize_complete = bool(
-        settings.vectorize_account_id and settings.vectorize_api_token and settings.vectorize_index_name
+        settings.vectorize_account_id
+        and settings.vectorize_api_token
+        and settings.vectorize_index_name
     )
     checks.append(
         _check(
@@ -178,7 +223,9 @@ def build_readiness_report(settings: Settings) -> ReadinessReport:
     )
 
     embeddings_complete = bool(
-        settings.embeddings_account_id and settings.embeddings_api_token and settings.embeddings_model
+        settings.embeddings_account_id
+        and settings.embeddings_api_token
+        and settings.embeddings_model
     )
     checks.append(
         _check(
@@ -225,6 +272,5 @@ def _valid_origin(origin: str, *, production: bool) -> bool:
         return False
     host = (parsed.hostname or "").lower()
     return not (
-        production
-        and (parsed.scheme != "https" or host in {"localhost", "127.0.0.1", "::1"})
+        production and (parsed.scheme != "https" or host in {"localhost", "127.0.0.1", "::1"})
     )
