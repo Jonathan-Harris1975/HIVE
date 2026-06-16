@@ -7,11 +7,14 @@ import tempfile
 import time
 import zipfile
 from dataclasses import asdict
+from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Literal
+from typing import Any, Literal
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.core.config import Settings, get_settings
@@ -90,6 +93,7 @@ class ChatTurn(BaseModel):
 
 class ChatWithFileRequest(BaseModel):
     object_key: str = Field(..., min_length=1, max_length=2048)
+    lane: str = Field("uploads", min_length=1, max_length=80)
     message: str = Field(..., min_length=1)
     history: list[ChatTurn] = Field(default_factory=list)
     mode: Mode = Mode.FILE_ANALYSIS
@@ -252,7 +256,9 @@ def r2_lanes(settings: Settings = Depends(get_settings)) -> dict[str, object]:
         "configured_count": sum(1 for item in lanes if item.get("configured")),
         "primary_upload_lane": "uploads",
         "lanes": lanes,
-        "note": "Non-upload lanes are registry/public-URL aware first; multi-bucket read/write can be added later if needed.",
+        "multi_bucket_read_enabled": settings.r2_multi_bucket_read_enabled,
+        "read_credentials_configured": settings.r2_read_credentials_configured,
+        "note": "The uploads lane is read/write. Other readable lanes are enforced as read-only.",
     }
 
 
@@ -272,6 +278,183 @@ def r2_lane_public_url(
             detail={"message": "Unknown or unconfigured R2 lane/base URL.", "allowed_lanes": allowed},
         )
     return {"ok": True, "lane": lane, "key": key.lstrip("/"), "public_url": url}
+
+
+@router.get("/files/r2/{lane}/objects")
+def list_r2_lane_objects(
+    lane: str,
+    prefix: str = Query("", max_length=2048),
+    limit: int = Query(100, ge=1, le=1000),
+    cursor: str | None = Query(None, max_length=4096),
+    search: str | None = Query(None, max_length=255),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    """Browse or search a configured R2 lane through scoped server-side credentials."""
+
+    lane_config = _require_r2_lane(settings, lane, require_read=True)
+    clean_prefix = _normalise_prefix(prefix)
+    try:
+        page = R2Storage(settings).list_objects_page(
+            prefix=clean_prefix,
+            limit=limit,
+            bucket=str(lane_config["bucket"]),
+            public_base_url=lane_config.get("public_base_url"),
+            cursor=cursor,
+            delimiter=None if search else "/",
+            search=search,
+            read_only=not bool(lane_config["primary_upload_lane"]),
+            max_scan_keys=settings.r2_multi_bucket_max_scan_keys,
+        )
+    except RuntimeError as exc:
+        return _lane_storage_error_response(
+            operation="lane_list",
+            lane_config=lane_config,
+            key_or_prefix=clean_prefix,
+            error=exc,
+        )
+    return {
+        "ok": True,
+        "storage": "r2",
+        "lane": lane_config["lane"],
+        "bucket": lane_config["bucket"],
+        "access_mode": lane_config["access_mode"],
+        "prefix": clean_prefix,
+        "search": search or None,
+        "count": len(page.objects),
+        "prefix_count": len(page.prefixes),
+        "prefixes": page.prefixes,
+        "files": [asdict(item) for item in page.objects],
+        "next_cursor": page.next_cursor,
+        "scanned_count": page.scanned_count,
+        "truncated": page.truncated,
+    }
+
+
+@router.get("/files/r2/{lane}/metadata")
+def r2_lane_object_metadata(
+    lane: str,
+    key: str = Query(..., min_length=1, max_length=2048),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    lane_config = _require_r2_lane(settings, lane, require_read=True)
+    clean_key = _validate_object_key(key)
+    try:
+        metadata = R2Storage(settings).head_object(
+            clean_key,
+            bucket=str(lane_config["bucket"]),
+            public_base_url=lane_config.get("public_base_url"),
+            read_only=not bool(lane_config["primary_upload_lane"]),
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        return _lane_storage_error_response(
+            operation="lane_metadata",
+            lane_config=lane_config,
+            key_or_prefix=clean_key,
+            error=exc,
+        )
+    return {
+        "ok": True,
+        "lane": lane_config["lane"],
+        "access_mode": lane_config["access_mode"],
+        "metadata": asdict(metadata),
+        "preview_supported": _text_preview_supported(clean_key, metadata.content_type),
+        "chat_supported": _text_preview_supported(clean_key, metadata.content_type),
+    }
+
+
+@router.get("/files/r2/{lane}/read")
+def read_r2_lane_object(
+    lane: str,
+    key: str = Query(..., min_length=1, max_length=2048),
+    max_chars: int | None = Query(None, ge=100, le=500_000),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    lane_config = _require_r2_lane(settings, lane, require_read=True)
+    clean_key = _validate_object_key(key)
+    try:
+        obj = _read_object_for_lane(
+            settings,
+            lane_config,
+            clean_key,
+            max_bytes=settings.max_file_read_bytes,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        return _lane_storage_error_response(
+            operation="lane_read",
+            lane_config=lane_config,
+            key_or_prefix=clean_key,
+            error=exc,
+        )
+
+    if not _text_preview_supported(clean_key, obj.content_type):
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="This object can be downloaded but is not supported for text preview or file chat.",
+        )
+    extracted = _extract_object_text(
+        obj,
+        settings,
+        max_chars=max_chars or settings.document_extract_max_chars,
+    )
+    return {
+        "ok": True,
+        "lane": lane_config["lane"],
+        "access_mode": lane_config["access_mode"],
+        "file": _source_metadata(
+            obj,
+            settings,
+            truncated=bool(extracted.get("truncated")),
+            decode_replacements=bool(extracted.get("decode_replacements")),
+            lane=str(lane_config["lane"]),
+        ),
+        "content": extracted.get("content") or "",
+        "extraction": extracted.get("extraction"),
+    }
+
+
+@router.get("/files/r2/{lane}/download")
+def download_r2_lane_object(
+    lane: str,
+    key: str = Query(..., min_length=1, max_length=2048),
+    settings: Settings = Depends(get_settings),
+) -> StreamingResponse:
+    lane_config = _require_r2_lane(settings, lane, require_read=True)
+    clean_key = _validate_object_key(key)
+    try:
+        stream = R2Storage(settings).open_object(
+            clean_key,
+            bucket=str(lane_config["bucket"]),
+            max_bytes=settings.r2_download_max_bytes,
+            read_only=not bool(lane_config["primary_upload_lane"]),
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+    filename = Path(clean_key).name.replace("\r", "_").replace("\n", "_") or "download"
+    headers = {
+        "Content-Length": str(stream.size_bytes),
+        "Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}",
+        "Cache-Control": "private, no-store",
+        "X-HIVE-R2-Lane": str(lane_config["lane"]),
+    }
+    if stream.etag:
+        headers["ETag"] = f'"{stream.etag}"'
+
+    return StreamingResponse(
+        _stream_r2_body(stream.body),
+        media_type=stream.content_type or "application/octet-stream",
+        headers=headers,
+    )
 
 
 @router.get("/files/read")
@@ -699,12 +882,21 @@ async def chat_with_file(
 
     try:
         clean_key = _time_stage(timings, "validate_key_seconds", lambda: _validate_object_key(request.object_key))
+        lane_config = _require_r2_lane(
+            settings,
+            request.lane,
+            require_read=(request.lane.strip().lower().replace("-", "_") != "uploads"),
+        )
     except HTTPException:
         raise
 
     source_label = Path(clean_key).name or clean_key
+    use_persisted_chunks = bool(request.use_chunks and lane_config["primary_upload_lane"])
+    chunk_mode_note = None
+    if request.use_chunks and not use_persisted_chunks:
+        chunk_mode_note = "Persisted chunk retrieval is limited to the uploads lane; this lane used a bounded direct read."
 
-    if request.use_chunks:
+    if use_persisted_chunks:
         stage = "chunk_retrieval"
         query = request.chunk_query or request.message
         chunk_limit = request.chunk_limit or settings.file_retrieval_max_chunks
@@ -798,6 +990,7 @@ async def chat_with_file(
         excerpt = _chunks_to_excerpt(chunks)
         obj = _object_stub_from_chunks(clean_key, settings)
         source = _chunk_source_metadata(clean_key, settings, retrieval, chunks)
+        source["lane"] = "uploads"
         retrieval_metadata = _retrieval_metadata(retrieval, chunks)
         truncated = False
         had_decode_replacements = False
@@ -807,16 +1000,21 @@ async def chat_with_file(
             obj = _time_stage(
                 timings,
                 "read_file_seconds",
-                lambda: _storage(settings).read_object(clean_key, max_bytes=settings.max_file_read_bytes),
+                lambda: _read_object_for_lane(
+                    settings,
+                    lane_config,
+                    clean_key,
+                    max_bytes=settings.max_file_read_bytes,
+                ),
             )
         except FileNotFoundError as exc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)) from exc
         except RuntimeError as exc:
-            response = _storage_error_response(
+            response = _lane_storage_error_response(
                 operation="chat_with_file_read",
-                settings=settings,
+                lane_config=lane_config,
                 key_or_prefix=clean_key,
                 error=exc,
             )
@@ -831,7 +1029,13 @@ async def chat_with_file(
         max_chars = request.max_file_chars or settings.max_file_chat_chars
         excerpt = content[:max_chars]
         truncated = len(content) > len(excerpt) or bool(extracted.get("truncated"))
-        source = _source_metadata(obj, settings, truncated=truncated, decode_replacements=had_decode_replacements)
+        source = _source_metadata(
+            obj,
+            settings,
+            truncated=truncated,
+            decode_replacements=had_decode_replacements,
+            lane=str(lane_config["lane"]),
+        )
         source["extraction"] = extracted.get("extraction")
         retrieval_metadata = None
 
@@ -869,11 +1073,13 @@ async def chat_with_file(
             "source": source,
             "retrieval_metadata": retrieval_metadata,
             "retrieval_summary": _retrieval_summary(retrieval_metadata, workflow_metadata),
-            "source_chunks": _source_chunks_metadata(chunks if request.use_chunks else []),
+            "source_chunks": _source_chunks_metadata(chunks if use_persisted_chunks else []),
+            "chunk_mode_note": chunk_mode_note,
             "source_citation": {
                 "label": source_label,
                 "object_key": obj.key,
                 "public_url": obj.public_url,
+                "lane": lane_config["lane"],
             },
             "timings": _finalise_timings(timings, total_started),
         }
@@ -901,6 +1107,7 @@ async def chat_with_file(
             obj=obj,
             timings=_finalise_timings(timings, total_started),
             retrieval_metadata=retrieval_metadata,
+            lane=str(lane_config["lane"]),
         )
     except Exception as exc:  # defensive: never let this endpoint become a vague 502
         timings["model_call_seconds"] = round(time.perf_counter() - model_started, 3)
@@ -916,6 +1123,7 @@ async def chat_with_file(
             obj=obj,
             timings=_finalise_timings(timings, total_started),
             retrieval_metadata=retrieval_metadata,
+            lane=str(lane_config["lane"]),
         )
     timings["model_call_seconds"] = round(time.perf_counter() - model_started, 3)
 
@@ -973,11 +1181,13 @@ async def chat_with_file(
         "source": source,
         "retrieval_metadata": retrieval_metadata,
         "retrieval_summary": _retrieval_summary(retrieval_metadata, workflow_metadata),
-        "source_chunks": _source_chunks_metadata(chunks if request.use_chunks else []),
+        "source_chunks": _source_chunks_metadata(chunks if use_persisted_chunks else []),
+        "chunk_mode_note": chunk_mode_note,
         "source_citation": {
             "label": source_label,
             "object_key": obj.key,
             "public_url": obj.public_url,
+            "lane": lane_config["lane"],
         },
     }
 
@@ -1449,6 +1659,7 @@ def _chat_with_file_model_error_response(
     obj,
     timings: dict[str, float | None],
     retrieval_metadata: dict[str, object] | None = None,
+    lane: str = "uploads",
 ) -> dict[str, object]:
     return {
         "ok": False,
@@ -1473,9 +1684,117 @@ def _chat_with_file_model_error_response(
             "label": source_label,
             "object_key": obj.key,
             "public_url": obj.public_url,
+            "lane": lane,
         },
         "hint": "Retry with skip_model=true to verify file read/prompt build, or lower max_file_chars/use a faster model for smoke tests.",
     }
+
+
+def _require_r2_lane(
+    settings: Settings,
+    lane: str,
+    *,
+    require_read: bool,
+) -> dict[str, Any]:
+    lane_config = settings.r2_lane(lane)
+    if lane_config is None:
+        allowed = [item["lane"] for item in settings.r2_ecosystem_lanes]
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"message": "Unknown R2 lane.", "allowed_lanes": allowed},
+        )
+    if not lane_config.get("bucket"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"R2 lane {lane_config['lane']!r} has no bucket configured.",
+        )
+    if require_read and not lane_config.get("readable"):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "message": f"R2 lane {lane_config['lane']!r} is not readable with the current credentials.",
+                "access_mode": lane_config.get("access_mode"),
+                "required_env": [
+                    "R2_MULTI_BUCKET_READ_ENABLED=true",
+                    "R2_READ_ACCESS_KEY_ID",
+                    "R2_READ_SECRET_ACCESS_KEY",
+                ] if not lane_config.get("primary_upload_lane") else [
+                    "R2_ACCESS_KEY_ID",
+                    "R2_SECRET_ACCESS_KEY",
+                ],
+            },
+        )
+    return lane_config
+
+
+def _read_object_for_lane(
+    settings: Settings,
+    lane_config: dict[str, Any],
+    key: str,
+    *,
+    max_bytes: int,
+):
+    if lane_config.get("primary_upload_lane"):
+        return _storage(settings).read_object(key, max_bytes=max_bytes)
+    return R2Storage(settings).read_object(
+        key,
+        max_bytes=max_bytes,
+        bucket=str(lane_config["bucket"]),
+        public_base_url=lane_config.get("public_base_url"),
+        read_only=True,
+    )
+
+
+def _lane_storage_error_response(
+    *,
+    operation: str,
+    lane_config: dict[str, Any],
+    key_or_prefix: str,
+    error: RuntimeError,
+) -> dict[str, object]:
+    return {
+        "ok": False,
+        "error": {
+            "operation": operation,
+            "message": str(error),
+            "hint": _storage_error_hint(str(error)),
+        },
+        "storage": "r2",
+        "lane": lane_config.get("lane"),
+        "bucket": lane_config.get("bucket"),
+        "access_mode": lane_config.get("access_mode"),
+        "key_or_prefix": key_or_prefix,
+    }
+
+
+def _text_preview_supported(key: str, content_type: str | None) -> bool:
+    suffix = Path(key).suffix.lower()
+    supported_suffixes = {
+        ".txt", ".md", ".log", ".json", ".jsonl", ".csv", ".tsv",
+        ".html", ".htm", ".xml", ".rss", ".pdf", ".docx", ".xlsx",
+        ".yaml", ".yml", ".py", ".js", ".ts", ".tsx", ".jsx", ".css",
+        ".sql", ".sh", ".toml", ".ini", ".cfg",
+    }
+    if suffix in supported_suffixes:
+        return True
+    media_type = (content_type or "").lower()
+    return media_type.startswith("text/") or any(
+        token in media_type
+        for token in ["json", "xml", "csv", "pdf", "wordprocessingml", "spreadsheetml"]
+    )
+
+
+def _stream_r2_body(body: Any, chunk_size: int = 1024 * 1024) -> Iterator[bytes]:
+    try:
+        while True:
+            chunk = body.read(chunk_size)
+            if not chunk:
+                break
+            yield chunk
+    finally:
+        close = getattr(body, "close", None)
+        if callable(close):
+            close()
 
 
 def _storage(settings: Settings):
@@ -1573,8 +1892,16 @@ def _decode_text(content: bytes) -> tuple[str, bool]:
     return decoded, "\ufffd" in decoded
 
 
-def _source_metadata(obj, settings: Settings, *, truncated: bool, decode_replacements: bool) -> dict[str, object]:
+def _source_metadata(
+    obj,
+    settings: Settings,
+    *,
+    truncated: bool,
+    decode_replacements: bool,
+    lane: str = "uploads",
+) -> dict[str, object]:
     return {
+        "lane": lane,
         "object_key": obj.key,
         "storage": _storage_name(settings),
         "bucket": obj.bucket,
