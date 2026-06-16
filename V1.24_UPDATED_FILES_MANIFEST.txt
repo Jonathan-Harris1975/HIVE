@@ -1,0 +1,21 @@
+HIVE v1.24 multi-bucket R2 and model-discovery update
+
+Modified:
+.env.example
+backend/app/api/files.py
+backend/app/api/models.py
+backend/app/core/config.py
+backend/app/core/production.py
+backend/app/services/model_router.py
+backend/app/services/openrouter.py
+backend/app/storage/r2.py
+
+Added:
+backend/tests/test_v124_model_groups.py
+backend/tests/test_v124_multi_bucket_r2.py
+docs/releases/v1.24-multi-bucket-r2-model-discovery.md
+V1.24_UPDATED_FILES_MANIFEST.txt
+
+Owner-frozen files listed by the user were not modified.
+V1.24_FROZEN_FILES_SHA256.txt
+HIVE-v1.24-KOYEB-ENV-PATCH.txt
