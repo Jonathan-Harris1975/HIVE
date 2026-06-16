@@ -10,10 +10,6 @@ from app.services.ecosystem_index import (
     search_ecosystem_metadata,
 )
 from app.storage.r2 import R2Storage
-from app.storage.vectorize import VectorizeClient
-from app.services.embeddings import CloudflareEmbeddingsClient
-from app.storage.sql_store import SqlStore
-from app.storage.d1 import D1MetadataStore
 
 router = APIRouter(tags=["ecosystem"], dependencies=[Depends(require_admin)])
 
@@ -64,27 +60,42 @@ def r2_discovery(
     storage = R2Storage(settings)
     lanes = settings.r2_ecosystem_lanes
     clean_lane = lane.strip().lower().replace("-", "_") if lane else None
-    selected = [item for item in lanes if item.get("configured") and (not clean_lane or item["lane"] == clean_lane)]
+    selected = [
+        item
+        for item in lanes
+        if item.get("configured") and (not clean_lane or item["lane"] == clean_lane)
+    ]
     discoveries = []
     for item in selected:
         bucket = item.get("bucket")
         if not bucket:
-            discoveries.append({"lane": item["lane"], "ok": False, "error": "bucket_not_configured"})
+            discoveries.append(
+                {"lane": item["lane"], "ok": False, "error": "bucket_not_configured"}
+            )
             continue
         try:
-            objects = storage.list_objects(prefix=prefix, limit=limit, bucket=str(bucket), public_base_url=item.get("public_base_url"))
-            discoveries.append({
-                "lane": item["lane"],
-                "bucket": bucket,
-                "ok": True,
-                "prefix": prefix,
-                "preview_count": len(objects),
-                "limit": limit,
-                "objects_preview": [obj.__dict__ for obj in objects],
-                "note": "preview_count is limited; this is discovery, not a full bucket inventory.",
-            })
+            objects = storage.list_objects(
+                prefix=prefix,
+                limit=limit,
+                bucket=str(bucket),
+                public_base_url=item.get("public_base_url"),
+            )
+            discoveries.append(
+                {
+                    "lane": item["lane"],
+                    "bucket": bucket,
+                    "ok": True,
+                    "prefix": prefix,
+                    "preview_count": len(objects),
+                    "limit": limit,
+                    "objects_preview": [obj.__dict__ for obj in objects],
+                    "note": "preview_count is limited; this is discovery, not a full bucket inventory.",
+                }
+            )
         except Exception as exc:  # pragma: no cover - depends on live Cloudflare permissions
-            discoveries.append({"lane": item["lane"], "bucket": bucket, "ok": False, "error": str(exc)})
+            discoveries.append(
+                {"lane": item["lane"], "bucket": bucket, "ok": False, "error": str(exc)}
+            )
     return {
         "ok": True,
         "lane": clean_lane,

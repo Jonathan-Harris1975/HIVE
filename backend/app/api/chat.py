@@ -15,6 +15,7 @@ from app.services.brand_modes import build_system_prompt
 from app.services.context_manager import ContextWindow
 from app.services.model_router import Mode, ModelRouter
 from app.services.openrouter import OpenRouterClient
+from app.services.skill_registry import build_skill_context
 from app.storage.sql_store import SqlStore
 
 router = APIRouter(tags=["chat"], dependencies=[Depends(require_admin)])
@@ -36,9 +37,22 @@ class ChatRequest(BaseModel):
     use_persisted_history: bool = True
     db_history_limit: int = Field(20, ge=0, le=100)
     test_run_id: str | None = Field(None, max_length=120)
+    use_skills: bool = True
+    skill_repo: str | None = Field(None, max_length=120)
+    skill_lane: str | None = Field(None, max_length=120)
+    skill_risk_ceiling: Literal["low", "medium", "high"] | None = None
+    skill_limit: int | None = Field(None, ge=1, le=8)
 
 
 def build_payload(request: ChatRequest, settings: Settings) -> tuple[dict[str, object], list[str]]:
+    payload, fallbacks, _skill_context = build_payload_with_context(request, settings)
+    return payload, fallbacks
+
+
+def build_payload_with_context(
+    request: ChatRequest,
+    settings: Settings,
+) -> tuple[dict[str, object], list[str], dict[str, object]]:
     router_service = ModelRouter(settings)
     task = router_service.classify_task(request.message, request.mode)
     effective_mode = router_service.resolve_mode(task, request.mode)
@@ -47,6 +61,21 @@ def build_payload(request: ChatRequest, settings: Settings) -> tuple[dict[str, o
 
     window = ContextWindow()
     window.add("system", build_system_prompt(effective_mode))
+    skill_context = (
+        build_skill_context(
+            settings=settings,
+            task=request.message,
+            repo=request.skill_repo,
+            hive_lane=request.skill_lane,
+            risk_ceiling=request.skill_risk_ceiling,
+            limit=request.skill_limit,
+        )
+        if request.use_skills
+        else {"ok": True, "enabled": False, "prompt": "", "skills": []}
+    )
+    skill_prompt = skill_context.get("prompt")
+    if isinstance(skill_prompt, str) and skill_prompt:
+        window.add("system", skill_prompt)
 
     if request.conversation_id and request.use_persisted_history and request.db_history_limit > 0:
         for turn in SqlStore(settings).recent_chat_turns(
@@ -65,7 +94,7 @@ def build_payload(request: ChatRequest, settings: Settings) -> tuple[dict[str, o
         "temperature": request.temperature,
         "max_tokens": max(request.max_tokens, settings.openrouter_min_response_tokens),
     }
-    return payload, fallback_models
+    return payload, fallback_models, skill_context
 
 
 @router.post("/chat/stream")
@@ -82,12 +111,13 @@ async def chat_stream(
 
     conversation_id = request.conversation_id or str(uuid.uuid4())
     request_with_id = request.model_copy(update={"conversation_id": conversation_id})
-    payload, fallback_models = build_payload(request_with_id, settings)
+    payload, fallback_models, skill_context = build_payload_with_context(request_with_id, settings)
     stream = _stream_and_record_chat(
         request=request_with_id,
         payload=payload,
         fallback_models=fallback_models,
         settings=settings,
+        skill_context=skill_context,
     )
     return StreamingResponse(heartbeat_stream(stream), media_type="text/event-stream")
 
@@ -98,17 +128,22 @@ async def _stream_and_record_chat(
     payload: dict[str, object],
     fallback_models: list[str],
     settings: Settings,
+    skill_context: dict[str, object] | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     conversation_id = request.conversation_id or str(uuid.uuid4())
     client = OpenRouterClient(settings)
     reply_parts: list[str] = []
     recorded = False
 
-    yield {
+    meta_event: dict[str, Any] = {
         "event": "meta",
         "type": "conversation",
         "conversation_id": conversation_id,
     }
+    if skill_context is not None:
+        meta_event["skills_used"] = _skill_summaries(skill_context)
+        meta_event["skill_context_status"] = _skill_context_status(skill_context)
+    yield meta_event
 
     try:
         async for event in client.stream_chat_completion(payload, fallback_models=fallback_models):
@@ -128,6 +163,7 @@ async def _stream_and_record_chat(
                     conversation_id=conversation_id,
                     settings=settings,
                     stream_ended_early=False,
+                    skill_context=skill_context,
                 )
                 recorded = True
                 yield {
@@ -135,6 +171,8 @@ async def _stream_and_record_chat(
                     "conversation_id": conversation_id,
                     "db_recorded": bool(result.get("ok")),
                     "db_error": result.get("error"),
+                    "skills_used": _skill_summaries(skill_context),
+                    "skill_context_status": _skill_context_status(skill_context),
                 }
                 return
 
@@ -151,6 +189,7 @@ async def _stream_and_record_chat(
                 conversation_id=conversation_id,
                 settings=settings,
                 stream_ended_early=True,
+                skill_context=skill_context,
             )
 
 
@@ -162,6 +201,7 @@ def _record_streamed_turn(
     conversation_id: str,
     settings: Settings,
     stream_ended_early: bool,
+    skill_context: dict[str, object] | None = None,
 ) -> dict[str, object]:
     usage = event.get("usage")
     finish_ok = bool(event.get("ok")) and not stream_ended_early
@@ -178,6 +218,8 @@ def _record_streamed_turn(
             "ok": finish_ok,
             "stream_ended_early": stream_ended_early,
             "test_run_id": request.test_run_id,
+            "skills_used": _skill_summaries(skill_context),
+            "skill_context_status": _skill_context_status(skill_context),
         },
     )
 
@@ -189,7 +231,7 @@ async def chat(
 ) -> dict[str, object]:
     """Non-streaming endpoint for Make.com and smoke tests."""
 
-    payload, fallback_models = build_payload(request, settings)
+    payload, fallback_models, skill_context = build_payload_with_context(request, settings)
     client = OpenRouterClient(settings)
     completion = await client.chat_completion(payload, fallback_models=fallback_models)
     choice = (completion.get("choices") or [{}])[0]
@@ -231,6 +273,27 @@ async def chat(
         "conversation_id": db_record.get("conversation_id") or request.conversation_id,
         "db_recorded": bool(db_record.get("ok")),
         "db_error": db_record.get("error"),
+        "skills_used": _skill_summaries(skill_context),
+        "skill_context_status": _skill_context_status(skill_context),
+    }
+
+
+def _skill_summaries(skill_context: dict[str, object] | None) -> list[dict[str, object]]:
+    if not isinstance(skill_context, dict):
+        return []
+    skills = skill_context.get("skills")
+    return [item for item in skills if isinstance(item, dict)] if isinstance(skills, list) else []
+
+
+def _skill_context_status(skill_context: dict[str, object] | None) -> dict[str, object]:
+    if not isinstance(skill_context, dict):
+        return {"enabled": False, "ok": True, "source": None, "fallback_reason": None}
+    return {
+        "enabled": bool(skill_context.get("enabled")),
+        "ok": bool(skill_context.get("ok")),
+        "source": skill_context.get("source"),
+        "fallback_reason": skill_context.get("fallback_reason"),
+        "error_code": skill_context.get("error_code"),
     }
 
 

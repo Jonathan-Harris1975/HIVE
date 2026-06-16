@@ -116,12 +116,24 @@ class ChatWithFileRequest(BaseModel):
         description="Alias for skip_model, useful for smoke tests and diagnosing file-context build issues.",
     )
     conversation_id: str | None = None
-    use_chunks: bool = Field(False, description="Use persisted SQL chunks instead of injecting the raw file excerpt.")
-    use_vectorize: bool = Field(False, description="When use_chunks is true, try Vectorize semantic retrieval first.")
-    vectorize_fallback_sql: bool = Field(True, description="Fall back to SQL lexical chunk search if Vectorize is disabled, empty, or fails.")
-    chunk_query: str | None = Field(None, max_length=2000, description="Optional retrieval query; defaults to the user message.")
+    use_chunks: bool = Field(
+        False, description="Use persisted SQL chunks instead of injecting the raw file excerpt."
+    )
+    use_vectorize: bool = Field(
+        False, description="When use_chunks is true, try Vectorize semantic retrieval first."
+    )
+    vectorize_fallback_sql: bool = Field(
+        True,
+        description="Fall back to SQL lexical chunk search if Vectorize is disabled, empty, or fails.",
+    )
+    chunk_query: str | None = Field(
+        None, max_length=2000, description="Optional retrieval query; defaults to the user message."
+    )
     chunk_limit: int | None = Field(None, ge=1, le=30)
-    auto_chunk: bool = Field(False, description="If use_chunks is true and no chunks exist, read the file and create chunks first.")
+    auto_chunk: bool = Field(
+        False,
+        description="If use_chunks is true and no chunks exist, read the file and create chunks first.",
+    )
     test_run_id: str | None = Field(None, max_length=120)
     workflow_preset: str | None = Field(
         None,
@@ -140,9 +152,16 @@ async def upload_file(
     except UnsafeZipError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)
+        ) from exc
     db_record = SqlStore(settings).record_file(result)
-    return {"ok": True, "file": result.__dict__, "db_recorded": bool(db_record.get("ok")), "db_error": db_record.get("error")}
+    return {
+        "ok": True,
+        "file": result.__dict__,
+        "db_recorded": bool(db_record.get("ok")),
+        "db_error": db_record.get("error"),
+    }
 
 
 @router.post("/files/upload-text")
@@ -158,9 +177,18 @@ async def upload_text(
             settings=settings,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)) from exc
-    db_record = SqlStore(settings).record_file(result, extra_metadata={"test_run_id": payload.test_run_id} if payload.test_run_id else None)
-    return {"ok": True, "file": result.__dict__, "db_recorded": bool(db_record.get("ok")), "db_error": db_record.get("error")}
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)
+        ) from exc
+    db_record = SqlStore(settings).record_file(
+        result, extra_metadata={"test_run_id": payload.test_run_id} if payload.test_run_id else None
+    )
+    return {
+        "ok": True,
+        "file": result.__dict__,
+        "db_recorded": bool(db_record.get("ok")),
+        "db_error": db_record.get("error"),
+    }
 
 
 @router.post("/files/upload-base64")
@@ -184,13 +212,24 @@ async def upload_base64(
             settings=settings,
         )
     except binascii.Error as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid base64 payload") from exc
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid base64 payload"
+        ) from exc
     except UnsafeZipError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)) from exc
-    db_record = SqlStore(settings).record_file(result, extra_metadata={"test_run_id": payload.test_run_id} if payload.test_run_id else None)
-    return {"ok": True, "file": result.__dict__, "db_recorded": bool(db_record.get("ok")), "db_error": db_record.get("error")}
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)
+        ) from exc
+    db_record = SqlStore(settings).record_file(
+        result, extra_metadata={"test_run_id": payload.test_run_id} if payload.test_run_id else None
+    )
+    return {
+        "ok": True,
+        "file": result.__dict__,
+        "db_recorded": bool(db_record.get("ok")),
+        "db_error": db_record.get("error"),
+    }
 
 
 @router.get("/files/list")
@@ -270,14 +309,18 @@ def r2_lane_public_url(
 ) -> dict[str, object]:
     """Build a public URL for a configured ecosystem R2 lane/key pair."""
 
-    url = settings.public_url_for_r2_lane(lane, key)
+    clean_key = _validate_object_key(key) if key else ""
+    url = settings.public_url_for_r2_lane(lane, clean_key)
     if not url:
         allowed = [item["lane"] for item in settings.r2_ecosystem_lanes]
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail={"message": "Unknown or unconfigured R2 lane/base URL.", "allowed_lanes": allowed},
+            detail={
+                "message": "Unknown or unconfigured R2 lane/base URL.",
+                "allowed_lanes": allowed,
+            },
         )
-    return {"ok": True, "lane": lane, "key": key.lstrip("/"), "public_url": url}
+    return {"ok": True, "lane": lane, "key": clean_key, "public_url": url}
 
 
 @router.get("/files/r2/{lane}/objects")
@@ -383,7 +426,9 @@ def read_r2_lane_object(
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)
+        ) from exc
     except RuntimeError as exc:
         return _lane_storage_error_response(
             operation="lane_read",
@@ -436,7 +481,9 @@ def download_r2_lane_object(
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)
+        ) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
@@ -470,7 +517,9 @@ def read_file(
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)
+        ) from exc
     except RuntimeError as exc:
         return _storage_error_response(
             operation="read",
@@ -509,7 +558,9 @@ def inspect_stored_zip(
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)
+        ) from exc
     except RuntimeError as exc:
         return _storage_error_response(
             operation="zip_inspect_read",
@@ -529,7 +580,10 @@ def inspect_stored_zip(
             max_uncompressed_bytes=settings.max_zip_uncompressed_bytes,
         )
     except zipfile.BadZipFile as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Stored object is not a valid ZIP archive") from exc
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Stored object is not a valid ZIP archive",
+        ) from exc
     except UnsafeZipError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -568,7 +622,9 @@ async def extract_text_from_stored_zip(
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)
+        ) from exc
     except RuntimeError as exc:
         return _storage_error_response(
             operation="zip_extract_read",
@@ -588,12 +644,18 @@ async def extract_text_from_stored_zip(
             max_uncompressed_bytes=settings.max_zip_uncompressed_bytes,
             max_members=payload.max_members or settings.zip_extract_max_members,
             max_member_bytes=payload.max_member_bytes or settings.zip_extract_max_member_bytes,
-            max_total_text_chars=payload.max_total_text_chars or settings.zip_extract_max_total_text_chars,
-            max_depth=payload.max_depth if payload.max_depth is not None else settings.zip_extract_max_depth,
+            max_total_text_chars=payload.max_total_text_chars
+            or settings.zip_extract_max_total_text_chars,
+            max_depth=payload.max_depth
+            if payload.max_depth is not None
+            else settings.zip_extract_max_depth,
             supported_suffixes=settings.zip_extract_supported_suffix_set,
         )
     except zipfile.BadZipFile as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Stored object is not a valid ZIP archive") from exc
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Stored object is not a valid ZIP archive",
+        ) from exc
     except UnsafeZipError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -663,7 +725,9 @@ async def extract_text_from_stored_zip(
     return {
         "ok": True,
         "stage": "complete",
-        "source_archive": _source_metadata(obj, settings, truncated=False, decode_replacements=False),
+        "source_archive": _source_metadata(
+            obj, settings, truncated=False, decode_replacements=False
+        ),
         "extracted_file": text_result.__dict__,
         "extraction": {k: v for k, v in report.items() if k != "text"},
         "extracted_text_preview": extracted_text[:1200],
@@ -691,7 +755,9 @@ def chunk_file(
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)
+        ) from exc
     except RuntimeError as exc:
         return _storage_error_response(
             operation="chunk_read",
@@ -704,7 +770,11 @@ def chunk_file(
     content = extracted["content"]
     had_decode_replacements = bool(extracted.get("decode_replacements"))
     max_chars = payload.max_chars or settings.file_chunk_max_chars
-    overlap_chars = payload.overlap_chars if payload.overlap_chars is not None else settings.file_chunk_overlap_chars
+    overlap_chars = (
+        payload.overlap_chars
+        if payload.overlap_chars is not None
+        else settings.file_chunk_overlap_chars
+    )
     max_chunks = payload.max_chunks or settings.file_chunk_max_count
     chunks = split_text_into_chunks(
         content,
@@ -713,7 +783,12 @@ def chunk_file(
         max_chunks=max_chunks,
     )
     chunk_dicts = chunks_to_dicts(chunks)
-    source = _source_metadata(obj, settings, truncated=bool(extracted.get("truncated")), decode_replacements=had_decode_replacements)
+    source = _source_metadata(
+        obj,
+        settings,
+        truncated=bool(extracted.get("truncated")),
+        decode_replacements=had_decode_replacements,
+    )
     source["extraction"] = extracted.get("extraction")
     if payload.test_run_id:
         source["test_run_id"] = payload.test_run_id
@@ -732,13 +807,14 @@ def chunk_file(
             "overlap_chars": overlap_chars,
             "max_chunks": max_chunks,
             "replace_existing": payload.replace_existing,
-            "total_token_estimate": sum(int(chunk.get("token_estimate") or 0) for chunk in chunk_dicts),
+            "total_token_estimate": sum(
+                int(chunk.get("token_estimate") or 0) for chunk in chunk_dicts
+            ),
         },
         "db_recorded": bool(db_record.get("ok")),
         "db_error": db_record.get("error"),
         "chunks_preview": [
-            {**chunk, "content": chunk["content"][:360]}
-            for chunk in chunk_dicts[:5]
+            {**chunk, "content": chunk["content"][:360]} for chunk in chunk_dicts[:5]
         ],
     }
 
@@ -793,7 +869,13 @@ async def vectorize_file_chunks(
             include_content=False,
         )
         if not isinstance(existing, dict) or not existing.get("ok"):
-            return {"ok": False, "stage": "chunk_check", "error": existing.get("error") if isinstance(existing, dict) else "Chunk lookup failed."}
+            return {
+                "ok": False,
+                "stage": "chunk_check",
+                "error": existing.get("error")
+                if isinstance(existing, dict)
+                else "Chunk lookup failed.",
+            }
         if existing.get("count") == 0 or payload.replace_existing_chunks:
             chunk_result = _chunk_file_for_chat(clean_key=clean_key, settings=settings)
             if not chunk_result.get("ok"):
@@ -807,9 +889,20 @@ async def vectorize_file_chunks(
     )
     chunks = chunks_result.get("chunks", []) if isinstance(chunks_result, dict) else []
     if not isinstance(chunks_result, dict) or not chunks_result.get("ok"):
-        return {"ok": False, "stage": "list_chunks", "error": chunks_result.get("error") if isinstance(chunks_result, dict) else "Chunk list failed."}
+        return {
+            "ok": False,
+            "stage": "list_chunks",
+            "error": chunks_result.get("error")
+            if isinstance(chunks_result, dict)
+            else "Chunk list failed.",
+        }
     if not chunks:
-        return {"ok": False, "stage": "list_chunks", "error_code": "no_chunks_found", "message": "No persisted chunks found to vectorize."}
+        return {
+            "ok": False,
+            "stage": "list_chunks",
+            "error_code": "no_chunks_found",
+            "message": "No persisted chunks found to vectorize.",
+        }
 
     return await _vectorize_chunks(
         chunks=chunks,
@@ -881,7 +974,9 @@ async def chat_with_file(
     stage = "validate_key"
 
     try:
-        clean_key = _time_stage(timings, "validate_key_seconds", lambda: _validate_object_key(request.object_key))
+        clean_key = _time_stage(
+            timings, "validate_key_seconds", lambda: _validate_object_key(request.object_key)
+        )
         lane_config = _require_r2_lane(
             settings,
             request.lane,
@@ -912,7 +1007,9 @@ async def chat_with_file(
                 fallback_sql=request.vectorize_fallback_sql,
             )
         else:
-            retrieval = store.search_file_chunks(query=query, object_key=clean_key, limit=chunk_limit)
+            retrieval = store.search_file_chunks(
+                query=query, object_key=clean_key, limit=chunk_limit
+            )
             if isinstance(retrieval, dict):
                 retrieval["retrieval_mode"] = "sql"
         timings["chunk_retrieval_seconds"] = round(time.perf_counter() - retrieval_started, 3)
@@ -929,7 +1026,9 @@ async def chat_with_file(
             except FileNotFoundError as exc:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
             except ValueError as exc:
-                raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)) from exc
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)
+                ) from exc
             except RuntimeError as exc:
                 response = _storage_error_response(
                     operation="chat_with_file_auto_chunk_read",
@@ -945,7 +1044,8 @@ async def chat_with_file(
                     "ok": False,
                     "stage": stage,
                     "error_code": "chunk_index_failed",
-                    "message": chunk_index_result.get("db_error") or "File chunks could not be recorded.",
+                    "message": chunk_index_result.get("db_error")
+                    or "File chunks could not be recorded.",
                     "chunk_index": chunk_index_result,
                     "timings": _finalise_timings(timings, total_started),
                 }
@@ -960,7 +1060,9 @@ async def chat_with_file(
                     fallback_sql=request.vectorize_fallback_sql,
                 )
             else:
-                retrieval = store.search_file_chunks(query=query, object_key=clean_key, limit=chunk_limit)
+                retrieval = store.search_file_chunks(
+                    query=query, object_key=clean_key, limit=chunk_limit
+                )
                 if isinstance(retrieval, dict):
                     retrieval["retrieval_mode"] = "sql"
             timings["chunk_retrieval_seconds"] = round(time.perf_counter() - retrieval_started, 3)
@@ -971,7 +1073,9 @@ async def chat_with_file(
                 "ok": False,
                 "stage": stage,
                 "error_code": "chunk_retrieval_failed",
-                "message": (retrieval or {}).get("error") if isinstance(retrieval, dict) else "Chunk retrieval failed.",
+                "message": (retrieval or {}).get("error")
+                if isinstance(retrieval, dict)
+                else "Chunk retrieval failed.",
                 "retrieval": retrieval if isinstance(retrieval, dict) else None,
                 "timings": _finalise_timings(timings, total_started),
                 "hint": "Run POST /v1/files/chunk first, retry with use_chunks=false for small files, or enable SQL fallback for Vectorize.",
@@ -1010,7 +1114,9 @@ async def chat_with_file(
         except FileNotFoundError as exc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
         except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)) from exc
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)
+            ) from exc
         except RuntimeError as exc:
             response = _lane_storage_error_response(
                 operation="chat_with_file_read",
@@ -1023,7 +1129,13 @@ async def chat_with_file(
             return response
 
         stage = "decode_file"
-        extracted = _time_stage(timings, "decode_seconds", lambda: _extract_object_text(obj, settings, max_chars=settings.document_extract_max_chars))
+        extracted = _time_stage(
+            timings,
+            "decode_seconds",
+            lambda: _extract_object_text(
+                obj, settings, max_chars=settings.document_extract_max_chars
+            ),
+        )
         content = str(extracted.get("content") or "")
         had_decode_replacements = bool(extracted.get("decode_replacements"))
         max_chars = request.max_file_chars or settings.max_file_chat_chars
@@ -1249,16 +1361,36 @@ async def _vectorize_chunks(
     embeddings = CloudflareEmbeddingsClient(settings)
     vectorize = VectorizeClient(settings)
     if not embeddings.enabled:
-        return {"ok": False, "stage": "embeddings", "embeddings": embeddings.safe_config, "error": "Embeddings disabled or not configured."}
+        return {
+            "ok": False,
+            "stage": "embeddings",
+            "embeddings": embeddings.safe_config,
+            "error": "Embeddings disabled or not configured.",
+        }
     if not vectorize.enabled:
-        return {"ok": False, "stage": "vectorize", "vectorize": vectorize.safe_config, "error": "Vectorize disabled or not configured."}
+        return {
+            "ok": False,
+            "stage": "vectorize",
+            "vectorize": vectorize.safe_config,
+            "error": "Vectorize disabled or not configured.",
+        }
 
-    clean_chunks = [chunk for chunk in chunks if chunk.get("id") and (chunk.get("content") or chunk.get("content_preview"))]
+    clean_chunks = [
+        chunk
+        for chunk in chunks
+        if chunk.get("id") and (chunk.get("content") or chunk.get("content_preview"))
+    ]
     if not clean_chunks:
-        return {"ok": False, "stage": "prepare", "error": "No chunk IDs/content available for vectorization."}
+        return {
+            "ok": False,
+            "stage": "prepare",
+            "error": "No chunk IDs/content available for vectorization.",
+        }
 
     requested_batch_size = batch_size or settings.embeddings_max_batch_size
-    safe_batch_size = max(1, min(int(requested_batch_size), int(settings.embeddings_max_batch_size), 100))
+    safe_batch_size = max(
+        1, min(int(requested_batch_size), int(settings.embeddings_max_batch_size), 100)
+    )
     upserts: list[dict[str, object]] = []
     embedding_batches = 0
     vector_count = 0
@@ -1269,7 +1401,12 @@ async def _vectorize_chunks(
         embedding_result = await embeddings.embed_texts(texts)
         embedding_batches += 1
         if not embedding_result.get("ok"):
-            return {"ok": False, "stage": "embedding", "batch": embedding_batches, "embedding_error": embedding_result}
+            return {
+                "ok": False,
+                "stage": "embedding",
+                "batch": embedding_batches,
+                "embedding_error": embedding_result,
+            }
         vectors = embedding_result.get("vectors") or []
         vector_payload: list[dict[str, object]] = []
         for chunk, vector in zip(batch, vectors):
@@ -1286,13 +1423,27 @@ async def _vectorize_chunks(
             vector_payload.append({"id": chunk_id, "values": vector, "metadata": metadata})
         upsert_result = await vectorize.upsert_vectors(vector_payload)
         if not upsert_result.get("ok"):
-            return {"ok": False, "stage": "upsert", "batch": embedding_batches, "vectorize_error": upsert_result}
-        raw_result = upsert_result.get("result") if isinstance(upsert_result.get("result"), dict) else {}
+            return {
+                "ok": False,
+                "stage": "upsert",
+                "batch": embedding_batches,
+                "vectorize_error": upsert_result,
+            }
+        raw_result = (
+            upsert_result.get("result") if isinstance(upsert_result.get("result"), dict) else {}
+        )
         mutation_id = raw_result.get("mutationId") if isinstance(raw_result, dict) else None
         if mutation_id:
             mutation_ids.append(str(mutation_id))
         vector_count += len(vector_payload)
-        upserts.append({"batch": embedding_batches, "count": len(vector_payload), "mutation_id": mutation_id, "status_code": upsert_result.get("status_code")})
+        upserts.append(
+            {
+                "batch": embedding_batches,
+                "count": len(vector_payload),
+                "mutation_id": mutation_id,
+                "status_code": upsert_result.get("status_code"),
+            }
+        )
 
     return {
         "ok": True,
@@ -1332,7 +1483,9 @@ async def _vector_search_chunks(
                 embedding["vectors"][0],
                 top_k=max(limit, int(settings.vectorize_top_k)),
             )
-            vector_diag["query"] = {k: v for k, v in query_result.items() if k not in {"raw", "matches"}}
+            vector_diag["query"] = {
+                k: v for k, v in query_result.items() if k not in {"raw", "matches"}
+            }
             matches = query_result.get("matches") or []
             ids = [str(match.get("id")) for match in matches if match.get("id")]
             if ids:
@@ -1372,7 +1525,9 @@ async def _vector_search_chunks(
         vector_diag["reason"] = "Vectorize or embeddings disabled/not configured."
 
     if fallback_sql:
-        fallback = SqlStore(settings).search_file_chunks(query=query, object_key=object_key, limit=limit)
+        fallback = SqlStore(settings).search_file_chunks(
+            query=query, object_key=object_key, limit=limit
+        )
         if isinstance(fallback, dict):
             fallback["retrieval_mode"] = "sql_fallback"
             fallback["retrieval_source"] = "sql_fallback"
@@ -1400,7 +1555,7 @@ async def _vector_search_chunks(
 
 
 def _batches(items: list[dict[str, object]], batch_size: int) -> list[list[dict[str, object]]]:
-    return [items[index:index + batch_size] for index in range(0, len(items), batch_size)]
+    return [items[index : index + batch_size] for index in range(0, len(items), batch_size)]
 
 
 def _time_stage(timings: dict[str, float | None], key: str, func):  # noqa: ANN001, ANN202
@@ -1411,7 +1566,9 @@ def _time_stage(timings: dict[str, float | None], key: str, func):  # noqa: ANN0
         timings[key] = round(time.perf_counter() - started, 3)
 
 
-def _finalise_timings(timings: dict[str, float | None], total_started: float) -> dict[str, float | None]:
+def _finalise_timings(
+    timings: dict[str, float | None], total_started: float
+) -> dict[str, float | None]:
     final = dict(timings)
     final["total_seconds"] = round(time.perf_counter() - total_started, 3)
     return final
@@ -1492,7 +1649,12 @@ def _chunk_file_for_chat(*, clean_key: str, settings: Settings) -> dict[str, obj
         overlap_chars=settings.file_chunk_overlap_chars,
         max_chunks=settings.file_chunk_max_count,
     )
-    source = _source_metadata(obj, settings, truncated=bool(extracted.get("truncated")), decode_replacements=had_decode_replacements)
+    source = _source_metadata(
+        obj,
+        settings,
+        truncated=bool(extracted.get("truncated")),
+        decode_replacements=had_decode_replacements,
+    )
     source["extraction"] = extracted.get("extraction")
     db_record = SqlStore(settings).record_file_chunks(
         object_key=clean_key,
@@ -1524,7 +1686,9 @@ def _chunks_to_excerpt(chunks: list[dict[str, object]]) -> str:
 
 
 def _object_stub_from_chunks(clean_key: str, settings: Settings) -> SimpleNamespace:
-    public_url = R2Storage(settings).public_url_for_key(clean_key) if R2Storage(settings).enabled else None
+    public_url = (
+        R2Storage(settings).public_url_for_key(clean_key) if R2Storage(settings).enabled else None
+    )
     return SimpleNamespace(
         key=clean_key,
         bucket=settings.cf_r2_bucket if R2Storage(settings).enabled else None,
@@ -1534,7 +1698,9 @@ def _object_stub_from_chunks(clean_key: str, settings: Settings) -> SimpleNamesp
     )
 
 
-def _retrieval_metadata(retrieval: dict[str, object] | None, chunks: list[dict[str, object]]) -> dict[str, object]:
+def _retrieval_metadata(
+    retrieval: dict[str, object] | None, chunks: list[dict[str, object]]
+) -> dict[str, object]:
     if not isinstance(retrieval, dict):
         return {
             "retrieval_source": "raw_file",
@@ -1555,7 +1721,9 @@ def _retrieval_metadata(retrieval: dict[str, object] | None, chunks: list[dict[s
     }
 
 
-def _source_chunks_metadata(chunks: list[dict[str, object]], *, excerpt_chars: int = 360) -> list[dict[str, object]]:
+def _source_chunks_metadata(
+    chunks: list[dict[str, object]], *, excerpt_chars: int = 360
+) -> list[dict[str, object]]:
     """Return compact evidence metadata for UI citations and answer grounding."""
 
     source_chunks: list[dict[str, object]] = []
@@ -1571,7 +1739,9 @@ def _source_chunks_metadata(chunks: list[dict[str, object]], *, excerpt_chars: i
                 "char_end": chunk.get("char_end"),
                 "score": chunk.get("score"),
                 "vector_score": chunk.get("vector_score"),
-                "retrieval_source": metadata.get("retrieval_source") or metadata.get("source") or chunk.get("retrieval_source"),
+                "retrieval_source": metadata.get("retrieval_source")
+                or metadata.get("source")
+                or chunk.get("retrieval_source"),
                 "source_archive_object_key": metadata.get("source_archive_object_key"),
                 "excerpt": content[:excerpt_chars],
             }
@@ -1625,7 +1795,9 @@ def _chunk_source_metadata(
     retrieval: dict[str, object],
     chunks: list[dict[str, object]],
 ) -> dict[str, object]:
-    public_url = R2Storage(settings).public_url_for_key(clean_key) if R2Storage(settings).enabled else None
+    public_url = (
+        R2Storage(settings).public_url_for_key(clean_key) if R2Storage(settings).enabled else None
+    )
     return {
         "object_key": clean_key,
         "storage": _storage_name(settings),
@@ -1718,7 +1890,9 @@ def _require_r2_lane(
                     "R2_MULTI_BUCKET_READ_ENABLED=true",
                     "R2_READ_ACCESS_KEY_ID",
                     "R2_READ_SECRET_ACCESS_KEY",
-                ] if not lane_config.get("primary_upload_lane") else [
+                ]
+                if not lane_config.get("primary_upload_lane")
+                else [
                     "R2_ACCESS_KEY_ID",
                     "R2_SECRET_ACCESS_KEY",
                 ],
@@ -1770,10 +1944,33 @@ def _lane_storage_error_response(
 def _text_preview_supported(key: str, content_type: str | None) -> bool:
     suffix = Path(key).suffix.lower()
     supported_suffixes = {
-        ".txt", ".md", ".log", ".json", ".jsonl", ".csv", ".tsv",
-        ".html", ".htm", ".xml", ".rss", ".pdf", ".docx", ".xlsx",
-        ".yaml", ".yml", ".py", ".js", ".ts", ".tsx", ".jsx", ".css",
-        ".sql", ".sh", ".toml", ".ini", ".cfg",
+        ".txt",
+        ".md",
+        ".log",
+        ".json",
+        ".jsonl",
+        ".csv",
+        ".tsv",
+        ".html",
+        ".htm",
+        ".xml",
+        ".rss",
+        ".pdf",
+        ".docx",
+        ".xlsx",
+        ".yaml",
+        ".yml",
+        ".py",
+        ".js",
+        ".ts",
+        ".tsx",
+        ".jsx",
+        ".css",
+        ".sql",
+        ".sh",
+        ".toml",
+        ".ini",
+        ".cfg",
     }
     if suffix in supported_suffixes:
         return True
@@ -1813,12 +2010,16 @@ def _normalise_prefix(prefix: str) -> str:
 def _validate_object_key(key: str, *, allow_trailing_slash: bool = False) -> str:
     clean_key = key.strip().lstrip("/")
     if not clean_key:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Object key is required")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Object key is required"
+        )
     parts = [part for part in clean_key.split("/") if part]
     if any(part in {".", ".."} for part in parts) or "\x00" in clean_key:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid object key")
     if not allow_trailing_slash and clean_key.endswith("/"):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Object key must point to a file")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Object key must point to a file"
+        )
     return clean_key
 
 
@@ -1840,7 +2041,9 @@ def _reply_text(content: object) -> str:
     return str(content)
 
 
-def _decode_base64_upload(content_base64: str, content_type: str | None) -> tuple[str | None, bytes]:
+def _decode_base64_upload(
+    content_base64: str, content_type: str | None
+) -> tuple[str | None, bytes]:
     raw = content_base64.strip()
     detected_content_type = content_type
     if raw.startswith("data:") and "," in raw:
@@ -1850,7 +2053,9 @@ def _decode_base64_upload(content_base64: str, content_type: str | None) -> tupl
     return detected_content_type, base64.b64decode(raw, validate=True)
 
 
-def _extract_object_text(obj, settings: Settings, *, max_chars: int | None = None) -> dict[str, object]:
+def _extract_object_text(
+    obj, settings: Settings, *, max_chars: int | None = None
+) -> dict[str, object]:
     suffix = Path(obj.key).suffix.lower()
     if suffix in {".pdf", ".docx", ".xlsx", ".csv", ".json", ".html", ".htm"}:
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix or ".bin") as tmp:
@@ -1883,7 +2088,13 @@ def _extract_object_text(obj, settings: Settings, *, max_chars: int | None = Non
         "content": content,
         "decode_replacements": had_decode_replacements,
         "truncated": truncated,
-        "extraction": {"supported": suffix not in {".zip"}, "extractor": "utf8_decode", "suffix": suffix, "char_count": len(content), "truncated": truncated},
+        "extraction": {
+            "supported": suffix not in {".zip"},
+            "extractor": "utf8_decode",
+            "suffix": suffix,
+            "char_count": len(content),
+            "truncated": truncated,
+        },
     }
 
 
