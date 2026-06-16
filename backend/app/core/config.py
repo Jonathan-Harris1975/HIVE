@@ -23,6 +23,23 @@ class Settings(BaseSettings):
     production_require_r2: bool = Field(True, validation_alias=AliasChoices("PRODUCTION_REQUIRE_R2"))
     production_require_database: bool = Field(False, validation_alias=AliasChoices("PRODUCTION_REQUIRE_DATABASE"))
 
+    # Read-only ecosystem service monitoring for the HIVE-UI Ops dashboard.
+    # URLs are operator-controlled environment values; the API never accepts
+    # arbitrary probe targets from request parameters.
+    repo_health_enabled: bool = Field(True, validation_alias=AliasChoices("REPO_HEALTH_ENABLED"))
+    repo_health_timeout_seconds: float = Field(6.0, validation_alias=AliasChoices("REPO_HEALTH_TIMEOUT_SECONDS"))
+    repo_health_cache_seconds: int = Field(30, validation_alias=AliasChoices("REPO_HEALTH_CACHE_SECONDS"))
+    hive_ui_health_url: str = Field("", validation_alias=AliasChoices("HIVE_UI_HEALTH_URL"))
+    aims_health_url: str = Field("https://app.jonathan-harris.online/health", validation_alias=AliasChoices("AIMS_HEALTH_URL"))
+    aims_operational_health_url: str = Field("https://app.jonathan-harris.online/ops/health", validation_alias=AliasChoices("AIMS_OPERATIONAL_HEALTH_URL"))
+    rams_health_url: str = Field("https://mod.jonathan-harris.online/health", validation_alias=AliasChoices("RAMS_HEALTH_URL"))
+    rams_readiness_url: str = Field("https://mod.jonathan-harris.online/readiness", validation_alias=AliasChoices("RAMS_READINESS_URL"))
+    rams_health_bearer_token: str = Field("", validation_alias=AliasChoices("RAMS_HEALTH_BEARER_TOKEN", "RMS_API_KEY"))
+    mast_health_url: str = Field("", validation_alias=AliasChoices("MAST_HEALTH_URL"))
+    mast_status_url: str = Field("", validation_alias=AliasChoices("MAST_STATUS_URL"))
+    irs_health_url: str = Field("https://images.jonathan-harris.online/", validation_alias=AliasChoices("IRS_HEALTH_URL"))
+    website_health_url: str = Field("https://jonathan-harris.online/", validation_alias=AliasChoices("WEBSITE_HEALTH_URL"))
+
     openrouter_api_key: str = ""
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     openrouter_site_url: str = "https://jonathan-harris.online"
