@@ -345,7 +345,7 @@ def list_r2_lane_objects(
             cursor=cursor,
             delimiter=None if search else "/",
             search=search,
-            read_only=False,  # TEMP: force main credentials to debug SignatureDoesNotMatch
+            read_only=not bool(lane_config.get("primary_upload_lane")),
             max_scan_keys=settings.r2_multi_bucket_max_scan_keys,
         )
     except RuntimeError as exc:
@@ -386,7 +386,7 @@ def r2_lane_object_metadata(
             clean_key,
             bucket=str(lane_config["bucket"]),
             public_base_url=lane_config.get("public_base_url"),
-            read_only=False,  # TEMP: force main credentials to debug SignatureDoesNotMatch
+            read_only=not bool(lane_config.get("primary_upload_lane")),
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
@@ -476,7 +476,7 @@ def download_r2_lane_object(
             clean_key,
             bucket=str(lane_config["bucket"]),
             max_bytes=settings.r2_download_max_bytes,
-            read_only=False,  # TEMP: force main credentials to debug SignatureDoesNotMatch
+            read_only=not bool(lane_config.get("primary_upload_lane")),
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
@@ -1915,7 +1915,7 @@ def _read_object_for_lane(
         max_bytes=max_bytes,
         bucket=str(lane_config["bucket"]),
         public_base_url=lane_config.get("public_base_url"),
-        read_only=False,  # TEMP: force main credentials to debug SignatureDoesNotMatch
+        read_only=True,
     )
 
 
