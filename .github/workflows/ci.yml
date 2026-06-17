@@ -18,8 +18,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: pip
@@ -38,10 +38,10 @@ jobs:
           R2_BUCKET_UPLOADS: hive
           R2_ENDPOINT_URL: https://00000000000000000000000000000000.r2.cloudflarestorage.com
           R2_MULTI_BUCKET_READ_ENABLED: 'true'
-          R2_READ_ACCESS_KEY_ID: ci-r2-read-access-key
-          R2_READ_SECRET_ACCESS_KEY: ci-r2-read-secret-key-with-sufficient-length
-          R2_BUCKET_HIVE_SKILLS: hive-skills
-          R2_PUBLIC_BASE_URL_HIVE_SKILLS: https://skills.example.invalid
+          R2_READ_ACCESS_KEY_ID: ci-r2-read-key
+          R2_READ_SECRET_ACCESS_KEY: ci-r2-read-secret
+          R2_BUCKET_META_SYSTEM: metasystem
+          MAST_MONITOR_MODE: r2
           CORS_ORIGINS: https://hive.jonathan-harris.online
           ALLOWED_HOSTS: hive-ci.example.invalid
           DATABASE_ENABLED: 'false'
@@ -54,5 +54,28 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
       - run: docker build -t hive:ci .
+
+  notify_failure:
+    name: Notify central operations on CI failure
+    needs: [backend, container]
+    if: ${{ always() && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Send redacted HIVE operational event
+        env:
+          OPS_ALERT_WEBHOOK_URL: ${{ secrets.OPS_ALERT_WEBHOOK_URL }}
+          OPS_ALERT_WEBHOOK_TOKEN: ${{ secrets.OPS_ALERT_WEBHOOK_TOKEN }}
+        run: >-
+          python scripts/ops_notify.py
+          --service HIVE
+          --event-type ci_failed
+          --title "HIVE GitHub Actions failed"
+          --summary "The governed CI workflow failed. Open the linked run for the failing job and logs."
+          --event-id "github:${{ github.repository }}:${{ github.run_id }}:${{ github.run_attempt }}"
+          --release-id "${{ github.sha }}"
+          --url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+

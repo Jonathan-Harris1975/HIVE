@@ -1,0 +1,39 @@
+name: Koyeb production deployment watch
+
+on:
+  workflow_run:
+    workflows: ["HIVE production verification"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: koyeb-deployment-watch-HIVE
+  cancel-in-progress: true
+
+jobs:
+  watch:
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - name: Install the official Koyeb CLI
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/koyeb/koyeb-cli/master/install.sh | sh
+          echo "$HOME/.koyeb/bin" >> "$GITHUB_PATH"
+      - name: Watch production deployment
+        env:
+          KOYEB_TOKEN: ${{ secrets.KOYEB_TOKEN }}
+          KOYEB_SERVICE: ${{ secrets.KOYEB_SERVICE }}
+          SERVICE_DISPLAY_NAME: HIVE
+          OPS_ALERT_WEBHOOK_URL: ${{ secrets.OPS_ALERT_WEBHOOK_URL }}
+          OPS_ALERT_WEBHOOK_TOKEN: ${{ secrets.OPS_ALERT_WEBHOOK_TOKEN }}
+          GITHUB_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          EXPECTED_DEPLOYMENT_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          EXPECTED_DEPLOYMENT_AFTER: ${{ github.event.workflow_run.created_at || '' }}
+        run: python scripts/watch_koyeb_deployment.py
