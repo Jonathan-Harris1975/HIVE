@@ -157,7 +157,12 @@ def get_execution_review_plan(*, settings: Settings, plan_id: str) -> dict[str, 
         return {"ok": False, "enabled": False, "error_code": "d1_disabled"}
     item = _get_review_item(d1, plan_id)
     if not item:
-        return {"ok": False, "enabled": True, "error_code": "execution_plan_not_found", "plan_id": plan_id}
+        return {
+            "ok": False,
+            "enabled": True,
+            "error_code": "execution_plan_not_found",
+            "plan_id": plan_id,
+        }
     return {
         "ok": True,
         "enabled": True,
@@ -192,7 +197,12 @@ def decide_execution_review_plan(
 
     item = _get_review_item(d1, plan_id)
     if not item:
-        return {"ok": False, "enabled": True, "error_code": "execution_plan_not_found", "plan_id": plan_id}
+        return {
+            "ok": False,
+            "enabled": True,
+            "error_code": "execution_plan_not_found",
+            "plan_id": plan_id,
+        }
 
     metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
     now = _now()
@@ -238,7 +248,6 @@ def decide_execution_review_plan(
     }
 
 
-
 def execution_review_audit_trail(*, settings: Settings, plan_id: str) -> dict[str, object]:
     """Return a compact audit trail for one execution review plan.
 
@@ -262,13 +271,15 @@ def execution_review_audit_trail(*, settings: Settings, plan_id: str) -> dict[st
     ]
     for entry in decision_log:
         if isinstance(entry, dict):
-            timeline.append({
-                "event": "decision",
-                "at": entry.get("decided_at"),
-                "actor": entry.get("reviewer") or "hive-user",
-                "status": entry.get("decision"),
-                "note": entry.get("note"),
-            })
+            timeline.append(
+                {
+                    "event": "decision",
+                    "at": entry.get("decided_at"),
+                    "actor": entry.get("reviewer") or "hive-user",
+                    "status": entry.get("decision"),
+                    "note": entry.get("note"),
+                }
+            )
     return {
         "ok": True,
         "enabled": True,
@@ -296,9 +307,13 @@ def execution_review_evidence_pack(*, settings: Settings, plan_id: str) -> dict[
     item = detail.get("review") if isinstance(detail.get("review"), dict) else {}
     meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
     plan = meta.get("plan") if isinstance(meta.get("plan"), dict) else {}
-    routed = plan.get("routed_skill_plan") if isinstance(plan.get("routed_skill_plan"), dict) else {}
+    routed = (
+        plan.get("routed_skill_plan") if isinstance(plan.get("routed_skill_plan"), dict) else {}
+    )
     primary = routed.get("primary_skill") if isinstance(routed.get("primary_skill"), dict) else None
-    candidates = routed.get("candidate_skills") if isinstance(routed.get("candidate_skills"), list) else []
+    candidates = (
+        routed.get("candidate_skills") if isinstance(routed.get("candidate_skills"), list) else []
+    )
     audit = execution_review_audit_trail(settings=settings, plan_id=plan_id)
     pack = {
         "plan_id": plan_id,
@@ -318,7 +333,9 @@ def execution_review_evidence_pack(*, settings: Settings, plan_id: str) -> dict[
         "shared_steps": plan.get("shared_steps") or [],
         "guardrails": plan.get("guardrails") or {},
         "review_gate": meta.get("review_gate") or {},
-        "decision_log": meta.get("decision_log") if isinstance(meta.get("decision_log"), list) else [],
+        "decision_log": meta.get("decision_log")
+        if isinstance(meta.get("decision_log"), list)
+        else [],
         "audit_timeline": audit.get("timeline") if audit.get("ok") else [],
         "source_record": {
             "lane": item.get("lane"),
@@ -339,7 +356,9 @@ def execution_review_evidence_pack(*, settings: Settings, plan_id: str) -> dict[
     }
 
 
-def export_execution_review_pack(*, settings: Settings, plan_id: str, export_format: str = "json") -> dict[str, object]:
+def export_execution_review_pack(
+    *, settings: Settings, plan_id: str, export_format: str = "json"
+) -> dict[str, object]:
     """Return an inline export document for a review evidence pack.
 
     Export is response-only in v1.15. It does not write to R2 or trigger a job.
@@ -348,10 +367,19 @@ def export_execution_review_pack(*, settings: Settings, plan_id: str, export_for
     pack_payload = execution_review_evidence_pack(settings=settings, plan_id=plan_id)
     if not pack_payload.get("ok"):
         return pack_payload
-    pack = pack_payload.get("evidence_pack") if isinstance(pack_payload.get("evidence_pack"), dict) else {}
+    pack = (
+        pack_payload.get("evidence_pack")
+        if isinstance(pack_payload.get("evidence_pack"), dict)
+        else {}
+    )
     fmt = (export_format or "json").strip().lower()
     if fmt not in {"json", "markdown", "md"}:
-        return {"ok": False, "error_code": "unsupported_export_format", "allowed_formats": ["json", "markdown"], "format": export_format}
+        return {
+            "ok": False,
+            "error_code": "unsupported_export_format",
+            "allowed_formats": ["json", "markdown"],
+            "format": export_format,
+        }
     if fmt in {"markdown", "md"}:
         content_type = "text/markdown; charset=utf-8"
         filename = f"{plan_id}-evidence-pack.md"
@@ -376,6 +404,7 @@ def export_execution_review_pack(*, settings: Settings, plan_id: str, export_for
         "can_execute_now": False,
         "safety_note": _safety_note(),
     }
+
 
 def _get_review_item(d1: D1MetadataStore, plan_id: str) -> dict[str, Any] | None:
     result = d1.query(
@@ -436,12 +465,20 @@ def _review_summary(item: dict[str, Any]) -> dict[str, object]:
         "updated_at": item.get("updated_at") or meta.get("updated_at"),
         "requires_approval": meta.get("requires_approval", True),
         "can_execute_now": False,
-        "primary_skill": ((meta.get("plan") or {}).get("routed_skill_plan") or {}).get("primary_skill") if isinstance(meta.get("plan"), dict) else None,
-        "decision_count": len(meta.get("decision_log") or []) if isinstance(meta.get("decision_log"), list) else 0,
+        "primary_skill": ((meta.get("plan") or {}).get("routed_skill_plan") or {}).get(
+            "primary_skill"
+        )
+        if isinstance(meta.get("plan"), dict)
+        else None,
+        "decision_count": len(meta.get("decision_log") or [])
+        if isinstance(meta.get("decision_log"), list)
+        else 0,
     }
 
 
-def _title_for_plan(task: str, *, repo: str | None = None, workflow_preset: str | None = None) -> str:
+def _title_for_plan(
+    task: str, *, repo: str | None = None, workflow_preset: str | None = None
+) -> str:
     prefix = "Execution review"
     if repo:
         prefix += f" [{repo}]"
@@ -461,7 +498,7 @@ def _safety_note() -> str:
 def _evidence_pack_markdown(pack: dict[str, Any]) -> str:
     primary = pack.get("primary_skill") if isinstance(pack.get("primary_skill"), dict) else {}
     lines = [
-        f"# HIVE Execution Review Evidence Pack",
+        "# HIVE Execution Review Evidence Pack",
         "",
         f"- Plan ID: `{pack.get('plan_id')}`",
         f"- Status: `{pack.get('status')}`",
@@ -480,11 +517,15 @@ def _evidence_pack_markdown(pack: dict[str, Any]) -> str:
         "## Candidate skills",
         "",
     ]
-    candidates = pack.get("candidate_skills") if isinstance(pack.get("candidate_skills"), list) else []
+    candidates = (
+        pack.get("candidate_skills") if isinstance(pack.get("candidate_skills"), list) else []
+    )
     if candidates:
         for index, item in enumerate(candidates, start=1):
             if isinstance(item, dict):
-                lines.append(f"{index}. {item.get('name') or item.get('title') or item.get('skill_id')} — {item.get('risk_level') or 'unknown'}")
+                lines.append(
+                    f"{index}. {item.get('name') or item.get('title') or item.get('skill_id')} — {item.get('risk_level') or 'unknown'}"
+                )
     else:
         lines.append("No candidate skills recorded.")
     lines.extend(["", "## Audit timeline", ""])
@@ -492,7 +533,9 @@ def _evidence_pack_markdown(pack: dict[str, Any]) -> str:
     if timeline:
         for event in timeline:
             if isinstance(event, dict):
-                lines.append(f"- {event.get('at')}: {event.get('event')} / {event.get('status')} by {event.get('actor')} — {event.get('note') or ''}")
+                lines.append(
+                    f"- {event.get('at')}: {event.get('event')} / {event.get('status')} by {event.get('actor')} — {event.get('note') or ''}"
+                )
     else:
         lines.append("No audit events recorded.")
     lines.extend(["", "## Guardrails", ""])
@@ -502,5 +545,10 @@ def _evidence_pack_markdown(pack: dict[str, Any]) -> str:
             lines.append(f"- `{key}`: `{value}`")
     else:
         lines.append("No guardrails recorded.")
-    lines.extend(["", "HIVE v1.15 evidence packs are review artefacts only. They do not execute skills or mutate repos."])
+    lines.extend(
+        [
+            "",
+            "HIVE v1.15 evidence packs are review artefacts only. They do not execute skills or mutate repos.",
+        ]
+    )
     return "\n".join(lines) + "\n"
