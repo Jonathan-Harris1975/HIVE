@@ -21,6 +21,7 @@ def _production_settings(**overrides: object) -> Settings:
         "PRODUCTION_REQUIRE_DATABASE": False,
         "MAX_UPLOAD_BYTES": 1024,
         "MAX_REQUEST_BODY_BYTES": 2048,
+        "REPO_HEALTH_ENABLED": False,
     }
     values.update(overrides)
     return Settings(**values)
@@ -48,6 +49,38 @@ def test_production_readiness_rejects_wildcard_cors() -> None:
     assert report.ready is False
     assert any(item.name == "cors_origins" for item in report.errors)
 
+
+
+def test_production_readiness_requires_dedicated_ops_event_token() -> None:
+    settings = _production_settings(
+        OPS_EVENT_INGEST_ENABLED=True,
+        OPS_EVENT_INGEST_TOKEN="too-short",
+    )
+
+    report = build_readiness_report(settings)
+
+    assert report.ready is False
+    assert any(item.name == "ops_event_ingest" for item in report.errors)
+
+
+def test_production_readiness_accepts_r2_worker_monitoring() -> None:
+    settings = _production_settings(
+        REPO_HEALTH_ENABLED=True,
+        MAST_MONITOR_MODE="r2",
+        R2_BUCKET_META_SYSTEM="metasystem",
+        R2_MULTI_BUCKET_READ_ENABLED=True,
+        R2_ACCOUNT_ID="0" * 32,
+        R2_ACCESS_KEY_ID="write-key",
+        R2_SECRET_ACCESS_KEY="write-secret",
+        R2_BUCKET_UPLOADS="hive",
+        R2_READ_ACCESS_KEY_ID="read-key",
+        R2_READ_SECRET_ACCESS_KEY="read-secret",
+    )
+
+    report = build_readiness_report(settings)
+
+    assert report.ready is True
+    assert next(item for item in report.checks if item.name == "mast_monitoring").status == "ok"
 
 def test_production_docs_are_disabled_and_runtime_is_hardened() -> None:
     app = create_app(_production_settings())
