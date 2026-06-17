@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 import httpx
 import pytest
 
@@ -101,3 +103,70 @@ async def test_repo_health_can_be_disabled() -> None:
     report = await build_repo_health_report(settings, force_refresh=True)
     assert report["overall_status"] == "disabled"
     assert report["repos"] == []
+
+
+@pytest.mark.asyncio
+async def test_repo_health_monitors_mast_worker_from_r2_heartbeat() -> None:
+    clear_repo_health_cache()
+    heartbeat = datetime.now(UTC).isoformat()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "meta.example":
+            return httpx.Response(
+                200,
+                json={
+                    "version": 1,
+                    "startedAt": heartbeat,
+                    "lastTickAt": heartbeat,
+                    "recentResults": [{"ok": True, "finishedAt": heartbeat}],
+                },
+            )
+        return httpx.Response(200, json={"ok": True, "status": "ok"})
+
+    settings = Settings(
+        app_env="test",
+        repo_health_cache_seconds=0,
+        hive_ui_health_url="https://ui.example/health",
+        aims_health_url="https://aims.example/livez",
+        rams_health_url="https://rams.example/livez",
+        mast_monitor_mode="r2",
+        mast_state_r2_lane="meta_system",
+        mast_state_object_key="state/mast/scheduler-state.json",
+        r2_public_base_url_meta_system="https://meta.example",
+        irs_health_url="https://images.example/health.json",
+        website_health_url="https://website.example/health.json",
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        report = await build_repo_health_report(settings, client=client, force_refresh=True)
+
+    mast = next(item for item in report["repos"] if item["repo"] == "MAST")
+    assert mast["category"] == "background_api"
+    assert mast["status"] == "healthy"
+    assert mast["operational"]["payload"]["source"] == "r2_public"
+    assert mast["operational"]["payload"]["recent_failures"] == 0
+
+
+@pytest.mark.asyncio
+async def test_repo_health_marks_stopped_mast_heartbeat_down() -> None:
+    clear_repo_health_cache()
+    heartbeat = (datetime.now(UTC) - timedelta(minutes=10)).isoformat()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "meta.example":
+            return httpx.Response(200, json={"lastTickAt": heartbeat, "recentResults": []})
+        return httpx.Response(200, json={"ok": True, "status": "ok"})
+
+    settings = Settings(
+        app_env="test",
+        repo_health_cache_seconds=0,
+        mast_monitor_mode="r2",
+        mast_state_healthy_max_age_seconds=90,
+        mast_state_down_max_age_seconds=300,
+        r2_public_base_url_meta_system="https://meta.example",
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        report = await build_repo_health_report(settings, client=client, force_refresh=True)
+
+    mast = next(item for item in report["repos"] if item["repo"] == "MAST")
+    assert mast["status"] == "down"
+    assert mast["operational"]["payload"]["heartbeat_age_seconds"] >= 600

@@ -180,3 +180,29 @@ def test_multi_bucket_enabled_requires_read_credentials_in_production() -> None:
 
     check = next(item for item in report.checks if item.name == "r2_multi_bucket_read")
     assert check.status == "error"
+
+
+def test_r2_client_trims_koyeb_secret_whitespace(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_client(service: str, **kwargs):  # noqa: ANN001
+        captured["service"] = service
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr("app.storage.r2.boto3.client", fake_client)
+    settings = _settings(
+        cf_r2_endpoint_url="  https://account.r2.cloudflarestorage.com/  ",
+        r2_read_access_key_id="  read-key  ",
+        r2_read_secret_access_key="  read-secret\n",
+        r2_region=" auto ",
+        r2_addressing_style=" path ",
+    )
+
+    R2Storage(settings).client(read_only=True)
+
+    assert captured["service"] == "s3"
+    assert captured["endpoint_url"] == "https://account.r2.cloudflarestorage.com"
+    assert captured["aws_access_key_id"] == "read-key"
+    assert captured["aws_secret_access_key"] == "read-secret"
+    assert captured["region_name"] == "auto"
