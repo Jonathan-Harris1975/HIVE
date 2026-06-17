@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, Depends, Query
 
 from app.core.config import Settings, get_settings
 from app.core.security import require_admin
 from app.services.repo_health import build_repo_health_report
+from app.services.ops_events import list_ops_events
 from app.services.repo_hygiene import repo_hygiene_report
 
 router = APIRouter(tags=["system"], dependencies=[Depends(require_admin)])
@@ -32,3 +35,17 @@ async def repo_health(
     """Return compact liveness/readiness status for the governed repo ecosystem."""
 
     return await build_repo_health_report(settings, force_refresh=force_refresh)
+
+
+@router.get("/system/ops-events")
+async def ops_events(
+    limit: int = Query(50, ge=1, le=200),
+    severity: str | None = Query(None),
+    service: str | None = Query(None),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    """Return recent redacted operational events for the HIVE-UI Ops page."""
+
+    return await asyncio.to_thread(
+        list_ops_events, settings, limit=limit, severity=severity, service=service
+    )
