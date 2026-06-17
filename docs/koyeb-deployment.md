@@ -234,7 +234,7 @@ VECTORIZE_RETURN_METADATA=all
 
 EMBEDDINGS_ENABLED=false
 EMBEDDINGS_PROVIDER=cloudflare
-EMBEDDINGS_MODEL=@cf/baai/bge-base-en-v1.5
+EMBEDDINGS_MODEL=cf/baai/bge-base-en-v1.5
 EMBEDDINGS_DIMENSIONS=768
 EMBEDDINGS_TIMEOUT_SECONDS=20
 EMBEDDINGS_MAX_BATCH_SIZE=32
@@ -258,9 +258,10 @@ Use `POST /v1/db/test-cleanup` with `dry_run:true` before deleting smoke-test re
 
 If a token is pasted into a browser, chat, log, or screenshot, rotate it in Cloudflare/OpenRouter, update the Koyeb secret, then redeploy.
 
-## Bounded production ingestion settings
+## v1.5 bounded production extraction settings
 
-For the current free Koyeb web service, keep extraction bounded:
+The production Koyeb service is not in free-tier mode. Keep extraction bounded
+as a safety control rather than as a free-plan restriction:
 
 ```env
 HIVE_FREE_TIER_MODE=false
@@ -273,8 +274,6 @@ ZIP_EXTRACT_MAX_MEMBER_BYTES=2097152
 ZIP_EXTRACT_MAX_TOTAL_TEXT_CHARS=120000
 ZIP_EXTRACT_MAX_DEPTH=2
 ```
-
-MAST can ping `GET /healthz` every 10 minutes using `HIVE_KEEPAWAKE_URL` to reduce free-service cold starts. Keep this endpoint unauthenticated and minimal.
 
 ## v1.6 deployment checks
 
@@ -289,7 +288,38 @@ curl "$HIVE_URL/v1/files/r2-lanes" -H "Authorization: Bearer $ADMIN_BEARER_TOKEN
 
 `/health` should show `build: v1.23-hive-ui-api-contract`, `workflow_presets_enabled: true`, and `r2_ecosystem_lanes_enabled: true`.
 
-Keep MAST keep-awake pings gentle on Koyeb Free. Use `/healthz`, not authenticated file/chat endpoints.
+MAST may still use `/healthz` for a minimal dependency check, but HIVE monitors
+the MAST Worker itself through the durable R2 scheduler heartbeat rather than a
+public MAST URL.
+
+## MAST Worker monitoring
+
+MAST is deployed as a Koyeb Worker and does not expose public inbound routes.
+Configure HIVE to inspect the scheduler heartbeat that MAST persists in the
+`metasystem` R2 bucket:
+
+```env
+MAST_MONITOR_MODE=r2
+MAST_STATE_R2_LANE=meta_system
+MAST_STATE_OBJECT_KEY=state/mast/scheduler-state.json
+MAST_STATE_HEALTHY_MAX_AGE_SECONDS=90
+MAST_STATE_DOWN_MAX_AGE_SECONDS=300
+MAST_STATE_MAX_BYTES=1048576
+```
+
+Do not configure `MAST_HEALTH_URL` or `MAST_STATUS_URL` for the Worker deployment.
+
+## Production dependency readiness
+
+`/livez` proves only that the process is alive. `/readyz` combines configuration checks with cached, bounded list probes for every required R2 lane. When `hive_skills` is required, it also reads and schema-checks `manifests/shared-skill-pool-manifest.json` and `index/search-documents.json`.
+
+```env
+READINESS_DEPENDENCY_PROBES_ENABLED=true
+READINESS_DEPENDENCY_PROBE_CACHE_SECONDS=30
+R2_REQUIRED_READ_LANES=uploads,audits,art,blog,blog_images,blog_rss,brand_assets,meta,meta_system,podcast,podcast_rss,rss,transcripts,transcript_html,hive_skills
+```
+
+If `R2_REQUIRED_READ_LANES` is omitted while `PRODUCTION_REQUIRE_R2=true`, every configured bucket lane is required. The authenticated `/v1/runtime/readiness` response shows redacted per-lane evidence; credentials and provider signing material are never returned.
 
 ## v1.8 Skill Registry Import Env
 
@@ -298,9 +328,16 @@ Optional tuning for the R2 shared skill-pool importer:
 ```env
 SKILL_REGISTRY_IMPORT_MAX_ITEMS=250
 SKILL_REGISTRY_IMPORT_TIMEOUT_SECONDS=20
+SKILL_REGISTRY_MAX_SOURCE_BYTES=5242880
+SKILL_REGISTRY_FALLBACK_ENABLED=true
+SKILL_REGISTRY_FALLBACK_CACHE_SECONDS=300
+SKILL_CONTEXT_ENABLED=true
+SKILL_CONTEXT_MAX_ITEMS=3
+SKILL_CONTEXT_MAX_CHARS=6000
+SKILL_CONTEXT_RISK_CEILING=medium
 ```
 
-The importer uses `R2_PUBLIC_BASE_URL_HIVE_SKILLS` and reads `index/search-documents.json`. Run it as a manual endpoint, not a background process, on Koyeb Free.
+The importer uses `R2_PUBLIC_BASE_URL_HIVE_SKILLS` and reads only the governed `index/search-documents.json` URL. Redirects and alternate hosts are rejected, the response is size-bounded, and D1 outages fall back to a short-lived read-only copy of those governed search documents. Chat requests can inject a small, provenance-rich excerpt set; retrieved skill text is explicitly treated as untrusted reference data.
 
 ## v1.9 Intelligent Skill Search Checks
 
@@ -314,7 +351,7 @@ curl "$HIVE_URL/v1/skills/by-repo?repo=AIMS&limit=10" -H "Authorization: Bearer 
 curl "$HIVE_URL/v1/skills/by-risk?risk=high&limit=10" -H "Authorization: Bearer $ADMIN_BEARER_TOKEN"
 ```
 
-The search layer is bounded for paid production because it reads the imported D1 catalogue rather than walking R2 buckets.
+The search layer is bounded for production because it prefers the imported D1 catalogue and uses the governed R2 search-document object as a cached fallback instead of walking buckets.
 
 ## v1.17 registry integrity smoke checks
 
@@ -338,4 +375,14 @@ For script-based checks:
 ADMIN_BEARER_TOKEN=... python scripts/v117_registry_integrity_smoke.py
 ```
 
-Keep live rebuilds explicit. The endpoint is safe for Koyeb Free because it performs one bounded manifest import and does not run background jobs.
+Keep live rebuilds explicit. The endpoint is production-safe because it performs one bounded manifest import and does not run background jobs.
+
+## Central operational event inbox
+
+```env
+OPS_EVENT_INGEST_ENABLED=true
+OPS_EVENT_INGEST_TOKEN={{ secret.OPS_EVENT_INGEST_TOKEN }}
+OPS_EVENT_MEMORY_LIMIT=200
+```
+
+Use a dedicated random token of at least 32 characters. Do not reuse `ADMIN_BEARER_TOKEN`. GitHub and provider deployment watchers post redacted events to `/v1/ops/events`; HIVE-UI reads them through its authenticated server-side proxy.
