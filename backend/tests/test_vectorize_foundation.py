@@ -38,6 +38,12 @@ def test_vectorize_env_aliases_are_supported() -> None:
     assert settings.embeddings_dimensions == 768
 
 
+def test_embeddings_model_accepts_koyeb_safe_cloudflare_identifier() -> None:
+    settings = Settings(EMBEDDINGS_MODEL="cf/baai/bge-base-en-v1.5")
+
+    assert settings.embeddings_model == "@cf/baai/bge-base-en-v1.5"
+
+
 def test_vectorize_client_disabled_without_gate() -> None:
     settings = Settings(
         VECTORIZE_ENABLED="false",
