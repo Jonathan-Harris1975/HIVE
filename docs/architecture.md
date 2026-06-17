@@ -197,7 +197,7 @@ File-chat responses surface `retrieval_source`, `vector_hits`, `sql_fallback_hit
 
 HIVE now treats archive ingestion as a bounded transformation, not a background-heavy extraction worker. Raw uploaded ZIPs remain in R2. `/v1/files/zip/extract-text` reads the ZIP, extracts text from supported members into a single derived text artefact, stores that artefact back through the normal upload path, and can immediately create SQL chunks for retrieval.
 
-PostgreSQL remains the source of truth for file metadata and chunks. Vectorize remains an optional semantic accelerator over SQL chunk IDs. Koyeb free-tier protection is provided by explicit member, byte, character and recursion limits.
+PostgreSQL remains the source of truth for file metadata and chunks. Vectorize remains an optional semantic accelerator over SQL chunk IDs. Production resource protection is provided by explicit member, byte, character and recursion limits.
 
 ## v1.6 workflow and lane architecture
 
@@ -221,7 +221,7 @@ The current presets are:
 - `podcast_episode_review`
 - `ebook_keyword_review`
 
-The R2 ecosystem lane registry is metadata-first. It records configured bucket names and public base URLs for uploads, audits, blog artefacts, images, RSS feeds, brand assets, podcast artefacts, transcripts and HIVE skills. The primary upload lane remains the only direct read/write storage adapter in this build. This keeps Koyeb free-tier behaviour predictable while letting HIVE understand where wider AIMS/RAMS/website/podcast artefacts live.
+The R2 ecosystem lane registry is metadata-first. It records configured bucket names and public base URLs for uploads, audits, blog artefacts, images, RSS feeds, brand assets, podcast artefacts, transcripts and HIVE skills. The primary upload lane remains the only direct read/write storage adapter in this build. This keeps paid-production resource use predictable while letting HIVE understand where wider AIMS/RAMS/website/podcast artefacts live.
 
 
 ## v1.12 shared ecosystem execution layer
@@ -286,4 +286,4 @@ Data remains split deliberately:
 - R2 remains artefact storage.
 - Vectorize remains semantic retrieval.
 
-The simulation endpoint is deterministic and free-tier friendly. It estimates service touches, risk class, affected repos/buckets and missing prerequisites without model calls or external mutations.
+The simulation endpoint is deterministic and production-bounded. It estimates service touches, risk class, affected repos/buckets and missing prerequisites without model calls or external mutations.

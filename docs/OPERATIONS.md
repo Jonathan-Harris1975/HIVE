@@ -1,10 +1,10 @@
 # HIVE production operations
 
-**Status:** Production-controlled  
-**Last reviewed:** 16 June 2026
+**Status:** Paid Koyeb production service  
+**Last reviewed:** 17 June 2026
 
-HIVE runs on Koyeb from the root Dockerfile. Use `/livez` for liveness and `/readyz` for readiness. HIVE-UI reaches the API through the Cloudflare Pages proxy; direct browser access is not the normal operator path.
+Use `/livez` for process liveness, `/readyz` for public dependency readiness and authenticated `/v1/runtime/readiness` for detailed checks. MAST is monitored as a Worker through its durable R2 heartbeat, not through a public URL.
 
-Before deployment, run backend tests, Ruff, dependency checks and the production preflight. After deployment, verify runtime readiness, model discovery, database diagnostics, R2 lanes, a small file-chat dry run and the ecosystem health endpoint.
+HIVE is also the ecosystem alert inbox. GitHub, Koyeb, Cloudflare Pages and runtime services post bounded redacted events to `/v1/ops/events`; HIVE-UI reads them from `/v1/system/ops-events`. See [`OPERATIONAL_ALERTING.md`](OPERATIONAL_ALERTING.md).
 
-The `hive` bucket is write-enabled. All additional ecosystem buckets use read-only credentials. A failed read-only lane must degrade that lane without granting broader access or exposing storage credentials.
+Routine operations: review readiness, repository health and operational events; verify the scoped R2 read credentials; retain release identifiers; and never weaken production gates to clear a dashboard warning. Roll back HIVE and HIVE-UI as a coordinated pair when an API contract changes.

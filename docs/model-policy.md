@@ -144,7 +144,7 @@ Default stance:
 - Repo/debug and CI/log presets use Code framing.
 - SQL fallback remains enabled for all presets.
 - `ci_log_analysis` prefers SQL retrieval first because exact log terms are usually more useful and cheaper than semantic search.
-- Presets are free-tier safe by default and avoid expanding chunk limits into heavy background work.
+- Presets are production-bounded by default and avoid expanding chunk limits into heavy background work.
 
 The model router still respects explicit `model` when supplied by the caller.
 
