@@ -21,7 +21,7 @@ The endpoint is read-only, uses only operator-configured URLs, never accepts an 
 | HIVE-UI | Configured public Pages URL | Not applicable |
 | AIMS | `/health` | `/ops/health` |
 | RAMS | `/health` | Authenticated `/readiness` |
-| MAST | `/health` | `/status` |
+| MAST | Durable R2 scheduler heartbeat | Heartbeat freshness and bounded recent-result summary |
 | IRS | Public root reachability | Not applicable |
 | Website | Public root reachability | Not applicable |
 
@@ -47,17 +47,28 @@ AIMS_OPERATIONAL_HEALTH_URL=https://app.jonathan-harris.online/ops/health
 RAMS_HEALTH_URL=https://mod.jonathan-harris.online/livez
 RAMS_READINESS_URL=https://mod.jonathan-harris.online/readiness
 RAMS_HEALTH_BEARER_TOKEN={{ secret.RMS_API_KEY }}
-MAST_HEALTH_URL=https://your-mast-domain.example/health
-MAST_STATUS_URL=https://your-mast-domain.example/status
+MAST_MONITOR_MODE=r2
+MAST_STATE_R2_LANE=meta_system
+MAST_STATE_OBJECT_KEY=state/mast/scheduler-state.json
+MAST_STATE_HEALTHY_MAX_AGE_SECONDS=90
+MAST_STATE_DOWN_MAX_AGE_SECONDS=300
+MAST_STATE_MAX_BYTES=1048576
 IRS_HEALTH_URL=https://images.jonathan-harris.online/
 WEBSITE_HEALTH_URL=https://jonathan-harris.online/
 ```
 
 The RAMS token is sent only to the configured RAMS readiness URL. It is never returned in the health payload.
 
+MAST runs as a Koyeb Worker and therefore has no public inbound health URL. In
+`r2` mode HIVE reads the bounded scheduler state object from the configured
+`meta_system` lane. Scoped S3 reads are preferred; the governed public R2 URL is
+used as a read-only fallback when available. The worker is healthy while
+`lastTickAt` remains within the healthy threshold, degraded while mildly stale,
+and down only after the down threshold is exceeded.
+
 ## Deployment order
 
 1. Deploy HIVE and verify the backend tests and `/readyz`.
-2. Set the exact production HIVE-UI and MAST URLs in Koyeb.
+2. Set the production HIVE-UI URL and MAST R2 heartbeat variables in Koyeb.
 3. Call `/v1/system/repo-health?force_refresh=true` with the HIVE admin bearer token.
 4. Deploy HIVE-UI and verify the compact Ops cards and inspector payload.

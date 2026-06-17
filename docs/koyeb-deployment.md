@@ -258,12 +258,13 @@ Use `POST /v1/db/test-cleanup` with `dry_run:true` before deleting smoke-test re
 
 If a token is pasted into a browser, chat, log, or screenshot, rotate it in Cloudflare/OpenRouter, update the Koyeb secret, then redeploy.
 
-## v1.5 Koyeb free-tier settings
+## v1.5 bounded production extraction settings
 
-For the current free Koyeb web service, keep extraction bounded:
+The production Koyeb service is not in free-tier mode. Keep extraction bounded
+as a safety control rather than as a free-plan restriction:
 
 ```env
-HIVE_FREE_TIER_MODE=true
+HIVE_FREE_TIER_MODE=false
 DOCUMENT_EXTRACT_MAX_CHARS=120000
 DOCUMENT_EXTRACT_PDF_MAX_PAGES=40
 DOCUMENT_EXTRACT_XLSX_MAX_ROWS_PER_SHEET=500
@@ -273,8 +274,6 @@ ZIP_EXTRACT_MAX_MEMBER_BYTES=2097152
 ZIP_EXTRACT_MAX_TOTAL_TEXT_CHARS=120000
 ZIP_EXTRACT_MAX_DEPTH=2
 ```
-
-MAST can ping `GET /healthz` every 10 minutes using `HIVE_KEEPAWAKE_URL` to reduce free-service cold starts. Keep this endpoint unauthenticated and minimal.
 
 ## v1.6 deployment checks
 
@@ -289,7 +288,26 @@ curl "$HIVE_URL/v1/files/r2-lanes" -H "Authorization: Bearer $ADMIN_BEARER_TOKEN
 
 `/health` should show `build: v1.23-hive-ui-api-contract`, `workflow_presets_enabled: true`, and `r2_ecosystem_lanes_enabled: true`.
 
-Keep MAST keep-awake pings gentle on Koyeb Free. Use `/healthz`, not authenticated file/chat endpoints.
+MAST may still use `/healthz` for a minimal dependency check, but HIVE monitors
+the MAST Worker itself through the durable R2 scheduler heartbeat rather than a
+public MAST URL.
+
+## MAST Worker monitoring
+
+MAST is deployed as a Koyeb Worker and does not expose public inbound routes.
+Configure HIVE to inspect the scheduler heartbeat that MAST persists in the
+`metasystem` R2 bucket:
+
+```env
+MAST_MONITOR_MODE=r2
+MAST_STATE_R2_LANE=meta_system
+MAST_STATE_OBJECT_KEY=state/mast/scheduler-state.json
+MAST_STATE_HEALTHY_MAX_AGE_SECONDS=90
+MAST_STATE_DOWN_MAX_AGE_SECONDS=300
+MAST_STATE_MAX_BYTES=1048576
+```
+
+Do not configure `MAST_HEALTH_URL` or `MAST_STATUS_URL` for the Worker deployment.
 
 ## Production dependency readiness
 
