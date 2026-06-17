@@ -18,8 +18,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
           cache: pip
@@ -37,6 +37,11 @@ jobs:
           R2_SECRET_ACCESS_KEY: ci-r2-secret-key-with-sufficient-length
           R2_BUCKET_UPLOADS: hive
           R2_ENDPOINT_URL: https://00000000000000000000000000000000.r2.cloudflarestorage.com
+          R2_MULTI_BUCKET_READ_ENABLED: 'true'
+          R2_READ_ACCESS_KEY_ID: ci-r2-read-access-key
+          R2_READ_SECRET_ACCESS_KEY: ci-r2-read-secret-key-with-sufficient-length
+          R2_BUCKET_HIVE_SKILLS: hive-skills
+          R2_PUBLIC_BASE_URL_HIVE_SKILLS: https://skills.example.invalid
           CORS_ORIGINS: https://hive.jonathan-harris.online
           ALLOWED_HOSTS: hive-ci.example.invalid
           DATABASE_ENABLED: 'false'
@@ -49,5 +54,5 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - run: docker build -t hive:ci .
