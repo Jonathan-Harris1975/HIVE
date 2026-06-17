@@ -72,3 +72,7 @@ Use the root `Dockerfile` on Koyeb. Keep one worker unless persistence and concu
 - Operational responses redact tokens, credentials and unrestricted remote URLs.
 
 See [`SECURITY.md`](SECURITY.md), [`docs/architecture.md`](docs/architecture.md) and [`docs/production-readiness.md`](docs/production-readiness.md).
+
+## Operational event inbox
+
+HIVE receives redacted GitHub, Koyeb, Cloudflare Pages and runtime failure events through a dedicated bearer-protected endpoint. HIVE-UI displays them on `/ops`. See [`docs/OPERATIONAL_ALERTING.md`](docs/OPERATIONAL_ALERTING.md).
