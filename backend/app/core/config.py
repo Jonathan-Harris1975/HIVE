@@ -419,6 +419,21 @@ class Settings(BaseSettings):
         "medium", validation_alias=AliasChoices("SKILL_CONTEXT_RISK_CEILING")
     )
 
+    @field_validator("embeddings_model", mode="before")
+    @classmethod
+    def normalise_embeddings_model(cls, value: object) -> str:
+        """Accept Koyeb-safe Workers AI model values and restore ``@cf``.
+
+        Koyeb's environment editor rejects a value that begins with ``@``.
+        Operators can therefore configure ``cf/...`` while HIVE presents the
+        canonical Cloudflare Workers AI identifier internally.
+        """
+
+        model = str(value or "").strip().strip('"').strip("'").lstrip("/")
+        if model.startswith("cf/"):
+            return f"@{model}"
+        return model
+
     @field_validator("cors_origins", "allowed_hosts", "r2_required_read_lanes", mode="before")
     @classmethod
     def parse_comma_separated_list(cls, value: str | list[str]) -> list[str]:
