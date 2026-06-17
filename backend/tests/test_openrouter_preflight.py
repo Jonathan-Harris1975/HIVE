@@ -7,7 +7,9 @@ from app.services.openrouter import OpenRouterClient
 
 
 @pytest.mark.asyncio
-async def test_payload_attempts_skip_invalid_model_and_use_free_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_payload_attempts_skip_invalid_model_and_use_free_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     settings = Settings(
         openrouter_api_key="test-key",
         openrouter_free_fallback_model="free-good:free",
@@ -20,7 +22,8 @@ async def test_payload_attempts_skip_invalid_model_and_use_free_fallback(monkeyp
 
     monkeypatch.setattr(client, "model_ids", fake_model_ids)
     attempts = [
-        item async for item in client._payload_attempts(  # noqa: SLF001 - behaviour-level unit test
+        item
+        async for item in client._payload_attempts(  # noqa: SLF001 - behaviour-level unit test
             {"model": "dead-model", "messages": []},
             ["free-good:free"],
         )
@@ -40,7 +43,8 @@ async def test_payload_attempts_still_prefers_free_fallback_when_preflight_is_di
     client = OpenRouterClient(settings)
 
     attempts = [
-        item async for item in client._payload_attempts(  # noqa: SLF001 - behaviour-level unit test
+        item
+        async for item in client._payload_attempts(  # noqa: SLF001 - behaviour-level unit test
             {"model": "dead-model", "messages": []},
             ["free-good:free"],
         )
@@ -50,7 +54,9 @@ async def test_payload_attempts_still_prefers_free_fallback_when_preflight_is_di
 
 
 @pytest.mark.asyncio
-async def test_payload_attempts_respects_max_fallback_attempts(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_payload_attempts_respects_max_fallback_attempts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     settings = Settings(
         openrouter_api_key="test-key",
         openrouter_max_fallback_attempts=1,
@@ -62,7 +68,8 @@ async def test_payload_attempts_respects_max_fallback_attempts(monkeypatch: pyte
 
     monkeypatch.setattr(client, "model_ids", fake_model_ids)
     attempts = [
-        item async for item in client._payload_attempts(  # noqa: SLF001 - behaviour-level unit test
+        item
+        async for item in client._payload_attempts(  # noqa: SLF001 - behaviour-level unit test
             {"model": "primary", "messages": []},
             ["fallback-one:free", "fallback-two:free"],
         )
@@ -70,8 +77,11 @@ async def test_payload_attempts_respects_max_fallback_attempts(monkeypatch: pyte
 
     assert [attempt["model"] for attempt in attempts] == ["primary", "fallback-one:free"]
 
+
 @pytest.mark.asyncio
-async def test_chat_completion_does_not_call_invalid_primary(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_chat_completion_does_not_call_invalid_primary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     settings = Settings(
         openrouter_api_key="test-key",
         openrouter_free_fallback_model="free-good:free",
@@ -114,7 +124,9 @@ async def test_preflight_does_not_filter_controlled_fallback_aliases(monkeypatch
     monkeypatch.setattr(client, "model_ids", fake_model_ids)
     payload = {"model": "dead/model", "messages": []}
 
-    attempts = [item async for item in client._payload_attempts(payload, ["router/free-alias:free"])]
+    attempts = [
+        item async for item in client._payload_attempts(payload, ["router/free-alias:free"])
+    ]
 
     assert attempts == [{"model": "router/free-alias:free", "messages": []}]
 
@@ -140,7 +152,9 @@ async def test_preflight_keeps_free_fallback_when_all_candidates_would_be_filter
 
 
 @pytest.mark.asyncio
-async def test_chat_completion_returns_structured_failure_instead_of_raising_502(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_chat_completion_returns_structured_failure_instead_of_raising_502(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     settings = Settings(openrouter_api_key="test", openrouter_free_fallback_model="free-good:free")
     client = OpenRouterClient(settings)
 
@@ -153,14 +167,20 @@ async def test_chat_completion_returns_structured_failure_instead_of_raising_502
     monkeypatch.setattr(client, "_payload_attempts", fake_attempts)
     monkeypatch.setattr(client, "_post_json", fake_post_json)
 
-    result = await client.chat_completion({"model": "dead-model", "messages": []}, ["free-good:free"])
+    result = await client.chat_completion(
+        {"model": "dead-model", "messages": []}, ["free-good:free"]
+    )
 
     assert result["_all_attempts_failed"] is True
-    assert result["hive_attempts"] == [{"model": "dead-model", "status_code": 404, "message": "dead"}]
+    assert result["hive_attempts"] == [
+        {"model": "dead-model", "status_code": 404, "message": "dead"}
+    ]
 
 
 @pytest.mark.asyncio
-async def test_free_only_mode_reorders_non_free_primary_behind_free_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_free_only_mode_reorders_non_free_primary_behind_free_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     settings = Settings(
         openrouter_api_key="test",
         allow_paid_fallback=False,
@@ -175,7 +195,8 @@ async def test_free_only_mode_reorders_non_free_primary_behind_free_fallback(mon
     monkeypatch.setattr(client, "model_ids", fake_ids)
 
     attempts = [
-        item async for item in client._payload_attempts(  # noqa: SLF001 - behaviour-level unit test
+        item
+        async for item in client._payload_attempts(  # noqa: SLF001 - behaviour-level unit test
             {"model": "dead-paid", "messages": []},
             ["free-good:free"],
         )
@@ -213,7 +234,9 @@ async def test_chat_completion_retries_empty_visible_reply(monkeypatch: pytest.M
     monkeypatch.setattr(client, "_payload_attempts", fake_attempts)
     monkeypatch.setattr(client, "_post_json", fake_post_json)
 
-    result = await client.chat_completion({"model": "empty-model:free", "messages": []}, ["fallback-good:free"])
+    result = await client.chat_completion(
+        {"model": "empty-model:free", "messages": []}, ["fallback-good:free"]
+    )
 
     assert result["model"] == "fallback-good:free"
     assert called_models == ["empty-model:free", "fallback-good:free"]
@@ -222,8 +245,12 @@ async def test_chat_completion_retries_empty_visible_reply(monkeypatch: pytest.M
 
 
 @pytest.mark.asyncio
-async def test_chat_completion_returns_empty_reply_diagnostic_when_all_attempts_empty(monkeypatch: pytest.MonkeyPatch) -> None:
-    settings = Settings(openrouter_api_key="test-key", openrouter_free_fallback_model="empty-free:free")
+async def test_chat_completion_returns_empty_reply_diagnostic_when_all_attempts_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = Settings(
+        openrouter_api_key="test-key", openrouter_free_fallback_model="empty-free:free"
+    )
     client = OpenRouterClient(settings)
 
     async def fake_attempts(payload, fallback_models):  # noqa: ANN001

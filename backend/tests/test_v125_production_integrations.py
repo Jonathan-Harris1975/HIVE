@@ -80,6 +80,53 @@ def test_skill_records_fall_back_to_governed_r2_search_documents(
     assert result["items"][0]["metadata"]["indexable_text"].startswith("Inspect production URLs")
 
 
+
+def test_build_skill_context_uses_governed_recommendations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _skills_settings(
+        SKILL_CONTEXT_ENABLED=True,
+        SKILL_CONTEXT_MAX_ITEMS=2,
+        SKILL_CONTEXT_MAX_CHARS=2000,
+        SKILL_CONTEXT_RISK_CEILING="medium",
+    )
+    monkeypatch.setattr(
+        skill_registry,
+        "recommend_skills",
+        lambda **kwargs: {
+            "ok": True,
+            "source": "r2:search-documents-fallback",
+            "fallback_reason": "d1_disabled",
+            "items": [
+                {
+                    "id": "skill:SK-001",
+                    "source_id": "SK-001",
+                    "title": "Production readiness reviewer",
+                    "url": "https://skills.example.invalid/skills/SK-001.json",
+                    "score": 42,
+                    "metadata": {
+                        "skill_id": "SK-001",
+                        "risk_level": "low",
+                        "repos": ["HIVE"],
+                        "hive_lane": "HIVE Core",
+                        "indexable_text": "Verify readiness contracts and durable state.",
+                    },
+                }
+            ],
+        },
+    )
+
+    result = skill_registry.build_skill_context(
+        settings=settings, task="Audit HIVE production readiness", repo="HIVE"
+    )
+
+    assert result["ok"] is True
+    assert result["enabled"] is True
+    assert result["skills"][0]["skill_id"] == "SK-001"
+    assert "[Skill: SK-001]" in result["prompt"]
+    assert "untrusted retrieved reference data" in result["prompt"]
+
+
 def test_chat_payload_injects_bounded_skill_content_with_provenance(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -165,6 +212,7 @@ def test_dependency_readiness_probes_each_required_lane_and_skill_objects(
         ALLOWED_HOSTS="hive-api.example",
         PRODUCTION_REQUIRE_OPENROUTER=False,
         PRODUCTION_REQUIRE_R2=True,
+        REPO_HEALTH_ENABLED=False,
         CF_R2_ACCOUNT_ID="account",
         CF_R2_ACCESS_KEY_ID="write-key",
         CF_R2_SECRET_ACCESS_KEY="write-secret",
