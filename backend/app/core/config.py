@@ -1,5 +1,5 @@
 from functools import lru_cache
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from urllib.parse import quote, unquote
 
 from pydantic import AliasChoices, Field, field_validator
@@ -88,6 +88,34 @@ class Settings(BaseSettings):
     )
     mast_health_url: str = Field("", validation_alias=AliasChoices("MAST_HEALTH_URL"))
     mast_status_url: str = Field("", validation_alias=AliasChoices("MAST_STATUS_URL"))
+    mast_monitor_mode: Literal["auto", "r2", "http", "disabled"] = Field(
+        "auto", validation_alias=AliasChoices("MAST_MONITOR_MODE")
+    )
+    mast_state_r2_lane: str = Field(
+        "meta_system", validation_alias=AliasChoices("MAST_STATE_R2_LANE")
+    )
+    mast_state_object_key: str = Field(
+        "state/mast/scheduler-state.json",
+        validation_alias=AliasChoices("MAST_STATE_OBJECT_KEY"),
+    )
+    mast_state_healthy_max_age_seconds: int = Field(
+        90,
+        ge=20,
+        le=3600,
+        validation_alias=AliasChoices("MAST_STATE_HEALTHY_MAX_AGE_SECONDS"),
+    )
+    mast_state_down_max_age_seconds: int = Field(
+        300,
+        ge=60,
+        le=86_400,
+        validation_alias=AliasChoices("MAST_STATE_DOWN_MAX_AGE_SECONDS"),
+    )
+    mast_state_max_bytes: int = Field(
+        1_048_576,
+        ge=1024,
+        le=8_388_608,
+        validation_alias=AliasChoices("MAST_STATE_MAX_BYTES"),
+    )
     irs_health_url: str = Field(
         "https://images.jonathan-harris.online/health.json",
         validation_alias=AliasChoices("IRS_HEALTH_URL"),
@@ -474,10 +502,10 @@ class Settings(BaseSettings):
     @property
     def r2_endpoint_url(self) -> str:
         if self.cf_r2_endpoint_url:
-            return self.cf_r2_endpoint_url.rstrip("/")
+            return self.cf_r2_endpoint_url.strip().rstrip("/")
         if not self.cf_r2_account_id:
             return ""
-        return f"https://{self.cf_r2_account_id}.r2.cloudflarestorage.com"
+        return f"https://{self.cf_r2_account_id.strip()}.r2.cloudflarestorage.com"
 
     @property
     def r2_ecosystem_lanes(self) -> list[dict[str, Any]]:
