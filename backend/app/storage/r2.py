@@ -119,17 +119,17 @@ class R2Storage:
     def _build_client(self, access_key_id: str, secret_access_key: str):
         return boto3.client(
             "s3",
-            endpoint_url=self.settings.r2_endpoint_url,
-            aws_access_key_id=access_key_id,
-            aws_secret_access_key=secret_access_key,
+            endpoint_url=self.settings.r2_endpoint_url.strip(),
+            aws_access_key_id=access_key_id.strip(),
+            aws_secret_access_key=secret_access_key.strip(),
             config=Config(
                 signature_version="s3v4",
                 connect_timeout=self.settings.r2_connect_timeout_seconds,
                 read_timeout=self.settings.r2_read_timeout_seconds,
                 retries={"max_attempts": self.settings.r2_max_attempts, "mode": "standard"},
-                s3={"addressing_style": self.settings.r2_addressing_style},
+                s3={"addressing_style": self.settings.r2_addressing_style.strip() or "path"},
             ),
-            region_name=self.settings.r2_region or "auto",
+            region_name=self.settings.r2_region.strip() or "auto",
         )
 
     def public_url_for_key(
