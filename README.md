@@ -76,3 +76,11 @@ See [`SECURITY.md`](SECURITY.md), [`docs/architecture.md`](docs/architecture.md)
 ## Operational event inbox
 
 HIVE receives redacted GitHub, Koyeb, Cloudflare Pages and runtime failure events through a dedicated bearer-protected endpoint. HIVE-UI displays them on `/ops`. See [`docs/OPERATIONAL_ALERTING.md`](docs/OPERATIONAL_ALERTING.md).
+
+## Paired skills integration contract
+
+`backend/app/api/chat.py` and `backend/app/services/skill_registry.py` are a release pair. The chat route imports `build_skill_context`, which performs bounded skill recommendation, provenance retention and untrusted-reference prompt construction. CI imports the production app and executes the real builder to prevent partial-file deployments.
+
+## Operational alerting
+
+GitHub, Koyeb, Cloudflare Pages and runtime services can submit redacted events to the authenticated `/v1/ops/events` contract. See [`docs/OPERATIONAL_ALERTING.md`](docs/OPERATIONAL_ALERTING.md).
