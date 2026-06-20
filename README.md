@@ -27,7 +27,7 @@ HIVE-UI (Cloudflare Pages)
 - Read-only browsing and chat across configured ecosystem R2 buckets.
 - Cloudflare Workers AI embeddings and Vectorize retrieval.
 - Skills search, integrity checks and review-gated workflow planning.
-- Repository hygiene, execution previews, evidence packs and review queues.
+- Repository hygiene, execution previews, evidence packs, review queues and approved production adapter handoff.
 - Authenticated ecosystem health aggregation for HIVE-UI Ops.
 
 ## Health and operator endpoints
