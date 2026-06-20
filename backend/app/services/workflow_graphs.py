@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from app.core.config import Settings
 from app.core.version import BUILD_STAGE
+from app.services.execution_adapters import execution_adapter_policy
 from app.services.skill_registry import shared_execution_plan
 from app.storage.d1 import D1MetadataStore
 
@@ -48,22 +49,23 @@ CONTROLLED_EXECUTION_POLICIES = {
     "plan_only": {
         "enabled": True,
         "can_execute_now": False,
-        "description": "Generate a reviewable plan without running skills or mutating systems.",
+        "description": "Generate a reviewable plan without mutating systems.",
     },
     "review_gate_required": {
         "enabled": True,
         "can_execute_now": False,
-        "description": "A human review decision is required before any future adapter can run.",
+        "can_execute_after_approval": True,
+        "description": "A human review decision is required before an allow-listed production adapter handoff can run.",
     },
     "adapter_allowlist_required": {
         "enabled": True,
-        "can_execute_now": False,
-        "description": "Future execution adapters must be explicit, allow-listed and dry-run first.",
+        "can_execute_now": True,
+        "description": "Production execution adapters are explicit, allow-listed and unlocked by approval.",
     },
-    "koyeb_free_safe": {
+    "koyeb_bounded_runtime": {
         "enabled": True,
-        "can_execute_now": False,
-        "description": "No background jobs, long loops, installs, repo mutations or large batch execution on Koyeb Free.",
+        "can_execute_now": True,
+        "description": "Production handoff remains bounded: no long loops, package installs or unreviewed background jobs.",
     },
 }
 
@@ -71,6 +73,7 @@ POLICY_PROFILES: dict[str, dict[str, object]] = {
     "readonly": {
         "label": "Read-only",
         "can_execute_now": False,
+        "can_execute_after_approval": False,
         "allows_repo_mutation": False,
         "allows_r2_write": False,
         "requires_human_approval": False,
@@ -78,38 +81,41 @@ POLICY_PROFILES: dict[str, dict[str, object]] = {
     },
     "review_required": {
         "label": "Review required",
-        "can_execute_now": False,
+        "can_execute_now": True,
+        "can_execute_after_approval": True,
         "allows_repo_mutation": False,
         "allows_r2_write": False,
         "requires_human_approval": True,
-        "description": "A reviewer must approve the plan before any future adapter can be considered.",
+        "description": "Approval unlocks the allow-listed production adapter handoff.",
     },
     "repo_safe": {
         "label": "Repo safe",
-        "can_execute_now": False,
+        "can_execute_now": True,
+        "can_execute_after_approval": True,
         "allows_repo_mutation": False,
         "allows_r2_write": False,
         "requires_human_approval": True,
-        "description": "May discuss repo changes, but cannot write files, push commits or run installers.",
+        "description": "May produce approved repo-change handoff artefacts, but does not push commits or install packages.",
     },
     "r2_write_allowed": {
-        "label": "R2 write allowed later",
-        "can_execute_now": False,
+        "label": "R2 write allowed",
+        "can_execute_now": True,
+        "can_execute_after_approval": True,
         "allows_repo_mutation": False,
-        "allows_r2_write": False,
+        "allows_r2_write": True,
         "requires_human_approval": True,
-        "description": "Profiles future export-to-R2 behaviour, but v1.22 still stores preview evidence in D1 only.",
+        "description": "Allows approved export/write handoff where the configured HIVE lane is writable.",
     },
     "human_approval_required": {
         "label": "Human approval required",
-        "can_execute_now": False,
+        "can_execute_now": True,
+        "can_execute_after_approval": True,
         "allows_repo_mutation": False,
         "allows_r2_write": False,
         "requires_human_approval": True,
-        "description": "Conservative default for any medium/high-risk plan.",
+        "description": "Conservative default for medium/high-risk plans; approval unlocks the controlled adapter gate.",
     },
 }
-
 
 
 
@@ -140,9 +146,9 @@ def build_workflow_graph(
 ) -> dict[str, object]:
     """Build a graph-shaped, review-gated workflow plan.
 
-    v1.18 adds a graph model inspired by lightweight workflow/run-plan tools,
-    but keeps HIVE firmly plan-only. The graph is designed for UI rendering and
-    review decisions, not execution.
+    Build a graph model for HIVE-UI review and production handoff. The graph
+    itself does not mutate systems; an approved preview marks the allow-listed
+    adapter handoff as ready.
     """
 
     clean_task = " ".join((task or "").strip().split())[:1200]
@@ -179,9 +185,11 @@ def build_workflow_graph(
         "task": clean_task,
         "repo": plan.get("repo"),
         "workflow_preset": workflow_preset,
-        "execution_mode": "plan_only_graph",
+        "execution_mode": "review_gated_production_graph",
         "can_execute_now": False,
         "requires_approval": True,
+        "adapter_execution_enabled": bool(execution_adapter_policy(settings)["enabled"]),
+        "execution_adapter_policy": execution_adapter_policy(settings),
         "node_count": len(nodes),
         "edge_count": len(edges),
         "nodes": nodes,
@@ -206,9 +214,9 @@ def controlled_execution_preview(
 ) -> dict[str, object]:
     """Return a controlled execution preview with step statuses.
 
-    v1.22 remains non-executing. It models what would be required for future
-    execution adapters and clearly marks every runnable-looking step as blocked
-    by review/adapter gates.
+    Model the approved production adapter gate for HIVE-UI. Pending plans still
+    require review; approved plans now surface the allow-listed adapter handoff
+    as ready rather than blocked.
     """
 
     graph = build_workflow_graph(
@@ -223,7 +231,13 @@ def controlled_execution_preview(
         return graph
 
     approval = _normalise_approval_state(approval_state)
-    statuses = _execution_step_statuses(graph, approval_state=approval)
+    adapter_policy = execution_adapter_policy(settings)
+    can_execute_now = bool(approval == "approved" and adapter_policy["enabled"])
+    statuses = _execution_step_statuses(
+        graph,
+        approval_state=approval,
+        adapter_enabled=bool(adapter_policy["enabled"]),
+    )
     blocked = [item for item in statuses if item.get("status") in {"blocked", "review_required"}]
     return {
         "ok": True,
@@ -233,17 +247,23 @@ def controlled_execution_preview(
         "repo": graph.get("repo"),
         "workflow_preset": workflow_preset,
         "template": graph.get("template"),
-        "execution_mode": "controlled_preview_only",
+        "execution_mode": "controlled_production_preview",
         "approval_state": approval,
-        "can_execute_now": False,
-        "requires_approval": True,
-        "adapter_execution_enabled": False,
+        "can_execute_now": can_execute_now,
+        "requires_approval": approval != "approved",
+        "adapter_execution_enabled": bool(adapter_policy["enabled"]),
+        "execution_state": "ready_for_execution" if can_execute_now else "awaiting_approval",
+        "execution_adapter_policy": adapter_policy,
         "step_count": len(statuses),
         "blocked_count": len(blocked),
         "step_statuses": statuses,
         "policies": CONTROLLED_EXECUTION_POLICIES,
         "workflow_graph": graph,
-        "next_required_actions": _next_required_actions(approval, blocked),
+        "next_required_actions": _next_required_actions(
+            approval,
+            blocked,
+            adapter_enabled=bool(adapter_policy["enabled"]),
+        ),
         "safety_note": _safety_note(),
     }
 
@@ -253,8 +273,10 @@ def execution_preview_policies() -> dict[str, object]:
         "ok": True,
         "build_stage_hint": BUILD_STAGE,
         "policies": CONTROLLED_EXECUTION_POLICIES,
-        "can_execute_now": False,
-        "note": "v1.22 persists and simulates execution previews only. Adapter execution remains unavailable.",
+        "can_execute_now": True,
+        "adapter_execution_enabled": True,
+        "can_execute_after_approval": True,
+        "note": "Production adapter handoff is available for approved, allow-listed review plans.",
     }
 
 
@@ -352,14 +374,14 @@ def _workflow_nodes(
             "type": "approval",
             "label": "Execution review queue",
             "status": "review_required",
-            "summary": "A review decision is required before any future adapter could run.",
+            "summary": "A review decision is required before the production adapter handoff can run.",
         },
         {
             "id": "adapter_execution",
-            "type": "blocked_execution",
-            "label": "Future adapter execution",
-            "status": "blocked",
-            "summary": "Blocked in v1.22. No adapters, repo mutations, installs or background jobs are enabled.",
+            "type": "controlled_execution",
+            "label": "Production adapter handoff",
+            "status": "approval_required",
+            "summary": "Available after approval through the production adapter allow-list.",
         },
     ]
 
@@ -371,7 +393,9 @@ def _workflow_edges(nodes: list[dict[str, object]]) -> list[dict[str, object]]:
     return edges
 
 
-def _execution_step_statuses(graph: dict[str, object], *, approval_state: str) -> list[dict[str, object]]:
+def _execution_step_statuses(
+    graph: dict[str, object], *, approval_state: str, adapter_enabled: bool
+) -> list[dict[str, object]]:
     statuses = []
     for node in graph.get("nodes", []):
         if not isinstance(node, dict):
@@ -381,10 +405,17 @@ def _execution_step_statuses(graph: dict[str, object], *, approval_state: str) -
         can_run = False
         blocker = None
         if node_id == "adapter_execution":
-            status = "blocked"
-            blocker = "execution_adapters_disabled_in_v1_22"
+            if approval_state == "approved" and adapter_enabled:
+                status = "ready_for_execution"
+                can_run = True
+            elif not adapter_enabled:
+                status = "blocked"
+                blocker = "execution_adapters_disabled_by_config"
+            else:
+                status = "review_required"
+                blocker = "human_review_required"
         elif node_id in {"risk_gate", "review_queue"}:
-            status = "review_required" if approval_state != "approved" else "approved_but_execution_still_disabled"
+            status = "approved" if approval_state == "approved" else "review_required"
             blocker = None if approval_state == "approved" else "human_review_required"
         elif node_id == "request":
             status = "complete"
@@ -409,20 +440,24 @@ def _normalise_approval_state(value: str | None) -> str:
     return "pending_review"
 
 
-def _next_required_actions(approval_state: str, blocked: list[dict[str, object]]) -> list[str]:
+def _next_required_actions(
+    approval_state: str, blocked: list[dict[str, object]], *, adapter_enabled: bool
+) -> list[str]:
     actions = []
     if approval_state != "approved":
-        actions.append("Create or update an execution review decision before any future adapter can run.")
-    if blocked:
-        actions.append("Keep execution adapters disabled until an explicit allow-list and dry-run adapter layer exists.")
+        actions.append("Approve the execution review decision to unlock the allow-listed production adapter handoff.")
+    elif adapter_enabled:
+        actions.append("Approved plan is ready for operator-triggered production adapter handoff.")
+    if blocked and not adapter_enabled:
+        actions.append("Set EXECUTION_ADAPTERS_ENABLED=true to enable the production adapter gate.")
     actions.append("Use the evidence pack endpoint to review sources, candidate skills and risk notes.")
     return actions
 
 
 def _safety_note() -> str:
     return (
-        "v1.22 is persisted simulation/preview only. HIVE does not execute skills, mutate repos, "
-        "install packages, write exports, or start background jobs from these endpoints."
+        "Production approval unlocks allow-listed, operator-triggered adapter handoff. "
+        "Decision and preview endpoints do not auto-run package installs, repo pushes or background jobs."
     )
 
 
@@ -435,8 +470,10 @@ def execution_policy_profiles() -> dict[str, object]:
         "build_stage_hint": BUILD_STAGE,
         "count": len(POLICY_PROFILES),
         "profiles": POLICY_PROFILES,
-        "can_execute_now": False,
-        "note": "Policy profiles describe review gates only. v1.22 still does not execute skills or mutate repos.",
+        "can_execute_now": True,
+        "adapter_execution_enabled": True,
+        "can_execute_after_approval": True,
+        "note": "Policy profiles now describe approved production adapter handoff gates.",
     }
 
 
@@ -475,7 +512,13 @@ def simulate_workflow_execution(
     selected_profile = _normalise_policy_profile(policy_profile, risk_summary)
     required_services = _required_services_for_graph(graph)
     cost_estimate = _simulation_cost_estimate(candidate_skills, required_services)
-    missing_prerequisites = _simulation_missing_prerequisites(preview, selected_profile)
+    can_execute_now = bool(preview.get("can_execute_now"))
+    adapter_enabled = bool(preview.get("adapter_execution_enabled"))
+    missing_prerequisites = _simulation_missing_prerequisites(
+        preview,
+        selected_profile,
+        adapter_enabled=adapter_enabled,
+    )
     rollback_notes = _simulation_rollback_notes(required_services)
     affected = _affected_surfaces(preview, graph)
     return {
@@ -488,9 +531,10 @@ def simulate_workflow_execution(
         "workflow_preset": workflow_preset,
         "policy_profile": selected_profile,
         "policy": POLICY_PROFILES[selected_profile],
-        "execution_mode": "pretend_simulation_only",
-        "can_execute_now": False,
-        "adapter_execution_enabled": False,
+        "execution_mode": "approved_controlled_execution_simulation" if can_execute_now else "approval_gated_simulation",
+        "can_execute_now": can_execute_now,
+        "adapter_execution_enabled": adapter_enabled,
+        "execution_state": "ready_for_execution" if can_execute_now else "awaiting_approval",
         "required_services": required_services,
         "affected_repos": affected["repos"],
         "affected_buckets": affected["buckets"],
@@ -502,7 +546,7 @@ def simulate_workflow_execution(
         "controlled_preview": preview,
         "next_required_actions": preview.get("next_required_actions", []) + [
             "Save the preview if it needs to appear in the operator review history.",
-            "Keep all future adapter behaviour behind a separate allow-list and dry-run gate.",
+            "Use only the configured allow-listed adapter handoff for approved production runs.",
         ],
         "safety_note": _safety_note(),
     }
@@ -554,8 +598,9 @@ def save_execution_preview(
         "status": "preview_saved" if not dry_run else "dry_run",
         "created_at": now,
         "updated_at": now,
-        "execution_mode": "persisted_preview_only",
-        "can_execute_now": False,
+        "execution_mode": "persisted_execution_preview",
+        "can_execute_now": bool(simulation.get("can_execute_now")),
+        "adapter_execution_enabled": bool(simulation.get("adapter_execution_enabled")),
         "simulation": simulation,
     }
     item_id = preview_id
@@ -569,7 +614,7 @@ def save_execution_preview(
             "lane": EXECUTION_PREVIEW_LANE,
             "preview_id": preview_id,
             "would_save": metadata,
-            "can_execute_now": False,
+            "can_execute_now": bool(metadata.get("can_execute_now")),
             "safety_note": _safety_note(),
         }
     d1 = D1MetadataStore(settings)
@@ -593,7 +638,7 @@ def save_execution_preview(
         "preview_id": preview_id,
         "d1_result": result,
         "preview": metadata,
-        "can_execute_now": False,
+        "can_execute_now": bool(metadata.get("can_execute_now")),
         "safety_note": _safety_note(),
     }
 
@@ -628,7 +673,7 @@ def list_saved_execution_previews(
         "lane": EXECUTION_PREVIEW_LANE,
         "count": len(items),
         "items": items,
-        "can_execute_now": False,
+        "can_execute_now": any(bool(item.get("can_execute_now")) for item in items),
         "safety_note": _safety_note(),
     }
 
@@ -647,7 +692,7 @@ def get_saved_execution_preview(*, settings: Settings, preview_id: str) -> dict[
         "lane": EXECUTION_PREVIEW_LANE,
         "preview_id": preview_id,
         "preview": item,
-        "can_execute_now": False,
+        "can_execute_now": bool((item.get("metadata") or {}).get("can_execute_now")) if isinstance(item.get("metadata"), dict) else False,
         "safety_note": _safety_note(),
     }
 
@@ -718,7 +763,8 @@ def _preview_summary(item: dict[str, Any]) -> dict[str, object]:
         "status": meta.get("status"),
         "risk_summary": simulation.get("risk_summary") if isinstance(simulation.get("risk_summary"), dict) else {},
         "estimated_cost": simulation.get("estimated_cost") if isinstance(simulation.get("estimated_cost"), dict) else {},
-        "can_execute_now": False,
+        "can_execute_now": bool(meta.get("can_execute_now")),
+        "adapter_execution_enabled": bool(meta.get("adapter_execution_enabled")),
         "created_at": item.get("created_at"),
         "updated_at": item.get("updated_at"),
     }
@@ -768,18 +814,19 @@ def _simulation_cost_estimate(candidate_skills: list[dict[str, object]], require
     }
 
 
-def _simulation_missing_prerequisites(preview: dict[str, object], policy_profile: str) -> list[str]:
+def _simulation_missing_prerequisites(
+    preview: dict[str, object], policy_profile: str, *, adapter_enabled: bool
+) -> list[str]:
     missing = []
     if preview.get("approval_state") != "approved":
         missing.append("human_review_approval")
-    if policy_profile != "readonly":
-        missing.append("future_adapter_allowlist")
-    missing.append("execution_adapter_layer_not_enabled")
+    if policy_profile != "readonly" and not adapter_enabled:
+        missing.append("execution_adapters_disabled_by_config")
     return missing
 
 
 def _simulation_rollback_notes(required_services: list[dict[str, object]]) -> list[str]:
-    notes = ["No rollback is required for v1.22 simulation because no external mutation occurs."]
+    notes = ["Preview/simulation rollback is not required because the endpoint does not auto-run external mutation."]
     touched = [item.get("service") for item in required_services]
     if "D1" in touched:
         notes.append("Saved previews can be removed from the D1 execution_previews lane if needed.")

@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from app.core.config import Settings
 from app.core.version import BUILD_STAGE
+from app.services.execution_adapters import approved_execution_payload, execution_adapter_policy
 from app.services.skill_registry import shared_execution_plan
 from app.storage.d1 import D1MetadataStore
 
@@ -32,9 +33,9 @@ def create_execution_review_plan(
 ) -> dict[str, object]:
     """Create a reviewable execution plan record in D1.
 
-    v1.15 is still intentionally plan/review only. This endpoint does not run
-    tools, mutate repos, install skills, or create background jobs. It stores a
-    plan so the future UI can show an approval queue.
+    Create a review-gated production plan. Pending plans cannot execute; an
+    approved decision unlocks the allow-listed adapter handoff without auto-running
+    side effects from the decision endpoint.
     """
 
     clean_task = " ".join((task or "").strip().split())[:1200]
@@ -66,9 +67,12 @@ def create_execution_review_plan(
         "requested_by": requested_by or "hive-user",
         "created_at": created_at,
         "updated_at": created_at,
-        "execution_mode": "plan_only",
+        "execution_mode": "review_gated_execution",
         "can_execute_now": False,
         "requires_approval": True,
+        "adapter_execution_enabled": bool(execution_adapter_policy(settings)["enabled"]),
+        "execution_state": "awaiting_approval",
+        "execution_adapter_policy": execution_adapter_policy(settings),
         "review_gate": {
             "state": "pending_review",
             "approved": False,
@@ -223,7 +227,8 @@ def decide_execution_review_plan(
         "approved_by": decision_entry["reviewer"] if clean_decision == "approved" else None,
         "approved_at": now if clean_decision == "approved" else None,
     }
-    metadata["can_execute_now"] = False
+    execution_payload = approved_execution_payload(settings, approved=clean_decision == "approved")
+    metadata.update(execution_payload)
     metadata["requires_approval"] = clean_decision != "approved"
 
     result = d1.upsert_metadata(
@@ -324,9 +329,12 @@ def execution_review_evidence_pack(*, settings: Settings, plan_id: str) -> dict[
         "requested_by": meta.get("requested_by"),
         "created_at": meta.get("created_at") or item.get("created_at"),
         "updated_at": meta.get("updated_at") or item.get("updated_at"),
-        "execution_mode": "plan_only",
-        "can_execute_now": False,
-        "requires_approval": True,
+        "execution_mode": meta.get("execution_mode") or "review_gated_execution",
+        "can_execute_now": bool(meta.get("can_execute_now")),
+        "requires_approval": bool(meta.get("requires_approval", True)),
+        "adapter_execution_enabled": bool(meta.get("adapter_execution_enabled")),
+        "execution_state": meta.get("execution_state") or "awaiting_approval",
+        "execution_handoff": meta.get("execution_handoff") or {},
         "primary_skill": primary,
         "candidate_skills": candidates,
         "candidate_count": len(candidates),
@@ -401,7 +409,8 @@ def export_execution_review_pack(
         "content_chars": len(content),
         "export_document": content,
         "storage": "inline_response_only",
-        "can_execute_now": False,
+        "can_execute_now": bool(pack.get("can_execute_now")),
+        "adapter_execution_enabled": bool(pack.get("adapter_execution_enabled")),
         "safety_note": _safety_note(),
     }
 
@@ -464,7 +473,9 @@ def _review_summary(item: dict[str, Any]) -> dict[str, object]:
         "created_at": item.get("created_at") or meta.get("created_at"),
         "updated_at": item.get("updated_at") or meta.get("updated_at"),
         "requires_approval": meta.get("requires_approval", True),
-        "can_execute_now": False,
+        "can_execute_now": bool(meta.get("can_execute_now")),
+        "adapter_execution_enabled": bool(meta.get("adapter_execution_enabled")),
+        "execution_state": meta.get("execution_state") or "awaiting_approval",
         "primary_skill": ((meta.get("plan") or {}).get("routed_skill_plan") or {}).get(
             "primary_skill"
         )
@@ -492,7 +503,7 @@ def _clean_status(value: str | None) -> str:
 
 
 def _safety_note() -> str:
-    return "v1.15 stores reviewable plans, decisions and evidence packs only. HIVE does not execute skills, mutate repos, or start background jobs from this queue."
+    return "Approval unlocks allow-listed, operator-triggered production adapter handoff. The review decision endpoint does not auto-run repo pushes, package installs or background jobs."
 
 
 def _evidence_pack_markdown(pack: dict[str, Any]) -> str:
@@ -548,7 +559,7 @@ def _evidence_pack_markdown(pack: dict[str, Any]) -> str:
     lines.extend(
         [
             "",
-            "HIVE v1.15 evidence packs are review artefacts only. They do not execute skills or mutate repos.",
+            "Approved evidence packs can unlock allow-listed production handoff; this export response itself does not mutate repos.",
         ]
     )
     return "\n".join(lines) + "\n"

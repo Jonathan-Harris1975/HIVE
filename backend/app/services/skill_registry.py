@@ -9,6 +9,7 @@ import httpx
 
 from app.core.config import Settings
 from app.core.version import BUILD_STAGE
+from app.services.execution_adapters import execution_adapter_policy
 from app.storage.d1 import D1MetadataStore
 
 SKILL_LANE = "hive_skills"
@@ -485,7 +486,7 @@ def shared_execution_plan(
         {
             "step": 5,
             "name": "approval_gate",
-            "description": "Require explicit approval before any future execution adapter runs.",
+            "description": "Require explicit approval before the production adapter handoff can run.",
         },
     ]
     return {
@@ -494,9 +495,12 @@ def shared_execution_plan(
         "task": task,
         "repo": repo,
         "workflow_preset": workflow_preset,
-        "execution_mode": "plan_only",
+        "execution_mode": "review_gated_execution",
         "can_execute_now": False,
+        "can_execute_after_approval": True,
         "requires_approval": True,
+        "adapter_execution_enabled": bool(execution_adapter_policy(settings)["enabled"]),
+        "execution_adapter_policy": execution_adapter_policy(settings),
         "routed_skill_plan": routed,
         "shared_steps": steps,
         "guardrails": {
@@ -506,7 +510,7 @@ def shared_execution_plan(
             "review_queue_required": True,
             "risk_gates_required": ["medium", "high"],
         },
-        "next_adapter_layer": "Future execution adapters must remain explicit, allow-listed and review-gated.",
+        "next_adapter_layer": "Production execution adapters are explicit, allow-listed and unlocked by approval.",
     }
 
 
@@ -1124,7 +1128,7 @@ def _route_plan(
         {
             "step": 5,
             "name": "approval_gate",
-            "description": "Require explicit approval before any future execution adapter runs.",
+            "description": "Require explicit approval before the production adapter handoff can run.",
         },
     ]
 
