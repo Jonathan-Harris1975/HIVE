@@ -13,9 +13,16 @@
 
 # Changelog
 
+## v1.26 R2 write, skill and model selection
+
+- Added readable date/filename R2 upload keys.
+- Enabled configured ecosystem R2 lanes for read/write when shared server-side write credentials allow it.
+- Added inline R2 object viewing and file-to-skill registration.
+- Enabled all model categories for explicit selection.
+
 ## 2026.06.20 — Production execution gates
 
-- Updated the build marker to `v1.25-production-execution-gates`.
+- Updated the build marker to `v1.26-r2-write-skill-models`.
 - Added the production execution adapter policy surface and health flag.
 - Changed approved execution-review decisions so `can_execute_now:true`, `adapter_execution_enabled:true`, and `execution_state:ready_for_execution` are recorded.
 - Changed controlled execution previews so approved plans show the production adapter handoff as ready instead of blocked.
@@ -28,7 +35,7 @@
 - Added production CI for tests, linting, preflight and container build.
 - Refreshed production, security and operations documentation.
 
-## v1.25-production-execution-gates
+## v1.26-r2-write-skill-models
 
 - Persisted streamed `/v1/chat/stream` user and assistant turns in the SQL conversation store.
 - Emitted the conversation ID before the first model token and returned persistence status in the final SSE event.
