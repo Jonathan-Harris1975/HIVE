@@ -242,6 +242,32 @@ class D1MetadataStore:
             row["metadata"] = _json_or_none(row.pop("metadata_json", None))
         return {"ok": True, "enabled": True, "query": query, "lane": lane, "count": len(rows), "items": rows}
 
+
+    def delete_metadata_ids(self, item_ids: list[str]) -> dict[str, object]:
+        """Delete ecosystem metadata rows by id with per-row reporting."""
+
+        if not self.enabled:
+            return {"ok": False, "enabled": False, "message": "D1 metadata store disabled or not configured."}
+        clean_ids = [str(item_id).strip() for item_id in item_ids if str(item_id).strip()]
+        if not clean_ids:
+            return {"ok": True, "enabled": True, "deleted_count": 0, "deleted_ids": [], "failed": []}
+        deleted_ids: list[str] = []
+        failed: list[dict[str, object]] = []
+        for item_id in clean_ids:
+            result = self.query("DELETE FROM hive_ecosystem_metadata WHERE id = ?", [item_id])
+            if result.get("ok"):
+                deleted_ids.append(item_id)
+            else:
+                failed.append({"id": item_id, "result": result})
+        return {
+            "ok": not failed,
+            "enabled": True,
+            "requested_count": len(clean_ids),
+            "deleted_count": len(deleted_ids),
+            "deleted_ids": deleted_ids,
+            "failed": failed,
+        }
+
     def query(self, sql: str, params: list[Any] | None = None) -> dict[str, object]:
         if not self.enabled:
             return {"ok": False, "message": "D1 metadata store disabled or not configured."}
