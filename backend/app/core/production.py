@@ -164,21 +164,30 @@ def build_readiness_report(settings: Settings) -> ReadinessReport:
         )
     )
 
+    configured_lanes = {str(item["lane"]): item for item in settings.r2_ecosystem_lanes}
+    required_lane_names = settings.required_r2_read_lane_names
+    non_primary_buckets_configured = any(
+        bool(item.get("bucket")) and not bool(item.get("primary_upload_lane"))
+        for item in configured_lanes.values()
+    )
+    multi_bucket_read_required = bool(
+        settings.r2_multi_bucket_read_enabled
+        and (settings.production_require_r2 or non_primary_buckets_configured or required_lane_names)
+    )
     multi_bucket_read_complete = bool(
-        settings.r2_read_access_key_id and settings.r2_read_secret_access_key
+        settings.r2_write_credentials_configured
+        or (settings.r2_read_access_key_id and settings.r2_read_secret_access_key)
     )
     checks.append(
         _check(
             "r2_multi_bucket_read",
-            not settings.r2_multi_bucket_read_enabled or multi_bucket_read_complete,
+            not multi_bucket_read_required or multi_bucket_read_complete,
             "Scoped multi-bucket R2 read access is configured.",
-            "R2_MULTI_BUCKET_READ_ENABLED=true but the read-only access key or secret is missing.",
-            required=production and settings.r2_multi_bucket_read_enabled,
+            "R2 multi-bucket read access is enabled but neither shared write credentials nor read-only credentials are complete.",
+            required=production and multi_bucket_read_required,
         )
     )
 
-    configured_lanes = {str(item["lane"]): item for item in settings.r2_ecosystem_lanes}
-    required_lane_names = settings.required_r2_read_lane_names
     unknown_required_lanes = [name for name in required_lane_names if name not in configured_lanes]
     unreadable_required_lanes = [
         name

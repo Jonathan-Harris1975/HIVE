@@ -15,7 +15,7 @@ class Settings(BaseSettings):
         "JH Ops Chat", validation_alias=AliasChoices("APP_NAME", "OPENROUTER_APP_NAME")
     )
     app_env: str = Field("development", validation_alias=AliasChoices("APP_ENV"))
-    app_version: str = Field("1.25.0-production", validation_alias=AliasChoices("APP_VERSION"))
+    app_version: str = Field("1.26.0-production", validation_alias=AliasChoices("APP_VERSION"))
     admin_bearer_token: str = Field(
         "change-me-local-only", validation_alias=AliasChoices("ADMIN_BEARER_TOKEN")
     )
@@ -196,7 +196,10 @@ class Settings(BaseSettings):
     r2_max_attempts: int = 2
     r2_addressing_style: str = "path"
     r2_multi_bucket_read_enabled: bool = Field(
-        False, validation_alias=AliasChoices("R2_MULTI_BUCKET_READ_ENABLED")
+        True, validation_alias=AliasChoices("R2_MULTI_BUCKET_READ_ENABLED")
+    )
+    r2_multi_bucket_write_enabled: bool = Field(
+        True, validation_alias=AliasChoices("R2_MULTI_BUCKET_WRITE_ENABLED")
     )
     r2_read_access_key_id: str = Field("", validation_alias=AliasChoices("R2_READ_ACCESS_KEY_ID"))
     r2_read_secret_access_key: str = Field(
@@ -214,7 +217,9 @@ class Settings(BaseSettings):
     )
 
     # v1.6 ecosystem R2 lane registry. These envs let HIVE understand where
-    # AIMS/RAMS/website/podcast artefacts live without granting new write paths.
+    # AIMS/RAMS/website/podcast artefacts live. Production now supports
+    # controlled read/write operations across every configured lane when the
+    # shared R2 write credentials and R2_MULTI_BUCKET_WRITE_ENABLED are enabled.
     r2_bucket_art: str = Field("", validation_alias=AliasChoices("R2_BUCKET_ART"))
     r2_bucket_audits: str = Field("", validation_alias=AliasChoices("R2_BUCKET_AUDITS"))
     r2_bucket_blog: str = Field("", validation_alias=AliasChoices("R2_BUCKET_BLOG"))
@@ -607,21 +612,23 @@ class Settings(BaseSettings):
             self.r2_endpoint_url
             and self.cf_r2_access_key_id
             and self.cf_r2_secret_access_key
-            and self.cf_r2_bucket
         )
         read_credentials_configured = bool(
-            self.r2_multi_bucket_read_enabled
-            and self.r2_endpoint_url
-            and self.r2_read_access_key_id
-            and self.r2_read_secret_access_key
+            write_credentials_configured
+            or (
+                self.r2_multi_bucket_read_enabled
+                and self.r2_endpoint_url
+                and self.r2_read_access_key_id
+                and self.r2_read_secret_access_key
+            )
         )
         for name, bucket, public_base_url, description in lanes:
             primary = name == "uploads"
             configured = bool(bucket or public_base_url)
-            readable = bool(bucket) and (
-                write_credentials_configured if primary else read_credentials_configured
+            readable = bool(bucket) and read_credentials_configured
+            writable = bool(bucket) and write_credentials_configured and (
+                primary or self.r2_multi_bucket_write_enabled
             )
-            writable = bool(bucket) and primary and write_credentials_configured
             if writable:
                 access_mode = "read_write"
             elif readable:
@@ -664,10 +671,21 @@ class Settings(BaseSettings):
     @property
     def r2_read_credentials_configured(self) -> bool:
         return bool(
-            self.r2_multi_bucket_read_enabled
-            and self.r2_endpoint_url
-            and self.r2_read_access_key_id
-            and self.r2_read_secret_access_key
+            self.r2_write_credentials_configured
+            or (
+                self.r2_multi_bucket_read_enabled
+                and self.r2_endpoint_url
+                and self.r2_read_access_key_id
+                and self.r2_read_secret_access_key
+            )
+        )
+
+    @property
+    def r2_write_credentials_configured(self) -> bool:
+        return bool(
+            self.r2_endpoint_url
+            and self.cf_r2_access_key_id
+            and self.cf_r2_secret_access_key
         )
 
     def public_url_for_r2_lane(self, lane: str, key: str) -> str | None:
