@@ -1,4 +1,4 @@
-name: HIVE production verification
+name: HIVE-UI CI
 
 on:
   push:
@@ -10,56 +10,43 @@ permissions:
   contents: read
 
 concurrency:
-  group: hive-${{ github.ref }}
+  group: hive-ui-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  backend:
+  verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: pip
-      - run: python -m pip install --requirement requirements.txt --requirement requirements-dev.txt
-      - run: PYTHONPATH=backend python -m pytest backend/tests -q
-      - run: python -m ruff check backend/app backend/tests scripts
-      - run: python -m pip check
-      - name: Production configuration preflight
-        env:
-          APP_ENV: production
-          ADMIN_BEARER_TOKEN: ci-admin-token-with-sufficient-length
-          OPENROUTER_API_KEY: ci-openrouter-token-with-sufficient-length
-          R2_ACCOUNT_ID: 00000000000000000000000000000000
-          R2_ACCESS_KEY_ID: ci-r2-access-key
-          R2_SECRET_ACCESS_KEY: ci-r2-secret-key-with-sufficient-length
-          R2_BUCKET_UPLOADS: hive
-          R2_ENDPOINT_URL: https://00000000000000000000000000000000.r2.cloudflarestorage.com
-          R2_MULTI_BUCKET_READ_ENABLED: 'true'
-          R2_READ_ACCESS_KEY_ID: ci-r2-read-key
-          R2_READ_SECRET_ACCESS_KEY: ci-r2-read-secret
-          R2_BUCKET_META_SYSTEM: metasystem
-          MAST_MONITOR_MODE: r2
-          CORS_ORIGINS: https://hive.jonathan-harris.online
-          ALLOWED_HOSTS: hive-ci.example.invalid
-          DATABASE_ENABLED: 'false'
-          D1_ENABLED: 'false'
-          VECTORIZE_ENABLED: 'false'
-          EMBEDDINGS_ENABLED: 'false'
-        run: PYTHONPATH=backend python scripts/production_preflight.py
+      - name: Checkout
+        uses: actions/checkout@v6
 
-  container:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t hive:ci .
+      - name: Use Node.js 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Typecheck, lint, build and verify
+        run: npm run check
+
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
+
+      - name: Upload production bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: hive-ui-dist-${{ github.sha }}
+          path: dist
+          if-no-files-found: error
+          retention-days: 14
 
   notify_failure:
     name: Notify central operations on CI failure
-    needs: [backend, container]
+    needs: [verify]
     if: ${{ always() && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}
     runs-on: ubuntu-latest
     continue-on-error: true
@@ -71,9 +58,9 @@ jobs:
           OPS_ALERT_WEBHOOK_TOKEN: ${{ secrets.OPS_ALERT_WEBHOOK_TOKEN }}
         run: >-
           python scripts/ops_notify.py
-          --service HIVE
+          --service HIVE-UI
           --event-type ci_failed
-          --title "HIVE GitHub Actions failed"
+          --title "HIVE-UI GitHub Actions failed"
           --summary "The governed CI workflow failed. Open the linked run for the failing job and logs."
           --event-id "github:${{ github.repository }}:${{ github.run_id }}:${{ github.run_attempt }}"
           --release-id "${{ github.sha }}"
