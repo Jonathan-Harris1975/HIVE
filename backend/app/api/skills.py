@@ -79,13 +79,12 @@ class SkillFromFileRequest(BaseModel):
     dry_run: bool = False
 
 
-
 @router.post("/skills/from-file")
 def skill_from_file(
     payload: SkillFromFileRequest,
     settings: Settings = Depends(get_settings),
 ) -> dict[str, object]:
-    """Register an uploaded object as a searchable HIVE skill descriptor in D1."""
+    """Register an uploaded object as a reviewed HIVE skill descriptor in D1."""
 
     d1 = D1MetadataStore(settings)
     skill_id = f"upload-{uuid.uuid4().hex[:12]}"
@@ -96,11 +95,13 @@ def skill_from_file(
     if "uploaded-file" not in [tag.lower() for tag in tags]:
         tags.insert(0, "uploaded-file")
     repo = (payload.repo or "HIVE").strip()
+    description = (payload.description or "").strip()
     metadata = {
         "skill_id": skill_id,
         "reference_prefix": skill_id,
         "slug": slug,
         "name": title,
+        "description": description,
         "object_key": payload.object_key,
         "descriptor_url": source_url,
         "search_document_id": f"skill:{skill_id}",
@@ -109,11 +110,11 @@ def skill_from_file(
         "risk_level": payload.risk_level,
         "repos": [repo] if repo else [],
         "tags": tags,
-        "catalogue_category": "uploaded-file-skills",
+        "catalogue_category": payload.hive_lane or "uploaded-file-skills",
         "indexable_text": " ".join(
-            part for part in [title, payload.description or "", payload.object_key, repo, " ".join(tags)] if part
+            part for part in [title, description, payload.object_key, repo, " ".join(tags)] if part
         ),
-        "source_register": "HIVE direct file upload",
+        "source_register": "HIVE reviewed file-to-skill registration",
         "source_manifest_key": None,
         "source_lane": payload.source_lane,
         "source_object_key": payload.object_key,
@@ -133,7 +134,7 @@ def skill_from_file(
         return {
             "ok": False,
             "error_code": "d1_disabled",
-            "message": "D1 metadata store is not configured, so the uploaded file could not be added to the skill catalogue.",
+            "message": "D1 metadata store is not configured, so the reviewed skill could not be added to the catalogue.",
             "d1": d1.safe_config(),
             "skill": item,
         }
@@ -151,7 +152,7 @@ def skill_from_file(
         "enabled": True,
         "skill": item,
         "d1_result": result,
-        "message": "Uploaded file registered as a searchable skill." if result.get("ok") else "D1 write failed.",
+        "message": "Reviewed file skill registered." if result.get("ok") else "D1 write failed.",
     }
 
 
