@@ -1,1 +1,1 @@
-BUILD_STAGE = "v1.23-hive-ui-api-contract"
+BUILD_STAGE = "v1.25-production-execution-gates"

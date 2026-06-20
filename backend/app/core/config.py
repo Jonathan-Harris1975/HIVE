@@ -15,7 +15,7 @@ class Settings(BaseSettings):
         "JH Ops Chat", validation_alias=AliasChoices("APP_NAME", "OPENROUTER_APP_NAME")
     )
     app_env: str = Field("development", validation_alias=AliasChoices("APP_ENV"))
-    app_version: str = Field("1.24.0-production", validation_alias=AliasChoices("APP_VERSION"))
+    app_version: str = Field("1.25.0-production", validation_alias=AliasChoices("APP_VERSION"))
     admin_bearer_token: str = Field(
         "change-me-local-only", validation_alias=AliasChoices("ADMIN_BEARER_TOKEN")
     )
@@ -53,6 +53,15 @@ class Settings(BaseSettings):
     )
     readiness_dependency_probe_cache_seconds: int = Field(
         30, validation_alias=AliasChoices("READINESS_DEPENDENCY_PROBE_CACHE_SECONDS")
+    )
+
+    # Production execution adapter gate. Approval unlocks allow-listed
+    # operator-triggered handoff; decision endpoints never auto-run side effects.
+    execution_adapters_enabled: bool = Field(
+        True, validation_alias=AliasChoices("EXECUTION_ADAPTERS_ENABLED")
+    )
+    execution_adapters_require_approval: bool = Field(
+        True, validation_alias=AliasChoices("EXECUTION_ADAPTERS_REQUIRE_APPROVAL")
     )
 
     # Central operational event inbox used by GitHub, provider deployment watchers
