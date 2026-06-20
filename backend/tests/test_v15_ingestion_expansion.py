@@ -25,7 +25,7 @@ def test_health_reports_v15_free_tier_limits(monkeypatch, tmp_path) -> None:
     _reset_settings(monkeypatch, tmp_path)
     client = TestClient(app)
     body = client.get("/health").json()
-    assert body["build"] == "v1.25-production-execution-gates"
+    assert body["build"] == "v1.26-r2-write-skill-models"
     assert body["free_tier"]["enabled"] is True
     assert "zip_extract_max_members" in body["free_tier"]["ingestion_limits"]
 

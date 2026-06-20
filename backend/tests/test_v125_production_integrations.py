@@ -178,7 +178,7 @@ def test_public_r2_urls_encode_safe_keys_and_reject_traversal() -> None:
     assert settings.public_url_for_r2_lane("hive_skills", "%2e%2e/secret.txt") is None
 
 
-def test_production_readiness_rejects_unreadable_required_r2_lanes() -> None:
+def test_production_readiness_accepts_required_r2_lanes_with_shared_write_credentials() -> None:
     settings = Settings(
         APP_ENV="production",
         ADMIN_BEARER_TOKEN="x" * 48,
@@ -186,6 +186,7 @@ def test_production_readiness_rejects_unreadable_required_r2_lanes() -> None:
         ALLOWED_HOSTS="hive-api.example",
         PRODUCTION_REQUIRE_OPENROUTER=False,
         PRODUCTION_REQUIRE_R2=True,
+        REPO_HEALTH_ENABLED=False,
         CF_R2_ACCOUNT_ID="account",
         CF_R2_ACCESS_KEY_ID="write-key",
         CF_R2_SECRET_ACCESS_KEY="write-secret",
@@ -197,9 +198,9 @@ def test_production_readiness_rejects_unreadable_required_r2_lanes() -> None:
 
     report = build_readiness_report(settings)
 
-    assert report.ready is False
+    assert report.ready is True
     required_lanes = next(item for item in report.checks if item.name == "r2_required_lanes")
-    assert "hive_skills" in required_lanes.message
+    assert required_lanes.status == "ok"
 
 
 def test_dependency_readiness_probes_each_required_lane_and_skill_objects(

@@ -27,7 +27,7 @@ def _settings(**overrides) -> Settings:
     return Settings(**values)
 
 
-def test_lane_registry_exposes_read_only_access() -> None:
+def test_lane_registry_exposes_read_write_access() -> None:
     client = TestClient(create_app(_settings()))
 
     body = client.get("/v1/files/r2-lanes").json()
@@ -36,12 +36,12 @@ def test_lane_registry_exposes_read_only_access() -> None:
     assert body["multi_bucket_read_enabled"] is True
     assert lanes["uploads"]["access_mode"] == "read_write"
     assert lanes["uploads"]["writable"] is True
-    assert lanes["audits"]["access_mode"] == "read_only"
+    assert lanes["audits"]["access_mode"] == "read_write"
     assert lanes["audits"]["readable"] is True
-    assert lanes["audits"]["writable"] is False
+    assert lanes["audits"]["writable"] is True
 
 
-def test_list_read_metadata_and_download_use_scoped_read_credentials(monkeypatch) -> None:
+def test_list_read_metadata_download_and_view_use_write_credentials_when_writable(monkeypatch) -> None:
     calls: list[tuple[str, bool, str]] = []
 
     def fake_list(self, **kwargs):  # noqa: ANN001
@@ -111,6 +111,10 @@ def test_list_read_metadata_and_download_use_scoped_read_credentials(monkeypatch
         "/v1/files/r2/audits/download",
         params={"key": "reports/latest.md"},
     )
+    view = client.get(
+        "/v1/files/r2/audits/view",
+        params={"key": "reports/latest.md"},
+    )
 
     assert listed.status_code == 200
     assert listed.json()["prefixes"] == ["reports/archive/"]
@@ -119,17 +123,20 @@ def test_list_read_metadata_and_download_use_scoped_read_credentials(monkeypatch
     assert read.json()["file"]["lane"] == "audits"
     assert download.content == b"audit result"
     assert download.headers["x-hive-r2-lane"] == "audits"
+    assert view.content == b"audit result"
+    assert view.headers["content-disposition"].startswith("inline")
     assert calls == [
-        ("list", True, "audits"),
-        ("head", True, "audits"),
-        ("read", True, "audits"),
-        ("download", True, "audits"),
+        ("list", False, "audits"),
+        ("head", False, "audits"),
+        ("read", False, "audits"),
+        ("download", False, "audits"),
+        ("download", False, "audits"),
     ]
 
 
 def test_non_upload_lane_chat_uses_bounded_direct_read(monkeypatch) -> None:
     def fake_read(self, key, max_bytes, **kwargs):  # noqa: ANN001, ARG001
-        assert kwargs["read_only"] is True
+        assert kwargs["read_only"] is False
         assert kwargs["bucket"] == "audits"
         return ReadObject(
             key=key,
@@ -164,7 +171,7 @@ def test_non_upload_lane_chat_uses_bounded_direct_read(monkeypatch) -> None:
     assert "bounded direct read" in body["chunk_mode_note"]
 
 
-def test_multi_bucket_enabled_requires_read_credentials_in_production() -> None:
+def test_multi_bucket_enabled_accepts_shared_write_credentials_in_production() -> None:
     from app.core.production import build_readiness_report
 
     settings = _settings(
@@ -179,7 +186,7 @@ def test_multi_bucket_enabled_requires_read_credentials_in_production() -> None:
     report = build_readiness_report(settings)
 
     check = next(item for item in report.checks if item.name == "r2_multi_bucket_read")
-    assert check.status == "error"
+    assert check.status == "ok"
 
 
 def test_r2_client_trims_koyeb_secret_whitespace(monkeypatch) -> None:
