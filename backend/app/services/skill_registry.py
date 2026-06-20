@@ -1272,6 +1272,140 @@ def rebuild_skills_index(
     return result
 
 
+
+
+def cleanup_uploaded_file_skill_records(
+    *,
+    settings: Settings,
+    dry_run: bool = True,
+    limit: int = 500,
+    confirm: str | None = None,
+) -> dict[str, object]:
+    """Preview or remove legacy file-generated skill records from D1.
+
+    This repairs the v1.26/v1.26.1 UI mistake where ordinary uploaded files
+    could be registered as skills. It is deliberately D1-only because those
+    records were catalogue metadata; it does not delete or mutate any R2 object.
+    Reviewed descriptor skills from the hive_skills lane under skills/ are kept.
+    """
+
+    safe_limit = max(1, min(int(limit or 500), 1000))
+    d1 = D1MetadataStore(settings)
+    if not d1.enabled:
+        return {
+            "ok": False,
+            "enabled": False,
+            "error_code": "d1_disabled",
+            "message": "D1 metadata store is not configured, so there are no live catalogue rows to clean from this HIVE instance.",
+            "d1": d1.safe_config(),
+            "r2_deletes_attempted": 0,
+        }
+
+    payload = d1.list_metadata(lane=SKILL_LANE, limit=safe_limit)
+    if not payload.get("ok"):
+        return {
+            **payload,
+            "operation": "cleanup_uploaded_file_skill_records",
+            "build_stage_hint": BUILD_STAGE,
+            "r2_deletes_attempted": 0,
+        }
+
+    items = payload.get("items", []) if isinstance(payload.get("items"), list) else []
+    candidates = [_cleanup_candidate_summary(item) for item in items if _is_legacy_uploaded_file_skill(item)]
+    candidate_ids = [str(item.get("id") or "").strip() for item in candidates if str(item.get("id") or "").strip()]
+
+    result: dict[str, object] = {
+        "ok": True,
+        "enabled": True,
+        "operation": "cleanup_uploaded_file_skill_records",
+        "build_stage_hint": BUILD_STAGE,
+        "dry_run": dry_run,
+        "checked_count": len(items),
+        "candidate_count": len(candidate_ids),
+        "candidates": candidates[:100],
+        "truncated": len(candidates) > 100,
+        "r2_deletes_attempted": 0,
+        "scope": "D1 hive_ecosystem_metadata rows only; R2 bucket contents are not touched.",
+        "kept_rule": "Reviewed skills-folder descriptors are kept when source_lane is hive_skills and object_key starts with skills/.",
+    }
+    if dry_run:
+        result["message"] = "Dry-run only. Re-run with dry_run=false and the required confirmation token to delete these D1 catalogue rows."
+        return result
+    if confirm != "delete-uploaded-file-skills":
+        return {
+            **result,
+            "ok": False,
+            "error_code": "cleanup_confirmation_required",
+            "message": "Live cleanup requires confirm='delete-uploaded-file-skills'.",
+        }
+    delete_result = d1.delete_metadata_ids(candidate_ids)
+    result["delete_result"] = delete_result
+    result["deleted_count"] = delete_result.get("deleted_count", 0)
+    result["deleted_ids"] = delete_result.get("deleted_ids", [])
+    result["ok"] = bool(delete_result.get("ok"))
+    result["message"] = (
+        f"Deleted {result['deleted_count']} legacy uploaded-file skill catalogue row(s) from D1."
+        if result["ok"]
+        else "Cleanup attempted, but one or more D1 deletes failed."
+    )
+    return result
+
+
+def _is_legacy_uploaded_file_skill(item: dict[str, Any]) -> bool:
+    meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    item_id = str(item.get("id") or "").strip().lower()
+    source_id = str(item.get("source_id") or meta.get("skill_id") or "").strip().lower()
+    source_lane = str(meta.get("source_lane") or "").strip().lower().replace("-", "_")
+    object_key = str(meta.get("source_object_key") or meta.get("object_key") or "").replace("\\", "/").lstrip("/")
+    hive_lane = str(meta.get("hive_lane") or "").strip().lower()
+    source_register = str(meta.get("source_register") or "").strip().lower()
+    tags = [str(tag).strip().lower() for tag in (meta.get("tags") or [])]
+
+    if bool(meta.get("created_from_hive_skills_folder_file")):
+        return False
+    if source_lane in {"skill", "skills"}:
+        source_lane = "hive_skills"
+    if source_lane == SKILL_LANE and object_key.startswith("skills/"):
+        return False
+
+    legacy_signals = [
+        bool(meta.get("created_from_file")),
+        source_register == "hive direct file upload",
+        hive_lane == "uploaded-file-skills",
+        "uploaded-file" in tags,
+        item_id.startswith("skill:upload-"),
+        source_id.startswith("upload-"),
+    ]
+    return any(legacy_signals)
+
+
+def _cleanup_candidate_summary(item: dict[str, Any]) -> dict[str, object]:
+    meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    reasons: list[str] = []
+    if bool(meta.get("created_from_file")):
+        reasons.append("created_from_file")
+    if str(meta.get("source_register") or "").strip().lower() == "hive direct file upload":
+        reasons.append("legacy_direct_file_upload")
+    if str(meta.get("hive_lane") or "").strip().lower() == "uploaded-file-skills":
+        reasons.append("uploaded_file_skill_lane")
+    tags = [str(tag).strip().lower() for tag in (meta.get("tags") or [])]
+    if "uploaded-file" in tags:
+        reasons.append("uploaded_file_tag")
+    if str(item.get("id") or "").strip().lower().startswith("skill:upload-"):
+        reasons.append("upload_id")
+    if str(item.get("source_id") or meta.get("skill_id") or "").strip().lower().startswith("upload-"):
+        reasons.append("upload_source_id")
+    return {
+        "id": item.get("id"),
+        "title": item.get("title"),
+        "source_id": item.get("source_id") or meta.get("skill_id"),
+        "object_key": meta.get("source_object_key") or meta.get("object_key"),
+        "source_lane": meta.get("source_lane"),
+        "hive_lane": meta.get("hive_lane"),
+        "created_at": meta.get("created_at") or item.get("created_at"),
+        "reasons": sorted(set(reasons)),
+    }
+
 def _skill_duplicate_report(items: list[dict[str, Any]]) -> dict[str, object]:
     buckets: dict[str, dict[str, list[dict[str, object]]]] = {
         "skill_ids": defaultdict(list),
