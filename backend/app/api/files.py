@@ -45,6 +45,7 @@ class TextUploadRequest(BaseModel):
     filename: str = Field("hive-r2-smoke.txt", min_length=1, max_length=255)
     content: str = Field(..., min_length=0)
     content_type: str | None = "text/plain; charset=utf-8"
+    lane: str = Field("uploads", min_length=1, max_length=80)
     test_run_id: str | None = Field(None, max_length=120)
 
 
@@ -52,6 +53,7 @@ class Base64UploadRequest(BaseModel):
     filename: str = Field(..., min_length=1, max_length=255)
     content_base64: str = Field(..., min_length=1)
     content_type: str | None = None
+    lane: str = Field("uploads", min_length=1, max_length=80)
     test_run_id: str | None = Field(None, max_length=120)
 
 
@@ -145,17 +147,21 @@ class ChatWithFileRequest(BaseModel):
 @router.post("/files/upload")
 async def upload_file(
     upload: UploadFile = File(...),
+    lane: str = Query("uploads", min_length=1, max_length=80),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, object]:
+    lane_config = _target_upload_lane(settings, lane)
     try:
-        result = await ingest_upload(upload, settings)
+        result = await ingest_upload(upload, settings, lane_config=lane_config)
     except UnsafeZipError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)
         ) from exc
-    db_record = SqlStore(settings).record_file(result)
+    db_record = SqlStore(settings).record_file(
+        result, extra_metadata=_upload_metadata(lane_config)
+    )
     return {
         "ok": True,
         "file": result.__dict__,
@@ -175,13 +181,15 @@ async def upload_text(
             content=payload.content,
             content_type=payload.content_type or "text/plain; charset=utf-8",
             settings=settings,
+            lane_config=_target_upload_lane(settings, payload.lane),
         )
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)
         ) from exc
+    lane_config = _target_upload_lane(settings, payload.lane)
     db_record = SqlStore(settings).record_file(
-        result, extra_metadata={"test_run_id": payload.test_run_id} if payload.test_run_id else None
+        result, extra_metadata=_upload_metadata(lane_config, payload.test_run_id)
     )
     return {
         "ok": True,
@@ -210,6 +218,7 @@ async def upload_base64(
             data=data,
             content_type=content_type,
             settings=settings,
+            lane_config=_target_upload_lane(settings, payload.lane),
         )
     except binascii.Error as exc:
         raise HTTPException(
@@ -221,8 +230,9 @@ async def upload_base64(
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)
         ) from exc
+    lane_config = _target_upload_lane(settings, payload.lane)
     db_record = SqlStore(settings).record_file(
-        result, extra_metadata={"test_run_id": payload.test_run_id} if payload.test_run_id else None
+        result, extra_metadata=_upload_metadata(lane_config, payload.test_run_id)
     )
     return {
         "ok": True,
@@ -283,9 +293,9 @@ def public_url(
 def r2_lanes(settings: Settings = Depends(get_settings)) -> dict[str, object]:
     """Return configured R2 ecosystem lanes without exposing credentials.
 
-    v1.6 uses this as a registry so HIVE can reason about AIMS/RAMS/website/
-    podcast artefact locations. Only the primary uploads lane is read/write via
-    the existing R2 adapter; the other lanes are metadata/public-URL aware first.
+    HIVE uses this as a registry so it can reason about AIMS/RAMS/website/
+    podcast artefact locations. Configured lanes are read/write when the shared
+    server-side R2 write credentials allow it.
     """
 
     lanes = settings.r2_ecosystem_lanes
@@ -296,8 +306,10 @@ def r2_lanes(settings: Settings = Depends(get_settings)) -> dict[str, object]:
         "primary_upload_lane": "uploads",
         "lanes": lanes,
         "multi_bucket_read_enabled": settings.r2_multi_bucket_read_enabled,
+        "multi_bucket_write_enabled": settings.r2_multi_bucket_write_enabled,
         "read_credentials_configured": settings.r2_read_credentials_configured,
-        "note": "The uploads lane is read/write. Other readable lanes are enforced as read-only.",
+        "write_credentials_configured": settings.r2_write_credentials_configured,
+        "note": "Every configured bucket can be read/write when shared R2 write credentials are configured.",
     }
 
 
@@ -345,7 +357,7 @@ def list_r2_lane_objects(
             cursor=cursor,
             delimiter=None if search else "/",
             search=search,
-            read_only=not bool(lane_config.get("primary_upload_lane")),
+            read_only=_r2_read_only_for_lane(lane_config),
             max_scan_keys=settings.r2_multi_bucket_max_scan_keys,
         )
     except RuntimeError as exc:
@@ -386,7 +398,7 @@ def r2_lane_object_metadata(
             clean_key,
             bucket=str(lane_config["bucket"]),
             public_base_url=lane_config.get("public_base_url"),
-            read_only=not bool(lane_config.get("primary_upload_lane")),
+            read_only=_r2_read_only_for_lane(lane_config),
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
@@ -476,7 +488,7 @@ def download_r2_lane_object(
             clean_key,
             bucket=str(lane_config["bucket"]),
             max_bytes=settings.r2_download_max_bytes,
-            read_only=not bool(lane_config.get("primary_upload_lane")),
+            read_only=_r2_read_only_for_lane(lane_config),
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
@@ -491,6 +503,47 @@ def download_r2_lane_object(
     headers = {
         "Content-Length": str(stream.size_bytes),
         "Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}",
+        "Cache-Control": "private, no-store",
+        "X-HIVE-R2-Lane": str(lane_config["lane"]),
+    }
+    if stream.etag:
+        headers["ETag"] = f'"{stream.etag}"'
+
+    return StreamingResponse(
+        _stream_r2_body(stream.body),
+        media_type=stream.content_type or "application/octet-stream",
+        headers=headers,
+    )
+
+
+@router.get("/files/r2/{lane}/view")
+def view_r2_lane_object(
+    lane: str,
+    key: str = Query(..., min_length=1, max_length=2048),
+    settings: Settings = Depends(get_settings),
+) -> StreamingResponse:
+    lane_config = _require_r2_lane(settings, lane, require_read=True)
+    clean_key = _validate_object_key(key)
+    try:
+        stream = R2Storage(settings).open_object(
+            clean_key,
+            bucket=str(lane_config["bucket"]),
+            max_bytes=settings.r2_download_max_bytes,
+            read_only=_r2_read_only_for_lane(lane_config),
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+    filename = Path(clean_key).name.replace("\r", "_").replace("\n", "_") or "view"
+    headers = {
+        "Content-Length": str(stream.size_bytes),
+        "Content-Disposition": f"inline; filename*=UTF-8''{quote(filename)}",
         "Cache-Control": "private, no-store",
         "X-HIVE-R2-Lane": str(lane_config["lane"]),
     }
@@ -1867,6 +1920,7 @@ def _require_r2_lane(
     lane: str,
     *,
     require_read: bool,
+    require_write: bool = False,
 ) -> dict[str, Any]:
     lane_config = settings.r2_lane(lane)
     if lane_config is None:
@@ -1887,18 +1941,50 @@ def _require_r2_lane(
                 "message": f"R2 lane {lane_config['lane']!r} is not readable with the current credentials.",
                 "access_mode": lane_config.get("access_mode"),
                 "required_env": [
+                    "R2_ACCESS_KEY_ID",
+                    "R2_SECRET_ACCESS_KEY",
                     "R2_MULTI_BUCKET_READ_ENABLED=true",
                     "R2_READ_ACCESS_KEY_ID",
                     "R2_READ_SECRET_ACCESS_KEY",
-                ]
-                if not lane_config.get("primary_upload_lane")
-                else [
+                ],
+            },
+        )
+    if require_write and not lane_config.get("writable"):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "message": f"R2 lane {lane_config['lane']!r} is not writable with the current credentials.",
+                "access_mode": lane_config.get("access_mode"),
+                "required_env": [
+                    "R2_MULTI_BUCKET_WRITE_ENABLED=true",
                     "R2_ACCESS_KEY_ID",
                     "R2_SECRET_ACCESS_KEY",
                 ],
             },
         )
     return lane_config
+
+
+def _target_upload_lane(settings: Settings, lane: str) -> dict[str, Any]:
+    lane_config = _require_r2_lane(settings, lane, require_read=False)
+    if lane_config.get("primary_upload_lane") and _storage_name(settings) == "local":
+        return lane_config
+    return _require_r2_lane(settings, lane, require_read=False, require_write=True)
+
+
+def _upload_metadata(lane_config: dict[str, Any], test_run_id: str | None = None) -> dict[str, object]:
+    metadata: dict[str, object] = {
+        "lane": lane_config.get("lane"),
+        "bucket": lane_config.get("bucket"),
+        "access_mode": lane_config.get("access_mode"),
+    }
+    if test_run_id:
+        metadata["test_run_id"] = test_run_id
+    return metadata
+
+
+def _r2_read_only_for_lane(lane_config: dict[str, Any]) -> bool:
+    return not bool(lane_config.get("writable"))
 
 
 def _read_object_for_lane(
@@ -1908,14 +1994,14 @@ def _read_object_for_lane(
     *,
     max_bytes: int,
 ):
-    if lane_config.get("primary_upload_lane"):
+    if lane_config.get("primary_upload_lane") and _storage_name(settings) == "local":
         return _storage(settings).read_object(key, max_bytes=max_bytes)
     return R2Storage(settings).read_object(
         key,
         max_bytes=max_bytes,
         bucket=str(lane_config["bucket"]),
         public_base_url=lane_config.get("public_base_url"),
-        read_only=True,
+        read_only=_r2_read_only_for_lane(lane_config),
     )
 
 

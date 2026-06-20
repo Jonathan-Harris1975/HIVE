@@ -21,9 +21,11 @@ async def list_models(settings: Settings = Depends(get_settings)) -> dict[str, o
         "models": models,
         "groups": router_service.model_group_manifest(visible_models),
         "policy": {
-            "image_generation": "discovery_only",
-            "video_generation": "discovery_only",
-            "standard_chat_requires_text_output": True,
+            "image_generation": "enabled_for_selection",
+            "video_generation": "enabled_for_selection",
+            "audio": "enabled_for_selection",
+            "infrastructure_models": "enabled_for_selection",
+            "standard_chat_requires_text_output": False,
         },
     }
 

@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import re
+import uuid
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
 from app.core.config import Settings, get_settings
 from app.core.security import require_admin
+from app.storage.d1 import D1MetadataStore
 from app.services.skill_registry import (
     get_skill_catalogue_item,
     import_skills_manifest,
@@ -59,6 +64,95 @@ class SharedExecutionPlanRequest(BaseModel):
     repo: str | None = Field(None, max_length=40)
     workflow_preset: str | None = Field(None, max_length=120)
     limit: int = Field(5, ge=1, le=25)
+
+
+class SkillFromFileRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=180)
+    object_key: str = Field(..., min_length=1, max_length=2048)
+    source_lane: str = Field("uploads", min_length=1, max_length=80)
+    description: str | None = Field(None, max_length=1200)
+    repo: str | None = Field("HIVE", max_length=40)
+    hive_lane: str | None = Field("uploaded-file-skills", max_length=120)
+    priority_tier: str = Field("P2", min_length=1, max_length=40)
+    risk_level: str = Field("medium", min_length=1, max_length=40)
+    tags: list[str] = Field(default_factory=lambda: ["uploaded-file"], max_length=20)
+    dry_run: bool = False
+
+
+
+@router.post("/skills/from-file")
+def skill_from_file(
+    payload: SkillFromFileRequest,
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    """Register an uploaded object as a searchable HIVE skill descriptor in D1."""
+
+    d1 = D1MetadataStore(settings)
+    skill_id = f"upload-{uuid.uuid4().hex[:12]}"
+    slug = _slugify(payload.title)
+    title = payload.title.strip()
+    source_url = settings.public_url_for_r2_lane(payload.source_lane, payload.object_key)
+    tags = [str(tag).strip() for tag in payload.tags if str(tag).strip()][:20]
+    if "uploaded-file" not in [tag.lower() for tag in tags]:
+        tags.insert(0, "uploaded-file")
+    repo = (payload.repo or "HIVE").strip()
+    metadata = {
+        "skill_id": skill_id,
+        "reference_prefix": skill_id,
+        "slug": slug,
+        "name": title,
+        "object_key": payload.object_key,
+        "descriptor_url": source_url,
+        "search_document_id": f"skill:{skill_id}",
+        "priority_tier": payload.priority_tier,
+        "hive_lane": payload.hive_lane or "uploaded-file-skills",
+        "risk_level": payload.risk_level,
+        "repos": [repo] if repo else [],
+        "tags": tags,
+        "catalogue_category": "uploaded-file-skills",
+        "indexable_text": " ".join(
+            part for part in [title, payload.description or "", payload.object_key, repo, " ".join(tags)] if part
+        ),
+        "source_register": "HIVE direct file upload",
+        "source_manifest_key": None,
+        "source_lane": payload.source_lane,
+        "source_object_key": payload.object_key,
+        "created_from_file": True,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    item = {
+        "id": f"skill:{skill_id}",
+        "source_id": skill_id,
+        "title": title,
+        "url": source_url,
+        "metadata": metadata,
+    }
+    if payload.dry_run:
+        return {"ok": True, "dry_run": True, "enabled": d1.enabled, "skill": item}
+    if not d1.enabled:
+        return {
+            "ok": False,
+            "error_code": "d1_disabled",
+            "message": "D1 metadata store is not configured, so the uploaded file could not be added to the skill catalogue.",
+            "d1": d1.safe_config(),
+            "skill": item,
+        }
+    result = d1.upsert_metadata(
+        item_id=item["id"],
+        lane="hive_skills",
+        source_type="skill_descriptor",
+        source_id=skill_id,
+        title=title,
+        url=source_url,
+        metadata=metadata,
+    )
+    return {
+        "ok": bool(result.get("ok")),
+        "enabled": True,
+        "skill": item,
+        "d1_result": result,
+        "message": "Uploaded file registered as a searchable skill." if result.get("ok") else "D1 write failed.",
+    }
 
 
 @router.get("/skills/status")
@@ -281,3 +375,8 @@ def execution_plan(
         workflow_preset=payload.workflow_preset,
         limit=payload.limit,
     )
+
+
+def _slugify(value: str) -> str:
+    clean = re.sub(r"[^a-zA-Z0-9]+", "-", value.strip().lower()).strip("-")
+    return clean[:100] or "uploaded-file-skill"
