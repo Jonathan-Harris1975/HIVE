@@ -13,6 +13,14 @@
 
 # Changelog
 
+## 2026.06.20 — Production execution gates
+
+- Updated the build marker to `v1.25-production-execution-gates`.
+- Added the production execution adapter policy surface and health flag.
+- Changed approved execution-review decisions so `can_execute_now:true`, `adapter_execution_enabled:true`, and `execution_state:ready_for_execution` are recorded.
+- Changed controlled execution previews so approved plans show the production adapter handoff as ready instead of blocked.
+- Kept adapter handoff operator-triggered: approval unlocks the gate but does not auto-run package installs, repo pushes or background jobs.
+
 ## 2026.06.16 — Ecosystem health update
 
 - Added authenticated ecosystem repository-health aggregation.
@@ -20,7 +28,7 @@
 - Added production CI for tests, linting, preflight and container build.
 - Refreshed production, security and operations documentation.
 
-## v1.23-hive-ui-api-contract
+## v1.25-production-execution-gates
 
 - Persisted streamed `/v1/chat/stream` user and assistant turns in the SQL conversation store.
 - Emitted the conversation ID before the first model token and returned persistence status in the final SSE event.

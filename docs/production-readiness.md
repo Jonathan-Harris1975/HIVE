@@ -10,7 +10,7 @@ This hardening layer keeps the existing HIVE API contract intact while tightenin
 
 ```env
 APP_ENV=production
-APP_VERSION=1.23.1-production
+APP_VERSION=1.25.0-production
 ADMIN_BEARER_TOKEN=<unique random value, at least 32 characters>
 CORS_ORIGINS=https://<your-hive-ui-domain>
 ALLOWED_HOSTS=<your-service>.koyeb.app

@@ -56,4 +56,4 @@ In this build, lane support is registry/public-URL aware only. Direct multi-buck
 
 ## v1.12 reference boundary
 
-The skill catalogue can map skills to HIVE, RAMS, AIMS and Website, but reference status does not mean execution authority. Skills are registry entries until a future adapter and approval gate explicitly allows a read-only or low-risk operation.
+The skill catalogue can map skills to HIVE, RAMS, AIMS and Website, but reference status does not mean execution authority. Skills are registry entries until the production adapter policy and approval gate explicitly allow a read-only or low-risk handoff.

@@ -226,7 +226,7 @@ The R2 ecosystem lane registry is metadata-first. It records configured bucket n
 
 ## v1.12 shared ecosystem execution layer
 
-HIVE now contains a plan-only skill intelligence stack:
+HIVE now contains a review-gated skill intelligence stack:
 
 ```text
 D1 skill catalogue
@@ -240,15 +240,15 @@ The execution layer does not mutate repos, install skills, run deploys or start 
 
 ## v1.15 execution review queue
 
-The execution review queue sits between skill routing and any future execution adapter. It stores reviewable plan records in D1 using lane `hive_execution_reviews`. Each record contains the routed skill plan, task, repo, workflow preset, review gate state and decision log.
+The execution review queue sits between skill routing and the production adapter handoff. It stores reviewable plan records in D1 using lane `hive_execution_reviews`. Each record contains the routed skill plan, task, repo, workflow preset, review gate state, decision log and adapter gate state.
 
-The queue is intentionally non-executing. Even an `approved` review keeps `can_execute_now:false`. Later builds may add explicit adapters for selected low-risk operations, but those adapters should read this queue rather than bypass it.
+Pending reviews remain non-executable. An `approved` review now records `can_execute_now:true`, `adapter_execution_enabled:true` and `execution_state:ready_for_execution`, so HIVE-UI no longer treats production approval as review-only. The approval decision unlocks the allow-listed handoff; it does not auto-run repo pushes, package installs or background jobs.
 
 ## v1.15 review evidence packs
 
 The evidence-pack layer sits on top of the execution review queue. It turns a stored D1 review record into a UI/export friendly artefact with task metadata, primary skill evidence, candidate skills, shared execution steps, guardrails, decision log and audit timeline.
 
-v1.15 remains plan-only. Evidence packs are inline responses and do not run skills, mutate repos, upload exports to R2 or start background work.
+Evidence packs remain inline review/export responses. Approved packs can signal readiness for allow-listed production handoff, but the export response itself does not push repos, install packages or start background work.
 
 ## v1.17 Registry Integrity Layer
 
@@ -269,15 +269,15 @@ The registry integrity layer checks:
 The workflow graph layer converts task, repo, workflow preset and skill-routing context into a UI-friendly graph:
 
 ```text
-request -> classify -> recommend_skills -> collect_evidence -> dry_run_output -> risk_gate -> review_queue -> adapter_execution(blocked)
+request -> classify -> recommend_skills -> collect_evidence -> dry_run_output -> risk_gate -> review_queue -> adapter_execution(ready_after_approval)
 ```
 
-The controlled execution preview layer then annotates graph nodes with statuses, blockers and next actions. It is deliberately non-executing. Adapter execution is disabled in v1.19 and `can_execute_now` remains `false`.
+The controlled execution preview layer then annotates graph nodes with statuses, blockers and next actions. Pending plans wait at the review gate; approved plans mark the production adapter handoff as `ready_for_execution` and set `can_execute_now:true`.
 
 
 ## v1.20-v1.22 Preview Persistence, Policy Profiles and Simulation
 
-The v1.20-v1.22 layer sits above workflow graphs and controlled execution preview. It stores preview records in D1, exposes reusable policy profiles, and simulates what a workflow would require before any future execution adapter exists.
+The preview-persistence layer sits above workflow graphs and controlled execution preview. It stores preview records in D1, exposes reusable policy profiles, and simulates what an approved production adapter handoff will touch before the operator triggers it.
 
 Data remains split deliberately:
 

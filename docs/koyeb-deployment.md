@@ -252,7 +252,7 @@ curl https://YOUR-KOYEB-APP.koyeb.app/health
 curl https://YOUR-KOYEB-APP.koyeb.app/healthz
 ```
 
-`/health` should show `build: v1.23-hive-ui-api-contract` and clean flags for R2, SQL, D1, Vectorize and embeddings. `/healthz` is deliberately small and unauthenticated for later MAST keep-awake use.
+`/health` should show `build: v1.25-production-execution-gates` and clean flags for R2, SQL, D1, Vectorize and embeddings. `/healthz` is deliberately small and unauthenticated for later MAST keep-awake use.
 
 Use `POST /v1/db/test-cleanup` with `dry_run:true` before deleting smoke-test records.
 
@@ -286,7 +286,7 @@ curl "$HIVE_URL/v1/workflow-presets" -H "Authorization: Bearer $ADMIN_BEARER_TOK
 curl "$HIVE_URL/v1/files/r2-lanes" -H "Authorization: Bearer $ADMIN_BEARER_TOKEN"
 ```
 
-`/health` should show `build: v1.23-hive-ui-api-contract`, `workflow_presets_enabled: true`, and `r2_ecosystem_lanes_enabled: true`.
+`/health` should show `build: v1.25-production-execution-gates`, `workflow_presets_enabled: true`, and `r2_ecosystem_lanes_enabled: true`.
 
 MAST may still use `/healthz` for a minimal dependency check, but HIVE monitors
 the MAST Worker itself through the durable R2 scheduler heartbeat rather than a
@@ -341,7 +341,7 @@ The importer uses `R2_PUBLIC_BASE_URL_HIVE_SKILLS` and reads only the governed `
 
 ## v1.9 Intelligent Skill Search Checks
 
-After deploy, `/health` should show `build: v1.23-hive-ui-api-contract`.
+After deploy, `/health` should show `build: v1.25-production-execution-gates`.
 
 Useful checks:
 
@@ -355,7 +355,7 @@ The search layer is bounded for production because it prefers the imported D1 ca
 
 ## v1.17 registry integrity smoke checks
 
-After deploying `v1.23-hive-ui-api-contract`, run:
+After deploying `v1.25-production-execution-gates`, run:
 
 ```bash
 curl "$HIVE_URL/health"
