@@ -313,8 +313,13 @@ class ModelRouter:
         outputs = set(output_modalities)
         if "text" in outputs:
             return True, None
-        if outputs.intersection({"image", "video", "audio", "speech"}):
-            return True, "Enabled for explicit selection; non-text responses may require a dedicated renderer."
+        if outputs.intersection({"image", "video"}):
+            return (
+                False,
+                "Discovery-only in HIVE chat; use the future creation workspace for image or video generation.",
+            )
+        if outputs.intersection({"audio", "speech"}):
+            return True, "Enabled for explicit selection; non-text audio responses may require a dedicated renderer."
         if outputs.intersection({"embeddings", "rerank", "transcription"}):
             return True, "Enabled for explicit selection; this is an infrastructure-style model."
         return True, "Enabled for explicit selection; output modality was not declared by the provider."
