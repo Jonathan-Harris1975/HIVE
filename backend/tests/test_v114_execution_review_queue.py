@@ -68,7 +68,7 @@ def _fake_plan(**kwargs):
 
 
 def test_v114_build_stage():
-    assert BUILD_STAGE == "v1.23-hive-ui-api-contract"
+    assert BUILD_STAGE == "v1.25-production-execution-gates"
 
 
 def test_create_execution_review_dry_run(monkeypatch):
@@ -119,7 +119,9 @@ def test_create_list_and_decide_execution_review(monkeypatch):
     )
     assert decided["ok"] is True
     assert decided["review"]["status"] == "approved"
-    assert decided["review"]["can_execute_now"] is False
+    assert decided["review"]["can_execute_now"] is True
+    assert decided["review"]["adapter_execution_enabled"] is True
+    assert decided["review"]["execution_state"] == "ready_for_execution"
     assert decided["review"]["review_gate"]["approved"] is True
 
     detail = reviews.get_execution_review_plan(settings=_SettingsStub(), plan_id=plan_id)

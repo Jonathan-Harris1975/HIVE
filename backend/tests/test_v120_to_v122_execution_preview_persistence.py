@@ -74,18 +74,19 @@ def _fake_shared_execution_plan(**kwargs):
 
 
 def test_v122_build_marker():
-    assert BUILD_STAGE == "v1.23-hive-ui-api-contract"
+    assert BUILD_STAGE == "v1.25-production-execution-gates"
 
 
-def test_v121_policy_profiles_are_non_executing():
+def test_v121_policy_profiles_enable_approved_handoff():
     result = workflow_graphs.execution_policy_profiles()
     assert result["ok"] is True
-    assert result["can_execute_now"] is False
+    assert result["can_execute_now"] is True
+    assert result["adapter_execution_enabled"] is True
     assert result["profiles"]["human_approval_required"]["requires_human_approval"] is True
-    assert result["profiles"]["r2_write_allowed"]["allows_r2_write"] is False
+    assert result["profiles"]["r2_write_allowed"]["allows_r2_write"] is True
 
 
-def test_v122_workflow_simulation_is_pretend_only(monkeypatch):
+def test_v122_workflow_simulation_waits_for_approval(monkeypatch):
     monkeypatch.setattr(workflow_graphs, "shared_execution_plan", _fake_shared_execution_plan)
     result = workflow_graphs.simulate_workflow_execution(
         settings=_SettingsStub(),
@@ -96,11 +97,11 @@ def test_v122_workflow_simulation_is_pretend_only(monkeypatch):
         policy_profile="review_required",
     )
     assert result["ok"] is True
-    assert result["execution_mode"] == "pretend_simulation_only"
+    assert result["execution_mode"] == "approval_gated_simulation"
     assert result["can_execute_now"] is False
-    assert result["adapter_execution_enabled"] is False
+    assert result["adapter_execution_enabled"] is True
     assert result["estimated_cost"]["estimated_model_calls"] == 0
-    assert "execution_adapter_layer_not_enabled" in result["missing_prerequisites"]
+    assert result["missing_prerequisites"] == ["human_review_approval"]
 
 
 def test_v120_save_and_read_preview(monkeypatch):

@@ -32,7 +32,7 @@ def _fake_shared_execution_plan(**kwargs):
 
 
 def test_v119_build_marker() -> None:
-    assert BUILD_STAGE == "v1.23-hive-ui-api-contract"
+    assert BUILD_STAGE == "v1.25-production-execution-gates"
 
 
 def test_v118_workflow_templates_are_plan_only() -> None:
@@ -54,15 +54,15 @@ def test_v118_workflow_graph_builds_nodes_and_edges(monkeypatch) -> None:
     )
     assert result["ok"] is True
     assert result["build_stage_hint"] == BUILD_STAGE
-    assert result["execution_mode"] == "plan_only_graph"
+    assert result["execution_mode"] == "review_gated_production_graph"
     assert result["can_execute_now"] is False
     assert result["node_count"] == 8
     assert result["edge_count"] == 7
     assert result["risk_summary"]["highest_risk"] == "medium"
-    assert result["nodes"][-1]["status"] == "blocked"
+    assert result["nodes"][-1]["status"] == "approval_required"
 
 
-def test_v119_execution_preview_blocks_adapters(monkeypatch) -> None:
+def test_v119_execution_preview_readies_adapters_after_approval(monkeypatch) -> None:
     monkeypatch.setattr(workflow_graphs, "shared_execution_plan", _fake_shared_execution_plan)
     result = workflow_graphs.controlled_execution_preview(
         settings=SETTINGS,
@@ -73,16 +73,19 @@ def test_v119_execution_preview_blocks_adapters(monkeypatch) -> None:
     )
     assert result["ok"] is True
     assert result["build_stage_hint"] == BUILD_STAGE
-    assert result["execution_mode"] == "controlled_preview_only"
-    assert result["can_execute_now"] is False
-    assert result["adapter_execution_enabled"] is False
+    assert result["execution_mode"] == "controlled_production_preview"
+    assert result["can_execute_now"] is True
+    assert result["adapter_execution_enabled"] is True
+    assert result["blocked_count"] == 0
     adapter = [item for item in result["step_statuses"] if item["node_id"] == "adapter_execution"][0]
-    assert adapter["status"] == "blocked"
-    assert adapter["blocker"] == "execution_adapters_disabled_in_v1_22"
+    assert adapter["status"] == "ready_for_execution"
+    assert adapter["can_run"] is True
+    assert adapter["blocker"] is None
 
 
-def test_v119_policies_are_non_executing() -> None:
+def test_v119_policies_enable_approved_adapter_handoff() -> None:
     result = workflow_graphs.execution_preview_policies()
     assert result["ok"] is True
-    assert result["can_execute_now"] is False
-    assert result["policies"]["adapter_allowlist_required"]["can_execute_now"] is False
+    assert result["can_execute_now"] is True
+    assert result["adapter_execution_enabled"] is True
+    assert result["policies"]["adapter_allowlist_required"]["can_execute_now"] is True

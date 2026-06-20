@@ -115,7 +115,7 @@ def test_v111_route_plan_is_review_gated(monkeypatch):
     assert result["route_plan"][-1]["name"] == "approval_gate"
 
 
-def test_v112_shared_execution_plan_is_plan_only(monkeypatch):
+def test_v112_shared_execution_plan_is_review_gated(monkeypatch):
     monkeypatch.setattr(
         registry,
         "_skill_records",
@@ -131,7 +131,7 @@ def test_v112_shared_execution_plan_is_plan_only(monkeypatch):
     )
 
     assert result["ok"] is True
-    assert result["build_stage_hint"] == "v1.23-hive-ui-api-contract"
-    assert result["execution_mode"] == "plan_only"
+    assert result["build_stage_hint"] == "v1.25-production-execution-gates"
+    assert result["execution_mode"] == "review_gated_execution"
     assert result["can_execute_now"] is False
     assert result["guardrails"]["no_auto_install"] is True

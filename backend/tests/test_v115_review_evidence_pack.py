@@ -66,7 +66,7 @@ def _fake_plan(**kwargs):
 
 
 def test_v115_build_stage():
-    assert BUILD_STAGE == "v1.23-hive-ui-api-contract"
+    assert BUILD_STAGE == "v1.25-production-execution-gates"
 
 
 def test_evidence_pack_audit_trail_and_exports(monkeypatch):
@@ -100,7 +100,7 @@ def test_evidence_pack_audit_trail_and_exports(monkeypatch):
     pack = reviews.execution_review_evidence_pack(settings=_SettingsStub(), plan_id=plan_id)
     assert pack["ok"] is True
     assert pack["evidence_pack"]["plan_id"] == plan_id
-    assert pack["evidence_pack"]["execution_mode"] == "plan_only"
+    assert pack["evidence_pack"]["execution_mode"] == "review_gated_execution"
     assert pack["evidence_pack"]["can_execute_now"] is False
     assert pack["evidence_pack"]["candidate_count"] == 1
 
