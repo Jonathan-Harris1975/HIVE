@@ -3,7 +3,7 @@ from app.services.repo_hygiene import repo_hygiene_report
 
 
 def test_build_stage_is_v113():
-    assert BUILD_STAGE == "v1.26.1-file-to-skill-review-flow"
+    assert BUILD_STAGE == "v1.26.3-skill-catalogue-cleanup"
 
 
 def test_repo_hygiene_report_detects_orphan_and_duplicates(tmp_path):

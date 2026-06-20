@@ -32,7 +32,7 @@ def _fake_shared_execution_plan(**kwargs):
 
 
 def test_v119_build_marker() -> None:
-    assert BUILD_STAGE == "v1.26.1-file-to-skill-review-flow"
+    assert BUILD_STAGE == "v1.26.3-skill-catalogue-cleanup"
 
 
 def test_v118_workflow_templates_are_plan_only() -> None:
