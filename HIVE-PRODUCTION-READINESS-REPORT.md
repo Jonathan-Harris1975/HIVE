@@ -4,7 +4,7 @@
 
 # HIVE Backend Production Readiness Report
 
-**Release:** 1.25.0-production  
+**Release:** 1.26.0-production  
 **Prepared:** 16 June 2026  
 **Target:** Koyeb eco-micro, Cloudflare Pages HIVE-UI client
 
@@ -96,7 +96,7 @@ Both checks are mandatory in `.github/workflows/backend-ci.yml`. A production de
 
 ```env
 APP_ENV=production
-APP_VERSION=1.25.0-production
+APP_VERSION=1.26.0-production
 ADMIN_BEARER_TOKEN=<unique random value of at least 32 characters>
 CORS_ORIGINS=https://<your-hive-ui-domain>
 ALLOWED_HOSTS=<your-service>.koyeb.app
@@ -136,4 +136,4 @@ ADMIN_BEARER_TOKEN='<token>' \
 
 ## Frozen-file assurance
 
-The owner-specified backend, test, and documentation files were not changed. Their SHA-256 hashes match the uploaded source archive. The absent file `docs/releases/v1.25-production-execution-gates.md` was not created or altered.
+The owner-specified backend, test, and documentation files were not changed. Their SHA-256 hashes match the uploaded source archive. The absent file `docs/releases/v1.26-r2-write-skill-models.md` was not created or altered.

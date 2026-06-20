@@ -20,5 +20,5 @@ a7205697a068fb80c3c3a1a392539623987344f3c1d5d6bfd4a1b8ff0dbeba62  backend/tests/
 19d48785476be5141f3d4d09516c948831358b7fccb2ec17988a323e03d4d677  README.md
 68b149fdc1b76245a55b532f6f50b8e466d5137788d10cbd1344abc19309c964  docs/CHANGELOG.md
 d17478e560cf28bceef55f7aa5a62c205cde14609ad467179f13cf58be609757  docs/koyeb-deployment.md
-MISSING  docs/releases/v1.25-production-execution-gates.md
+MISSING  docs/releases/v1.26-r2-write-skill-models.md
 6225fe2860bd923805cbef7ee238454b55028a053b7ec15d3c570c3227a78418  V1.23_UPDATED_FILES_MANIFEST.txt

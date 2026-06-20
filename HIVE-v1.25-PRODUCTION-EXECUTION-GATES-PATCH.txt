@@ -3,7 +3,7 @@ HIVE v1.25 production execution gates patch
 Purpose
 - Remove the production blocker where approved review decisions still reported can_execute_now=false.
 - Remove the blocker where controlled execution previews always reported adapter execution as disabled.
-- Replace the v1.23 API-contract build marker with v1.25-production-execution-gates.
+- Replace the v1.23 API-contract build marker with v1.26-r2-write-skill-models.
 
 Key backend changes
 - Added backend/app/services/execution_adapters.py as the shared production adapter policy surface.
