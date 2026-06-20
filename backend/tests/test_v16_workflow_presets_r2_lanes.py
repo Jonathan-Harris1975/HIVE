@@ -31,7 +31,7 @@ def test_v16_health_reports_workflow_and_r2_lane_flags(monkeypatch, tmp_path) ->
 
     body = client.get("/health").json()
 
-    assert body["build"] == "v1.26-r2-write-skill-models"
+    assert body["build"] == "v1.26.1-file-to-skill-review-flow"
     assert body["workflow_presets_enabled"] is True
     assert body["r2_ecosystem_lanes_enabled"] is True
     lanes = body["storage_flags"]["r2"]["ecosystem_lanes_configured"]

@@ -66,7 +66,7 @@ def _fake_plan(**kwargs):
 
 
 def test_v115_build_stage():
-    assert BUILD_STAGE == "v1.26-r2-write-skill-models"
+    assert BUILD_STAGE == "v1.26.1-file-to-skill-review-flow"
 
 
 def test_evidence_pack_audit_trail_and_exports(monkeypatch):

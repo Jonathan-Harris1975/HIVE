@@ -74,7 +74,7 @@ def _fake_shared_execution_plan(**kwargs):
 
 
 def test_v122_build_marker():
-    assert BUILD_STAGE == "v1.26-r2-write-skill-models"
+    assert BUILD_STAGE == "v1.26.1-file-to-skill-review-flow"
 
 
 def test_v121_policy_profiles_enable_approved_handoff():
