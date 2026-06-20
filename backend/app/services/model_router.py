@@ -213,9 +213,6 @@ class ModelRouter:
             "other",
         )
         chat_selectable, disabled_reason = self._chat_selection_policy(output_modalities)
-        infrastructure_only = any(
-            item in output_modalities for item in {"embeddings", "rerank", "transcription"}
-        ) and "text" not in output_modalities
 
         return {
             "id": model_id,
@@ -240,7 +237,7 @@ class ModelRouter:
             "primary_group": primary_group,
             "group_label": MODEL_GROUP_LABELS.get(primary_group, "Other models"),
             "chat_selectable": chat_selectable,
-            "visible_in_chat_picker": not infrastructure_only,
+            "visible_in_chat_picker": True,
             "disabled_reason": disabled_reason,
         }
 
@@ -314,17 +311,13 @@ class ModelRouter:
 
     def _chat_selection_policy(self, output_modalities: list[str]) -> tuple[bool, str | None]:
         outputs = set(output_modalities)
-        if "video" in outputs:
-            return False, "Video generation needs the later dedicated creation workspace."
-        if "image" in outputs:
-            return False, "Image generation needs the later dedicated creation workspace."
-        if outputs.intersection({"audio", "speech"}):
-            return False, "Audio-output models are discovery-only in standard chat."
-        if outputs.intersection({"embeddings", "rerank", "transcription"}) and "text" not in outputs:
-            return False, "Infrastructure models are not available in the chat picker."
-        if "text" not in outputs:
-            return False, "This model does not provide text output for standard chat."
-        return True, None
+        if "text" in outputs:
+            return True, None
+        if outputs.intersection({"image", "video", "audio", "speech"}):
+            return True, "Enabled for explicit selection; non-text responses may require a dedicated renderer."
+        if outputs.intersection({"embeddings", "rerank", "transcription"}):
+            return True, "Enabled for explicit selection; this is an infrastructure-style model."
+        return True, "Enabled for explicit selection; output modality was not declared by the provider."
 
     def _is_free_model(self, model_id: str, pricing: dict[str, Any]) -> bool:
         if self._is_free_model_id(model_id):

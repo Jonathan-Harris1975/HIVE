@@ -360,7 +360,7 @@ async def _probe_mast_worker(
                     settings.mast_state_max_bytes,
                     bucket=str(lane["bucket"]),
                     public_base_url=lane.get("public_base_url"),
-                    read_only=not bool(lane.get("primary_upload_lane")),
+                    read_only=not bool(lane.get("writable")),
                 ),
                 timeout=settings.repo_health_timeout_seconds,
             )

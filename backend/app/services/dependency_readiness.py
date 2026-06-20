@@ -125,7 +125,7 @@ def _probe_required_r2_lanes(settings: Settings) -> list[DependencyProbe]:
                 )
             )
             continue
-        read_only = not bool(lane.get("primary_upload_lane"))
+        read_only = not bool(lane.get("writable"))
         try:
             storage.list_objects_page(
                 prefix="",
