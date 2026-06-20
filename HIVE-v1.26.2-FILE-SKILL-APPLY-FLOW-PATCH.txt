@@ -1,0 +1,5 @@
+HIVE v1.26.2 file-skill apply flow
+
+- File chat now accepts an existing skill_id/skill_title and injects the selected skill metadata as guidance while analysing the attached file.
+- /v1/skills/from-file is now guarded: creating a new skill from a file is only allowed for descriptor files selected from the hive_skills lane under skills/.
+- Ordinary uploaded or brand-asset files should be paired with an existing skill instead of being silently registered as new skill records.
