@@ -92,6 +92,11 @@ class R2Storage:
             and settings.cf_r2_secret_access_key
             and settings.cf_r2_bucket
         )
+        self.write_enabled = bool(
+            settings.r2_endpoint_url
+            and settings.cf_r2_access_key_id
+            and settings.cf_r2_secret_access_key
+        )
         self.read_enabled = bool(settings.r2_read_credentials_configured)
         self._client = None
         self._read_client = None
@@ -107,8 +112,8 @@ class R2Storage:
                 )
             return self._read_client
 
-        if not self.enabled:
-            raise RuntimeError("Cloudflare R2 is not configured")
+        if not self.write_enabled:
+            raise RuntimeError("Cloudflare R2 write access is not configured")
         if self._client is None:
             self._client = self._build_client(
                 self.settings.cf_r2_access_key_id,
@@ -150,26 +155,37 @@ class R2Storage:
             return f"{base.rstrip('/')}/{quote(clean_key, safe='/~')}"
         return None
 
-    def put_file(self, path: Path, key: str, content_type: str | None = None) -> StoredObject:
+    def put_file(
+        self,
+        path: Path,
+        key: str,
+        content_type: str | None = None,
+        *,
+        bucket: str | None = None,
+        public_base_url: str | None | object = _DEFAULT_PUBLIC_BASE,
+    ) -> StoredObject:
         digest = sha256_file(path)
         extra_args = {"ContentType": content_type} if content_type else {}
+        bucket_name = bucket or self.settings.cf_r2_bucket
+        if not bucket_name:
+            raise RuntimeError("R2 upload bucket is not configured")
         try:
             self.client().upload_file(
                 str(path),
-                self.settings.cf_r2_bucket,
+                bucket_name,
                 key,
                 ExtraArgs=extra_args,
             )
         except ClientError as exc:
-            raise RuntimeError(f"R2 upload failed for {key}: {_format_client_error(exc)}") from exc
+            raise RuntimeError(f"R2 upload failed for {bucket_name}/{key}: {_format_client_error(exc)}") from exc
         except BotoCoreError as exc:
-            raise RuntimeError(f"R2 upload failed for {key}: {exc}") from exc
+            raise RuntimeError(f"R2 upload failed for {bucket_name}/{key}: {exc}") from exc
         return StoredObject(
             key=key,
-            bucket=self.settings.cf_r2_bucket,
+            bucket=bucket_name,
             size_bytes=path.stat().st_size,
             sha256=digest,
-            public_url=self.public_url_for_key(key),
+            public_url=self.public_url_for_key(key, public_base_url=public_base_url),
         )
 
     def list_keys(self, prefix: str = "", limit: int = 1000) -> list[str]:
