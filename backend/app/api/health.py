@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from app.core.config import get_settings
 from app.core.version import BUILD_STAGE
 from app.services.embeddings import CloudflareEmbeddingsClient
+from app.services.execution_adapters import execution_adapter_policy
 from app.storage.d1 import D1MetadataStore
 from app.storage.r2 import R2Storage
 from app.storage.sql_store import SqlStore
@@ -57,6 +58,8 @@ async def health() -> dict[str, object]:
         "env": settings.app_env,
         "workflow_presets_enabled": True,
         "r2_ecosystem_lanes_enabled": True,
+        "execution_adapters_enabled": bool(execution_adapter_policy(settings)["enabled"]),
+        "execution_adapter_policy": execution_adapter_policy(settings),
         "free_tier": {
             "enabled": settings.hive_free_tier_mode,
             "platform": "koyeb-free-web-service" if settings.hive_free_tier_mode else None,
