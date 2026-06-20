@@ -4,7 +4,7 @@ import re
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from app.core.config import Settings, get_settings
@@ -79,12 +79,31 @@ class SkillFromFileRequest(BaseModel):
     dry_run: bool = False
 
 
+def _is_hive_skills_descriptor_source(source_lane: str, object_key: str) -> bool:
+    lane = (source_lane or "").strip().lower().replace("-", "_")
+    if lane in {"skill", "skills"}:
+        lane = "hive_skills"
+    key = (object_key or "").replace("\\", "/").lstrip("/")
+    return lane == "hive_skills" and key.startswith("skills/")
+
+
 @router.post("/skills/from-file")
 def skill_from_file(
     payload: SkillFromFileRequest,
     settings: Settings = Depends(get_settings),
 ) -> dict[str, object]:
-    """Register an uploaded object as a reviewed HIVE skill descriptor in D1."""
+    """Register a reviewed descriptor from the HIVE skills folder in D1."""
+
+    if not _is_hive_skills_descriptor_source(payload.source_lane, payload.object_key):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": "Create skill from file is only available for descriptor files selected from the hive_skills lane under skills/.",
+                "error_code": "skill_source_not_hive_skills_folder",
+                "required_lane": "hive_skills",
+                "required_prefix": "skills/",
+            },
+        )
 
     d1 = D1MetadataStore(settings)
     skill_id = f"upload-{uuid.uuid4().hex[:12]}"
@@ -114,11 +133,11 @@ def skill_from_file(
         "indexable_text": " ".join(
             part for part in [title, description, payload.object_key, repo, " ".join(tags)] if part
         ),
-        "source_register": "HIVE reviewed file-to-skill registration",
+        "source_register": "HIVE reviewed skills-folder descriptor registration",
         "source_manifest_key": None,
         "source_lane": payload.source_lane,
         "source_object_key": payload.object_key,
-        "created_from_file": True,
+        "created_from_hive_skills_folder_file": True,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     item = {

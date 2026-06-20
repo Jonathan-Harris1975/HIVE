@@ -27,6 +27,7 @@ from app.services.brand_modes import build_system_prompt
 from app.services.context_manager import ContextWindow
 from app.services.model_router import Mode, ModelRouter
 from app.services.openrouter import OpenRouterClient
+from app.services.skill_registry import get_skill_catalogue_item
 from app.services.workflow_presets import (
     allowed_workflow_presets,
     apply_workflow_preset_to_request,
@@ -141,6 +142,16 @@ class ChatWithFileRequest(BaseModel):
         None,
         max_length=80,
         description="Optional v1.6 preset such as audit_report_review, repo_debug_bundle, ci_log_analysis, social_content_qa, podcast_episode_review, or ebook_keyword_review.",
+    )
+    skill_id: str | None = Field(
+        None,
+        max_length=120,
+        description="Optional existing HIVE skill id to apply as guidance while working with this file.",
+    )
+    skill_title: str | None = Field(
+        None,
+        max_length=180,
+        description="UI display title for the selected skill, used as a fallback when the registry lookup is unavailable.",
     )
 
 
@@ -1233,6 +1244,7 @@ async def chat_with_file(
             "fallback_models": fallback_models,
             "effective_mode": str(effective_mode),
             "workflow_preset": workflow_metadata,
+            "selected_skill": prompt_context.get("selected_skill"),
             "prompt_message_count": len(payload.get("messages", [])),
             "file_excerpt_chars": len(excerpt),
             "source": source,
@@ -1320,6 +1332,7 @@ async def chat_with_file(
             "source": source,
             "retrieval_metadata": retrieval_metadata,
             "workflow_preset": workflow_metadata,
+            "selected_skill": prompt_context.get("selected_skill"),
             "timings": timings,
             "test_run_id": request.test_run_id,
         },
@@ -1339,6 +1352,7 @@ async def chat_with_file(
         "attempts": completion.get("hive_attempts"),
         "stage": "complete",
         "workflow_preset": workflow_metadata,
+        "selected_skill": prompt_context.get("selected_skill"),
         "timings": _finalise_timings(timings, total_started),
         "conversation_id": db_record.get("conversation_id") or request.conversation_id,
         "db_recorded": bool(db_record.get("ok")),
@@ -1627,6 +1641,70 @@ def _finalise_timings(
     return final
 
 
+def _selected_skill_context(request: ChatWithFileRequest, settings: Settings) -> dict[str, object] | None:
+    skill_id = (request.skill_id or "").strip()
+    fallback_title = (request.skill_title or skill_id).strip()
+    if not skill_id:
+        return None
+    try:
+        lookup = get_skill_catalogue_item(settings=settings, skill_id=skill_id)
+    except Exception as exc:  # defensive: a skill lookup must not break file chat
+        return {
+            "id": skill_id,
+            "title": fallback_title or skill_id,
+            "description": "",
+            "lookup_ok": False,
+            "lookup_error": str(exc),
+        }
+    if not lookup.get("ok"):
+        return {
+            "id": skill_id,
+            "title": fallback_title or skill_id,
+            "description": "",
+            "lookup_ok": False,
+            "error_code": lookup.get("error_code"),
+        }
+    item = lookup.get("item") if isinstance(lookup.get("item"), dict) else {}
+    metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    return {
+        "id": str(item.get("id") or metadata.get("skill_id") or skill_id),
+        "source_id": str(item.get("source_id") or metadata.get("skill_id") or skill_id),
+        "title": str(item.get("title") or metadata.get("name") or fallback_title or skill_id),
+        "description": str(metadata.get("description") or item.get("description") or ""),
+        "repo": metadata.get("repo") or metadata.get("repos"),
+        "hive_lane": metadata.get("hive_lane"),
+        "risk_level": metadata.get("risk_level"),
+        "priority_tier": metadata.get("priority_tier"),
+        "tags": metadata.get("tags"),
+        "descriptor_url": metadata.get("descriptor_url") or item.get("url"),
+        "lookup_ok": True,
+    }
+
+
+def _selected_skill_instruction(selected_skill: dict[str, object] | None) -> str | None:
+    if not selected_skill:
+        return None
+    title = str(selected_skill.get("title") or selected_skill.get("id") or "selected skill")
+    parts = [
+        "Apply the selected existing HIVE skill to the attached file.",
+        f"Skill: {title}",
+    ]
+    for label, key in [
+        ("Description", "description"),
+        ("Lane", "hive_lane"),
+        ("Risk", "risk_level"),
+        ("Priority", "priority_tier"),
+        ("Descriptor", "descriptor_url"),
+    ]:
+        value = selected_skill.get(key)
+        if value:
+            parts.append(f"{label}: {value}")
+    parts.append(
+        "Use the skill as guidance only. Do not claim the skill executed external tools unless the response explicitly reports an approved execution path."
+    )
+    return "\n".join(parts)
+
+
 def _build_file_chat_payload(
     *,
     request: ChatWithFileRequest,
@@ -1658,6 +1736,10 @@ def _build_file_chat_payload(
             f"{preset.name}. {preset.prompt_instruction} "
             f"Preferred output shape: {preset.output_shape}.",
         )
+    selected_skill = _selected_skill_context(request, settings)
+    selected_skill_instruction = _selected_skill_instruction(selected_skill)
+    if selected_skill_instruction:
+        window.add("system", selected_skill_instruction)
     for turn in request.history:
         window.add(turn.role, turn.content)
     window.add(
@@ -1688,6 +1770,7 @@ def _build_file_chat_payload(
         "fallback_models": fallback_models,
         "selected_model": selected_model,
         "effective_mode": effective_mode,
+        "selected_skill": selected_skill,
     }
 
 
