@@ -2,7 +2,7 @@ from app.core.config import Settings
 from app.services.model_router import ModelRouter
 
 
-def test_image_generation_model_is_selectable() -> None:
+def test_image_generation_model_is_discovery_only() -> None:
     router = ModelRouter(Settings())
     summary = router.summarise_model(
         {
@@ -17,11 +17,11 @@ def test_image_generation_model_is_selectable() -> None:
     )
 
     assert summary["primary_group"] == "image_generation"
-    assert summary["chat_selectable"] is True
-    assert "dedicated renderer" in summary["disabled_reason"]
+    assert summary["chat_selectable"] is False
+    assert "Discovery-only" in summary["disabled_reason"]
 
 
-def test_video_generation_model_is_selectable() -> None:
+def test_video_generation_model_is_discovery_only() -> None:
     router = ModelRouter(Settings())
     summary = router.summarise_model(
         {
@@ -35,7 +35,8 @@ def test_video_generation_model_is_selectable() -> None:
     )
 
     assert summary["primary_group"] == "video_generation"
-    assert summary["chat_selectable"] is True
+    assert summary["chat_selectable"] is False
+    assert "creation workspace" in summary["disabled_reason"]
 
 
 def test_configured_free_model_has_roles_and_free_flag() -> None:
@@ -96,4 +97,4 @@ def test_free_image_model_stays_in_image_generation_group() -> None:
     assert summary["is_free"] is True
     assert "free" in summary["groups"]
     assert summary["primary_group"] == "image_generation"
-    assert summary["chat_selectable"] is True
+    assert summary["chat_selectable"] is False
