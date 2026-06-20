@@ -11,6 +11,7 @@ from app.core.config import Settings, get_settings
 from app.core.security import require_admin
 from app.storage.d1 import D1MetadataStore
 from app.services.skill_registry import (
+    cleanup_uploaded_file_skill_records,
     get_skill_catalogue_item,
     import_skills_manifest,
     list_skills_catalogue,
@@ -42,6 +43,12 @@ class SkillManifestImportRequest(BaseModel):
 class SkillIndexRebuildRequest(BaseModel):
     dry_run: bool = True
     limit: int | None = Field(None, ge=1, le=1000)
+
+
+class UploadedFileSkillCleanupRequest(BaseModel):
+    dry_run: bool = True
+    limit: int = Field(500, ge=1, le=1000)
+    confirm: str | None = Field(None, max_length=80)
 
 
 class SkillRecommendationRequest(BaseModel):
@@ -174,6 +181,22 @@ def skill_from_file(
         "message": "Reviewed file skill registered." if result.get("ok") else "D1 write failed.",
     }
 
+
+
+
+@router.post("/skills/cleanup-uploaded-file-skills")
+def cleanup_uploaded_file_skills(
+    payload: UploadedFileSkillCleanupRequest,
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    """Preview or delete legacy ordinary-file skill records from D1 only."""
+
+    return cleanup_uploaded_file_skill_records(
+        settings=settings,
+        dry_run=payload.dry_run,
+        limit=payload.limit,
+        confirm=payload.confirm,
+    )
 
 @router.get("/skills/status")
 def skills_status(settings: Settings = Depends(get_settings)) -> dict[str, object]:
