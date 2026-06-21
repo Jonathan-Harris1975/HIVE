@@ -6,9 +6,114 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable
 
-SUPPORTED_TEXT_SUFFIXES = {
-    ".txt", ".md", ".log", ".py", ".js", ".ts", ".tsx", ".jsx", ".css", ".html", ".htm",
-    ".json", ".csv", ".pdf", ".docx", ".xlsx",
+GITHUB_REPO_TEXT_SUFFIXES = {
+    ".adoc",
+    ".astro",
+    ".bash",
+    ".bat",
+    ".c",
+    ".cfg",
+    ".cmd",
+    ".conf",
+    ".cpp",
+    ".cs",
+    ".css",
+    ".csv",
+    ".cxx",
+    ".docx",
+    ".env",
+    ".fish",
+    ".fs",
+    ".fsx",
+    ".go",
+    ".gradle",
+    ".graphql",
+    ".gql",
+    ".h",
+    ".hcl",
+    ".hpp",
+    ".html",
+    ".htm",
+    ".ini",
+    ".ipynb",
+    ".java",
+    ".js",
+    ".json",
+    ".jsonc",
+    ".jsonl",
+    ".jsx",
+    ".kt",
+    ".kts",
+    ".less",
+    ".lock",
+    ".log",
+    ".lua",
+    ".mjs",
+    ".md",
+    ".mdx",
+    ".pdf",
+    ".php",
+    ".pl",
+    ".pm",
+    ".properties",
+    ".proto",
+    ".ps1",
+    ".py",
+    ".r",
+    ".rb",
+    ".rs",
+    ".rss",
+    ".rst",
+    ".sass",
+    ".sbt",
+    ".scala",
+    ".scss",
+    ".sh",
+    ".sql",
+    ".svelte",
+    ".svg",
+    ".swift",
+    ".tf",
+    ".tfvars",
+    ".toml",
+    ".ts",
+    ".tsv",
+    ".tsx",
+    ".txt",
+    ".vue",
+    ".xml",
+    ".xlsx",
+    ".yaml",
+    ".yml",
+    ".zsh",
+}
+
+SUPPORTED_TEXT_SUFFIXES = GITHUB_REPO_TEXT_SUFFIXES
+
+PLAIN_TEXT_SUFFIXES = GITHUB_REPO_TEXT_SUFFIXES - {".csv", ".docx", ".html", ".htm", ".json", ".pdf", ".xlsx"}
+
+SUPPORTED_TEXT_FILENAMES = {
+    ".dockerignore",
+    ".editorconfig",
+    ".env",
+    ".env.example",
+    ".env.local",
+    ".eslintignore",
+    ".eslintrc",
+    ".gitattributes",
+    ".gitignore",
+    ".npmrc",
+    ".nvmrc",
+    ".prettierignore",
+    ".prettierrc",
+    ".python-version",
+    ".ruby-version",
+    "dockerfile",
+    "license",
+    "makefile",
+    "procfile",
+    "readme",
+    "requirements",
 }
 
 
@@ -55,10 +160,16 @@ def extract_text_with_metadata(
     limit = _safe_limit(max_chars)
 
     try:
-        if suffix in {".txt", ".md", ".log", ".py", ".js", ".ts", ".tsx", ".jsx", ".css"}:
+        if suffix in PLAIN_TEXT_SUFFIXES or path.name.lower() in SUPPORTED_TEXT_FILENAMES:
             text = path.read_text(encoding="utf-8", errors="replace")
             text, truncated = _truncate(text, limit)
-            return ExtractedText(text=text, supported=True, extractor="plain_text", suffix=suffix, truncated=truncated)
+            return ExtractedText(
+                text=text,
+                supported=True,
+                extractor="plain_text",
+                suffix=suffix or path.name.lower(),
+                truncated=truncated,
+            )
         if suffix in {".html", ".htm"}:
             return extract_html(path, max_chars=limit)
         if suffix == ".json":

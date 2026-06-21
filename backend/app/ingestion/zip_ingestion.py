@@ -97,6 +97,7 @@ def extract_text_from_zip(
     max_total_text_chars: int,
     max_depth: int,
     supported_suffixes: set[str] | None = None,
+    supported_filenames: set[str] | None = None,
 ) -> dict[str, object]:
     """Extract bounded text from a ZIP, including nested ZIPs when enabled.
 
@@ -105,6 +106,7 @@ def extract_text_from_zip(
     """
 
     suffixes = {item.lower() for item in (supported_suffixes or SUPPORTED_TEXT_SUFFIXES)}
+    filenames = {item.lower() for item in (supported_filenames or set())}
     items: list[ZipExtractItem] = []
     skipped: list[ZipSkippedItem] = []
     text_parts: list[str] = []
@@ -124,6 +126,7 @@ def extract_text_from_zip(
             max_total_text_chars=max_total_text_chars,
             max_depth=max_depth,
             supported_suffixes=suffixes,
+            supported_filenames=filenames,
             text_parts=text_parts,
             items=items,
             skipped=skipped,
@@ -172,6 +175,7 @@ def _extract_zip_recursive(
     max_total_text_chars: int,
     max_depth: int,
     supported_suffixes: set[str],
+    supported_filenames: set[str],
     text_parts: list[str],
     items: list[ZipExtractItem],
     skipped: list[ZipSkippedItem],
@@ -213,6 +217,7 @@ def _extract_zip_recursive(
                     max_total_text_chars=max_total_text_chars,
                     max_depth=max_depth,
                     supported_suffixes=supported_suffixes,
+                    supported_filenames=supported_filenames,
                     text_parts=text_parts,
                     items=items,
                     skipped=skipped,
@@ -220,8 +225,16 @@ def _extract_zip_recursive(
                 )
                 continue
 
-            if suffix not in supported_suffixes:
-                skipped.append(ZipSkippedItem(filename=full_name, size=member.size, depth=depth, reason="unsupported_suffix"))
+            filename = Path(member.filename).name.lower()
+            if suffix not in supported_suffixes and filename not in supported_filenames:
+                skipped.append(
+                    ZipSkippedItem(
+                        filename=full_name,
+                        size=member.size,
+                        depth=depth,
+                        reason="unsupported_suffix_or_filename",
+                    )
+                )
                 continue
 
             temp_path = tmp_root / f"member-{len(items)}{suffix or '.txt'}"
