@@ -124,6 +124,8 @@ def test_sql_store_lists_conversations_files_and_costs(tmp_path: Path) -> None:
     assert conversations["ok"] is True
     assert conversations["count"] == 1
     assert conversations["conversations"][0]["id"] == "conv-1"
+    assert conversations["conversations"][0]["total_tokens"] == 15
+    assert conversations["conversations"][0]["total_cost_usd"] == 0.001
 
     conversation = store.get_conversation("conv-1")
     assert conversation["ok"] is True
