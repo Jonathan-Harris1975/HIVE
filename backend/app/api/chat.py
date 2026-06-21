@@ -4,7 +4,7 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -16,7 +16,7 @@ from app.services.context_manager import ContextWindow
 from app.services.model_router import Mode, ModelRouter
 from app.services.openrouter import OpenRouterClient
 from app.services.skill_registry import build_skill_context
-from app.storage.sql_store import SqlStore
+from app.storage.sql_store import SqlStore, _default_conversation_title
 
 router = APIRouter(tags=["chat"], dependencies=[Depends(require_admin)])
 
@@ -44,11 +44,38 @@ class ChatRequest(BaseModel):
     skill_limit: int | None = Field(None, ge=1, le=8)
 
 
+class AutoTitleRequest(BaseModel):
+    force: bool = False
+
+
 class AutoTitleResponse(BaseModel):
     ok: bool
     conversation_id: str
     title: str | None = None
+    auto_titled: bool = False
     skipped: bool = False
+    error: str | None = None
+
+
+class ConversationSummary(BaseModel):
+    id: str
+    mode: str | None = None
+    model: str | None = None
+    title: str | None = None
+    auto_titled: bool = False
+    created_at: str | None = None
+    updated_at: str | None = None
+    message_count: int = 0
+    total_tokens: int | None = None
+    total_cost_usd: float | None = None
+    cost_usd: float | None = None
+
+
+class ConversationListResponse(BaseModel):
+    ok: bool
+    enabled: bool | None = None
+    count: int | None = None
+    conversations: list[ConversationSummary] = Field(default_factory=list)
     error: str | None = None
 
 
@@ -106,9 +133,28 @@ def build_payload_with_context(
 
 
 
+@router.get("/chat/conversations", response_model=ConversationListResponse)
+def list_chat_conversations(
+    limit: int = Query(50, ge=1, le=200),
+    settings: Settings = Depends(get_settings),
+) -> ConversationListResponse:
+    """Return persisted chat conversations with auto-title and usage metadata."""
+
+    result = SqlStore(settings).list_conversations(limit=limit)
+    if not result.get("ok"):
+        return ConversationListResponse(
+            ok=False,
+            enabled=bool(result.get("enabled")),
+            error=str(result.get("error") or "conversation_storage_unavailable"),
+        )
+    conversations = [ConversationSummary(**item) for item in result.get("conversations", []) if isinstance(item, dict)]
+    return ConversationListResponse(ok=True, enabled=True, count=len(conversations), conversations=conversations)
+
+
 @router.post("/chat/conversations/{conversation_id}/auto-title", response_model=AutoTitleResponse)
 async def auto_title_conversation(
     conversation_id: str,
+    request: AutoTitleRequest | None = None,
     settings: Settings = Depends(get_settings),
 ) -> AutoTitleResponse:
     """Generate and persist a concise title from the first stored exchange."""
@@ -120,10 +166,21 @@ async def auto_title_conversation(
     if not user_message or not assistant_reply:
         return AutoTitleResponse(ok=True, conversation_id=conversation_id, skipped=True)
 
+    state = store.conversation_auto_title_state(conversation_id)
+    if state.get("ok"):
+        current_title = str(state.get("title") or "").strip()
+        current_auto_titled = bool(state.get("auto_titled"))
+        default_title = _default_conversation_title(user_message) or ""
+        force = bool(request.force) if request else False
+        if current_auto_titled and current_title and not force:
+            return AutoTitleResponse(ok=True, conversation_id=conversation_id, title=current_title, auto_titled=True, skipped=True)
+        if current_title and not current_auto_titled and current_title != default_title and not force:
+            return AutoTitleResponse(ok=True, conversation_id=conversation_id, title=current_title, auto_titled=False, skipped=True)
+
     payload: dict[str, object] = {
         "model": settings.default_model,
         "messages": [
-            {"role": "system", "content": "Generate a concise 4-6 word title for this conversation. Return only the title, no punctuation."},
+            {"role": "system", "content": "Generate a concise 4–6 word title for this conversation. Return only the title, no punctuation."},
             {
                 "role": "user",
                 "content": f"User: {user_message[:1200]}\nAssistant: {assistant_reply[:1200]}",
@@ -142,10 +199,10 @@ async def auto_title_conversation(
     if not title:
         return AutoTitleResponse(ok=True, conversation_id=conversation_id, skipped=True, error="empty_title")
 
-    result = store.rename_conversation(conversation_id, title)
+    result = store.set_auto_title(conversation_id, title)
     if not result.get("ok"):
         return AutoTitleResponse(ok=False, conversation_id=conversation_id, title=title, error=str(result.get("error") or "title_not_saved"))
-    return AutoTitleResponse(ok=True, conversation_id=conversation_id, title=title)
+    return AutoTitleResponse(ok=True, conversation_id=conversation_id, title=title, auto_titled=True)
 
 
 @router.post("/chat/stream")
