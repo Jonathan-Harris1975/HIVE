@@ -39,7 +39,7 @@ class ChatRequest(BaseModel):
     use_persisted_history: bool = True
     db_history_limit: int = Field(20, ge=0, le=100)
     test_run_id: str | None = Field(None, max_length=120)
-    use_skills: bool = True
+    use_skills: bool = False
     skill_repo: str | None = Field(None, max_length=120)
     skill_lane: str | None = Field(None, max_length=120)
     skill_risk_ceiling: Literal["low", "medium", "high"] | None = None
