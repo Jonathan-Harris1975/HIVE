@@ -440,3 +440,117 @@ def test_chat_with_file_can_use_persisted_chunks(monkeypatch, tmp_path):
         assert "badger" in body["reply"].lower()
     finally:
         app.dependency_overrides.clear()
+
+
+def test_chat_with_multiple_files_builds_combined_context(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    client = TestClient(app)
+    first_key = _upload_text(client, content="First file says Alpha evidence.")
+    second_response = client.post(
+        "/v1/files/upload-text",
+        json={"filename": "second-note.txt", "content": "Second file says Beta evidence."},
+    )
+    assert second_response.status_code == 200
+    second_key = second_response.json()["file"]["object_key"]
+
+    async def fake_chat_completion(self, payload, fallback_models=None):  # noqa: ANN001, ARG001
+        joined = "\n".join(message["content"] for message in payload["messages"])
+        assert "Attached file count: 2" in joined
+        assert "First file says Alpha evidence." in joined
+        assert "Second file says Beta evidence." in joined
+        assert first_key not in joined
+        assert second_key not in joined
+        return {
+            "model": payload["model"],
+            "provider": "test-provider",
+            "usage": {"total_tokens": 20, "cost": 0},
+            "choices": [{"message": {"content": "Alpha and Beta evidence are both present."}, "finish_reason": "stop"}],
+        }
+
+    monkeypatch.setattr(OpenRouterClient, "chat_completion", fake_chat_completion)
+
+    response = client.post(
+        "/v1/chat/with-file",
+        json={
+            "object_key": first_key,
+            "files": [
+                {"lane": "uploads", "object_key": first_key, "name": "first-note.txt"},
+                {"lane": "uploads", "object_key": second_key, "name": "second-note.txt"},
+            ],
+            "message": "Compare these files.",
+            "model": "poolside/laguna-xs.2:free",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert body["file_count"] == 2
+    assert len(body["source_citations"]) == 2
+    assert body["source_citation"]["label"] == "2 attached files"
+    assert "Alpha and Beta" in body["reply"]
+
+
+def test_chat_with_zip_auto_chunk_strips_nul_before_sql_persistence(monkeypatch, tmp_path):
+    import base64
+    import io
+    import zipfile
+
+    from app.core.config import Settings, get_settings
+
+    monkeypatch.chdir(tmp_path)
+    db_path = tmp_path / "hive.sqlite3"
+    settings = Settings(
+        APP_ENV="test",
+        DATABASE_ENABLED=True,
+        DATABASE_URL=f"sqlite:///{db_path}",
+        OPENROUTER_API_KEY="test",
+        FILE_CHUNK_MAX_CHARS=120,
+        FILE_CHUNK_OVERLAP_CHARS=20,
+    )
+    app.dependency_overrides[get_settings] = lambda: settings
+    try:
+        client = TestClient(app)
+        assert client.post("/v1/db/init").json()["ok"] is True
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            archive.writestr("src/example.txt", "alpha\x00 beta retrieval target")
+
+        upload = client.post(
+            "/v1/files/upload-base64",
+            json={
+                "filename": "repo.zip",
+                "content_type": "application/zip",
+                "content_base64": base64.b64encode(buffer.getvalue()).decode("ascii"),
+            },
+        )
+        assert upload.status_code == 200
+        key = upload.json()["file"]["object_key"]
+
+        dry_run = client.post(
+            "/v1/chat/with-file",
+            json={
+                "object_key": key,
+                "message": "Review the ZIP.",
+                "chunk_query": "beta retrieval target",
+                "model": "poolside/laguna-xs.2:free",
+                "dry_run": True,
+                "use_chunks": True,
+                "auto_chunk": True,
+                "max_file_chars": 4000,
+            },
+        )
+        assert dry_run.status_code == 200
+        body = dry_run.json()
+        assert body["ok"] is True
+        assert body["source"]["chunked"] is True
+        assert "\x00" not in str(body)
+
+        listed = client.get("/v1/files/chunks", params={"key": key, "include_content": True})
+        assert listed.status_code == 200
+        chunks = listed.json()["chunks"]
+        assert chunks
+        assert "\x00" not in str(chunks)
+        assert any("�" in chunk.get("content", "") for chunk in chunks)
+    finally:
+        app.dependency_overrides.clear()
