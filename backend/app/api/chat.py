@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import time
 import uuid
 from collections.abc import AsyncIterator
 from typing import Any, Literal
@@ -219,13 +221,16 @@ async def chat_stream(
 
     conversation_id = request.conversation_id or str(uuid.uuid4())
     request_with_id = request.model_copy(update={"conversation_id": conversation_id})
+    build_started = time.perf_counter()
     payload, fallback_models, skill_context = build_payload_with_context(request_with_id, settings)
+    request_timings = {"payload_build_seconds": round(time.perf_counter() - build_started, 3)}
     stream = _stream_and_record_chat(
         request=request_with_id,
         payload=payload,
         fallback_models=fallback_models,
         settings=settings,
         skill_context=skill_context,
+        request_timings=request_timings,
     )
     return StreamingResponse(heartbeat_stream(stream), media_type="text/event-stream")
 
@@ -237,17 +242,21 @@ async def _stream_and_record_chat(
     fallback_models: list[str],
     settings: Settings,
     skill_context: dict[str, object] | None = None,
+    request_timings: dict[str, float] | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     conversation_id = request.conversation_id or str(uuid.uuid4())
     client = OpenRouterClient(settings)
     reply_parts: list[str] = []
     recorded = False
+    stream_started = time.perf_counter()
 
     meta_event: dict[str, Any] = {
         "event": "meta",
         "type": "conversation",
         "conversation_id": conversation_id,
     }
+    if request_timings is not None:
+        meta_event["timings"] = request_timings
     if skill_context is not None:
         meta_event["skills_used"] = _skill_summaries(skill_context)
         meta_event["skill_context_status"] = _skill_context_status(skill_context)
@@ -264,7 +273,8 @@ async def _stream_and_record_chat(
                 continue
 
             if event_name == "done":
-                result = _record_streamed_turn(
+                result = await asyncio.to_thread(
+                    _record_streamed_turn,
                     request=request,
                     event=event,
                     reply="".join(reply_parts),
@@ -272,6 +282,10 @@ async def _stream_and_record_chat(
                     settings=settings,
                     stream_ended_early=False,
                     skill_context=skill_context,
+                    timings={
+                        **(request_timings or {}),
+                        "stream_total_seconds": round(time.perf_counter() - stream_started, 3),
+                    },
                 )
                 recorded = True
                 yield {
@@ -281,6 +295,10 @@ async def _stream_and_record_chat(
                     "db_error": result.get("error"),
                     "skills_used": _skill_summaries(skill_context),
                     "skill_context_status": _skill_context_status(skill_context),
+                    "timings": {
+                        **(request_timings or {}),
+                        "stream_total_seconds": round(time.perf_counter() - stream_started, 3),
+                    },
                 }
                 return
 
@@ -290,7 +308,8 @@ async def _stream_and_record_chat(
         # already generated so the database and conversation list do not silently
         # diverge from what the user saw.
         if not recorded and reply_parts:
-            _record_streamed_turn(
+            await asyncio.to_thread(
+                _record_streamed_turn,
                 request=request,
                 event={"ok": False},
                 reply="".join(reply_parts),
@@ -298,6 +317,10 @@ async def _stream_and_record_chat(
                 settings=settings,
                 stream_ended_early=True,
                 skill_context=skill_context,
+                timings={
+                    **(request_timings or {}),
+                    "stream_total_seconds": round(time.perf_counter() - stream_started, 3),
+                },
             )
 
 
@@ -310,6 +333,7 @@ def _record_streamed_turn(
     settings: Settings,
     stream_ended_early: bool,
     skill_context: dict[str, object] | None = None,
+    timings: dict[str, float] | None = None,
 ) -> dict[str, object]:
     usage = event.get("usage")
     finish_ok = bool(event.get("ok")) and not stream_ended_early
@@ -328,6 +352,7 @@ def _record_streamed_turn(
             "test_run_id": request.test_run_id,
             "skills_used": _skill_summaries(skill_context),
             "skill_context_status": _skill_context_status(skill_context),
+            "timings": timings or {},
         },
     )
 
@@ -351,7 +376,8 @@ async def chat(
     model_used = completion.get("model") or payload.get("model")
     provider = completion.get("provider")
     usage = completion.get("usage")
-    db_record = SqlStore(settings).record_chat(
+    db_record = await asyncio.to_thread(
+        SqlStore(settings).record_chat,
         conversation_id=request.conversation_id,
         mode=str(request.mode),
         user_message=request.message,

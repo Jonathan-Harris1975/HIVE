@@ -1157,11 +1157,13 @@ async def chat_with_file(
         if not chunks and request.auto_chunk:
             stage = "chunk_index"
             try:
-                chunk_index_result = _time_stage(
-                    timings,
-                    "chunk_index_seconds",
-                    lambda: _chunk_file_for_chat(clean_key=clean_key, settings=settings),
+                chunk_index_started = time.perf_counter()
+                chunk_index_result = await asyncio.to_thread(
+                    _chunk_file_for_chat,
+                    clean_key=clean_key,
+                    settings=settings,
                 )
+                timings["chunk_index_seconds"] = round(time.perf_counter() - chunk_index_started, 3)
             except FileNotFoundError as exc:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
             except ValueError as exc:
@@ -1243,15 +1245,14 @@ async def chat_with_file(
     else:
         stage = "read_file"
         try:
-            direct_context = _time_stage(
-                timings,
-                "read_file_seconds",
-                lambda: _read_file_sources_for_chat(
-                    settings=settings,
-                    source_refs=source_refs,
-                    max_chars=request.max_file_chars or settings.max_file_chat_chars,
-                ),
+            read_started = time.perf_counter()
+            direct_context = await asyncio.to_thread(
+                _read_file_sources_for_chat,
+                settings=settings,
+                source_refs=source_refs,
+                max_chars=request.max_file_chars or settings.max_file_chat_chars,
             )
+            timings["read_file_seconds"] = round(time.perf_counter() - read_started, 3)
         except FileNotFoundError as exc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
         except ValueError as exc:
@@ -1393,7 +1394,8 @@ async def chat_with_file(
 
     stage = "db_record"
     db_started = time.perf_counter()
-    db_record = SqlStore(settings).record_chat(
+    db_record = await asyncio.to_thread(
+        SqlStore(settings).record_chat,
         conversation_id=request.conversation_id,
         mode=str(request.mode),
         user_message=request.message,
