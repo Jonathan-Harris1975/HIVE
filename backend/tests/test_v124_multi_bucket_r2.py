@@ -312,3 +312,41 @@ def test_delete_r2_lane_objects_refuses_non_writable_lanes(monkeypatch) -> None:
 
     assert response.status_code == 503
     assert called is False
+
+
+def test_recursive_lane_list_flattens_selected_prefix(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_list(self, **kwargs):  # noqa: ANN001, ARG001
+        captured.update(kwargs)
+        return ObjectListPage(
+            objects=[
+                ObjectSummary(
+                    key="reports/2026/june/audit.md",
+                    size_bytes=17,
+                    last_modified=datetime.now(UTC).isoformat(),
+                    public_url="https://audits.example.test/reports/2026/june/audit.md",
+                )
+            ],
+            prefixes=[],
+            next_cursor=None,
+            scanned_count=1,
+            truncated=False,
+        )
+
+    monkeypatch.setattr(R2Storage, "list_objects_page", fake_list)
+    client = TestClient(create_app(_settings()))
+
+    response = client.get(
+        "/v1/files/r2/audits/objects",
+        params={"prefix": "reports/", "limit": "8", "recursive": "true"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["recursive"] is True
+    assert body["files"][0]["key"] == "reports/2026/june/audit.md"
+    assert body["prefixes"] == []
+    assert captured["prefix"] == "reports/"
+    assert captured["delimiter"] is None
+    assert captured["limit"] == 8
