@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import json
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, ClassVar
 
 import httpx
 from fastapi import HTTPException, status
@@ -24,11 +26,25 @@ class OpenRouterStreamState:
 
 
 class OpenRouterClient:
+    _shared_models_cache: ClassVar[dict[str, tuple[float, list[dict[str, Any]]]]] = {}
+    _shared_model_ids_cache: ClassVar[dict[str, tuple[float, set[str]]]] = {}
+    _shared_cache_locks: ClassVar[dict[str, asyncio.Lock]] = {}
+    _cache_seconds: ClassVar[int] = 10 * 60
+
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self._models_cache: tuple[float, list[dict[str, Any]]] | None = None
-        self._model_ids_cache: tuple[float, set[str]] | None = None
-        self._cache_seconds = 10 * 60
+
+    def _cache_key(self) -> str:
+        key_digest = hashlib.sha256(self.settings.openrouter_api_key.encode("utf-8")).hexdigest()[:16]
+        return f"{self.settings.openrouter_base_url.rstrip('/')}:{key_digest}"
+
+    @classmethod
+    def _lock_for_cache_key(cls, cache_key: str) -> asyncio.Lock:
+        lock = cls._shared_cache_locks.get(cache_key)
+        if lock is None:
+            lock = asyncio.Lock()
+            cls._shared_cache_locks[cache_key] = lock
+        return lock
 
     def _headers(self) -> dict[str, str]:
         if not self.settings.openrouter_api_key:
@@ -54,28 +70,39 @@ class OpenRouterClient:
 
     async def list_models(self, force_refresh: bool = False) -> list[dict[str, Any]]:
         now = time.time()
-        if not force_refresh and self._models_cache and now - self._models_cache[0] < self._cache_seconds:
-            return self._models_cache[1]
+        cache_key = self._cache_key()
+        cached = self._shared_models_cache.get(cache_key)
+        if not force_refresh and cached and now - cached[0] < self._cache_seconds:
+            return cached[1]
 
-        url = f"{self.settings.openrouter_base_url.rstrip('/')}/models"
-        timeout = max(1.0, float(self.settings.openrouter_model_list_timeout_seconds))
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.get(
-                url,
-                headers=self._headers(),
-                params={"output_modalities": "all"},
-            )
-            response.raise_for_status()
-            payload = response.json()
-            models = payload.get("data", []) if isinstance(payload, dict) else []
-            self._models_cache = (now, models)
-            self._model_ids_cache = (now, {model["id"] for model in models if isinstance(model, dict) and model.get("id")})
-            return models
+        async with self._lock_for_cache_key(cache_key):
+            now = time.time()
+            cached = self._shared_models_cache.get(cache_key)
+            if not force_refresh and cached and now - cached[0] < self._cache_seconds:
+                return cached[1]
+
+            url = f"{self.settings.openrouter_base_url.rstrip('/')}/models"
+            timeout = max(1.0, float(self.settings.openrouter_model_list_timeout_seconds))
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                response = await client.get(
+                    url,
+                    headers=self._headers(),
+                    params={"output_modalities": "all"},
+                )
+                response.raise_for_status()
+                payload = response.json()
+                models = payload.get("data", []) if isinstance(payload, dict) else []
+                model_ids = {model["id"] for model in models if isinstance(model, dict) and model.get("id")}
+                self._shared_models_cache[cache_key] = (now, models)
+                self._shared_model_ids_cache[cache_key] = (now, model_ids)
+                return models
 
     async def model_ids(self) -> set[str]:
         now = time.time()
-        if self._model_ids_cache and now - self._model_ids_cache[0] < self._cache_seconds:
-            return self._model_ids_cache[1]
+        cache_key = self._cache_key()
+        cached = self._shared_model_ids_cache.get(cache_key)
+        if cached and now - cached[0] < self._cache_seconds:
+            return cached[1]
         models = await self.list_models()
         return {model["id"] for model in models if isinstance(model, dict) and model.get("id")}
 

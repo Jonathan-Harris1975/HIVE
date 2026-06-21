@@ -29,6 +29,7 @@ SCORE_WEIGHTS = {
 }
 
 _SKILL_FALLBACK_CACHE: dict[str, object] = {"expires_at": 0.0, "items": []}
+_SKILL_RECORDS_CACHE: dict[str, dict[str, object]] = {}
 
 SKILL_SYNONYMS = {
     "rss": ["rss", "feed", "feeds", "syndication"],
@@ -52,7 +53,7 @@ def skills_registry_status(settings: Settings) -> dict[str, object]:
         "lane": SKILL_LANE,
         "configured": bool(base),
         "public_base_url": base,
-        "search_documents_url": settings.public_url_for_r2_lane(SKILL_LANE, SEARCH_DOCUMENTS_KEY),
+        "search_documents_url": str(settings.public_url_for_r2_lane(SKILL_LANE, SEARCH_DOCUMENTS_KEY) or ""),
         "skills_index_url": settings.public_url_for_r2_lane(SKILL_LANE, SKILLS_INDEX_KEY),
         "shared_manifest_url": settings.public_url_for_r2_lane(SKILL_LANE, SHARED_MANIFEST_KEY),
         "d1": {
@@ -553,6 +554,24 @@ def _skill_records(*, settings: Settings, query: str | None, limit: int) -> dict
     from app.services.ecosystem_index import recent_ecosystem_metadata, search_ecosystem_metadata
 
     safe_limit = max(1, min(int(limit or 50), 500))
+    now = time.monotonic()
+    cache_key = ":".join(
+        [
+            str(settings.d1_database_id or settings.d1_database_name or "d1"),
+            str(bool(settings.d1_enabled)),
+            str(bool(settings.skill_registry_fallback_enabled)),
+            str(settings.public_url_for_r2_lane(SKILL_LANE, SEARCH_DOCUMENTS_KEY) or ""),
+            SKILL_LANE,
+            str(query or ""),
+            str(safe_limit),
+        ]
+    )
+    cached = _SKILL_RECORDS_CACHE.get(cache_key)
+    if cached and float(cached.get("expires_at") or 0) > now:
+        payload = dict(cached.get("payload") or {})
+        payload["cached"] = True
+        return payload
+
     if query:
         payload = search_ecosystem_metadata(
             settings=settings, query=query, lane=SKILL_LANE, limit=safe_limit
@@ -560,7 +579,12 @@ def _skill_records(*, settings: Settings, query: str | None, limit: int) -> dict
     else:
         payload = recent_ecosystem_metadata(settings=settings, lane=SKILL_LANE, limit=safe_limit)
     if payload.get("ok") and isinstance(payload.get("items"), list) and payload.get("items"):
-        return {**payload, "source": "d1:hive_ecosystem_metadata"}
+        result = {**payload, "source": "d1:hive_ecosystem_metadata", "cached": False}
+        _SKILL_RECORDS_CACHE[cache_key] = {
+            "expires_at": now + max(1, min(int(settings.skill_registry_fallback_cache_seconds or 60), 600)),
+            "payload": result,
+        }
+        return result
 
     if not settings.skill_registry_fallback_enabled:
         payload.update(_skill_manifest_hints(settings))
@@ -572,6 +596,10 @@ def _skill_records(*, settings: Settings, query: str | None, limit: int) -> dict
     fallback = _r2_search_document_records(settings=settings, limit=safe_limit)
     if fallback.get("ok"):
         fallback["fallback_reason"] = payload.get("error_code") or "d1_empty_or_unavailable"
+        _SKILL_RECORDS_CACHE[cache_key] = {
+            "expires_at": now + max(1, min(int(settings.skill_registry_fallback_cache_seconds or 60), 600)),
+            "payload": dict(fallback),
+        }
         return fallback
 
     payload.update(_skill_manifest_hints(settings))
@@ -599,7 +627,7 @@ def _r2_search_document_records(*, settings: Settings, limit: int) -> dict[str, 
 
     url = _validated_skill_source_url(
         settings,
-        settings.public_url_for_r2_lane(SKILL_LANE, SEARCH_DOCUMENTS_KEY),
+        str(settings.public_url_for_r2_lane(SKILL_LANE, SEARCH_DOCUMENTS_KEY) or ""),
     )
     if not url:
         return {
@@ -967,7 +995,7 @@ def _skill_manifest_hints(settings: Settings) -> dict[str, object]:
     return {
         "lane_public_base_url": settings.public_url_for_r2_lane(SKILL_LANE, ""),
         "manifest_hint": settings.public_url_for_r2_lane(SKILL_LANE, "index/skills-manifest.json"),
-        "search_documents_hint": settings.public_url_for_r2_lane(SKILL_LANE, SEARCH_DOCUMENTS_KEY),
+        "search_documents_hint": str(settings.public_url_for_r2_lane(SKILL_LANE, SEARCH_DOCUMENTS_KEY) or ""),
         "skills_index_hint": settings.public_url_for_r2_lane(SKILL_LANE, SKILLS_INDEX_KEY),
     }
 
