@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 
 from app.core.config import Settings, get_settings
 from app.core.security import require_admin
+from app.core.text_safety import strip_nul_text
 from app.ingestion.chunking import chunks_to_dicts, split_text_into_chunks
 from app.ingestion.file_ingestion import ingest_bytes_content, ingest_text_content, ingest_upload
 from app.ingestion.text_extractors import extract_text_with_metadata
@@ -94,9 +95,20 @@ class ChatTurn(BaseModel):
     content: str
 
 
+class ChatFileAttachment(BaseModel):
+    object_key: str = Field(..., min_length=1, max_length=2048)
+    lane: str = Field("uploads", min_length=1, max_length=80)
+    name: str | None = Field(None, max_length=255)
+
+
 class ChatWithFileRequest(BaseModel):
     object_key: str = Field(..., min_length=1, max_length=2048)
     lane: str = Field("uploads", min_length=1, max_length=80)
+    files: list[ChatFileAttachment] = Field(
+        default_factory=list,
+        max_length=8,
+        description="Optional multiple files to analyse in the same chat request. When supplied with more than one item, object_key/lane keep backward compatibility and the files array becomes the source set.",
+    )
     message: str = Field(..., min_length=1)
     history: list[ChatTurn] = Field(default_factory=list)
     mode: Mode = Mode.FILE_ANALYSIS
@@ -1037,6 +1049,20 @@ async def chat_with_file(
     total_started = time.perf_counter()
     stage = "validate_key"
 
+    attachments = _chat_file_attachments(request)
+    if len(attachments) > 1:
+        return await _chat_with_multiple_files(
+            request=request,
+            attachments=attachments,
+            settings=settings,
+            workflow_metadata=workflow_metadata,
+            timings=timings,
+            total_started=total_started,
+        )
+    if request.files:
+        first_attachment = attachments[0]
+        request = request.model_copy(update={"object_key": first_attachment.object_key, "lane": first_attachment.lane})
+
     try:
         clean_key = _time_stage(
             timings, "validate_key_seconds", lambda: _validate_object_key(request.object_key)
@@ -1415,6 +1441,364 @@ def files_diagnostics(
             "hint": _storage_error_hint(str(exc)),
         }
     return diagnostics
+
+
+def _chat_file_attachments(request: ChatWithFileRequest) -> list[ChatFileAttachment]:
+    attachments = request.files or [ChatFileAttachment(object_key=request.object_key, lane=request.lane)]
+    deduped: list[ChatFileAttachment] = []
+    seen: set[tuple[str, str]] = set()
+    for attachment in attachments:
+        lane = attachment.lane.strip() or "uploads"
+        key = attachment.object_key.strip()
+        marker = (lane.lower().replace("-", "_"), key)
+        if not key or marker in seen:
+            continue
+        seen.add(marker)
+        deduped.append(
+            ChatFileAttachment(
+                object_key=key,
+                lane=lane,
+                name=strip_nul_text(attachment.name or "") or None,
+            )
+        )
+    if not deduped:
+        deduped.append(ChatFileAttachment(object_key=request.object_key, lane=request.lane))
+    return deduped[:8]
+
+
+async def _chat_with_multiple_files(
+    *,
+    request: ChatWithFileRequest,
+    attachments: list[ChatFileAttachment],
+    settings: Settings,
+    workflow_metadata: dict[str, object] | None,
+    timings: dict[str, float | None],
+    total_started: float,
+) -> dict[str, object]:
+    per_file_chars = min(
+        int(request.max_file_chars or settings.max_file_chat_chars),
+        int(settings.document_extract_max_chars),
+    )
+    contexts: list[dict[str, object]] = []
+    read_started = time.perf_counter()
+    for index, attachment in enumerate(attachments, start=1):
+        clean_key = _validate_object_key(attachment.object_key)
+        lane_config = _require_r2_lane(
+            settings,
+            attachment.lane,
+            require_read=(attachment.lane.strip().lower().replace("-", "_") != "uploads"),
+        )
+        try:
+            obj = _read_object_for_lane(
+                settings,
+                lane_config,
+                clean_key,
+                max_bytes=settings.max_file_read_bytes,
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            response = _lane_storage_error_response(
+                operation="chat_with_multiple_files_read",
+                lane_config=lane_config,
+                key_or_prefix=clean_key,
+                error=exc,
+            )
+            response["stage"] = "read_files"
+            response["timings"] = _finalise_timings(timings, total_started)
+            return response
+
+        extracted = _extract_object_text(obj, settings, max_chars=per_file_chars)
+        content = strip_nul_text(str(extracted.get("content") or ""))
+        excerpt = content[:per_file_chars]
+        truncated = len(content) > len(excerpt) or bool(extracted.get("truncated"))
+        source = _source_metadata(
+            obj,
+            settings,
+            truncated=truncated,
+            decode_replacements=bool(extracted.get("decode_replacements")),
+            lane=str(lane_config["lane"]),
+        )
+        source["extraction"] = extracted.get("extraction")
+        label = strip_nul_text(attachment.name or Path(clean_key).name or clean_key)
+        contexts.append(
+            {
+                "index": index,
+                "attachment": attachment,
+                "lane_config": lane_config,
+                "obj": obj,
+                "source": source,
+                "label": label,
+                "excerpt": excerpt,
+                "truncated": truncated,
+                "excerpt_chars": len(excerpt),
+            }
+        )
+    timings["read_file_seconds"] = round(time.perf_counter() - read_started, 3)
+
+    prompt_started = time.perf_counter()
+    prompt_context = _build_multi_file_chat_payload(
+        request=request,
+        settings=settings,
+        contexts=contexts,
+    )
+    timings["prompt_build_seconds"] = round(time.perf_counter() - prompt_started, 3)
+    payload = prompt_context["payload"]
+    fallback_models = prompt_context["fallback_models"]
+    selected_model = prompt_context["selected_model"]
+    effective_mode = prompt_context["effective_mode"]
+    source_citations = [
+        {
+            "label": str(context["label"]),
+            "object_key": getattr(context["obj"], "key", None),
+            "public_url": getattr(context["obj"], "public_url", None),
+            "lane": context["lane_config"].get("lane") if isinstance(context.get("lane_config"), dict) else None,
+        }
+        for context in contexts
+    ]
+    sources = [context["source"] for context in contexts]
+    retrieval_metadata = {
+        "retrieval_source": "raw_files",
+        "retrieval_mode": "raw_files",
+        "file_count": len(contexts),
+        "chunks_used": 0,
+        "vector_hits": 0,
+        "sql_fallback_hits": 0,
+    }
+
+    if request.skip_model or request.dry_run:
+        return {
+            "ok": True,
+            "dry_run": True,
+            "skip_model": True,
+            "stage": "complete_without_model",
+            "message": "Multiple file read and prompt build completed; model call was skipped.",
+            "selected_model": selected_model,
+            "fallback_models": fallback_models,
+            "effective_mode": str(effective_mode),
+            "workflow_preset": workflow_metadata,
+            "selected_skill": prompt_context.get("selected_skill"),
+            "prompt_message_count": len(payload.get("messages", [])),
+            "file_count": len(contexts),
+            "file_excerpt_chars": sum(int(context.get("excerpt_chars") or 0) for context in contexts),
+            "sources": sources,
+            "source": sources[0] if sources else None,
+            "retrieval_metadata": retrieval_metadata,
+            "retrieval_summary": _retrieval_summary(retrieval_metadata, workflow_metadata),
+            "source_chunks": [],
+            "source_citations": source_citations,
+            "source_citation": {
+                "label": f"{len(source_citations)} attached files",
+                "object_key": source_citations[0].get("object_key") if source_citations else None,
+                "public_url": source_citations[0].get("public_url") if source_citations else None,
+                "lane": source_citations[0].get("lane") if source_citations else None,
+            },
+            "timings": _finalise_timings(timings, total_started),
+        }
+
+    stage = "model_call"
+    client = OpenRouterClient(settings)
+    model_timeout = request.model_timeout_seconds or settings.chat_with_file_model_timeout_seconds
+    model_started = time.perf_counter()
+    try:
+        completion = await asyncio.wait_for(
+            client.chat_completion(payload, fallback_models=fallback_models),
+            timeout=max(0.5, float(model_timeout)),
+        )
+    except TimeoutError:
+        timings["model_call_seconds"] = round(time.perf_counter() - model_started, 3)
+        return {
+            "ok": False,
+            "reply": "",
+            "stage": stage,
+            "error_code": "chat_with_file_timeout",
+            "message": f"Model call timed out after {model_timeout} seconds.",
+            "model_used": selected_model,
+            "selected_model": selected_model,
+            "fallback_models": fallback_models,
+            "usage": None,
+            "timings": _finalise_timings(timings, total_started),
+            "sources": sources,
+            "source": sources[0] if sources else None,
+            "source_citations": source_citations,
+            "source_citation": source_citations[0] if source_citations else None,
+            "retrieval_metadata": retrieval_metadata,
+            "retrieval_summary": _retrieval_summary(retrieval_metadata, workflow_metadata),
+            "hint": "Retry with skip_model=true to verify multi-file context build, or use fewer files/a faster model.",
+        }
+    except Exception as exc:
+        timings["model_call_seconds"] = round(time.perf_counter() - model_started, 3)
+        return {
+            "ok": False,
+            "reply": "",
+            "stage": stage,
+            "error_code": "chat_with_file_model_error",
+            "message": str(exc),
+            "model_used": selected_model,
+            "selected_model": selected_model,
+            "fallback_models": fallback_models,
+            "usage": None,
+            "timings": _finalise_timings(timings, total_started),
+            "sources": sources,
+            "source": sources[0] if sources else None,
+            "source_citations": source_citations,
+            "source_citation": source_citations[0] if source_citations else None,
+            "retrieval_metadata": retrieval_metadata,
+            "retrieval_summary": _retrieval_summary(retrieval_metadata, workflow_metadata),
+        }
+    timings["model_call_seconds"] = round(time.perf_counter() - model_started, 3)
+
+    choice = (completion.get("choices") or [{}])[0]
+    message = choice.get("message") or {}
+    reply = _reply_text(message.get("content"))
+    finish_reason = choice.get("finish_reason")
+    empty_reply = not reply.strip()
+    ok = not bool(completion.get("_all_attempts_failed")) and not empty_reply
+    model_used = completion.get("model") or payload.get("model")
+    provider = completion.get("provider")
+    usage = completion.get("usage")
+
+    db_started = time.perf_counter()
+    db_record = SqlStore(settings).record_chat(
+        conversation_id=request.conversation_id,
+        mode=str(request.mode),
+        user_message=request.message,
+        assistant_reply=reply,
+        model_used=str(model_used) if model_used else None,
+        provider=str(provider) if provider else None,
+        usage=usage if isinstance(usage, dict) else None,
+        metadata={
+            "endpoint": "/v1/chat/with-file",
+            "ok": ok,
+            "finish_reason": finish_reason,
+            "empty_reply": empty_reply,
+            "multi_file": True,
+            "sources": sources,
+            "retrieval_metadata": retrieval_metadata,
+            "workflow_preset": workflow_metadata,
+            "selected_skill": prompt_context.get("selected_skill"),
+            "timings": timings,
+            "test_run_id": request.test_run_id,
+        },
+    )
+    timings["db_record_seconds"] = round(time.perf_counter() - db_started, 3)
+
+    return {
+        "ok": ok,
+        "reply": reply,
+        "model_used": model_used,
+        "provider": provider,
+        "usage": usage,
+        "raw_finish_reason": finish_reason,
+        "completion_truncated": finish_reason == "length",
+        "empty_reply": empty_reply,
+        "error_code": completion.get("hive_error_code"),
+        "attempts": completion.get("hive_attempts"),
+        "stage": "complete",
+        "workflow_preset": workflow_metadata,
+        "selected_skill": prompt_context.get("selected_skill"),
+        "timings": _finalise_timings(timings, total_started),
+        "conversation_id": db_record.get("conversation_id") or request.conversation_id,
+        "db_recorded": bool(db_record.get("ok")),
+        "db_error": db_record.get("error"),
+        "file_count": len(contexts),
+        "sources": sources,
+        "source": sources[0] if sources else None,
+        "retrieval_metadata": retrieval_metadata,
+        "retrieval_summary": _retrieval_summary(retrieval_metadata, workflow_metadata),
+        "source_chunks": [],
+        "source_citations": source_citations,
+        "source_citation": {
+            "label": f"{len(source_citations)} attached files",
+            "object_key": source_citations[0].get("object_key") if source_citations else None,
+            "public_url": source_citations[0].get("public_url") if source_citations else None,
+            "lane": source_citations[0].get("lane") if source_citations else None,
+        },
+    }
+
+
+def _build_multi_file_chat_payload(
+    *,
+    request: ChatWithFileRequest,
+    settings: Settings,
+    contexts: list[dict[str, object]],
+) -> dict[str, object]:
+    router_service = ModelRouter(settings)
+    task = router_service.classify_task(request.message, request.mode)
+    effective_mode = router_service.resolve_mode(task, request.mode)
+    selected_model = router_service.select_model(task, request.model)
+    fallback_models = router_service.fallback_models_for_task(task, selected_model)
+
+    window = ContextWindow()
+    window.add("system", build_system_prompt(effective_mode))
+    window.add(
+        "system",
+        "Answer using the attached file contents only where relevant. Compare, merge and cross-reference the files when the user asks. "
+        "Do not print object keys or public URLs inside the answer; the API returns source metadata separately.",
+    )
+    preset = get_workflow_preset(request.workflow_preset)
+    if preset:
+        window.add(
+            "system",
+            "Workflow preset: "
+            f"{preset.name}. {preset.prompt_instruction} "
+            f"Preferred output shape: {preset.output_shape}.",
+        )
+    selected_skill = _selected_skill_context(request, settings)
+    selected_skill_instruction = _selected_skill_instruction(selected_skill)
+    if selected_skill_instruction:
+        window.add("system", selected_skill_instruction)
+    for turn in request.history:
+        window.add(turn.role, turn.content)
+
+    file_blocks: list[str] = []
+    for context in contexts:
+        obj = context["obj"]
+        source = context["source"] if isinstance(context.get("source"), dict) else {}
+        label = str(context.get("label") or getattr(obj, "key", "attached file"))
+        excerpt = str(context.get("excerpt") or "")
+        file_blocks.append(
+            "\n".join(
+                [
+                    f"## Attached file {context.get('index')}: {label}",
+                    f"Lane: {source.get('lane') or 'unknown'}",
+                    f"Content type: {getattr(obj, 'content_type', None) or 'unknown'}",
+                    f"Size bytes: {getattr(obj, 'size_bytes', None)}",
+                    "",
+                    "File content excerpt:",
+                    excerpt or "[NO EXTRACTABLE TEXT]",
+                    "\n[FILE CONTENT TRUNCATED]" if context.get("truncated") else "",
+                ]
+            ).strip()
+        )
+
+    window.add(
+        "user",
+        "\n\n".join(
+            [
+                request.message,
+                "",
+                f"Attached file count: {len(contexts)}",
+                *file_blocks,
+            ]
+        ).strip(),
+    )
+
+    payload: dict[str, object] = {
+        "model": selected_model,
+        "messages": window.trimmed_messages(),
+        "temperature": request.temperature,
+        "max_tokens": max(request.max_tokens, settings.openrouter_min_response_tokens),
+    }
+    return {
+        "payload": payload,
+        "fallback_models": fallback_models,
+        "selected_model": selected_model,
+        "effective_mode": effective_mode,
+        "selected_skill": selected_skill,
+    }
 
 
 async def _vectorize_chunks(
@@ -2140,6 +2524,7 @@ def _text_preview_supported(key: str, content_type: str | None) -> bool:
         ".toml",
         ".ini",
         ".cfg",
+        ".zip",
     }
     if suffix in supported_suffixes:
         return True
@@ -2226,6 +2611,56 @@ def _extract_object_text(
     obj, settings: Settings, *, max_chars: int | None = None
 ) -> dict[str, object]:
     suffix = Path(obj.key).suffix.lower()
+    if suffix == ".zip":
+        try:
+            with tempfile.TemporaryDirectory(prefix="hive-zip-chat-") as tmp_dir:
+                temp_path = Path(tmp_dir) / "source.zip"
+                temp_path.write_bytes(obj.content)
+                report = extract_text_from_zip(
+                    temp_path,
+                    max_files=settings.max_zip_files,
+                    max_uncompressed_bytes=settings.max_zip_uncompressed_bytes,
+                    max_members=settings.zip_extract_max_members,
+                    max_member_bytes=settings.zip_extract_max_member_bytes,
+                    max_total_text_chars=max_chars or settings.zip_extract_max_total_text_chars,
+                    max_depth=settings.zip_extract_max_depth,
+                    supported_suffixes=settings.zip_extract_supported_suffix_set,
+                )
+        except (zipfile.BadZipFile, UnsafeZipError) as exc:
+            return {
+                "content": "",
+                "decode_replacements": False,
+                "truncated": False,
+                "extraction": {
+                    "supported": True,
+                    "extractor": "zip_text",
+                    "suffix": suffix,
+                    "char_count": 0,
+                    "truncated": False,
+                    "error": str(exc),
+                },
+            }
+        text = strip_nul_text(str(report.get("text") or ""))
+        truncated = bool(report.get("truncated"))
+        if max_chars and len(text) > max_chars:
+            text = text[:max_chars]
+            truncated = True
+        return {
+            "content": text,
+            "decode_replacements": False,
+            "truncated": truncated,
+            "extraction": {
+                "supported": True,
+                "extractor": "zip_text",
+                "suffix": suffix,
+                "char_count": len(text),
+                "truncated": truncated,
+                "summary": report.get("summary"),
+                "limits": report.get("limits"),
+                "items_preview": (report.get("items") or [])[:20],
+                "skipped_preview": (report.get("skipped") or [])[:20],
+            },
+        }
     if suffix in {".pdf", ".docx", ".xlsx", ".csv", ".json", ".html", ".htm"}:
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix or ".bin") as tmp:
             temp_path = Path(tmp.name)
@@ -2242,7 +2677,7 @@ def _extract_object_text(
         )
         if extracted.supported and extracted.text:
             return {
-                "content": extracted.text,
+                "content": strip_nul_text(extracted.text),
                 "decode_replacements": False,
                 "truncated": extracted.truncated,
                 "extraction": extracted.as_dict(),
@@ -2269,7 +2704,7 @@ def _extract_object_text(
 
 def _decode_text(content: bytes) -> tuple[str, bool]:
     decoded = content.decode("utf-8", errors="replace")
-    return decoded, "\ufffd" in decoded
+    return strip_nul_text(decoded), "\ufffd" in decoded or "\x00" in decoded
 
 
 def _source_metadata(
