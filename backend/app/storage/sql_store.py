@@ -415,6 +415,12 @@ class SqlStore:
             return {"ok": False, "enabled": False}
         p = self._param()
         sql = f"""
+            WITH recent_conversations AS (
+              SELECT id, mode, model, title, auto_titled, created_at, updated_at
+              FROM hive_conversations
+              ORDER BY updated_at DESC
+              LIMIT {p}
+            )
             SELECT
               c.id,
               c.mode,
@@ -427,11 +433,10 @@ class SqlStore:
               COALESCE(SUM(CASE WHEN m.role='assistant' THEN m.token_total ELSE 0 END), 0) AS total_tokens,
               COALESCE(SUM(CASE WHEN m.role='assistant' THEN m.cost_usd ELSE 0 END), 0) AS total_cost_usd,
               COALESCE(SUM(CASE WHEN m.role='assistant' THEN m.cost_usd ELSE 0 END), 0) AS cost_usd
-            FROM hive_conversations c
+            FROM recent_conversations c
             LEFT JOIN hive_messages m ON m.conversation_id = c.id
             GROUP BY c.id, c.mode, c.model, c.title, c.auto_titled, c.created_at, c.updated_at
             ORDER BY c.updated_at DESC
-            LIMIT {p}
         """
         try:
             with self._connect() as conn:
@@ -832,6 +837,10 @@ class SqlStore:
             )
             """,
             """
+            CREATE INDEX IF NOT EXISTS idx_hive_conversations_updated
+            ON hive_conversations (updated_at DESC)
+            """,
+            """
             CREATE TABLE IF NOT EXISTS hive_messages (
                 id TEXT PRIMARY KEY,
                 conversation_id TEXT NOT NULL,
@@ -848,6 +857,10 @@ class SqlStore:
             """
             CREATE INDEX IF NOT EXISTS idx_hive_messages_conversation
             ON hive_messages (conversation_id, created_at)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_hive_messages_conversation_role_created
+            ON hive_messages (conversation_id, role, created_at)
             """,
             """
             CREATE TABLE IF NOT EXISTS hive_files (
