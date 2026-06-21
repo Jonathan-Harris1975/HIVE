@@ -88,6 +88,7 @@ class SqlStore:
             with self._transaction() as cur:
                 for statement in statements:
                     cur.execute(statement)
+                self._ensure_auto_titled_column(cur)
             return {"ok": True, "enabled": True, "dialect": self.dialect, "tables": self.table_names()}
         except Exception as exc:  # pragma: no cover - exact driver exceptions vary by provider
             return {"ok": False, "enabled": True, "dialect": self.dialect, "error": str(exc)}
@@ -419,6 +420,7 @@ class SqlStore:
               c.mode,
               c.model,
               c.title,
+              c.auto_titled,
               c.created_at,
               c.updated_at,
               COUNT(m.id) AS message_count,
@@ -427,7 +429,7 @@ class SqlStore:
               COALESCE(SUM(CASE WHEN m.role='assistant' THEN m.cost_usd ELSE 0 END), 0) AS cost_usd
             FROM hive_conversations c
             LEFT JOIN hive_messages m ON m.conversation_id = c.id
-            GROUP BY c.id, c.mode, c.model, c.title, c.created_at, c.updated_at
+            GROUP BY c.id, c.mode, c.model, c.title, c.auto_titled, c.created_at, c.updated_at
             ORDER BY c.updated_at DESC
             LIMIT {p}
         """
@@ -436,6 +438,8 @@ class SqlStore:
                 cur = conn.cursor()
                 cur.execute(sql, (_int_or_none(limit) or 50,))
                 rows = self._fetch_dicts(cur)
+            for row in rows:
+                row["auto_titled"] = bool(row.get("auto_titled"))
             return {"ok": True, "enabled": True, "count": len(rows), "conversations": rows}
         except Exception as exc:  # pragma: no cover
             return {"ok": False, "enabled": True, "error": str(exc)}
@@ -450,7 +454,7 @@ class SqlStore:
         try:
             with self._transaction() as cur:
                 cur.execute(
-                    f"UPDATE hive_conversations SET title={p}, updated_at={p} WHERE id={p}",
+                    f"UPDATE hive_conversations SET title={p}, auto_titled=0, updated_at={p} WHERE id={p}",
                     (clean_title[:200], _now(), conversation_id),
                 )
                 updated = int(cur.rowcount or 0)
@@ -474,6 +478,48 @@ class SqlStore:
                 "conversation_id": conversation_id,
                 "error": str(exc),
             }
+
+    def set_auto_title(self, conversation_id: str, title: str) -> dict[str, object]:
+        if not self.enabled:
+            return {"ok": False, "enabled": False}
+        clean_title = " ".join((title or "").split()).strip()
+        if not clean_title:
+            return {"ok": False, "enabled": True, "error": "title_required"}
+        p = self._param()
+        try:
+            with self._transaction() as cur:
+                cur.execute(
+                    f"UPDATE hive_conversations SET title={p}, auto_titled=1, updated_at={p} WHERE id={p}",
+                    (clean_title[:200], _now(), conversation_id),
+                )
+                updated = int(cur.rowcount or 0)
+            if updated == 0:
+                return {"ok": False, "enabled": True, "conversation_id": conversation_id, "error": "conversation_not_found"}
+            return {"ok": True, "enabled": True, "conversation_id": conversation_id, "title": clean_title[:200], "auto_titled": True}
+        except Exception as exc:  # pragma: no cover
+            return {"ok": False, "enabled": True, "conversation_id": conversation_id, "error": str(exc)}
+
+    def conversation_auto_title_state(self, conversation_id: str) -> dict[str, object]:
+        if not self.enabled or not conversation_id:
+            return {"ok": False, "enabled": self.enabled, "conversation_id": conversation_id}
+        p = self._param()
+        try:
+            with self._connect() as conn:
+                cur = conn.cursor()
+                cur.execute(f"SELECT id, title, auto_titled FROM hive_conversations WHERE id={p}", (conversation_id,))
+                rows = self._fetch_dicts(cur)
+            if not rows:
+                return {"ok": False, "enabled": True, "conversation_id": conversation_id, "error": "conversation_not_found"}
+            row = rows[0]
+            return {
+                "ok": True,
+                "enabled": True,
+                "conversation_id": conversation_id,
+                "title": row.get("title"),
+                "auto_titled": bool(row.get("auto_titled")),
+            }
+        except Exception as exc:  # pragma: no cover
+            return {"ok": False, "enabled": True, "conversation_id": conversation_id, "error": str(exc)}
 
     def delete_conversation(self, conversation_id: str) -> dict[str, object]:
         if not self.enabled:
@@ -520,7 +566,7 @@ class SqlStore:
             with self._connect() as conn:
                 cur = conn.cursor()
                 cur.execute(
-                    f"SELECT id, mode, model, title, created_at, updated_at FROM hive_conversations WHERE id={p}",
+                    f"SELECT id, mode, model, title, auto_titled, created_at, updated_at FROM hive_conversations WHERE id={p}",
                     (conversation_id,),
                 )
                 conversation_rows = self._fetch_dicts(cur)
@@ -539,10 +585,12 @@ class SqlStore:
                 messages = list(reversed(self._fetch_dicts(cur)))
             for message in messages:
                 message["metadata"] = _json_or_none(message.pop("metadata_json", None))
+            conversation = conversation_rows[0]
+            conversation["auto_titled"] = bool(conversation.get("auto_titled"))
             return {
                 "ok": True,
                 "enabled": True,
-                "conversation": conversation_rows[0],
+                "conversation": conversation,
                 "message_count": len(messages),
                 "messages": messages,
             }
@@ -778,6 +826,7 @@ class SqlStore:
                 mode TEXT,
                 model TEXT,
                 title TEXT,
+                auto_titled INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
@@ -867,6 +916,18 @@ class SqlStore:
             ON hive_cost_events (conversation_id)
             """,
         ]
+
+    def _ensure_auto_titled_column(self, cur: Any) -> None:
+        """Add the non-destructive auto-title marker for existing databases."""
+
+        if self.dialect == "postgres":
+            cur.execute("ALTER TABLE hive_conversations ADD COLUMN IF NOT EXISTS auto_titled INTEGER NOT NULL DEFAULT 0")
+            return
+        if self.dialect == "sqlite":
+            cur.execute("PRAGMA table_info(hive_conversations)")
+            columns = {str(row[1]) for row in cur.fetchall()}
+            if "auto_titled" not in columns:
+                cur.execute("ALTER TABLE hive_conversations ADD COLUMN auto_titled INTEGER NOT NULL DEFAULT 0")
 
     def _fetch_dicts(self, cur: Any) -> list[dict[str, Any]]:
         columns = [item[0] for item in cur.description or []]
@@ -987,8 +1048,8 @@ class SqlStore:
         p = self._param()
         cur.execute(
             f"""
-            INSERT INTO hive_conversations (id, mode, model, title, created_at, updated_at)
-            VALUES ({p}, {p}, {p}, {p}, {p}, {p})
+            INSERT INTO hive_conversations (id, mode, model, title, auto_titled, created_at, updated_at)
+            VALUES ({p}, {p}, {p}, {p}, 0, {p}, {p})
             ON CONFLICT(id) DO UPDATE SET
               mode=excluded.mode,
               model=excluded.model,
