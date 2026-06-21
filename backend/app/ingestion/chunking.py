@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from app.core.text_safety import strip_nul_text
 import re
 from dataclasses import asdict, dataclass
 from typing import Any
@@ -36,7 +37,7 @@ def split_text_into_chunks(
     if max_chunks < 1:
         raise ValueError("max_chunks must be at least 1")
 
-    normalised = text.replace("\r\n", "\n").replace("\r", "\n")
+    normalised = strip_nul_text(text).replace("\r\n", "\n").replace("\r", "\n")
     if not normalised.strip():
         return []
 
