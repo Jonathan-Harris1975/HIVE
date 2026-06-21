@@ -15,7 +15,7 @@ class Settings(BaseSettings):
         "JH Ops Chat", validation_alias=AliasChoices("APP_NAME", "OPENROUTER_APP_NAME")
     )
     app_env: str = Field("development", validation_alias=AliasChoices("APP_ENV"))
-    app_version: str = Field("1.26.4-production", validation_alias=AliasChoices("APP_VERSION"))
+    app_version: str = Field("1.26.5-production", validation_alias=AliasChoices("APP_VERSION"))
     admin_bearer_token: str = Field(
         "change-me-local-only", validation_alias=AliasChoices("ADMIN_BEARER_TOKEN")
     )
@@ -440,8 +440,12 @@ class Settings(BaseSettings):
     )
     zip_extract_max_depth: int = Field(2, validation_alias=AliasChoices("ZIP_EXTRACT_MAX_DEPTH"))
     zip_extract_supported_suffixes: str = Field(
-        ".txt,.md,.log,.json,.csv,.html,.htm,.pdf,.docx,.xlsx",
+        ".txt,.md,.mdx,.rst,.adoc,.log,.json,.jsonl,.jsonc,.csv,.tsv,.html,.htm,.xml,.rss,.svg,.yaml,.yml,.toml,.ini,.cfg,.conf,.properties,.lock,.env,.py,.js,.mjs,.ts,.tsx,.jsx,.css,.scss,.sass,.less,.vue,.svelte,.astro,.sh,.bash,.zsh,.fish,.ps1,.bat,.cmd,.sql,.graphql,.gql,.proto,.tf,.tfvars,.hcl,.go,.rs,.rb,.php,.java,.kt,.kts,.swift,.c,.h,.cpp,.cxx,.hpp,.cs,.fs,.fsx,.r,.lua,.pl,.pm,.scala,.sbt,.gradle,.ipynb,.pdf,.docx,.xlsx",
         validation_alias=AliasChoices("ZIP_EXTRACT_SUPPORTED_SUFFIXES"),
+    )
+    zip_extract_supported_filenames: str = Field(
+        ".gitignore,.gitattributes,.dockerignore,.editorconfig,.npmrc,.nvmrc,.prettierrc,.prettierignore,.eslintrc,.eslintignore,.python-version,.ruby-version,.env,.env.example,.env.local,Dockerfile,Makefile,Procfile,README,LICENSE,requirements",
+        validation_alias=AliasChoices("ZIP_EXTRACT_SUPPORTED_FILENAMES"),
     )
 
     # v1.8 shared skill pool importer. Bounded for production; skills live in R2 and D1 stores catalogue metadata.
@@ -737,6 +741,14 @@ class Settings(BaseSettings):
         return {
             item.strip().lower()
             for item in self.zip_extract_supported_suffixes.split(",")
+            if item.strip()
+        }
+
+    @property
+    def zip_extract_supported_filename_set(self) -> set[str]:
+        return {
+            item.strip().lower()
+            for item in self.zip_extract_supported_filenames.split(",")
             if item.strip()
         }
 
