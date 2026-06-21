@@ -187,6 +187,32 @@ def _combine_status(liveness: dict[str, Any], operational: dict[str, Any] | None
     return "healthy"
 
 
+
+def _readiness_probe(operational: dict[str, Any] | None, status: str) -> dict[str, Any]:
+    source = operational or {}
+    source_status = str(source.get("status") or status)
+    if source_status == "healthy":
+        readiness_status = "ready"
+    elif source_status in {"down", "failed", "error", "blocked"}:
+        readiness_status = "not_ready"
+    else:
+        readiness_status = "partial"
+    return {
+        "status": readiness_status,
+        "configured": bool(source.get("configured", status != "not_configured")),
+        "http_status": source.get("http_status"),
+        "latency_ms": source.get("latency_ms"),
+        "checked_at": source.get("checked_at") or _now_iso(),
+        "detail": source.get("detail") or f"Readiness derived from operational status: {source_status}.",
+        "payload": source.get("payload"),
+    }
+
+
+def _with_readiness(item: dict[str, Any]) -> dict[str, Any]:
+    if item.get("readiness") is not None:
+        return item
+    return {**item, "readiness": _readiness_probe(item.get("operational"), str(item.get("status") or "not_configured"))}
+
 async def _probe_target(client: httpx.AsyncClient, target: ProbeTarget) -> dict[str, Any]:
     liveness_task = _probe(client, url=target.health_url)
     operational_task = (
@@ -205,7 +231,7 @@ async def _probe_target(client: httpx.AsyncClient, target: ProbeTarget) -> dict[
     if status == "degraded" and operational:
         detail = f"Liveness passed; operational check: {operational.get('detail', 'not ready')}"
 
-    return {
+    return _with_readiness({
         "repo": target.repo,
         "label": target.label,
         "category": target.category,
@@ -214,7 +240,7 @@ async def _probe_target(client: httpx.AsyncClient, target: ProbeTarget) -> dict[
         "detail": detail,
         "liveness": liveness,
         "operational": operational,
-    }
+    })
 
 
 def _parse_utc_timestamp(value: object) -> datetime | None:
@@ -562,7 +588,7 @@ async def build_repo_health_report(
             if owns_client:
                 await active_client.aclose()
 
-        repos = [local_item, *remote_items]
+        repos = [_with_readiness(local_item), *[_with_readiness(item) for item in remote_items]]
         summary = {
             "total": len(repos),
             "healthy": sum(1 for item in repos if item["status"] == "healthy"),
