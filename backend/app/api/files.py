@@ -366,6 +366,7 @@ def list_r2_lane_objects(
     limit: int = Query(100, ge=1, le=1000),
     cursor: str | None = Query(None, max_length=4096),
     search: str | None = Query(None, max_length=255),
+    recursive: bool = Query(False),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, object]:
     """Browse or search a configured R2 lane through scoped server-side credentials."""
@@ -379,7 +380,7 @@ def list_r2_lane_objects(
             bucket=str(lane_config["bucket"]),
             public_base_url=lane_config.get("public_base_url"),
             cursor=cursor,
-            delimiter=None if search else "/",
+            delimiter=None if search or recursive else "/",
             search=search,
             read_only=_r2_read_only_for_lane(lane_config),
             max_scan_keys=settings.r2_multi_bucket_max_scan_keys,
@@ -399,6 +400,7 @@ def list_r2_lane_objects(
         "access_mode": lane_config["access_mode"],
         "prefix": clean_prefix,
         "search": search or None,
+        "recursive": recursive,
         "count": len(page.objects),
         "prefix_count": len(page.prefixes),
         "prefixes": page.prefixes,
