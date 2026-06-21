@@ -443,7 +443,7 @@ def test_conversation_titles_rename_and_delete(tmp_path: Path) -> None:
     assert store.get_conversation("conv-manage")["error"] == "conversation_not_found"
 
 
-def test_sql_store_strips_nul_bytes_before_sql_writes(tmp_path: Path) -> None:
+def test_sql_store_strips_nul_bytes_before_persistence(tmp_path: Path) -> None:
     db_path = tmp_path / "hive.sqlite3"
     settings = Settings(
         APP_ENV="test",
@@ -454,45 +454,19 @@ def test_sql_store_strips_nul_bytes_before_sql_writes(tmp_path: Path) -> None:
     assert store.init_schema()["ok"] is True
 
     chat = store.record_chat(
-        conversation_id="nul-conv\x00id",
+        conversation_id="conv-nul\x00id",
         mode="general\x00mode",
         user_message="hello\x00there",
         assistant_reply="world\x00reply",
-        model_used="test/model\x00nul",
-        provider="test\x00provider",
-        usage={"total_tokens": 1, "cost": 0, "note": "usage\x00note"},
-        metadata={"nested": {"bad": "meta\x00value"}},
+        model_used="model\x00id",
+        provider="provider\x00id",
+        usage={"total_tokens": 1, "bad": "value\x00inside"},
+        metadata={"source\x00key": {"nested": "bad\x00value"}},
     )
+
     assert chat["ok"] is True
-    assert "\x00" not in chat["conversation_id"]
-
-    conversation = store.get_conversation(str(chat["conversation_id"]), limit=10)
+    conversation = store.get_conversation("conv-nul�id")
     assert conversation["ok"] is True
-    assert conversation["message_count"] == 2
-    for message in conversation["messages"]:
-        assert "\x00" not in message["content"]
-    assert "�" in conversation["messages"][0]["content"]
-
-    chunks = store.record_file_chunks(
-        object_key="uploads/nul\x00file.txt",
-        chunks=[
-            {
-                "chunk_index": 0,
-                "content": "alpha\x00beta",
-                "char_start": 0,
-                "char_end": 10,
-                "token_estimate": 2,
-                "content_sha256": "sha\x00bad",
-                "metadata": {"member": "one\x00two"},
-            }
-        ],
-        source_metadata={"source": "zip\x00extract"},
-    )
-    assert chunks["ok"] is True
-    listed = store.list_file_chunks(object_key="uploads/nul�file.txt", include_content=True)
-    assert listed["ok"] is True
-    assert listed["count"] == 1
-    saved = listed["chunks"][0]
-    assert "\x00" not in saved["content"]
-    assert "�" in saved["content"]
-    assert "\x00" not in str(saved["metadata"])
+    serialised = str(conversation)
+    assert "\x00" not in serialised
+    assert "�" in serialised

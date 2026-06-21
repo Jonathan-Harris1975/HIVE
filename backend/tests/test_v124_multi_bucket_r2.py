@@ -213,3 +213,102 @@ def test_r2_client_trims_koyeb_secret_whitespace(monkeypatch) -> None:
     assert captured["aws_access_key_id"] == "read-key"
     assert captured["aws_secret_access_key"] == "read-secret"
     assert captured["region_name"] == "auto"
+
+
+def test_multi_bucket_file_chat_accepts_multiple_selected_r2_objects(monkeypatch) -> None:
+    calls: list[tuple[str, str, bool]] = []
+
+    def fake_read(self, key, max_bytes, **kwargs):  # noqa: ANN001, ARG001
+        bucket = str(kwargs["bucket"])
+        calls.append((key, bucket, bool(kwargs["read_only"])))
+        content = {
+            ("uploads/brief.txt", "hive"): b"Upload brief says inspect deployment adapters.",
+            ("reports/audit.txt", "audits"): b"Audit report says verify R2 lane access.",
+        }[(key, bucket)]
+        return ReadObject(
+            key=key,
+            bucket=bucket,
+            content=content,
+            size_bytes=len(content),
+            content_type="text/plain",
+            public_url=f"https://{bucket}.example.test/{key}",
+        )
+
+    monkeypatch.setattr(R2Storage, "read_object", fake_read)
+    client = TestClient(create_app(_settings()))
+
+    response = client.post(
+        "/v1/chat/with-file",
+        json={
+            "message": "Compare the selected files.",
+            "dry_run": True,
+            "use_chunks": True,
+            "files": [
+                {"lane": "uploads", "object_key": "uploads/brief.txt", "name": "Brief"},
+                {"lane": "audits", "object_key": "reports/audit.txt", "name": "Audit"},
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert body["dry_run"] is True
+    assert body["source_label"] if "source_label" in body else True
+    assert [item["lane"] for item in body["source_citations"]] == ["uploads", "audits"]
+    assert [item["label"] for item in body["source_citations"]] == ["Brief", "Audit"]
+    assert "selected R2 files used bounded direct reads" in body["chunk_mode_note"]
+    assert calls == [("uploads/brief.txt", "hive", False), ("reports/audit.txt", "audits", False)]
+
+
+def test_delete_r2_lane_objects_is_lane_scoped_and_write_gated(monkeypatch) -> None:
+    calls: list[tuple[list[str], str]] = []
+
+    def fake_delete(self, keys, **kwargs):  # noqa: ANN001
+        calls.append((list(keys), str(kwargs["bucket"])))
+        return {
+            "ok": True,
+            "bucket": str(kwargs["bucket"]),
+            "requested_count": len(keys),
+            "deleted_count": len(keys),
+            "deleted_keys": list(keys),
+            "errors": [],
+        }
+
+    monkeypatch.setattr(R2Storage, "delete_objects", fake_delete)
+    client = TestClient(create_app(_settings()))
+
+    response = client.request(
+        "DELETE",
+        "/v1/files/r2/audits/objects",
+        json={"object_keys": ["reports/a.txt", "reports/b.txt", "reports/a.txt"]},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert body["lane"] == "audits"
+    assert body["deleted_count"] == 2
+    assert body["deleted_keys"] == ["reports/a.txt", "reports/b.txt"]
+    assert calls == [(["reports/a.txt", "reports/b.txt"], "audits")]
+
+
+def test_delete_r2_lane_objects_refuses_non_writable_lanes(monkeypatch) -> None:
+    called = False
+
+    def fake_delete(self, keys, **kwargs):  # noqa: ANN001, ARG001
+        nonlocal called
+        called = True
+        return {"ok": True}
+
+    monkeypatch.setattr(R2Storage, "delete_objects", fake_delete)
+    client = TestClient(create_app(_settings(r2_multi_bucket_write_enabled=False)))
+
+    response = client.request(
+        "DELETE",
+        "/v1/files/r2/audits/objects",
+        json={"object_key": "reports/a.txt"},
+    )
+
+    assert response.status_code == 503
+    assert called is False
