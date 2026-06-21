@@ -422,6 +422,8 @@ class SqlStore:
               c.created_at,
               c.updated_at,
               COUNT(m.id) AS message_count,
+              COALESCE(SUM(CASE WHEN m.role='assistant' THEN m.token_total ELSE 0 END), 0) AS total_tokens,
+              COALESCE(SUM(CASE WHEN m.role='assistant' THEN m.cost_usd ELSE 0 END), 0) AS total_cost_usd,
               COALESCE(SUM(CASE WHEN m.role='assistant' THEN m.cost_usd ELSE 0 END), 0) AS cost_usd
             FROM hive_conversations c
             LEFT JOIN hive_messages m ON m.conversation_id = c.id
@@ -546,6 +548,45 @@ class SqlStore:
             }
         except Exception as exc:  # pragma: no cover
             return {"ok": False, "enabled": True, "conversation_id": conversation_id, "error": str(exc)}
+
+
+    def first_conversation_exchange(self, conversation_id: str) -> dict[str, str | None]:
+        """Return the first user message and first assistant reply for auto-titling."""
+
+        if not self.enabled or not conversation_id:
+            return {"user_message": None, "assistant_reply": None}
+        p = self._param()
+        try:
+            with self._connect() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    f"""
+                    SELECT role, content
+                    FROM hive_messages
+                    WHERE conversation_id={p} AND role IN ('user', 'assistant')
+                    ORDER BY created_at ASC
+                    LIMIT 8
+                    """,
+                    (conversation_id,),
+                )
+                rows = self._fetch_dicts(cur)
+        except Exception:
+            return {"user_message": None, "assistant_reply": None}
+
+        first_user: str | None = None
+        first_assistant: str | None = None
+        for row in rows:
+            role = str(row.get("role") or "")
+            content = str(row.get("content") or "").strip()
+            if not content:
+                continue
+            if role == "user" and first_user is None:
+                first_user = content
+            elif role == "assistant" and first_assistant is None:
+                first_assistant = content
+            if first_user and first_assistant:
+                break
+        return {"user_message": first_user, "assistant_reply": first_assistant}
 
     def recent_chat_turns(self, conversation_id: str, *, limit: int = 20) -> list[dict[str, str]]:
         """Return recent user/assistant turns suitable for model context hydration."""
