@@ -12,7 +12,7 @@ from fastapi import HTTPException, status
 from app.core.config import Settings
 
 
-RETRYABLE_STATUS_CODES = {404, 408, 409, 425, 429, 500, 502, 503, 504}
+RETRYABLE_STATUS_CODES = {400, 404, 408, 409, 425, 429, 500, 502, 503, 504}
 
 
 @dataclass(frozen=True)
@@ -391,13 +391,13 @@ class OpenRouterClient:
                             continue
 
                         if "error" in chunk:
+                            error_payload = chunk["error"] if isinstance(chunk.get("error"), dict) else {}
                             yield {
-                                "event": "error",
-                                "message": chunk["error"].get("message", "OpenRouter stream error"),
-                                "error": chunk["error"],
+                                "event": "retry_model",
+                                "message": error_payload.get("message", "OpenRouter stream error"),
+                                "error": error_payload or chunk.get("error"),
                                 "model_used": final_model,
                             }
-                            yield {"event": "done", "ok": False, "model_used": final_model}
                             return
 
                         final_chunk = chunk
