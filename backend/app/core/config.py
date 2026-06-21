@@ -15,7 +15,7 @@ class Settings(BaseSettings):
         "JH Ops Chat", validation_alias=AliasChoices("APP_NAME", "OPENROUTER_APP_NAME")
     )
     app_env: str = Field("development", validation_alias=AliasChoices("APP_ENV"))
-    app_version: str = Field("1.26.0-production", validation_alias=AliasChoices("APP_VERSION"))
+    app_version: str = Field("1.26.4-production", validation_alias=AliasChoices("APP_VERSION"))
     admin_bearer_token: str = Field(
         "change-me-local-only", validation_alias=AliasChoices("ADMIN_BEARER_TOKEN")
     )
@@ -313,8 +313,8 @@ class Settings(BaseSettings):
     d1_database_name: str = Field(
         "database-hive", validation_alias=AliasChoices("D1_DATABASE_NAME", "D1_DATABASE")
     )
-    d1_timeout_seconds: int = Field(12, validation_alias=AliasChoices("D1_TIMEOUT_SECONDS"))
-    d1_max_attempts: int = Field(2, validation_alias=AliasChoices("D1_MAX_ATTEMPTS"))
+    d1_timeout_seconds: int = Field(3, validation_alias=AliasChoices("D1_TIMEOUT_SECONDS"))
+    d1_max_attempts: int = Field(1, validation_alias=AliasChoices("D1_MAX_ATTEMPTS"))
 
     # Optional Cloudflare Vectorize semantic retrieval. SQL chunks remain the
     # source of truth; Vectorize only stores/searches embeddings keyed by SQL chunk IDs.
@@ -449,7 +449,7 @@ class Settings(BaseSettings):
         250, validation_alias=AliasChoices("SKILL_REGISTRY_IMPORT_MAX_ITEMS")
     )
     skill_registry_import_timeout_seconds: int = Field(
-        20, validation_alias=AliasChoices("SKILL_REGISTRY_IMPORT_TIMEOUT_SECONDS")
+        6, validation_alias=AliasChoices("SKILL_REGISTRY_IMPORT_TIMEOUT_SECONDS")
     )
     skill_registry_max_source_bytes: int = Field(
         5 * 1024 * 1024, validation_alias=AliasChoices("SKILL_REGISTRY_MAX_SOURCE_BYTES")
@@ -464,10 +464,10 @@ class Settings(BaseSettings):
         True, validation_alias=AliasChoices("SKILL_CONTEXT_ENABLED")
     )
     skill_context_max_items: int = Field(
-        3, validation_alias=AliasChoices("SKILL_CONTEXT_MAX_ITEMS")
+        2, validation_alias=AliasChoices("SKILL_CONTEXT_MAX_ITEMS")
     )
     skill_context_max_chars: int = Field(
-        6000, validation_alias=AliasChoices("SKILL_CONTEXT_MAX_CHARS")
+        4000, validation_alias=AliasChoices("SKILL_CONTEXT_MAX_CHARS")
     )
     skill_context_risk_ceiling: str = Field(
         "medium", validation_alias=AliasChoices("SKILL_CONTEXT_RISK_CEILING")
