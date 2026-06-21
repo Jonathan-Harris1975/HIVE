@@ -1278,6 +1278,15 @@ async def chat_with_file(
         truncated = bool(direct_context["truncated"])
         retrieval_metadata = None
 
+    primary_source_citation = source_citations[0]
+    if len(source_citations) > 1:
+        primary_source_citation = {
+            "label": f"{len(source_citations)} attached files",
+            "object_key": None,
+            "public_url": None,
+            "lane": "multiple",
+        }
+
     stage = "prompt_build"
     prompt_context = _time_stage(
         timings,
@@ -1310,6 +1319,7 @@ async def chat_with_file(
             "workflow_preset": workflow_metadata,
             "selected_skill": prompt_context.get("selected_skill"),
             "prompt_message_count": len(payload.get("messages", [])),
+            "file_count": len(source_citations),
             "file_excerpt_chars": len(excerpt),
             "source": source,
             "sources": sources,
@@ -1317,7 +1327,7 @@ async def chat_with_file(
             "retrieval_summary": _retrieval_summary(retrieval_metadata, workflow_metadata),
             "source_chunks": _source_chunks_metadata(chunks if use_persisted_chunks else []),
             "chunk_mode_note": chunk_mode_note,
-            "source_citation": source_citations[0],
+            "source_citation": primary_source_citation,
             "source_citations": source_citations,
             "timings": _finalise_timings(timings, total_started),
         }
@@ -1424,13 +1434,14 @@ async def chat_with_file(
         "conversation_id": db_record.get("conversation_id") or request.conversation_id,
         "db_recorded": bool(db_record.get("ok")),
         "db_error": db_record.get("error"),
+        "file_count": len(source_citations),
         "source": source,
         "sources": sources,
         "retrieval_metadata": retrieval_metadata,
         "retrieval_summary": _retrieval_summary(retrieval_metadata, workflow_metadata),
         "source_chunks": _source_chunks_metadata(chunks if use_persisted_chunks else []),
         "chunk_mode_note": chunk_mode_note,
-        "source_citation": source_citations[0],
+        "source_citation": primary_source_citation,
         "source_citations": source_citations,
     }
 
@@ -1963,6 +1974,7 @@ def _build_file_chat_payload(
         ]
         attachment_intro = [
             f"Attached file set: {source_label}",
+            f"Attached file count: {len(source_items)}",
             "Attached files:",
             *source_lines,
             "",
@@ -2248,6 +2260,7 @@ def _chat_with_file_model_error_response(
         "empty_reply": True,
         "attempts": None,
         "timings": timings,
+        "file_count": len(citations),
         "source": source,
         "sources": sources or [source],
         "retrieval_metadata": retrieval_metadata,

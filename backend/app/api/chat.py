@@ -44,6 +44,14 @@ class ChatRequest(BaseModel):
     skill_limit: int | None = Field(None, ge=1, le=8)
 
 
+class AutoTitleResponse(BaseModel):
+    ok: bool
+    conversation_id: str
+    title: str | None = None
+    skipped: bool = False
+    error: str | None = None
+
+
 def build_payload(request: ChatRequest, settings: Settings) -> tuple[dict[str, object], list[str]]:
     payload, fallbacks, _skill_context = build_payload_with_context(request, settings)
     return payload, fallbacks
@@ -95,6 +103,49 @@ def build_payload_with_context(
         "max_tokens": max(request.max_tokens, settings.openrouter_min_response_tokens),
     }
     return payload, fallback_models, skill_context
+
+
+
+@router.post("/chat/conversations/{conversation_id}/auto-title", response_model=AutoTitleResponse)
+async def auto_title_conversation(
+    conversation_id: str,
+    settings: Settings = Depends(get_settings),
+) -> AutoTitleResponse:
+    """Generate and persist a concise title from the first stored exchange."""
+
+    store = SqlStore(settings)
+    exchange = store.first_conversation_exchange(conversation_id)
+    user_message = (exchange.get("user_message") or "").strip()
+    assistant_reply = (exchange.get("assistant_reply") or "").strip()
+    if not user_message or not assistant_reply:
+        return AutoTitleResponse(ok=True, conversation_id=conversation_id, skipped=True)
+
+    payload: dict[str, object] = {
+        "model": settings.default_model,
+        "messages": [
+            {"role": "system", "content": "Generate a concise 4-6 word title for this conversation. Return only the title, no punctuation."},
+            {
+                "role": "user",
+                "content": f"User: {user_message[:1200]}\nAssistant: {assistant_reply[:1200]}",
+            },
+        ],
+        "temperature": 0.2,
+        "max_tokens": 24,
+    }
+    completion = await OpenRouterClient(settings).chat_completion(
+        payload,
+        fallback_models=[settings.openrouter_free_fallback_model],
+    )
+    choice = (completion.get("choices") or [{}])[0]
+    message = choice.get("message") or {}
+    title = _clean_auto_title(_reply_text(message.get("content")))
+    if not title:
+        return AutoTitleResponse(ok=True, conversation_id=conversation_id, skipped=True, error="empty_title")
+
+    result = store.rename_conversation(conversation_id, title)
+    if not result.get("ok"):
+        return AutoTitleResponse(ok=False, conversation_id=conversation_id, title=title, error=str(result.get("error") or "title_not_saved"))
+    return AutoTitleResponse(ok=True, conversation_id=conversation_id, title=title)
 
 
 @router.post("/chat/stream")
@@ -276,6 +327,16 @@ async def chat(
         "skills_used": _skill_summaries(skill_context),
         "skill_context_status": _skill_context_status(skill_context),
     }
+
+
+
+def _clean_auto_title(value: object) -> str:
+    title = " ".join(str(value or "").replace("\n", " ").split()).strip()
+    title = title.strip(" \"'`.,:;!?-–—()[]{}")
+    if not title:
+        return ""
+    words = title.split()[:8]
+    return " ".join(words)[:80].strip()
 
 
 def _skill_summaries(skill_context: dict[str, object] | None) -> list[dict[str, object]]:
