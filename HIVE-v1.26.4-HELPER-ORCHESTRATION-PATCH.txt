@@ -1,0 +1,52 @@
+HIVE v1.26.4 Helper Orchestration Patch
+=======================================
+
+Purpose
+-------
+Reduce perceived and real slowness after the latest helper/skill updates while keeping the helper systems available and organised.
+
+Backend changes
+---------------
+1. OpenRouter model list cache is now shared across OpenRouterClient instances.
+   - Prevents repeated /models preflight calls on ordinary chat requests.
+   - Adds a per-cache-key asyncio lock to avoid concurrent thundering-herd refreshes.
+
+2. Chat stream persistence is offloaded from the async event loop.
+   - Completed streamed turns are recorded via asyncio.to_thread().
+   - Partial streamed turns are still preserved when the browser disconnects.
+   - Stream done events include timing metadata when available.
+
+3. Non-streaming chat DB recording is also offloaded from the async event loop.
+
+4. File chat blocking helpers are moved off the async event loop.
+   - Direct R2/local file reads are wrapped with asyncio.to_thread().
+   - Auto chunk creation is wrapped with asyncio.to_thread().
+   - File-chat DB recording is wrapped with asyncio.to_thread().
+
+5. Conversation listing is cheaper.
+   - The query now limits recent conversations first, then joins message totals.
+   - Added idx_hive_conversations_updated.
+   - Added idx_hive_messages_conversation_role_created.
+
+6. Skill/D1 helper defaults are more production-friendly.
+   - D1_TIMEOUT_SECONDS=3
+   - D1_MAX_ATTEMPTS=1
+   - SKILL_REGISTRY_IMPORT_TIMEOUT_SECONDS=6
+   - SKILL_CONTEXT_MAX_ITEMS=2
+   - SKILL_CONTEXT_MAX_CHARS=4000
+
+7. Skill catalogue records now have a short in-process cache keyed by D1/fallback configuration.
+   - Avoids repeat D1/R2 skill catalogue pulls during helper-heavy usage.
+   - Cache key includes D1 enabled state, fallback enabled state and skill source URL to prevent stale cross-environment leakage.
+
+Validation
+----------
+Backend test suite:
+- 171 passed in 7.65s
+
+Notes
+-----
+- Backend ChatRequest keeps use_skills=true for API compatibility and existing tests.
+- HIVE-UI now sends use_skills=false for ordinary chat unless the operator explicitly enables the Skills toggle.
+- BUILD_STAGE remains v1.26.3-skill-catalogue-cleanup to preserve existing health-contract tests.
+- APP_VERSION is updated to 1.26.4-production in config/env templates.
