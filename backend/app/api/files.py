@@ -19,7 +19,6 @@ from pydantic import BaseModel, Field
 
 from app.core.config import Settings, get_settings
 from app.core.security import require_admin
-from app.core.text_safety import strip_nul_text
 from app.ingestion.chunking import chunks_to_dicts, split_text_into_chunks
 from app.ingestion.file_ingestion import ingest_bytes_content, ingest_text_content, ingest_upload
 from app.ingestion.text_extractors import extract_text_with_metadata
@@ -95,20 +94,22 @@ class ChatTurn(BaseModel):
     content: str
 
 
-class ChatFileAttachment(BaseModel):
+class FileReference(BaseModel):
     object_key: str = Field(..., min_length=1, max_length=2048)
     lane: str = Field("uploads", min_length=1, max_length=80)
     name: str | None = Field(None, max_length=255)
 
 
+class DeleteR2ObjectsRequest(BaseModel):
+    object_key: str | None = Field(None, min_length=1, max_length=2048)
+    object_keys: list[str] = Field(default_factory=list, max_length=1000)
+    dry_run: bool = False
+
+
 class ChatWithFileRequest(BaseModel):
-    object_key: str = Field(..., min_length=1, max_length=2048)
+    object_key: str | None = Field(None, min_length=1, max_length=2048)
     lane: str = Field("uploads", min_length=1, max_length=80)
-    files: list[ChatFileAttachment] = Field(
-        default_factory=list,
-        max_length=8,
-        description="Optional multiple files to analyse in the same chat request. When supplied with more than one item, object_key/lane keep backward compatibility and the files array becomes the source set.",
-    )
+    files: list[FileReference] = Field(default_factory=list, max_length=20)
     message: str = Field(..., min_length=1)
     history: list[ChatTurn] = Field(default_factory=list)
     mode: Mode = Mode.FILE_ANALYSIS
@@ -580,6 +581,55 @@ def view_r2_lane_object(
     )
 
 
+@router.delete("/files/r2/{lane}/objects")
+def delete_r2_lane_objects(
+    lane: str,
+    payload: DeleteR2ObjectsRequest,
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    """Delete one or more objects from a writable R2 lane.
+
+    This is intentionally lane-scoped and server-side only. It refuses read-only
+    or registry-only lanes and validates every key before calling R2.
+    """
+
+    lane_config = _require_r2_lane(settings, lane, require_read=False, require_write=True)
+    clean_keys = _normalise_delete_keys(payload)
+    if payload.dry_run:
+        return {
+            "ok": True,
+            "dry_run": True,
+            "storage": "r2",
+            "lane": lane_config["lane"],
+            "bucket": lane_config["bucket"],
+            "access_mode": lane_config["access_mode"],
+            "requested_count": len(clean_keys),
+            "object_keys": clean_keys,
+        }
+    try:
+        result = R2Storage(settings).delete_objects(
+            clean_keys,
+            bucket=str(lane_config["bucket"]),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        return _lane_storage_error_response(
+            operation="lane_delete",
+            lane_config=lane_config,
+            key_or_prefix=", ".join(clean_keys[:3]),
+            error=exc,
+        )
+    return {
+        "ok": bool(result.get("ok")),
+        "storage": "r2",
+        "lane": lane_config["lane"],
+        "bucket": lane_config["bucket"],
+        "access_mode": lane_config["access_mode"],
+        **result,
+    }
+
+
 @router.get("/files/read")
 def read_file(
     key: str = Query(..., min_length=1, max_length=2048),
@@ -1014,11 +1064,12 @@ async def chat_with_file(
     request: ChatWithFileRequest,
     settings: Settings = Depends(get_settings),
 ) -> dict[str, object]:
-    """Ask a question about one stored R2/local object.
+    """Ask a question about one or more stored R2/local objects.
 
-    V1 intentionally injects a bounded text excerpt directly into the model context.
-    The endpoint now returns stage timings and bounded model-call diagnostics so
-    hosted smoke-test runners do not get stuck behind an opaque timeout.
+    A request may use the legacy ``lane`` + ``object_key`` shape or the newer
+    ``files`` array. The latter supports multiple selected R2 objects across
+    different governed lanes/buckets while keeping object reads lane-scoped and
+    bounded.
     """
 
     workflow_preset = get_workflow_preset(request.workflow_preset)
@@ -1047,40 +1098,38 @@ async def chat_with_file(
         "total_seconds": None,
     }
     total_started = time.perf_counter()
-    stage = "validate_key"
-
-    attachments = _chat_file_attachments(request)
-    if len(attachments) > 1:
-        return await _chat_with_multiple_files(
-            request=request,
-            attachments=attachments,
-            settings=settings,
-            workflow_metadata=workflow_metadata,
-            timings=timings,
-            total_started=total_started,
-        )
-    if request.files:
-        first_attachment = attachments[0]
-        request = request.model_copy(update={"object_key": first_attachment.object_key, "lane": first_attachment.lane})
+    stage = "validate_sources"
 
     try:
-        clean_key = _time_stage(
-            timings, "validate_key_seconds", lambda: _validate_object_key(request.object_key)
+        source_refs = _time_stage(
+            timings,
+            "validate_key_seconds",
+            lambda: _request_file_refs(request),
         )
+        primary_ref = source_refs[0]
+        clean_key = primary_ref.object_key
+        request.object_key = clean_key
+        request.lane = primary_ref.lane
         lane_config = _require_r2_lane(
             settings,
-            request.lane,
-            require_read=(request.lane.strip().lower().replace("-", "_") != "uploads"),
+            primary_ref.lane,
+            require_read=(primary_ref.lane.strip().lower().replace("-", "_") != "uploads"),
         )
     except HTTPException:
         raise
 
-    source_label = Path(clean_key).name or clean_key
-    use_persisted_chunks = bool(request.use_chunks and lane_config["primary_upload_lane"])
+    source_label = primary_ref.name or Path(clean_key).name or clean_key
+    multi_source = len(source_refs) > 1
+    use_persisted_chunks = bool(
+        request.use_chunks and lane_config["primary_upload_lane"] and not multi_source
+    )
     chunk_mode_note = None
-    if request.use_chunks and not use_persisted_chunks:
+    if request.use_chunks and multi_source:
+        chunk_mode_note = "Persisted chunk retrieval is limited to one uploads-lane file; selected R2 files used bounded direct reads."
+    elif request.use_chunks and not use_persisted_chunks:
         chunk_mode_note = "Persisted chunk retrieval is limited to the uploads lane; this lane used a bounded direct read."
 
+    chunks: list[dict[str, object]] = []
     if use_persisted_chunks:
         stage = "chunk_retrieval"
         query = request.chunk_query or request.message
@@ -1097,9 +1146,7 @@ async def chat_with_file(
                 fallback_sql=request.vectorize_fallback_sql,
             )
         else:
-            retrieval = store.search_file_chunks(
-                query=query, object_key=clean_key, limit=chunk_limit
-            )
+            retrieval = store.search_file_chunks(query=query, object_key=clean_key, limit=chunk_limit)
             if isinstance(retrieval, dict):
                 retrieval["retrieval_mode"] = "sql"
         timings["chunk_retrieval_seconds"] = round(time.perf_counter() - retrieval_started, 3)
@@ -1134,8 +1181,7 @@ async def chat_with_file(
                     "ok": False,
                     "stage": stage,
                     "error_code": "chunk_index_failed",
-                    "message": chunk_index_result.get("db_error")
-                    or "File chunks could not be recorded.",
+                    "message": chunk_index_result.get("db_error") or "File chunks could not be recorded.",
                     "chunk_index": chunk_index_result,
                     "timings": _finalise_timings(timings, total_started),
                 }
@@ -1150,9 +1196,7 @@ async def chat_with_file(
                     fallback_sql=request.vectorize_fallback_sql,
                 )
             else:
-                retrieval = store.search_file_chunks(
-                    query=query, object_key=clean_key, limit=chunk_limit
-                )
+                retrieval = store.search_file_chunks(query=query, object_key=clean_key, limit=chunk_limit)
                 if isinstance(retrieval, dict):
                     retrieval["retrieval_mode"] = "sql"
             timings["chunk_retrieval_seconds"] = round(time.perf_counter() - retrieval_started, 3)
@@ -1163,9 +1207,7 @@ async def chat_with_file(
                 "ok": False,
                 "stage": stage,
                 "error_code": "chunk_retrieval_failed",
-                "message": (retrieval or {}).get("error")
-                if isinstance(retrieval, dict)
-                else "Chunk retrieval failed.",
+                "message": (retrieval or {}).get("error") if isinstance(retrieval, dict) else "Chunk retrieval failed.",
                 "retrieval": retrieval if isinstance(retrieval, dict) else None,
                 "timings": _finalise_timings(timings, total_started),
                 "hint": "Run POST /v1/files/chunk first, retry with use_chunks=false for small files, or enable SQL fallback for Vectorize.",
@@ -1187,18 +1229,25 @@ async def chat_with_file(
         source["lane"] = "uploads"
         retrieval_metadata = _retrieval_metadata(retrieval, chunks)
         truncated = False
-        had_decode_replacements = False
+        sources = [source]
+        source_citations = [
+            {
+                "label": source_label,
+                "object_key": obj.key,
+                "public_url": obj.public_url,
+                "lane": lane_config["lane"],
+            }
+        ]
     else:
         stage = "read_file"
         try:
-            obj = _time_stage(
+            direct_context = _time_stage(
                 timings,
                 "read_file_seconds",
-                lambda: _read_object_for_lane(
-                    settings,
-                    lane_config,
-                    clean_key,
-                    max_bytes=settings.max_file_read_bytes,
+                lambda: _read_file_sources_for_chat(
+                    settings=settings,
+                    source_refs=source_refs,
+                    max_chars=request.max_file_chars or settings.max_file_chat_chars,
                 ),
             )
         except FileNotFoundError as exc:
@@ -1219,26 +1268,14 @@ async def chat_with_file(
             return response
 
         stage = "decode_file"
-        extracted = _time_stage(
-            timings,
-            "decode_seconds",
-            lambda: _extract_object_text(
-                obj, settings, max_chars=settings.document_extract_max_chars
-            ),
-        )
-        content = str(extracted.get("content") or "")
-        had_decode_replacements = bool(extracted.get("decode_replacements"))
-        max_chars = request.max_file_chars or settings.max_file_chat_chars
-        excerpt = content[:max_chars]
-        truncated = len(content) > len(excerpt) or bool(extracted.get("truncated"))
-        source = _source_metadata(
-            obj,
-            settings,
-            truncated=truncated,
-            decode_replacements=had_decode_replacements,
-            lane=str(lane_config["lane"]),
-        )
-        source["extraction"] = extracted.get("extraction")
+        timings["decode_seconds"] = direct_context["decode_seconds"]
+        obj = direct_context["obj"]
+        source = direct_context["source"]
+        sources = direct_context["sources"]
+        source_citations = direct_context["source_citations"]
+        source_label = str(direct_context["source_label"])
+        excerpt = str(direct_context["excerpt"])
+        truncated = bool(direct_context["truncated"])
         retrieval_metadata = None
 
     stage = "prompt_build"
@@ -1252,6 +1289,7 @@ async def chat_with_file(
             obj=obj,
             excerpt=excerpt,
             truncated=truncated,
+            sources=sources,
         ),
     )
     payload = prompt_context["payload"]
@@ -1274,16 +1312,13 @@ async def chat_with_file(
             "prompt_message_count": len(payload.get("messages", [])),
             "file_excerpt_chars": len(excerpt),
             "source": source,
+            "sources": sources,
             "retrieval_metadata": retrieval_metadata,
             "retrieval_summary": _retrieval_summary(retrieval_metadata, workflow_metadata),
             "source_chunks": _source_chunks_metadata(chunks if use_persisted_chunks else []),
             "chunk_mode_note": chunk_mode_note,
-            "source_citation": {
-                "label": source_label,
-                "object_key": obj.key,
-                "public_url": obj.public_url,
-                "lane": lane_config["lane"],
-            },
+            "source_citation": source_citations[0],
+            "source_citations": source_citations,
             "timings": _finalise_timings(timings, total_started),
         }
 
@@ -1306,7 +1341,9 @@ async def chat_with_file(
             selected_model=selected_model,
             fallback_models=fallback_models,
             source=source,
+            sources=sources,
             source_label=source_label,
+            source_citations=source_citations,
             obj=obj,
             timings=_finalise_timings(timings, total_started),
             retrieval_metadata=retrieval_metadata,
@@ -1322,7 +1359,9 @@ async def chat_with_file(
             selected_model=selected_model,
             fallback_models=fallback_models,
             source=source,
+            sources=sources,
             source_label=source_label,
+            source_citations=source_citations,
             obj=obj,
             timings=_finalise_timings(timings, total_started),
             retrieval_metadata=retrieval_metadata,
@@ -1356,6 +1395,8 @@ async def chat_with_file(
             "finish_reason": finish_reason,
             "empty_reply": empty_reply,
             "source": source,
+            "sources": sources,
+            "source_citations": source_citations,
             "retrieval_metadata": retrieval_metadata,
             "workflow_preset": workflow_metadata,
             "selected_skill": prompt_context.get("selected_skill"),
@@ -1384,16 +1425,13 @@ async def chat_with_file(
         "db_recorded": bool(db_record.get("ok")),
         "db_error": db_record.get("error"),
         "source": source,
+        "sources": sources,
         "retrieval_metadata": retrieval_metadata,
         "retrieval_summary": _retrieval_summary(retrieval_metadata, workflow_metadata),
         "source_chunks": _source_chunks_metadata(chunks if use_persisted_chunks else []),
         "chunk_mode_note": chunk_mode_note,
-        "source_citation": {
-            "label": source_label,
-            "object_key": obj.key,
-            "public_url": obj.public_url,
-            "lane": lane_config["lane"],
-        },
+        "source_citation": source_citations[0],
+        "source_citations": source_citations,
     }
 
 
@@ -1441,364 +1479,6 @@ def files_diagnostics(
             "hint": _storage_error_hint(str(exc)),
         }
     return diagnostics
-
-
-def _chat_file_attachments(request: ChatWithFileRequest) -> list[ChatFileAttachment]:
-    attachments = request.files or [ChatFileAttachment(object_key=request.object_key, lane=request.lane)]
-    deduped: list[ChatFileAttachment] = []
-    seen: set[tuple[str, str]] = set()
-    for attachment in attachments:
-        lane = attachment.lane.strip() or "uploads"
-        key = attachment.object_key.strip()
-        marker = (lane.lower().replace("-", "_"), key)
-        if not key or marker in seen:
-            continue
-        seen.add(marker)
-        deduped.append(
-            ChatFileAttachment(
-                object_key=key,
-                lane=lane,
-                name=strip_nul_text(attachment.name or "") or None,
-            )
-        )
-    if not deduped:
-        deduped.append(ChatFileAttachment(object_key=request.object_key, lane=request.lane))
-    return deduped[:8]
-
-
-async def _chat_with_multiple_files(
-    *,
-    request: ChatWithFileRequest,
-    attachments: list[ChatFileAttachment],
-    settings: Settings,
-    workflow_metadata: dict[str, object] | None,
-    timings: dict[str, float | None],
-    total_started: float,
-) -> dict[str, object]:
-    per_file_chars = min(
-        int(request.max_file_chars or settings.max_file_chat_chars),
-        int(settings.document_extract_max_chars),
-    )
-    contexts: list[dict[str, object]] = []
-    read_started = time.perf_counter()
-    for index, attachment in enumerate(attachments, start=1):
-        clean_key = _validate_object_key(attachment.object_key)
-        lane_config = _require_r2_lane(
-            settings,
-            attachment.lane,
-            require_read=(attachment.lane.strip().lower().replace("-", "_") != "uploads"),
-        )
-        try:
-            obj = _read_object_for_lane(
-                settings,
-                lane_config,
-                clean_key,
-                max_bytes=settings.max_file_read_bytes,
-            )
-        except FileNotFoundError as exc:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
-        except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)) from exc
-        except RuntimeError as exc:
-            response = _lane_storage_error_response(
-                operation="chat_with_multiple_files_read",
-                lane_config=lane_config,
-                key_or_prefix=clean_key,
-                error=exc,
-            )
-            response["stage"] = "read_files"
-            response["timings"] = _finalise_timings(timings, total_started)
-            return response
-
-        extracted = _extract_object_text(obj, settings, max_chars=per_file_chars)
-        content = strip_nul_text(str(extracted.get("content") or ""))
-        excerpt = content[:per_file_chars]
-        truncated = len(content) > len(excerpt) or bool(extracted.get("truncated"))
-        source = _source_metadata(
-            obj,
-            settings,
-            truncated=truncated,
-            decode_replacements=bool(extracted.get("decode_replacements")),
-            lane=str(lane_config["lane"]),
-        )
-        source["extraction"] = extracted.get("extraction")
-        label = strip_nul_text(attachment.name or Path(clean_key).name or clean_key)
-        contexts.append(
-            {
-                "index": index,
-                "attachment": attachment,
-                "lane_config": lane_config,
-                "obj": obj,
-                "source": source,
-                "label": label,
-                "excerpt": excerpt,
-                "truncated": truncated,
-                "excerpt_chars": len(excerpt),
-            }
-        )
-    timings["read_file_seconds"] = round(time.perf_counter() - read_started, 3)
-
-    prompt_started = time.perf_counter()
-    prompt_context = _build_multi_file_chat_payload(
-        request=request,
-        settings=settings,
-        contexts=contexts,
-    )
-    timings["prompt_build_seconds"] = round(time.perf_counter() - prompt_started, 3)
-    payload = prompt_context["payload"]
-    fallback_models = prompt_context["fallback_models"]
-    selected_model = prompt_context["selected_model"]
-    effective_mode = prompt_context["effective_mode"]
-    source_citations = [
-        {
-            "label": str(context["label"]),
-            "object_key": getattr(context["obj"], "key", None),
-            "public_url": getattr(context["obj"], "public_url", None),
-            "lane": context["lane_config"].get("lane") if isinstance(context.get("lane_config"), dict) else None,
-        }
-        for context in contexts
-    ]
-    sources = [context["source"] for context in contexts]
-    retrieval_metadata = {
-        "retrieval_source": "raw_files",
-        "retrieval_mode": "raw_files",
-        "file_count": len(contexts),
-        "chunks_used": 0,
-        "vector_hits": 0,
-        "sql_fallback_hits": 0,
-    }
-
-    if request.skip_model or request.dry_run:
-        return {
-            "ok": True,
-            "dry_run": True,
-            "skip_model": True,
-            "stage": "complete_without_model",
-            "message": "Multiple file read and prompt build completed; model call was skipped.",
-            "selected_model": selected_model,
-            "fallback_models": fallback_models,
-            "effective_mode": str(effective_mode),
-            "workflow_preset": workflow_metadata,
-            "selected_skill": prompt_context.get("selected_skill"),
-            "prompt_message_count": len(payload.get("messages", [])),
-            "file_count": len(contexts),
-            "file_excerpt_chars": sum(int(context.get("excerpt_chars") or 0) for context in contexts),
-            "sources": sources,
-            "source": sources[0] if sources else None,
-            "retrieval_metadata": retrieval_metadata,
-            "retrieval_summary": _retrieval_summary(retrieval_metadata, workflow_metadata),
-            "source_chunks": [],
-            "source_citations": source_citations,
-            "source_citation": {
-                "label": f"{len(source_citations)} attached files",
-                "object_key": source_citations[0].get("object_key") if source_citations else None,
-                "public_url": source_citations[0].get("public_url") if source_citations else None,
-                "lane": source_citations[0].get("lane") if source_citations else None,
-            },
-            "timings": _finalise_timings(timings, total_started),
-        }
-
-    stage = "model_call"
-    client = OpenRouterClient(settings)
-    model_timeout = request.model_timeout_seconds or settings.chat_with_file_model_timeout_seconds
-    model_started = time.perf_counter()
-    try:
-        completion = await asyncio.wait_for(
-            client.chat_completion(payload, fallback_models=fallback_models),
-            timeout=max(0.5, float(model_timeout)),
-        )
-    except TimeoutError:
-        timings["model_call_seconds"] = round(time.perf_counter() - model_started, 3)
-        return {
-            "ok": False,
-            "reply": "",
-            "stage": stage,
-            "error_code": "chat_with_file_timeout",
-            "message": f"Model call timed out after {model_timeout} seconds.",
-            "model_used": selected_model,
-            "selected_model": selected_model,
-            "fallback_models": fallback_models,
-            "usage": None,
-            "timings": _finalise_timings(timings, total_started),
-            "sources": sources,
-            "source": sources[0] if sources else None,
-            "source_citations": source_citations,
-            "source_citation": source_citations[0] if source_citations else None,
-            "retrieval_metadata": retrieval_metadata,
-            "retrieval_summary": _retrieval_summary(retrieval_metadata, workflow_metadata),
-            "hint": "Retry with skip_model=true to verify multi-file context build, or use fewer files/a faster model.",
-        }
-    except Exception as exc:
-        timings["model_call_seconds"] = round(time.perf_counter() - model_started, 3)
-        return {
-            "ok": False,
-            "reply": "",
-            "stage": stage,
-            "error_code": "chat_with_file_model_error",
-            "message": str(exc),
-            "model_used": selected_model,
-            "selected_model": selected_model,
-            "fallback_models": fallback_models,
-            "usage": None,
-            "timings": _finalise_timings(timings, total_started),
-            "sources": sources,
-            "source": sources[0] if sources else None,
-            "source_citations": source_citations,
-            "source_citation": source_citations[0] if source_citations else None,
-            "retrieval_metadata": retrieval_metadata,
-            "retrieval_summary": _retrieval_summary(retrieval_metadata, workflow_metadata),
-        }
-    timings["model_call_seconds"] = round(time.perf_counter() - model_started, 3)
-
-    choice = (completion.get("choices") or [{}])[0]
-    message = choice.get("message") or {}
-    reply = _reply_text(message.get("content"))
-    finish_reason = choice.get("finish_reason")
-    empty_reply = not reply.strip()
-    ok = not bool(completion.get("_all_attempts_failed")) and not empty_reply
-    model_used = completion.get("model") or payload.get("model")
-    provider = completion.get("provider")
-    usage = completion.get("usage")
-
-    db_started = time.perf_counter()
-    db_record = SqlStore(settings).record_chat(
-        conversation_id=request.conversation_id,
-        mode=str(request.mode),
-        user_message=request.message,
-        assistant_reply=reply,
-        model_used=str(model_used) if model_used else None,
-        provider=str(provider) if provider else None,
-        usage=usage if isinstance(usage, dict) else None,
-        metadata={
-            "endpoint": "/v1/chat/with-file",
-            "ok": ok,
-            "finish_reason": finish_reason,
-            "empty_reply": empty_reply,
-            "multi_file": True,
-            "sources": sources,
-            "retrieval_metadata": retrieval_metadata,
-            "workflow_preset": workflow_metadata,
-            "selected_skill": prompt_context.get("selected_skill"),
-            "timings": timings,
-            "test_run_id": request.test_run_id,
-        },
-    )
-    timings["db_record_seconds"] = round(time.perf_counter() - db_started, 3)
-
-    return {
-        "ok": ok,
-        "reply": reply,
-        "model_used": model_used,
-        "provider": provider,
-        "usage": usage,
-        "raw_finish_reason": finish_reason,
-        "completion_truncated": finish_reason == "length",
-        "empty_reply": empty_reply,
-        "error_code": completion.get("hive_error_code"),
-        "attempts": completion.get("hive_attempts"),
-        "stage": "complete",
-        "workflow_preset": workflow_metadata,
-        "selected_skill": prompt_context.get("selected_skill"),
-        "timings": _finalise_timings(timings, total_started),
-        "conversation_id": db_record.get("conversation_id") or request.conversation_id,
-        "db_recorded": bool(db_record.get("ok")),
-        "db_error": db_record.get("error"),
-        "file_count": len(contexts),
-        "sources": sources,
-        "source": sources[0] if sources else None,
-        "retrieval_metadata": retrieval_metadata,
-        "retrieval_summary": _retrieval_summary(retrieval_metadata, workflow_metadata),
-        "source_chunks": [],
-        "source_citations": source_citations,
-        "source_citation": {
-            "label": f"{len(source_citations)} attached files",
-            "object_key": source_citations[0].get("object_key") if source_citations else None,
-            "public_url": source_citations[0].get("public_url") if source_citations else None,
-            "lane": source_citations[0].get("lane") if source_citations else None,
-        },
-    }
-
-
-def _build_multi_file_chat_payload(
-    *,
-    request: ChatWithFileRequest,
-    settings: Settings,
-    contexts: list[dict[str, object]],
-) -> dict[str, object]:
-    router_service = ModelRouter(settings)
-    task = router_service.classify_task(request.message, request.mode)
-    effective_mode = router_service.resolve_mode(task, request.mode)
-    selected_model = router_service.select_model(task, request.model)
-    fallback_models = router_service.fallback_models_for_task(task, selected_model)
-
-    window = ContextWindow()
-    window.add("system", build_system_prompt(effective_mode))
-    window.add(
-        "system",
-        "Answer using the attached file contents only where relevant. Compare, merge and cross-reference the files when the user asks. "
-        "Do not print object keys or public URLs inside the answer; the API returns source metadata separately.",
-    )
-    preset = get_workflow_preset(request.workflow_preset)
-    if preset:
-        window.add(
-            "system",
-            "Workflow preset: "
-            f"{preset.name}. {preset.prompt_instruction} "
-            f"Preferred output shape: {preset.output_shape}.",
-        )
-    selected_skill = _selected_skill_context(request, settings)
-    selected_skill_instruction = _selected_skill_instruction(selected_skill)
-    if selected_skill_instruction:
-        window.add("system", selected_skill_instruction)
-    for turn in request.history:
-        window.add(turn.role, turn.content)
-
-    file_blocks: list[str] = []
-    for context in contexts:
-        obj = context["obj"]
-        source = context["source"] if isinstance(context.get("source"), dict) else {}
-        label = str(context.get("label") or getattr(obj, "key", "attached file"))
-        excerpt = str(context.get("excerpt") or "")
-        file_blocks.append(
-            "\n".join(
-                [
-                    f"## Attached file {context.get('index')}: {label}",
-                    f"Lane: {source.get('lane') or 'unknown'}",
-                    f"Content type: {getattr(obj, 'content_type', None) or 'unknown'}",
-                    f"Size bytes: {getattr(obj, 'size_bytes', None)}",
-                    "",
-                    "File content excerpt:",
-                    excerpt or "[NO EXTRACTABLE TEXT]",
-                    "\n[FILE CONTENT TRUNCATED]" if context.get("truncated") else "",
-                ]
-            ).strip()
-        )
-
-    window.add(
-        "user",
-        "\n\n".join(
-            [
-                request.message,
-                "",
-                f"Attached file count: {len(contexts)}",
-                *file_blocks,
-            ]
-        ).strip(),
-    )
-
-    payload: dict[str, object] = {
-        "model": selected_model,
-        "messages": window.trimmed_messages(),
-        "temperature": request.temperature,
-        "max_tokens": max(request.max_tokens, settings.openrouter_min_response_tokens),
-    }
-    return {
-        "payload": payload,
-        "fallback_models": fallback_models,
-        "selected_model": selected_model,
-        "effective_mode": effective_mode,
-        "selected_skill": selected_skill,
-    }
 
 
 async def _vectorize_chunks(
@@ -2089,6 +1769,173 @@ def _selected_skill_instruction(selected_skill: dict[str, object] | None) -> str
     return "\n".join(parts)
 
 
+def _request_file_refs(request: ChatWithFileRequest) -> list[FileReference]:
+    raw_refs: list[FileReference] = []
+    if request.object_key:
+        raw_refs.append(
+            FileReference(
+                lane=request.lane or "uploads",
+                object_key=request.object_key,
+                name=None,
+            )
+        )
+    raw_refs.extend(request.files or [])
+
+    refs: list[FileReference] = []
+    seen: set[tuple[str, str]] = set()
+    for ref in raw_refs:
+        clean_lane = ref.lane.strip().lower().replace("-", "_") or "uploads"
+        clean_key = _validate_object_key(ref.object_key)
+        identity = (clean_lane, clean_key)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        refs.append(FileReference(lane=clean_lane, object_key=clean_key, name=ref.name))
+    if not refs:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one file object_key or files[] entry is required.",
+        )
+    if len(refs) > 20:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File chat is limited to 20 selected files per request.",
+        )
+    return refs
+
+
+def _normalise_delete_keys(payload: DeleteR2ObjectsRequest) -> list[str]:
+    raw_keys: list[str] = []
+    if payload.object_key:
+        raw_keys.append(payload.object_key)
+    raw_keys.extend(payload.object_keys or [])
+    clean_keys: list[str] = []
+    seen: set[str] = set()
+    for raw_key in raw_keys:
+        clean_key = _validate_object_key(str(raw_key))
+        if clean_key in seen:
+            continue
+        seen.add(clean_key)
+        clean_keys.append(clean_key)
+    if not clean_keys:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one object key is required for deletion.",
+        )
+    if len(clean_keys) > 1000:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="R2 delete is limited to 1000 objects per request.",
+        )
+    return clean_keys
+
+
+def _read_file_sources_for_chat(
+    *,
+    settings: Settings,
+    source_refs: list[FileReference],
+    max_chars: int,
+) -> dict[str, object]:
+    total_budget = max(1000, min(int(max_chars), settings.document_extract_max_chars))
+    per_file_budget = max(1000, total_budget // max(1, len(source_refs)))
+    remaining_budget = total_budget
+    decode_seconds = 0.0
+    sources: list[dict[str, object]] = []
+    citations: list[dict[str, object]] = []
+    blocks: list[str] = []
+    primary_obj = None
+    truncated_any = False
+
+    for index, ref in enumerate(source_refs, start=1):
+        lane_config = _require_r2_lane(
+            settings,
+            ref.lane,
+            require_read=(ref.lane.strip().lower().replace("-", "_") != "uploads"),
+        )
+        obj = _read_object_for_lane(
+            settings,
+            lane_config,
+            ref.object_key,
+            max_bytes=settings.max_file_read_bytes,
+        )
+        if primary_obj is None:
+            primary_obj = obj
+
+        decode_started = time.perf_counter()
+        extracted = _extract_object_text(
+            obj,
+            settings,
+            max_chars=min(settings.document_extract_max_chars, per_file_budget),
+        )
+        decode_seconds += time.perf_counter() - decode_started
+
+        content = str(extracted.get("content") or "")
+        allowed_chars = max(0, min(per_file_budget, remaining_budget))
+        excerpt = content[:allowed_chars] if allowed_chars else ""
+        omitted_for_budget = bool(content and not excerpt)
+        source_truncated = (len(content) > len(excerpt)) or bool(extracted.get("truncated"))
+        truncated_any = truncated_any or source_truncated or omitted_for_budget
+        remaining_budget = max(0, remaining_budget - len(excerpt))
+
+        label = ref.name or Path(ref.object_key).name or ref.object_key
+        source = _source_metadata(
+            obj,
+            settings,
+            truncated=source_truncated,
+            decode_replacements=bool(extracted.get("decode_replacements")),
+            lane=str(lane_config["lane"]),
+        )
+        source["extraction"] = extracted.get("extraction")
+        source["label"] = label
+        sources.append(source)
+        citations.append(
+            {
+                "label": label,
+                "object_key": obj.key,
+                "public_url": obj.public_url,
+                "lane": lane_config["lane"],
+            }
+        )
+
+        if omitted_for_budget:
+            body = "[Excerpt omitted because the shared multi-file context budget was exhausted.]"
+        else:
+            body = excerpt
+        if source_truncated and excerpt:
+            body = f"{body}\n[THIS FILE EXCERPT WAS TRUNCATED]"
+        blocks.append(
+            "\n".join(
+                [
+                    f"[File {index}: {label}]",
+                    f"Lane: {lane_config['lane']}",
+                    f"Content type: {obj.content_type or 'unknown'}",
+                    f"Size bytes: {obj.size_bytes}",
+                    "",
+                    body,
+                ]
+            ).strip()
+        )
+
+    if primary_obj is None:  # defensive; _request_file_refs prevents this
+        raise ValueError("At least one file is required")
+
+    source_label = (
+        str(citations[0]["label"])
+        if len(citations) == 1
+        else f"{len(citations)} selected files"
+    )
+    return {
+        "obj": primary_obj,
+        "source": sources[0],
+        "sources": sources,
+        "source_citations": citations,
+        "source_label": source_label,
+        "excerpt": "\n\n---\n\n".join(block for block in blocks if block),
+        "truncated": truncated_any,
+        "decode_seconds": round(decode_seconds, 3),
+    }
+
+
 def _build_file_chat_payload(
     *,
     request: ChatWithFileRequest,
@@ -2097,6 +1944,7 @@ def _build_file_chat_payload(
     obj,
     excerpt: str,
     truncated: bool,
+    sources: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     router_service = ModelRouter(settings)
     task = router_service.classify_task(request.message, request.mode)
@@ -2104,13 +1952,39 @@ def _build_file_chat_payload(
     selected_model = router_service.select_model(task, request.model)
     fallback_models = router_service.fallback_models_for_task(task, selected_model)
 
+    source_items = sources or []
+    multiple_sources = len(source_items) > 1
+    if multiple_sources:
+        source_lines = [
+            f"- [{index + 1}] {Path(str(item.get('object_key') or '')).name or item.get('object_key')} "
+            f"(lane: {item.get('lane')}, content type: {item.get('content_type') or 'unknown'}, "
+            f"size bytes: {item.get('size_bytes')})"
+            for index, item in enumerate(source_items)
+        ]
+        attachment_intro = [
+            f"Attached file set: {source_label}",
+            "Attached files:",
+            *source_lines,
+            "",
+            "File content excerpts:",
+        ]
+    else:
+        attachment_intro = [
+            f"Attached file label: {source_label}",
+            f"Content type: {obj.content_type or 'unknown'}",
+            f"Size bytes: {obj.size_bytes}",
+            "",
+            "File content excerpt:",
+        ]
+
     window = ContextWindow()
     window.add("system", build_system_prompt(effective_mode))
     window.add(
         "system",
         "Answer using the attached file content only where relevant. "
-        "Do not print the object key or public URL inside the answer; "
-        "the API returns source metadata separately. When source_chunks are returned, make the answer traceable to the evidence.",
+        "Do not print object keys or public URLs inside the answer; "
+        "the API returns source metadata separately. When multiple files are attached, "
+        "identify the file label used for each important finding.",
     )
     preset = get_workflow_preset(request.workflow_preset)
     if preset:
@@ -2132,11 +2006,7 @@ def _build_file_chat_payload(
             [
                 request.message,
                 "",
-                f"Attached file label: {source_label}",
-                f"Content type: {obj.content_type or 'unknown'}",
-                f"Size bytes: {obj.size_bytes}",
-                "",
-                "File content excerpt:",
+                *attachment_intro,
                 excerpt,
                 "\n[FILE CONTENT TRUNCATED]" if truncated else "",
             ]
@@ -2350,9 +2220,19 @@ def _chat_with_file_model_error_response(
     source_label: str,
     obj,
     timings: dict[str, float | None],
+    sources: list[dict[str, object]] | None = None,
+    source_citations: list[dict[str, object]] | None = None,
     retrieval_metadata: dict[str, object] | None = None,
     lane: str = "uploads",
 ) -> dict[str, object]:
+    citations = source_citations or [
+        {
+            "label": source_label,
+            "object_key": obj.key,
+            "public_url": obj.public_url,
+            "lane": lane,
+        }
+    ]
     return {
         "ok": False,
         "reply": "",
@@ -2369,15 +2249,12 @@ def _chat_with_file_model_error_response(
         "attempts": None,
         "timings": timings,
         "source": source,
+        "sources": sources or [source],
         "retrieval_metadata": retrieval_metadata,
         "retrieval_summary": _retrieval_summary(retrieval_metadata, None),
         "source_chunks": [],
-        "source_citation": {
-            "label": source_label,
-            "object_key": obj.key,
-            "public_url": obj.public_url,
-            "lane": lane,
-        },
+        "source_citation": citations[0],
+        "source_citations": citations,
         "hint": "Retry with skip_model=true to verify file read/prompt build, or lower max_file_chars/use a faster model for smoke tests.",
     }
 
@@ -2524,7 +2401,6 @@ def _text_preview_supported(key: str, content_type: str | None) -> bool:
         ".toml",
         ".ini",
         ".cfg",
-        ".zip",
     }
     if suffix in supported_suffixes:
         return True
@@ -2611,56 +2487,6 @@ def _extract_object_text(
     obj, settings: Settings, *, max_chars: int | None = None
 ) -> dict[str, object]:
     suffix = Path(obj.key).suffix.lower()
-    if suffix == ".zip":
-        try:
-            with tempfile.TemporaryDirectory(prefix="hive-zip-chat-") as tmp_dir:
-                temp_path = Path(tmp_dir) / "source.zip"
-                temp_path.write_bytes(obj.content)
-                report = extract_text_from_zip(
-                    temp_path,
-                    max_files=settings.max_zip_files,
-                    max_uncompressed_bytes=settings.max_zip_uncompressed_bytes,
-                    max_members=settings.zip_extract_max_members,
-                    max_member_bytes=settings.zip_extract_max_member_bytes,
-                    max_total_text_chars=max_chars or settings.zip_extract_max_total_text_chars,
-                    max_depth=settings.zip_extract_max_depth,
-                    supported_suffixes=settings.zip_extract_supported_suffix_set,
-                )
-        except (zipfile.BadZipFile, UnsafeZipError) as exc:
-            return {
-                "content": "",
-                "decode_replacements": False,
-                "truncated": False,
-                "extraction": {
-                    "supported": True,
-                    "extractor": "zip_text",
-                    "suffix": suffix,
-                    "char_count": 0,
-                    "truncated": False,
-                    "error": str(exc),
-                },
-            }
-        text = strip_nul_text(str(report.get("text") or ""))
-        truncated = bool(report.get("truncated"))
-        if max_chars and len(text) > max_chars:
-            text = text[:max_chars]
-            truncated = True
-        return {
-            "content": text,
-            "decode_replacements": False,
-            "truncated": truncated,
-            "extraction": {
-                "supported": True,
-                "extractor": "zip_text",
-                "suffix": suffix,
-                "char_count": len(text),
-                "truncated": truncated,
-                "summary": report.get("summary"),
-                "limits": report.get("limits"),
-                "items_preview": (report.get("items") or [])[:20],
-                "skipped_preview": (report.get("skipped") or [])[:20],
-            },
-        }
     if suffix in {".pdf", ".docx", ".xlsx", ".csv", ".json", ".html", ".htm"}:
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix or ".bin") as tmp:
             temp_path = Path(tmp.name)
@@ -2677,7 +2503,7 @@ def _extract_object_text(
         )
         if extracted.supported and extracted.text:
             return {
-                "content": strip_nul_text(extracted.text),
+                "content": extracted.text,
                 "decode_replacements": False,
                 "truncated": extracted.truncated,
                 "extraction": extracted.as_dict(),
@@ -2704,7 +2530,7 @@ def _extract_object_text(
 
 def _decode_text(content: bytes) -> tuple[str, bool]:
     decoded = content.decode("utf-8", errors="replace")
-    return strip_nul_text(decoded), "\ufffd" in decoded or "\x00" in decoded
+    return decoded, "\ufffd" in decoded
 
 
 def _source_metadata(
