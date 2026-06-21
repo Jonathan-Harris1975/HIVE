@@ -11,7 +11,26 @@ from typing import Any, Iterator
 from urllib.parse import quote_plus
 
 from app.core.config import Settings
-from app.core.text_safety import sql_safe_json_dumps, strip_nul_data, strip_nul_text
+
+
+def _strip_nul_text(value: str) -> str:
+    return value.replace("\x00", "\ufffd")
+
+
+def _strip_nul(value: Any) -> Any:
+    if isinstance(value, str):
+        return _strip_nul_text(value)
+    if isinstance(value, dict):
+        return {_strip_nul_text(str(key)): _strip_nul(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_strip_nul(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_strip_nul(item) for item in value)
+    return value
+
+
+def _json_dumps_safe(value: Any) -> str:
+    return json.dumps(_strip_nul(value), ensure_ascii=False, default=str)
 
 
 def _now() -> str:
@@ -128,12 +147,15 @@ class SqlStore:
         if not self.enabled:
             return {"ok": False, "enabled": False}
 
-        conv_id = strip_nul_text(conversation_id) if conversation_id else str(uuid.uuid4())
+        conv_id = conversation_id or str(uuid.uuid4())
         total_tokens = _int_or_none((usage or {}).get("total_tokens"))
         cost = _float_or_none((usage or {}).get("cost"))
         created = _now()
-        metadata_json = sql_safe_json_dumps(metadata or {})
-        safe_reply = assistant_reply or ""
+        metadata_json = _json_dumps_safe(metadata or {})
+        safe_reply = _strip_nul_text(assistant_reply or "")
+        safe_user_message = _strip_nul_text(user_message or "")
+        safe_model_used = _strip_nul_text(model_used) if model_used else None
+        safe_provider = _strip_nul_text(provider) if provider else None
 
         try:
             with self._transaction() as cur:
@@ -141,25 +163,25 @@ class SqlStore:
                     cur,
                     conv_id,
                     mode,
-                    model_used,
+                    safe_model_used,
                     created,
-                    title=_default_conversation_title(user_message),
+                    title=_default_conversation_title(safe_user_message),
                 )
-                self._insert_message(cur, conv_id, "user", user_message or "", None, None, None, None, metadata_json, created)
+                self._insert_message(cur, conv_id, "user", safe_user_message, None, None, None, None, metadata_json, created)
                 self._insert_message(
                     cur,
                     conv_id,
                     "assistant",
                     safe_reply,
-                    model_used,
-                    provider,
+                    safe_model_used,
+                    safe_provider,
                     total_tokens,
                     cost,
                     metadata_json,
                     created,
                 )
                 if usage:
-                    self._insert_cost_event(cur, conv_id, model_used, provider, usage, created)
+                    self._insert_cost_event(cur, conv_id, safe_model_used, safe_provider, usage, created)
             return {"ok": True, "conversation_id": conv_id}
         except Exception as exc:  # pragma: no cover
             return {"ok": False, "conversation_id": conv_id, "error": str(exc)}
@@ -168,16 +190,17 @@ class SqlStore:
         if not self.enabled:
             return {"ok": False, "enabled": False}
 
-        data = strip_nul_data(asdict(file_result) if is_dataclass(file_result) else dict(file_result))
-        object_key = strip_nul_text(str(data.get("object_key") or data.get("key") or ""))
+        data = asdict(file_result) if is_dataclass(file_result) else dict(file_result)
+        object_key = data.get("object_key") or data.get("key")
         if not object_key:
             return {"ok": False, "error": "file result has no object_key"}
 
         if extra_metadata:
             data = dict(data)
             data.update(extra_metadata)
+        data = _strip_nul(data)
         now = _now()
-        metadata_json = sql_safe_json_dumps(data)
+        metadata_json = _json_dumps_safe(data)
         try:
             with self._transaction() as cur:
                 self._upsert_file(cur, data, metadata_json, now)
@@ -203,7 +226,7 @@ class SqlStore:
             return {"ok": False, "enabled": False}
         if not object_key:
             return {"ok": False, "error": "object_key is required"}
-        object_key = strip_nul_text(object_key)
+        object_key = _strip_nul_text(object_key)
 
         now = _now()
         p = self._param()
@@ -212,8 +235,8 @@ class SqlStore:
                 if replace_existing:
                     cur.execute(f"DELETE FROM hive_file_chunks WHERE object_key={p}", (object_key,))
                 for chunk in chunks:
-                    metadata = strip_nul_data(dict(source_metadata or {}))
-                    metadata.update(strip_nul_data(chunk.get("metadata") or {}))
+                    metadata = dict(source_metadata or {})
+                    metadata.update(chunk.get("metadata") or {})
                     self._upsert_file_chunk(cur, object_key, chunk, metadata, now)
             return {"ok": True, "object_key": object_key, "chunk_count": len(chunks), "replaced_existing": replace_existing}
         except Exception as exc:  # pragma: no cover
@@ -418,7 +441,7 @@ class SqlStore:
     def rename_conversation(self, conversation_id: str, title: str) -> dict[str, object]:
         if not self.enabled:
             return {"ok": False, "enabled": False}
-        clean_title = " ".join(strip_nul_text(title or "").split()).strip()
+        clean_title = " ".join((title or "").split()).strip()
         if not clean_title:
             return {"ok": False, "enabled": True, "error": "title_required"}
         p = self._param()
@@ -426,7 +449,7 @@ class SqlStore:
             with self._transaction() as cur:
                 cur.execute(
                     f"UPDATE hive_conversations SET title={p}, updated_at={p} WHERE id={p}",
-                    (clean_title[:200], _now(), strip_nul_text(conversation_id)),
+                    (clean_title[:200], _now(), conversation_id),
                 )
                 updated = int(cur.rowcount or 0)
             if updated == 0:
@@ -930,7 +953,7 @@ class SqlStore:
               model=excluded.model,
               updated_at=excluded.updated_at
             """,
-            (strip_nul_text(conv_id), strip_nul_text(mode), strip_nul_text(model) if model else None, strip_nul_text(title) if title else None, now, now),
+            (_strip_nul_text(conv_id), _strip_nul_text(mode), _strip_nul_text(model) if model else None, _strip_nul_text(title) if title else None, now, now),
         )
 
     def _insert_message(
@@ -953,23 +976,24 @@ class SqlStore:
             (id, conversation_id, role, content, model, provider, token_total, cost_usd, metadata_json, created_at)
             VALUES ({p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p})
             """,
-            (str(uuid.uuid4()), strip_nul_text(conv_id), strip_nul_text(role), strip_nul_text(content or ""), strip_nul_text(model) if model else None, strip_nul_text(provider) if provider else None, total_tokens, cost, strip_nul_text(metadata_json), created),
+            (str(uuid.uuid4()), _strip_nul_text(conv_id), _strip_nul_text(role), _strip_nul_text(content or ""), _strip_nul_text(model) if model else None, _strip_nul_text(provider) if provider else None, total_tokens, cost, _strip_nul_text(metadata_json), created),
         )
 
     def _upsert_file(self, cur: Any, data: dict[str, Any], metadata_json: str, now: str) -> None:
         p = self._param()
-        object_key = strip_nul_text(str(data.get("object_key") or data.get("key") or ""))
+        object_key = _strip_nul_text(str(data.get("object_key") or data.get("key") or ""))
+        filename = data.get("original_name") or data.get("filename") or Path(str(object_key)).name
         values = (
             str(uuid.uuid4()),
             object_key,
-            strip_nul_text(str(data.get("original_name") or data.get("filename") or Path(str(object_key)).name)),
-            strip_nul_text(str(data.get("storage"))) if data.get("storage") is not None else None,
-            strip_nul_text(str(data.get("bucket"))) if data.get("bucket") is not None else None,
-            strip_nul_text(str(data.get("public_url"))) if data.get("public_url") is not None else None,
+            _strip_nul_text(str(filename)),
+            _strip_nul_text(str(data.get("storage"))) if data.get("storage") is not None else None,
+            _strip_nul_text(str(data.get("bucket"))) if data.get("bucket") is not None else None,
+            _strip_nul_text(str(data.get("public_url"))) if data.get("public_url") is not None else None,
             _int_or_none(data.get("size_bytes")),
-            strip_nul_text(str(data.get("content_type"))) if data.get("content_type") is not None else None,
-            strip_nul_text(str(data.get("sha256"))) if data.get("sha256") is not None else None,
-            strip_nul_text(metadata_json),
+            _strip_nul_text(str(data.get("content_type"))) if data.get("content_type") is not None else None,
+            _strip_nul_text(str(data.get("sha256"))) if data.get("sha256") is not None else None,
+            _strip_nul_text(metadata_json),
             now,
             now,
         )
@@ -1001,16 +1025,17 @@ class SqlStore:
         now: str,
     ) -> None:
         p = self._param()
+        safe_metadata_json = _json_dumps_safe(metadata)
         values = (
             str(uuid.uuid4()),
-            strip_nul_text(object_key),
+            _strip_nul_text(object_key),
             _int_or_none(chunk.get("chunk_index")) or 0,
-            strip_nul_text(str(chunk.get("content") or "")),
+            _strip_nul_text(str(chunk.get("content") or "")),
             _int_or_none(chunk.get("char_start")),
             _int_or_none(chunk.get("char_end")),
             _int_or_none(chunk.get("token_estimate")),
-            strip_nul_text(str(chunk.get("content_sha256"))) if chunk.get("content_sha256") is not None else None,
-            sql_safe_json_dumps(metadata),
+            _strip_nul_text(str(chunk.get("content_sha256"))) if chunk.get("content_sha256") is not None else None,
+            _strip_nul_text(safe_metadata_json),
             now,
             now,
         )
@@ -1049,14 +1074,14 @@ class SqlStore:
             """,
             (
                 str(uuid.uuid4()),
-                strip_nul_text(conv_id),
-                strip_nul_text(model) if model else None,
-                strip_nul_text(provider) if provider else None,
+                _strip_nul_text(conv_id),
+                _strip_nul_text(model) if model else None,
+                _strip_nul_text(provider) if provider else None,
                 _int_or_none(usage.get("prompt_tokens")),
                 _int_or_none(usage.get("completion_tokens")),
                 _int_or_none(usage.get("total_tokens")),
                 _float_or_none(usage.get("cost")),
-                sql_safe_json_dumps(usage),
+                _json_dumps_safe(usage),
                 created,
             ),
         )
@@ -1097,7 +1122,7 @@ class DatabaseUrlBuilder:
 
 
 def _default_conversation_title(message: str, *, max_length: int = 72) -> str | None:
-    clean = " ".join(strip_nul_text(message or "").split()).strip()
+    clean = " ".join((message or "").split()).strip()
     if not clean:
         return None
     if len(clean) <= max_length:

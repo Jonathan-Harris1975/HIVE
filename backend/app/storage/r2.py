@@ -416,6 +416,53 @@ class R2Storage:
             etag=_clean_etag(response.get("ETag")),
         )
 
+    def delete_objects(
+        self,
+        keys: list[str],
+        *,
+        bucket: str | None = None,
+    ) -> dict[str, object]:
+        clean_keys = [str(key).strip().lstrip("/") for key in keys if str(key).strip()]
+        if not clean_keys:
+            raise ValueError("At least one object key is required")
+        if len(clean_keys) > 1000:
+            raise ValueError("R2 delete is limited to 1000 objects per request")
+        bucket_name = bucket or self.settings.cf_r2_bucket
+        if not bucket_name:
+            raise RuntimeError("R2 bucket is not configured")
+        try:
+            response = self.client(read_only=False).delete_objects(
+                Bucket=bucket_name,
+                Delete={
+                    "Objects": [{"Key": key} for key in clean_keys],
+                    "Quiet": False,
+                },
+            )
+        except ClientError as exc:
+            raise RuntimeError(
+                f"R2 delete failed for bucket {bucket_name!r}: {_format_client_error(exc)}"
+            ) from exc
+        except BotoCoreError as exc:
+            raise RuntimeError(f"R2 delete failed for bucket {bucket_name!r}: {exc}") from exc
+
+        deleted = [str(item.get("Key")) for item in response.get("Deleted", []) if item.get("Key")]
+        errors = [
+            {
+                "key": item.get("Key"),
+                "code": item.get("Code"),
+                "message": item.get("Message"),
+            }
+            for item in response.get("Errors", [])
+        ]
+        return {
+            "ok": not errors,
+            "bucket": bucket_name,
+            "requested_count": len(clean_keys),
+            "deleted_count": len(deleted),
+            "deleted_keys": deleted,
+            "errors": errors,
+        }
+
 
 def _isoformat(value: Any) -> str | None:
     if isinstance(value, datetime):
