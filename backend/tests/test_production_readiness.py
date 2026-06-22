@@ -75,12 +75,26 @@ def test_production_readiness_accepts_r2_worker_monitoring() -> None:
         R2_BUCKET_UPLOADS="hive",
         R2_READ_ACCESS_KEY_ID="read-key",
         R2_READ_SECRET_ACCESS_KEY="read-secret",
+        RAMS_READINESS_BEARER_TOKEN="r" * 48,
     )
 
     report = build_readiness_report(settings)
 
     assert report.ready is True
     assert next(item for item in report.checks if item.name == "mast_monitoring").status == "ok"
+
+
+def test_production_readiness_requires_rams_readiness_auth_when_enabled() -> None:
+    settings = _production_settings(
+        REPO_HEALTH_ENABLED=True,
+        RAMS_READINESS_URL="https://mod.jonathan-harris.online/readiness",
+        RAMS_READINESS_BEARER_TOKEN="{{ secret.RMS_API_KEY }}",
+    )
+
+    report = build_readiness_report(settings)
+
+    assert report.ready is False
+    assert any(item.name == "rams_readiness_auth" for item in report.errors)
 
 def test_production_docs_are_disabled_and_runtime_is_hardened() -> None:
     app = create_app(_production_settings())
