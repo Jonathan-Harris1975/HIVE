@@ -4,7 +4,7 @@
 
 # HIVE
 
-**Current build marker:** `v1.26.8-production-readiness-sync` / `APP_VERSION=1.26.8-production`.
+**Current build marker:** `v1.26.9-review-state-sync` / `APP_VERSION=1.26.9-production`.
 
 HIVE (Harris Intelligent Virtual Entity) is the private operations backend for chat, file analysis, repository intelligence, skills, workflow planning and ecosystem health. It is a Python/FastAPI service deployed on Koyeb and consumed by HIVE-UI through an authenticated Cloudflare Pages proxy.
 

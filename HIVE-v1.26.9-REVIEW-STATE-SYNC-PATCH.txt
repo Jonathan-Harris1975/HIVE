@@ -1,0 +1,12 @@
+# HIVE v1.26.9 review state sync
+
+Date: 22 June 2026
+
+Fixes:
+- Approved execution-review records now report is_ready/is_closed and no longer need to remain in the active review queue.
+- /v1/execution-reviews now supports status aliases: open, ready, closed, all.
+- Response counts now distinguish total_count, open_count, ready_count, and closed_count.
+- Backend build marker updated to v1.26.9-review-state-sync.
+
+Operator note:
+- Approval still does not auto-run repository mutations or background jobs. It marks an allow-listed handoff as ready for the next operator-triggered step.
