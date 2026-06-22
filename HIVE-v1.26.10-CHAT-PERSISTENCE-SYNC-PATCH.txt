@@ -1,0 +1,7 @@
+HIVE v1.26.10 chat persistence sync
+
+- Raises OpenRouter streaming timeouts so valid replies are not clipped mid-sentence.
+- Emits finish_reason/completion_truncated metadata for streamed replies.
+- Auto-initialises SQL schema on startup when DATABASE_AUTO_INIT=true.
+- Retries chat persistence once after creating missing SQL tables.
+- Updates build marker to v1.26.10-chat-persistence-sync.
