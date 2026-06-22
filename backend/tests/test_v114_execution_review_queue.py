@@ -68,7 +68,7 @@ def _fake_plan(**kwargs):
 
 
 def test_v114_build_stage():
-    assert BUILD_STAGE == "v1.26.10-chat-persistence-sync"
+    assert BUILD_STAGE == "v1.26.11-env-split"
 
 
 def test_create_execution_review_dry_run(monkeypatch):

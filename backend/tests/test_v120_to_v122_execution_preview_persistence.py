@@ -74,7 +74,7 @@ def _fake_shared_execution_plan(**kwargs):
 
 
 def test_v122_build_marker():
-    assert BUILD_STAGE == "v1.26.10-chat-persistence-sync"
+    assert BUILD_STAGE == "v1.26.11-env-split"
 
 
 def test_v121_policy_profiles_enable_approved_handoff():
