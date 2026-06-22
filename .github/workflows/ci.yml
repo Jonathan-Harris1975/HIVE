@@ -44,6 +44,10 @@ jobs:
           R2_BUCKET_HIVE_SKILLS: hive-skills
           R2_PUBLIC_BASE_URL_HIVE_SKILLS: https://pub-da50a6512f164566955a3076a1c795ef.r2.dev
           MAST_MONITOR_MODE: r2
+          RAMS_HEALTH_URL: https://mod.jonathan-harris.online/livez
+          RAMS_READINESS_URL: https://mod.jonathan-harris.online/readiness
+          RAMS_HEALTH_BEARER_TOKEN: ci-rams-token-with-sufficient-length
+          RAMS_READINESS_BEARER_TOKEN: ci-rams-token-with-sufficient-length
           CORS_ORIGINS: https://hive.jonathan-harris.online
           ALLOWED_HOSTS: hive-ci.example.invalid
           DATABASE_ENABLED: 'false'
