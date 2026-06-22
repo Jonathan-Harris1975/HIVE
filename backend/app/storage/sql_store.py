@@ -157,35 +157,53 @@ class SqlStore:
         safe_user_message = _strip_nul_text(user_message or "")
         safe_model_used = _strip_nul_text(model_used) if model_used else None
         safe_provider = _strip_nul_text(provider) if provider else None
+        schema_init_result: dict[str, object] | None = None
 
-        try:
-            with self._transaction() as cur:
-                self._upsert_conversation(
-                    cur,
-                    conv_id,
-                    mode,
-                    safe_model_used,
-                    created,
-                    title=_default_conversation_title(safe_user_message),
-                )
-                self._insert_message(cur, conv_id, "user", safe_user_message, None, None, None, None, metadata_json, created)
-                self._insert_message(
-                    cur,
-                    conv_id,
-                    "assistant",
-                    safe_reply,
-                    safe_model_used,
-                    safe_provider,
-                    total_tokens,
-                    cost,
-                    metadata_json,
-                    created,
-                )
-                if usage:
-                    self._insert_cost_event(cur, conv_id, safe_model_used, safe_provider, usage, created)
-            return {"ok": True, "conversation_id": conv_id}
-        except Exception as exc:  # pragma: no cover
-            return {"ok": False, "conversation_id": conv_id, "error": str(exc)}
+        for attempt in range(2):
+            try:
+                with self._transaction() as cur:
+                    self._upsert_conversation(
+                        cur,
+                        conv_id,
+                        mode,
+                        safe_model_used,
+                        created,
+                        title=_default_conversation_title(safe_user_message),
+                    )
+                    self._insert_message(cur, conv_id, "user", safe_user_message, None, None, None, None, metadata_json, created)
+                    self._insert_message(
+                        cur,
+                        conv_id,
+                        "assistant",
+                        safe_reply,
+                        safe_model_used,
+                        safe_provider,
+                        total_tokens,
+                        cost,
+                        metadata_json,
+                        created,
+                    )
+                    if usage:
+                        self._insert_cost_event(cur, conv_id, safe_model_used, safe_provider, usage, created)
+                response: dict[str, object] = {"ok": True, "conversation_id": conv_id}
+                if schema_init_result is not None:
+                    response["schema_auto_init"] = schema_init_result
+                return response
+            except Exception as exc:  # pragma: no cover
+                error = str(exc)
+                if attempt == 0 and self._looks_like_missing_schema_error(error):
+                    schema_init_result = self.init_schema()
+                    if schema_init_result.get("ok"):
+                        continue
+                    return {
+                        "ok": False,
+                        "conversation_id": conv_id,
+                        "error": error,
+                        "schema_auto_init": schema_init_result,
+                    }
+                return {"ok": False, "conversation_id": conv_id, "error": error}
+
+        return {"ok": False, "conversation_id": conv_id, "error": "record_chat_retry_exhausted"}
 
     def record_file(self, file_result: Any, extra_metadata: dict[str, Any] | None = None) -> dict[str, object]:
         if not self.enabled:
@@ -438,16 +456,28 @@ class SqlStore:
             GROUP BY c.id, c.mode, c.model, c.title, c.auto_titled, c.created_at, c.updated_at
             ORDER BY c.updated_at DESC
         """
-        try:
-            with self._connect() as conn:
-                cur = conn.cursor()
-                cur.execute(sql, (_int_or_none(limit) or 50,))
-                rows = self._fetch_dicts(cur)
-            for row in rows:
-                row["auto_titled"] = bool(row.get("auto_titled"))
-            return {"ok": True, "enabled": True, "count": len(rows), "conversations": rows}
-        except Exception as exc:  # pragma: no cover
-            return {"ok": False, "enabled": True, "error": str(exc)}
+        schema_init_result: dict[str, object] | None = None
+        for attempt in range(2):
+            try:
+                with self._connect() as conn:
+                    cur = conn.cursor()
+                    cur.execute(sql, (_int_or_none(limit) or 50,))
+                    rows = self._fetch_dicts(cur)
+                for row in rows:
+                    row["auto_titled"] = bool(row.get("auto_titled"))
+                response: dict[str, object] = {"ok": True, "enabled": True, "count": len(rows), "conversations": rows}
+                if schema_init_result is not None:
+                    response["schema_auto_init"] = schema_init_result
+                return response
+            except Exception as exc:  # pragma: no cover
+                error = str(exc)
+                if attempt == 0 and self._looks_like_missing_schema_error(error):
+                    schema_init_result = self.init_schema()
+                    if schema_init_result.get("ok"):
+                        continue
+                    return {"ok": False, "enabled": True, "error": error, "schema_auto_init": schema_init_result}
+                return {"ok": False, "enabled": True, "error": error}
+        return {"ok": False, "enabled": True, "error": "list_conversations_retry_exhausted"}
 
     def rename_conversation(self, conversation_id: str, title: str) -> dict[str, object]:
         if not self.enabled:
@@ -1217,6 +1247,20 @@ class SqlStore:
         p = self._param()
         placeholders = ", ".join([p for _ in values])
         cur.execute(f"DELETE FROM {table} WHERE {column} IN ({placeholders})", tuple(values))
+
+
+    def _looks_like_missing_schema_error(self, error: str) -> bool:
+        lowered = (error or "").lower()
+        return any(
+            needle in lowered
+            for needle in (
+                "no such table",
+                "does not exist",
+                "undefinedtable",
+                "relation \"hive_",
+                "relation hive_",
+            )
+        )
 
 
 class DatabaseUrlBuilder:
