@@ -25,6 +25,7 @@ from app.api.workflows import router as workflows_router
 from app.core.config import Settings, get_settings
 from app.core.middleware import ProductionMiddleware
 from app.core.production import enforce_production_readiness
+from app.storage.sql_store import SqlStore
 
 logger = logging.getLogger("uvicorn.error.hive.startup")
 
@@ -42,6 +43,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             report.app_version,
             len(report.warnings),
         )
+        if active_settings.database_enabled and active_settings.database_auto_init:
+            schema_result = SqlStore(active_settings).init_schema()
+            logger.info(
+                "HIVE SQL schema auto-init ok=%s enabled=%s dialect=%s error=%s",
+                schema_result.get("ok"),
+                schema_result.get("enabled"),
+                schema_result.get("dialect"),
+                schema_result.get("error"),
+            )
+            if not schema_result.get("ok") and active_settings.production_require_database:
+                raise RuntimeError(f"HIVE SQL schema auto-init failed: {schema_result.get('error')}")
         yield
         logger.info("HIVE shutdown complete")
 
