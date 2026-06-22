@@ -18,7 +18,7 @@ class Settings(BaseSettings):
         "JH Ops Chat", validation_alias=AliasChoices("APP_NAME", "OPENROUTER_APP_NAME")
     )
     app_env: str = Field("development", validation_alias=AliasChoices("APP_ENV"))
-    app_version: str = Field("1.26.11-production", validation_alias=AliasChoices("APP_VERSION"))
+    app_version: str = Field("1.26.12-production", validation_alias=AliasChoices("APP_VERSION"))
     admin_bearer_token: str = Field(
         "change-me-local-only", validation_alias=AliasChoices("ADMIN_BEARER_TOKEN")
     )
