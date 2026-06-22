@@ -1,0 +1,206 @@
+{
+  "schema_version": "2026-06-22.catalogue-metadata.v1",
+  "updated_at": "2026-06-22",
+  "description": "Governed HIVE task metadata for workflow presets, workflow graph nodes, execution policies and operator-visible task cards.",
+  "required_fields": ["id", "title", "description", "category", "risk", "requires_approval"],
+  "defaults": {
+    "type": "task",
+    "category": "Operations",
+    "risk": "medium",
+    "requires_approval": true,
+    "description": "Supports a bounded HIVE operations workflow with review-gated production handoff.",
+    "when_to_use": "Use when the operator request matches this task or workflow stage."
+  },
+  "items": [
+    {
+      "id": "audit_report_review",
+      "type": "workflow_preset",
+      "title": "Audit report review",
+      "category": "Audit and readiness",
+      "risk": "medium",
+      "requires_approval": true,
+      "description": "Summarises operational audit bundles and turns findings into future-facing QA improvements.",
+      "when_to_use": "Use for RAMS, AIMS, HIVE or ecosystem audit reports and readiness evidence."
+    },
+    {
+      "id": "repo_debug_bundle",
+      "type": "workflow_preset",
+      "title": "Repo/debug bundle",
+      "category": "Repository engineering",
+      "risk": "medium",
+      "requires_approval": true,
+      "description": "Inspects repo ZIPs, CI logs and stack traces to identify a safe, minimal patch path.",
+      "when_to_use": "Use when uploaded source files or logs need grounded debugging."
+    },
+    {
+      "id": "ci_log_analysis",
+      "type": "workflow_preset",
+      "title": "CI/log analysis",
+      "category": "CI and deployment diagnostics",
+      "risk": "low",
+      "requires_approval": false,
+      "description": "Finds the first meaningful CI, deployment or runtime error and recommends the next safe check.",
+      "when_to_use": "Use for GitHub Actions, Koyeb, Pages and runtime log triage."
+    },
+    {
+      "id": "social_content_qa",
+      "type": "workflow_preset",
+      "title": "Social content QA",
+      "category": "Content operations",
+      "risk": "low",
+      "requires_approval": false,
+      "description": "Reviews posts, captions, hooks and RSS rewrites against brand and platform QA gates.",
+      "when_to_use": "Use for future-facing content QA and guardrail checks."
+    },
+    {
+      "id": "podcast_episode_review",
+      "type": "workflow_preset",
+      "title": "Podcast episode review",
+      "category": "Podcast operations",
+      "risk": "low",
+      "requires_approval": false,
+      "description": "Reviews transcripts, episode metadata and RSS copy for clarity, discoverability and amplification.",
+      "when_to_use": "Use for podcast transcript, show-note and episode-page checks."
+    },
+    {
+      "id": "ebook_keyword_review",
+      "type": "workflow_preset",
+      "title": "eBook keyword review",
+      "category": "eBook operations",
+      "risk": "low",
+      "requires_approval": false,
+      "description": "Reviews eBook keyword evidence, catalogue fit and niche-gap signals without live-market guessing.",
+      "when_to_use": "Use for KDP keyword council, catalogue positioning and niche-gap reviews."
+    },
+    {
+      "id": "audit_review",
+      "type": "workflow_template",
+      "title": "Audit review workflow",
+      "category": "Audit and readiness",
+      "risk": "medium",
+      "requires_approval": true,
+      "description": "Plans an evidence-led audit review with candidate skills, risk gates and an execution review record.",
+      "when_to_use": "Use when an audit bundle needs clear findings and a safe improvement plan."
+    },
+    {
+      "id": "repo_debug",
+      "type": "workflow_template",
+      "title": "Repo/debug workflow",
+      "category": "Repository engineering",
+      "risk": "medium",
+      "requires_approval": true,
+      "description": "Plans a repo or deployment debug pass from evidence gathering through review-gated patch handoff.",
+      "when_to_use": "Use when source, logs or CI results point to a repo-level fix."
+    },
+    {
+      "id": "content_qa",
+      "type": "workflow_template",
+      "title": "Content QA workflow",
+      "category": "Content operations",
+      "risk": "low",
+      "requires_approval": false,
+      "description": "Plans a brand-safe review of social, RSS, blog, podcast or eBook content outputs.",
+      "when_to_use": "Use when content needs QA, platform-fit checks or future guardrail improvements."
+    },
+    {
+      "id": "skills_registry",
+      "type": "workflow_template",
+      "title": "Skills registry workflow",
+      "category": "Skill governance",
+      "risk": "medium",
+      "requires_approval": true,
+      "description": "Plans skill search, routing, registry cleanup and metadata checks without installing or executing skills.",
+      "when_to_use": "Use when the skill catalogue needs routing, integrity or description checks."
+    },
+    {
+      "id": "request",
+      "type": "workflow_node",
+      "title": "Operator request",
+      "category": "Workflow intake",
+      "risk": "low",
+      "requires_approval": false,
+      "description": "Captures the operator's requested task and preserves it as the starting evidence for the workflow.",
+      "when_to_use": "Appears at the start of every generated workflow graph."
+    },
+    {
+      "id": "classify",
+      "type": "workflow_node",
+      "title": "Classify workflow",
+      "category": "Workflow planning",
+      "risk": "low",
+      "requires_approval": false,
+      "description": "Classifies the requested repo, lane, preset and risk posture before selecting supporting skills.",
+      "when_to_use": "Appears when HIVE turns an operator request into a workflow graph."
+    },
+    {
+      "id": "recommend_skills",
+      "type": "workflow_node",
+      "title": "Recommend skills",
+      "category": "Skill routing",
+      "risk": "medium",
+      "requires_approval": true,
+      "description": "Selects bounded candidate skills from the registry for planning only; no skill is installed or run.",
+      "when_to_use": "Use when a workflow needs candidate skills before evidence gathering."
+    },
+    {
+      "id": "collect_evidence",
+      "type": "workflow_node",
+      "title": "Collect evidence",
+      "category": "Evidence gathering",
+      "risk": "medium",
+      "requires_approval": false,
+      "description": "Gathers configured R2, D1, SQL and Vectorize evidence needed to support the planned output.",
+      "when_to_use": "Use before proposing any change, patch or operational action."
+    },
+    {
+      "id": "dry_run_output",
+      "type": "workflow_node",
+      "title": "Generate dry-run output",
+      "category": "Dry-run planning",
+      "risk": "medium",
+      "requires_approval": false,
+      "description": "Produces a reviewable output, patch plan or recommendation without mutating live systems.",
+      "when_to_use": "Use before requesting approval for medium or high-impact work."
+    },
+    {
+      "id": "risk_gate",
+      "type": "workflow_node",
+      "title": "Risk gate",
+      "category": "Approval control",
+      "risk": "high",
+      "requires_approval": true,
+      "description": "Checks candidate risk and blocks production handoff until required review criteria are satisfied.",
+      "when_to_use": "Use before any approved adapter handoff or production-impacting change."
+    },
+    {
+      "id": "review_queue",
+      "type": "workflow_node",
+      "title": "Execution review queue",
+      "category": "Human approval",
+      "risk": "high",
+      "requires_approval": true,
+      "description": "Stores the plan for human approval, rejection or change requests before production handoff.",
+      "when_to_use": "Use when a plan must be reviewed before execution can be unlocked."
+    },
+    {
+      "id": "adapter_execution",
+      "type": "workflow_node",
+      "title": "Production adapter handoff",
+      "category": "Controlled execution",
+      "risk": "high",
+      "requires_approval": true,
+      "description": "Hands an approved plan to allow-listed production adapters; approval does not auto-run background work.",
+      "when_to_use": "Use only after an explicit human approval marks the plan ready."
+    },
+    {
+      "id": "repo_hygiene",
+      "type": "maintenance_task",
+      "title": "Repository hygiene",
+      "category": "Repository maintenance",
+      "risk": "medium",
+      "requires_approval": true,
+      "description": "Reports duplicate, generated and stale files so cleanup can be reviewed as a separate commit.",
+      "when_to_use": "Use when root patch notes, generated artefacts or local cache files are cluttering the repo."
+    }
+  ]
+}
