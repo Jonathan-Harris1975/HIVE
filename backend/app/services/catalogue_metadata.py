@@ -241,7 +241,6 @@ def _task_candidate_ids(item: dict[str, Any], item_id: str | None) -> list[str]:
 def _generated_skill_description(
     item: dict[str, Any], meta: dict[str, Any], merged: dict[str, object]
 ) -> str:
-    title = _clean_text(item.get("title") or meta.get("name") or meta.get("slug") or item.get("source_id") or "This skill")
     category = _clean_text(meta.get("catalogue_category") or merged.get("category") or "operations")
     repos = [str(repo) for repo in (meta.get("repos") or []) if str(repo).strip()]
     repo_note = f" for {', '.join(repos[:3])}" if repos else ""
