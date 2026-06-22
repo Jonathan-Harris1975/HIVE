@@ -147,7 +147,22 @@ def build_readiness_report(settings: Settings) -> ReadinessReport:
             not rams_readiness_requires_token,
             "RAMS readiness auth is configured or not required.",
             "RAMS_READINESS_URL is configured but no RAMS_READINESS_BEARER_TOKEN/RAMS_HEALTH_BEARER_TOKEN/RMS_API_KEY is available.",
-            required=False,
+            required=production and settings.repo_health_enabled and bool(settings.rams_readiness_url.strip()),
+        )
+    )
+
+
+    execution_gate_ready = (
+        not settings.execution_adapters_enabled
+        or bool(settings.execution_adapters_require_approval)
+    )
+    checks.append(
+        _check(
+            "execution_adapters",
+            execution_gate_ready,
+            "Execution adapters are enabled behind the human approval gate or disabled by configuration.",
+            "EXECUTION_ADAPTERS_ENABLED=true must keep EXECUTION_ADAPTERS_REQUIRE_APPROVAL=true for this controlled production service.",
+            required=production and settings.execution_adapters_enabled,
         )
     )
 

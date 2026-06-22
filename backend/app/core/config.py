@@ -15,7 +15,7 @@ class Settings(BaseSettings):
         "JH Ops Chat", validation_alias=AliasChoices("APP_NAME", "OPENROUTER_APP_NAME")
     )
     app_env: str = Field("development", validation_alias=AliasChoices("APP_ENV"))
-    app_version: str = Field("1.26.7-production", validation_alias=AliasChoices("APP_VERSION"))
+    app_version: str = Field("1.26.8-production", validation_alias=AliasChoices("APP_VERSION"))
     admin_bearer_token: str = Field(
         "change-me-local-only", validation_alias=AliasChoices("ADMIN_BEARER_TOKEN")
     )
@@ -161,29 +161,29 @@ class Settings(BaseSettings):
 
     # Model policy is deliberately env-driven. Defaults use currently common
     # OpenRouter aliases / cheap high-context models rather than brittle dated IDs.
-    default_model: str = "nvidia/nemotron-3-ultra-550b-a55b:free"
-    cheap_model: str = "nvidia/nemotron-3-ultra-550b-a55b:free"
-    balanced_model: str = "nvidia/nemotron-3-ultra-550b-a55b:free"
+    default_model: str = "~google/gemini-flash-latest"
+    cheap_model: str = "~google/gemini-flash-latest"
+    balanced_model: str = "~google/gemini-flash-latest"
     premium_model: str = "~anthropic/claude-sonnet-latest"
     code_model: str = "x-ai/grok-build-0.1"
-    audit_model: str = "nvidia/nemotron-3-ultra-550b-a55b:free"
+    audit_model: str = "~google/gemini-flash-latest"
     openrouter_free_fallback_model: str = "nvidia/nemotron-3-ultra-550b-a55b:free"
     allow_paid_fallback: bool = False
     openrouter_model_preflight_enabled: bool = True
     openrouter_model_list_timeout_seconds: float = 10
     openrouter_attempt_timeout_seconds: float = Field(
-        12,
+        10,
         validation_alias=AliasChoices(
             "OPENROUTER_ATTEMPT_TIMEOUT_SECONDS", "OPENROUTER_REQUEST_TIMEOUT_SECONDS"
         ),
     )
     openrouter_stream_idle_timeout_seconds: float = Field(
-        8, validation_alias=AliasChoices("OPENROUTER_STREAM_IDLE_TIMEOUT_SECONDS")
+        6, validation_alias=AliasChoices("OPENROUTER_STREAM_IDLE_TIMEOUT_SECONDS")
     )
     openrouter_stream_first_token_timeout_seconds: float = Field(
-        10, validation_alias=AliasChoices("OPENROUTER_STREAM_FIRST_TOKEN_TIMEOUT_SECONDS")
+        8, validation_alias=AliasChoices("OPENROUTER_STREAM_FIRST_TOKEN_TIMEOUT_SECONDS")
     )
-    openrouter_max_fallback_attempts: int = 2
+    openrouter_max_fallback_attempts: int = 1
     openrouter_empty_reply_retry_enabled: bool = True
     openrouter_min_response_tokens: int = 80
     chat_with_file_model_timeout_seconds: float = 30
@@ -447,7 +447,7 @@ class Settings(BaseSettings):
         2000, validation_alias=AliasChoices("DOCUMENT_EXTRACT_DOCX_MAX_TABLE_ROWS")
     )
     zip_extract_max_members: int = Field(
-        80, validation_alias=AliasChoices("ZIP_EXTRACT_MAX_MEMBERS")
+        160, validation_alias=AliasChoices("ZIP_EXTRACT_MAX_MEMBERS")
     )
     zip_extract_max_member_bytes: int = Field(
         2 * 1024 * 1024, validation_alias=AliasChoices("ZIP_EXTRACT_MAX_MEMBER_BYTES")
@@ -457,11 +457,11 @@ class Settings(BaseSettings):
     )
     zip_extract_max_depth: int = Field(2, validation_alias=AliasChoices("ZIP_EXTRACT_MAX_DEPTH"))
     zip_extract_supported_suffixes: str = Field(
-        ".txt,.md,.mdx,.rst,.adoc,.log,.json,.jsonl,.jsonc,.csv,.tsv,.html,.htm,.xml,.rss,.svg,.yaml,.yml,.toml,.ini,.cfg,.conf,.properties,.lock,.env,.py,.js,.mjs,.ts,.tsx,.jsx,.css,.scss,.sass,.less,.vue,.svelte,.astro,.sh,.bash,.zsh,.fish,.ps1,.bat,.cmd,.sql,.graphql,.gql,.proto,.tf,.tfvars,.hcl,.go,.rs,.rb,.php,.java,.kt,.kts,.swift,.c,.h,.cpp,.cxx,.hpp,.cs,.fs,.fsx,.r,.lua,.pl,.pm,.scala,.sbt,.gradle,.ipynb,.pdf,.docx,.xlsx",
+        ".txt,.md,.mdx,.rst,.adoc,.log,.json,.jsonl,.jsonc,.csv,.tsv,.html,.htm,.xml,.rss,.svg,.yaml,.yml,.toml,.ini,.cfg,.conf,.properties,.lock,.lockb,.env,.py,.pyi,.js,.mjs,.cjs,.ts,.tsx,.jsx,.mts,.cts,.css,.scss,.sass,.less,.vue,.svelte,.astro,.sh,.bash,.zsh,.fish,.ps1,.bat,.cmd,.sql,.graphql,.gql,.proto,.tf,.tfvars,.hcl,.go,.mod,.sum,.rs,.rb,.php,.java,.kt,.kts,.swift,.c,.h,.cpp,.cxx,.hpp,.cs,.fs,.fsx,.r,.lua,.pl,.pm,.scala,.sbt,.gradle,.prisma,.ipynb,.pdf,.docx,.xlsx",
         validation_alias=AliasChoices("ZIP_EXTRACT_SUPPORTED_SUFFIXES"),
     )
     zip_extract_supported_filenames: str = Field(
-        ".gitignore,.gitattributes,.dockerignore,.editorconfig,.npmrc,.nvmrc,.prettierrc,.prettierignore,.eslintrc,.eslintignore,.python-version,.ruby-version,.env,.env.example,.env.local,Dockerfile,Makefile,Procfile,README,LICENSE,requirements",
+        ".gitignore,.gitattributes,.gitmodules,.dockerignore,.editorconfig,.npmrc,.nvmrc,.prettierrc,.prettierignore,.eslintrc,.eslintignore,.python-version,.ruby-version,.tool-versions,.env,.env.example,.env.local,.env.production,.env.development,.env.staging,.env.test,Dockerfile,Dockerfile.dev,Dockerfile.prod,Dockerfile.production,Makefile,Procfile,README,LICENSE,NOTICE,COPYING,CHANGELOG,CONTRIBUTING,SECURITY,CODEOWNERS,OWNERS,AUTHORS,requirements,Pipfile,Gemfile,Rakefile,Brewfile,Caddyfile,Jenkinsfile,justfile",
         validation_alias=AliasChoices("ZIP_EXTRACT_SUPPORTED_FILENAMES"),
     )
 
