@@ -1,3 +1,9 @@
+## 22 June 2026 - v1.26.12 catalogue metadata
+
+- Added `skills/catalogue_metadata.json` and `tasks/task_metadata.json` as governed metadata catalogues.
+- Enriched skills, workflow presets and execution workflow nodes with stable descriptions and UI-safe fallbacks.
+- Added a digital-dust review manifest for superseded root patch notes and generated cache artefacts.
+
 ## 22 June 2026 - v1.26.11 env split
 
 - Split production configuration into repo-committed non-secret defaults and Koyeb secrets-only values.
