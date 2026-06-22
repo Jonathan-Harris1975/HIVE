@@ -1,7 +1,7 @@
 # HIVE production operations
 
 **Status:** Paid Koyeb production service  
-**Last reviewed:** 17 June 2026
+**Last reviewed:** 22 June 2026
 
 Use `/livez` for process liveness, `/readyz` for public dependency readiness and authenticated `/v1/runtime/readiness` for detailed checks. MAST is monitored as a Worker through its durable R2 heartbeat, not through a public URL.
 

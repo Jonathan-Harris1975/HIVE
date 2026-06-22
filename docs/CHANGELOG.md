@@ -1,3 +1,11 @@
+## 22 June 2026 - v1.26.8 production readiness sync
+
+- Updated backend build marker to `v1.26.8-production-readiness-sync` and default `APP_VERSION` to `1.26.8-production`.
+- Added RAMS readiness bearer-token aliasing and production readiness validation so authenticated readiness probes cannot silently report blocked.
+- Added OpenRouter stream first-token and idle timeout controls for Koyeb e-medium operation.
+- Confirmed execution adapters remain review-gated, allow-listed and operator-triggered after approval.
+- Expanded ZIP extraction suffix/filename support for GitHub repository archives while keeping member and text limits bounded.
+
 ## 16 June 2026 production-readiness hardening
 
 - Added bounded operational R2 readiness probes for every required lane and governed shared-skill objects.
@@ -8,7 +16,7 @@
 - Corrected AIMS and RAMS liveness defaults to `/livez`.
 
 > **Document status:** Production reference  
-> **Last reviewed:** 16 June 2026  
+> **Last reviewed:** 22 June 2026  
 > **Operational authority:** Current repository README, SECURITY policy and operations guide.
 
 # Changelog

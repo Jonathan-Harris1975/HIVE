@@ -1,7 +1,7 @@
 # HIVE operational alerting
 
 **Status:** Production-ready contract  
-**Last reviewed:** 17 June 2026
+**Last reviewed:** 22 June 2026
 
 HIVE is the central, redacted operational-event inbox for the ecosystem. It accepts trusted events from GitHub Actions, Koyeb deployment watchers, Cloudflare Pages watchers and runtime services, then exposes them to the authenticated HIVE-UI Ops page. This supplements provider email and does not depend on an email being noticed.
 

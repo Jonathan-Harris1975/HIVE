@@ -1,16 +1,18 @@
 > **Document status:** Production reference  
-> **Last reviewed:** 16 June 2026  
+> **Last reviewed:** 22 June 2026  
 > **Operational authority:** Current repository README, SECURITY policy and operations guide.
 
 # HIVE backend production readiness
 
 This hardening layer keeps the existing HIVE API contract intact while tightening deployment, configuration, observability, and container behaviour.
 
+**Current production marker:** `APP_VERSION=1.26.8-production`; backend health build `v1.26.8-production-readiness-sync`.
+
 ## Mandatory Koyeb settings
 
 ```env
 APP_ENV=production
-APP_VERSION=1.26.0-production
+APP_VERSION=1.26.8-production
 ADMIN_BEARER_TOKEN=<unique random value, at least 32 characters>
 CORS_ORIGINS=https://<your-hive-ui-domain>
 ALLOWED_HOSTS=<your-service>.koyeb.app
@@ -64,7 +66,7 @@ The production image:
 - builds dependencies in a separate stage;
 - runs as the unprivileged `hive` user;
 - exposes no Uvicorn server banner;
-- uses one worker by default for the Koyeb eco-micro footprint;
+- uses one worker by default for the Koyeb e-medium/eco-medium footprint;
 - applies concurrency, backlog, keep-alive, and graceful-shutdown limits;
 - includes request IDs, bounded request bodies, API security headers, and safe request completion logs.
 
