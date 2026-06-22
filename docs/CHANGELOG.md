@@ -1,12 +1,13 @@
-## 22 June 2026 - v1.26.9 review state sync
+## 22 June 2026 - v1.26.10 chat persistence sync
 
-- Updated backend build marker to `v1.26.9-review-state-sync` and default `APP_VERSION` to `1.26.9-production`.
-- Added execution-review status aliases for `open`, `ready`, `closed`, and `all` list views.
-- Added review queue summary flags (`is_open`, `is_ready`, `is_closed`) so approved records stop appearing as active review items.
+- Raised OpenRouter stream idle/first-token windows so healthy replies are not clipped mid-answer.
+- Added streamed finish_reason and completion_truncated metadata.
+- Added DATABASE_AUTO_INIT and SQL schema retry so persisted conversations self-heal when tables are missing.
+- Updated Koyeb e-medium env to APP_VERSION=1.26.10-production.
 
 ## 22 June 2026 - v1.26.8 production readiness sync
 
-- Updated backend build marker to `v1.26.8-production-readiness-sync` and default `APP_VERSION` to `1.26.8-production`.
+- Updated backend build marker to `v1.26.10-chat-persistence-sync` and default `APP_VERSION` to `1.26.10-production`.
 - Added RAMS readiness bearer-token aliasing and production readiness validation so authenticated readiness probes cannot silently report blocked.
 - Added OpenRouter stream first-token and idle timeout controls for Koyeb e-medium operation.
 - Confirmed execution adapters remain review-gated, allow-listed and operator-triggered after approval.
