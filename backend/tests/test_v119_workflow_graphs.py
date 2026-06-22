@@ -32,7 +32,7 @@ def _fake_shared_execution_plan(**kwargs):
 
 
 def test_v119_build_marker() -> None:
-    assert BUILD_STAGE == "v1.26.9-review-state-sync"
+    assert BUILD_STAGE == "v1.26.10-chat-persistence-sync"
 
 
 def test_v118_workflow_templates_are_plan_only() -> None:

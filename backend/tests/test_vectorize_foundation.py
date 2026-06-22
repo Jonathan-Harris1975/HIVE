@@ -68,7 +68,7 @@ def test_vectorize_diagnostics_endpoint_is_safe_when_disabled(monkeypatch, tmp_p
     assert response.status_code == 200
     body = response.json()
     assert body["ok"] is True
-    assert body["build"] == "v1.26.9-review-state-sync"
+    assert body["build"] == "v1.26.10-chat-persistence-sync"
     assert body["sql_chunks_source_of_truth"] is True
     assert body["vectorize"]["enabled"] is False
 

@@ -472,3 +472,30 @@ def test_sql_store_strips_nul_bytes_before_persistence(tmp_path: Path) -> None:
     serialised = str(conversation)
     assert "\x00" not in serialised
     assert "�" in serialised
+
+
+def test_sql_store_record_chat_auto_initialises_missing_schema(tmp_path: Path) -> None:
+    db_path = tmp_path / "auto-init.sqlite3"
+    settings = Settings(
+        APP_ENV="test",
+        DATABASE_ENABLED=True,
+        DATABASE_URL=f"sqlite:///{db_path}",
+        OPENROUTER_API_KEY="test",
+    )
+    store = SqlStore(settings)
+
+    result = store.record_chat(
+        conversation_id="auto-init-conv",
+        mode="general",
+        user_message="Persist without manual schema init",
+        assistant_reply="Saved after schema creation",
+        model_used="test/model",
+        provider="test-provider",
+        usage={"total_tokens": 4, "cost": 0},
+    )
+
+    assert result["ok"] is True
+    assert result["schema_auto_init"]["ok"] is True
+    saved = store.get_conversation("auto-init-conv")
+    assert saved["ok"] is True
+    assert saved["message_count"] == 2
