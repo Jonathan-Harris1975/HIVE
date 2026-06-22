@@ -1,3 +1,9 @@
+## 22 June 2026 - v1.26.9 review state sync
+
+- Updated backend build marker to `v1.26.9-review-state-sync` and default `APP_VERSION` to `1.26.9-production`.
+- Added execution-review status aliases for `open`, `ready`, `closed`, and `all` list views.
+- Added review queue summary flags (`is_open`, `is_ready`, `is_closed`) so approved records stop appearing as active review items.
+
 ## 22 June 2026 - v1.26.8 production readiness sync
 
 - Updated backend build marker to `v1.26.8-production-readiness-sync` and default `APP_VERSION` to `1.26.8-production`.
