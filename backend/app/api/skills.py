@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from app.core.config import Settings, get_settings
 from app.core.security import require_admin
 from app.storage.d1 import D1MetadataStore
+from app.services.catalogue_metadata import catalogue_status
 from app.services.skill_registry import (
     cleanup_uploaded_file_skill_records,
     get_skill_catalogue_item,
@@ -272,6 +273,15 @@ def rebuild_index(
     """Rebuild the D1 skill index from the R2 shared search-document manifest."""
 
     return rebuild_skills_index(settings=settings, dry_run=payload.dry_run, limit=payload.limit)
+
+
+
+
+@router.get("/skills/catalogue-metadata")
+def skill_catalogue_metadata_status() -> dict[str, object]:
+    """Return local task/skill metadata catalogue status."""
+
+    return catalogue_status()
 
 
 @router.get("/skills/categories")
