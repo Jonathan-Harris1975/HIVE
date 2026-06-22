@@ -1,7 +1,7 @@
 # HIVE security policy
 
 **Status:** Production-controlled  
-**Last reviewed:** 16 June 2026
+**Last reviewed:** 22 June 2026
 
 ## Supported release
 
