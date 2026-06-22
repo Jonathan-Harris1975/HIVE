@@ -22,7 +22,10 @@ async def health() -> dict[str, object]:
     embeddings = CloudflareEmbeddingsClient(settings)
     storage_flags = {
         "r2": {
+            "enabled": r2.enabled,
             "configured": r2.enabled,
+            "write_enabled": r2.write_enabled,
+            "read_enabled": r2.read_enabled,
             "bucket_configured": bool(settings.cf_r2_bucket),
             "endpoint_configured": bool(settings.r2_endpoint_url),
             "public_base_url_configured": bool(settings.cf_r2_public_base_url),
@@ -32,10 +35,12 @@ async def health() -> dict[str, object]:
             ],
         },
         "sql": {
+            "enabled": bool(settings.database_enabled),
             "configured": sql.enabled,
             "dialect": sql.dialect if sql.enabled else None,
         },
         "d1": {
+            "enabled": bool(settings.d1_enabled),
             "configured": d1.enabled,
         },
         "vectorize": {
@@ -79,8 +84,10 @@ async def health() -> dict[str, object]:
         "embeddings_configured": embeddings.enabled,
         "embeddings_enabled": bool(settings.embeddings_enabled),
         "database_configured": sql.enabled,
+        "database_enabled": bool(settings.database_enabled),
         "database_dialect": sql.dialect if sql.enabled else None,
         "d1_configured": d1.enabled,
+        "d1_enabled": bool(settings.d1_enabled),
     }
 
 
