@@ -4,7 +4,7 @@
 
 # HIVE
 
-**Current build marker:** `v1.26.10-chat-persistence-sync` / `APP_VERSION=1.26.10-production`.
+**Current build marker:** `v1.26.11-env-split` / `APP_VERSION=1.26.11-production`.
 
 HIVE (Harris Intelligent Virtual Entity) is the private operations backend for chat, file analysis, repository intelligence, skills, workflow planning and ecosystem health. It is a Python/FastAPI service deployed on Koyeb and consumed by HIVE-UI through an authenticated Cloudflare Pages proxy.
 
@@ -60,6 +60,10 @@ Run locally:
 ```bash
 PYTHONPATH=backend uvicorn app.main:app --host 0.0.0.0 --port 8080
 ```
+
+## Production environment split
+
+HIVE now keeps non-secret production defaults in `HIVE-PRODUCTION-SHARED.env` in the repository. Koyeb should only hold secret-backed variables from `HIVE-KOYEB-SECRETS-ONLY.env`. The startup script loads the shared env file without overriding existing Koyeb variables, so secrets and emergency platform overrides still win.
 
 ## Deployment
 

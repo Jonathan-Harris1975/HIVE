@@ -34,6 +34,7 @@ COPY --from=builder /opt/venv /opt/venv
 COPY --chown=hive:hive backend /app/backend
 COPY --chown=hive:hive scripts /app/scripts
 COPY --chown=hive:hive .env.example /app/.env.example
+COPY --chown=hive:hive HIVE-PRODUCTION-SHARED.env /app/HIVE-PRODUCTION-SHARED.env
 
 RUN chmod +x /app/scripts/start.sh
 
