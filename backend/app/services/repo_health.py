@@ -62,7 +62,11 @@ def _targets(settings: Settings) -> list[ProbeTarget]:
             description="Repository Automation Management Service",
             health_url=_clean_url(settings.rams_health_url),
             operational_url=_clean_url(settings.rams_readiness_url),
-            operational_token=(settings.rams_health_bearer_token or "").strip(),
+            operational_token=(
+                settings.rams_readiness_bearer_token
+                or settings.rams_health_bearer_token
+                or ""
+            ).strip(),
         ),
         ProbeTarget(
             repo="MAST",

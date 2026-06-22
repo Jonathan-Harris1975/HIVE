@@ -192,6 +192,12 @@ class OpenRouterClient:
         async for candidate_payload in self._payload_attempts(payload, fallback_models):
             saw_token = False
             state = OpenRouterStreamState(model_used=candidate_payload.get("model"))
+            yield {
+                "event": "meta",
+                "type": "model_attempt",
+                "model_used": state.model_used,
+                "message": f"Trying {state.model_used}",
+            }
 
             async for event in self._stream_one_attempt(candidate_payload):
                 if event.get("event") == "retry_model":
@@ -204,6 +210,7 @@ class OpenRouterClient:
                         "event": "meta",
                         "type": "model_fallback",
                         "from_model": candidate_payload.get("model"),
+                        "model_used": candidate_payload.get("model"),
                         "message": event["message"],
                     }
                     break
@@ -367,10 +374,19 @@ class OpenRouterClient:
         url = f"{self.settings.openrouter_base_url.rstrip('/')}/chat/completions"
         request_payload = {**payload, "stream": True}
 
-        # For streaming, keep the read timeout open, but still bound connect/write/pool
-        # failures so a dead endpoint does not pin the worker indefinitely.
+        # Bound both connection failures and silent streams. OpenRouter/provider
+        # routes that emit no visible tokens should not leave the UI parked at
+        # "thinking" while a Koyeb worker waits like a forgotten printer queue.
         attempt_seconds = max(1.0, float(self.settings.openrouter_attempt_timeout_seconds))
-        timeout = httpx.Timeout(timeout=None, connect=min(10.0, attempt_seconds), write=attempt_seconds, pool=attempt_seconds)
+        idle_seconds = max(1.0, float(self.settings.openrouter_stream_idle_timeout_seconds))
+        first_token_seconds = max(1.0, float(self.settings.openrouter_stream_first_token_timeout_seconds))
+        timeout = httpx.Timeout(
+            timeout=None,
+            connect=min(8.0, attempt_seconds),
+            read=idle_seconds,
+            write=attempt_seconds,
+            pool=attempt_seconds,
+        )
 
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
@@ -389,10 +405,26 @@ class OpenRouterClient:
                     final_provider = None
                     final_usage = None
                     final_chunk = None
+                    attempt_started = time.perf_counter()
+                    saw_visible_token = False
 
                     async for raw_line in response.aiter_lines():
                         if not raw_line:
                             continue
+                        if (
+                            not saw_visible_token
+                            and time.perf_counter() - attempt_started > first_token_seconds
+                        ):
+                            yield {
+                                "event": "retry_model",
+                                "message": (
+                                    f"OpenRouter stream produced no visible tokens within "
+                                    f"{first_token_seconds:.1f}s for {payload.get('model')}"
+                                ),
+                                "status_code": 408,
+                                "model_used": payload.get("model"),
+                            }
+                            return
                         if raw_line.startswith(":"):
                             yield {"event": "keepalive", "message": raw_line.removeprefix(':').strip()}
                             continue
@@ -436,6 +468,7 @@ class OpenRouterClient:
                             delta = choice.get("delta") or {}
                             content = delta.get("content")
                             if content:
+                                saw_visible_token = True
                                 yield {
                                     "event": "token",
                                     "content": content,
@@ -454,8 +487,9 @@ class OpenRouterClient:
         except httpx.TimeoutException as exc:
             yield {
                 "event": "retry_model",
-                "message": f"OpenRouter stream attempt timed out for {payload.get('model')}: {exc}",
+                "message": f"OpenRouter stream timed out for {payload.get('model')}: {exc}",
                 "status_code": 408,
+                "model_used": payload.get("model"),
             }
         except httpx.HTTPError as exc:
             yield {
