@@ -15,7 +15,7 @@ class Settings(BaseSettings):
         "JH Ops Chat", validation_alias=AliasChoices("APP_NAME", "OPENROUTER_APP_NAME")
     )
     app_env: str = Field("development", validation_alias=AliasChoices("APP_ENV"))
-    app_version: str = Field("1.26.5-production", validation_alias=AliasChoices("APP_VERSION"))
+    app_version: str = Field("1.26.7-production", validation_alias=AliasChoices("APP_VERSION"))
     admin_bearer_token: str = Field(
         "change-me-local-only", validation_alias=AliasChoices("ADMIN_BEARER_TOKEN")
     )
@@ -107,6 +107,12 @@ class Settings(BaseSettings):
     rams_health_bearer_token: str = Field(
         "", validation_alias=AliasChoices("RAMS_HEALTH_BEARER_TOKEN", "RMS_API_KEY")
     )
+    rams_readiness_bearer_token: str = Field(
+        "",
+        validation_alias=AliasChoices(
+            "RAMS_READINESS_BEARER_TOKEN", "RAMS_API_KEY", "RMS_API_KEY"
+        ),
+    )
     mast_health_url: str = Field("", validation_alias=AliasChoices("MAST_HEALTH_URL"))
     mast_status_url: str = Field("", validation_alias=AliasChoices("MAST_STATUS_URL"))
     mast_monitor_mode: Literal["auto", "r2", "http", "disabled"] = Field(
@@ -146,7 +152,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("WEBSITE_HEALTH_URL"),
     )
 
-    openrouter_api_key: str = ""
+    openrouter_api_key: str = Field("", validation_alias=AliasChoices("OPENROUTER_API_KEY"))
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     openrouter_site_url: str = "https://jonathan-harris.online"
     openrouter_app_title: str = Field(
@@ -165,7 +171,18 @@ class Settings(BaseSettings):
     allow_paid_fallback: bool = False
     openrouter_model_preflight_enabled: bool = True
     openrouter_model_list_timeout_seconds: float = 10
-    openrouter_attempt_timeout_seconds: float = 12
+    openrouter_attempt_timeout_seconds: float = Field(
+        12,
+        validation_alias=AliasChoices(
+            "OPENROUTER_ATTEMPT_TIMEOUT_SECONDS", "OPENROUTER_REQUEST_TIMEOUT_SECONDS"
+        ),
+    )
+    openrouter_stream_idle_timeout_seconds: float = Field(
+        8, validation_alias=AliasChoices("OPENROUTER_STREAM_IDLE_TIMEOUT_SECONDS")
+    )
+    openrouter_stream_first_token_timeout_seconds: float = Field(
+        10, validation_alias=AliasChoices("OPENROUTER_STREAM_FIRST_TOKEN_TIMEOUT_SECONDS")
+    )
     openrouter_max_fallback_attempts: int = 2
     openrouter_empty_reply_retry_enabled: bool = True
     openrouter_min_response_tokens: int = 80
@@ -476,6 +493,30 @@ class Settings(BaseSettings):
     skill_context_risk_ceiling: str = Field(
         "medium", validation_alias=AliasChoices("SKILL_CONTEXT_RISK_CEILING")
     )
+
+    @field_validator(
+        "admin_bearer_token",
+        "ops_event_ingest_token",
+        "rams_health_bearer_token",
+        "rams_readiness_bearer_token",
+        "openrouter_api_key",
+        "cf_r2_access_key_id",
+        "cf_r2_secret_access_key",
+        "r2_read_access_key_id",
+        "r2_read_secret_access_key",
+        "database_password",
+        "d1_api_key",
+        "vectorize_api_token",
+        "embeddings_api_token",
+        mode="before",
+    )
+    @classmethod
+    def clean_secret_placeholder(cls, value: object) -> str:
+        secret = str(value or "").strip().strip('"').strip("'")
+        compact = secret.replace(" ", "")
+        if compact.startswith("{{secret.") and compact.endswith("}}"):
+            return ""
+        return secret
 
     @field_validator("embeddings_model", mode="before")
     @classmethod

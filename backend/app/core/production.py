@@ -135,6 +135,23 @@ def build_readiness_report(settings: Settings) -> ReadinessReport:
     )
 
 
+    rams_readiness_requires_token = bool(
+        settings.repo_health_enabled
+        and settings.rams_readiness_url.strip()
+        and not settings.rams_readiness_bearer_token.strip()
+        and not settings.rams_health_bearer_token.strip()
+    )
+    checks.append(
+        _check(
+            "rams_readiness_auth",
+            not rams_readiness_requires_token,
+            "RAMS readiness auth is configured or not required.",
+            "RAMS_READINESS_URL is configured but no RAMS_READINESS_BEARER_TOKEN/RAMS_HEALTH_BEARER_TOKEN/RMS_API_KEY is available.",
+            required=False,
+        )
+    )
+
+
     checks.append(
         _check(
             "openrouter",
