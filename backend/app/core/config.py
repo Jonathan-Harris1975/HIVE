@@ -15,7 +15,7 @@ class Settings(BaseSettings):
         "JH Ops Chat", validation_alias=AliasChoices("APP_NAME", "OPENROUTER_APP_NAME")
     )
     app_env: str = Field("development", validation_alias=AliasChoices("APP_ENV"))
-    app_version: str = Field("1.26.8-production", validation_alias=AliasChoices("APP_VERSION"))
+    app_version: str = Field("1.26.10-production", validation_alias=AliasChoices("APP_VERSION"))
     admin_bearer_token: str = Field(
         "change-me-local-only", validation_alias=AliasChoices("ADMIN_BEARER_TOKEN")
     )
@@ -172,16 +172,16 @@ class Settings(BaseSettings):
     openrouter_model_preflight_enabled: bool = True
     openrouter_model_list_timeout_seconds: float = 10
     openrouter_attempt_timeout_seconds: float = Field(
-        10,
+        30,
         validation_alias=AliasChoices(
             "OPENROUTER_ATTEMPT_TIMEOUT_SECONDS", "OPENROUTER_REQUEST_TIMEOUT_SECONDS"
         ),
     )
     openrouter_stream_idle_timeout_seconds: float = Field(
-        6, validation_alias=AliasChoices("OPENROUTER_STREAM_IDLE_TIMEOUT_SECONDS")
+        18, validation_alias=AliasChoices("OPENROUTER_STREAM_IDLE_TIMEOUT_SECONDS")
     )
     openrouter_stream_first_token_timeout_seconds: float = Field(
-        8, validation_alias=AliasChoices("OPENROUTER_STREAM_FIRST_TOKEN_TIMEOUT_SECONDS")
+        12, validation_alias=AliasChoices("OPENROUTER_STREAM_FIRST_TOKEN_TIMEOUT_SECONDS")
     )
     openrouter_max_fallback_attempts: int = 1
     openrouter_empty_reply_retry_enabled: bool = True
@@ -294,6 +294,7 @@ class Settings(BaseSettings):
     # Optional SQL persistence. HIVE v1 works without this; enable when you want
     # conversation/message/file/cost records in SQLite or Koyeb/PostgreSQL.
     database_enabled: bool = Field(False, validation_alias=AliasChoices("DATABASE_ENABLED"))
+    database_auto_init: bool = Field(True, validation_alias=AliasChoices("DATABASE_AUTO_INIT"))
     database_url: str = Field("", validation_alias=AliasChoices("DATABASE_URL", "DATABASE_URI"))
     database_host: str = Field("", validation_alias=AliasChoices("DATABASE_HOST", "POSTGRES_HOST"))
     database_port: int = Field(
