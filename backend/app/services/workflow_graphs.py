@@ -8,6 +8,7 @@ from uuid import uuid4
 from app.core.config import Settings
 from app.core.version import BUILD_STAGE
 from app.services.execution_adapters import execution_adapter_policy
+from app.services.catalogue_metadata import enrich_task_item
 from app.services.skill_registry import shared_execution_plan
 from app.storage.d1 import D1MetadataStore
 
@@ -126,11 +127,15 @@ def _now() -> str:
 def workflow_graph_templates() -> dict[str, object]:
     """Return static workflow graph templates for the future UI."""
 
+    templates = {
+        template_id: enrich_task_item({"id": template_id, **template}, item_id=template_id)
+        for template_id, template in WORKFLOW_GRAPH_TEMPLATES.items()
+    }
     return {
         "ok": True,
         "build_stage_hint": BUILD_STAGE,
-        "count": len(WORKFLOW_GRAPH_TEMPLATES),
-        "templates": WORKFLOW_GRAPH_TEMPLATES,
+        "count": len(templates),
+        "templates": templates,
         "note": "Templates are UI/planning hints only. They do not execute skills or mutate repos.",
     }
 
@@ -324,7 +329,7 @@ def _workflow_nodes(
     candidate_skills: list[dict[str, object]],
     risk_summary: dict[str, object],
 ) -> list[dict[str, object]]:
-    return [
+    nodes = [
         {
             "id": "request",
             "type": "input",
@@ -384,6 +389,7 @@ def _workflow_nodes(
             "summary": "Available after approval through the production adapter allow-list.",
         },
     ]
+    return [enrich_task_item(node, item_id=str(node.get("id") or "")) for node in nodes]
 
 
 def _workflow_edges(nodes: list[dict[str, object]]) -> list[dict[str, object]]:
@@ -420,15 +426,20 @@ def _execution_step_statuses(
         elif node_id == "request":
             status = "complete"
         statuses.append(
-            {
-                "node_id": node_id,
-                "label": node.get("label"),
-                "type": node.get("type"),
-                "status": status,
-                "can_run": can_run,
-                "blocker": blocker,
-                "summary": node.get("summary"),
-            }
+            enrich_task_item(
+                {
+                    "id": node_id,
+                    "node_id": node_id,
+                    "label": node.get("label"),
+                    "type": node.get("type"),
+                    "status": status,
+                    "can_run": can_run,
+                    "blocker": blocker,
+                    "summary": node.get("summary"),
+                    "description": node.get("description") or node.get("summary"),
+                },
+                item_id=node_id,
+            )
         )
     return statuses
 

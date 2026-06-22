@@ -8,6 +8,7 @@ from uuid import uuid4
 from app.core.config import Settings
 from app.core.version import BUILD_STAGE
 from app.services.execution_adapters import approved_execution_payload, execution_adapter_policy
+from app.services.catalogue_metadata import enrich_task_item
 from app.services.skill_registry import shared_execution_plan
 from app.storage.d1 import D1MetadataStore
 
@@ -480,6 +481,16 @@ def _review_summary(item: dict[str, Any]) -> dict[str, object]:
     risk_level = _review_risk_level(meta, plan, routed, primary)
     skill_name = _review_skill_name(primary)
     task = meta.get("task")
+    task_meta = enrich_task_item(
+        {
+            "id": meta.get("workflow_preset") or "review_queue",
+            "label": str(item.get("title") or "Execution review"),
+            "summary": _review_evidence_summary(task, skill_name, risk_level),
+            "risk": risk_level,
+            "requires_approval": meta.get("requires_approval", True),
+        },
+        item_id=str(meta.get("workflow_preset") or "review_queue"),
+    )
     return {
         "id": item.get("id"),
         "plan_id": meta.get("plan_id") or item.get("id"),
@@ -501,6 +512,9 @@ def _review_summary(item: dict[str, Any]) -> dict[str, object]:
         "action_type": "review_gated_plan",
         "skill_name": skill_name,
         "primary_skill": primary,
+        "description": task_meta.get("description"),
+        "category": task_meta.get("category"),
+        "when_to_use": task_meta.get("when_to_use"),
         "evidence_summary": _review_evidence_summary(task, skill_name, risk_level),
         "decision_count": len(meta.get("decision_log") or [])
         if isinstance(meta.get("decision_log"), list)

@@ -10,6 +10,7 @@ import httpx
 from app.core.config import Settings
 from app.core.version import BUILD_STAGE
 from app.services.execution_adapters import execution_adapter_policy
+from app.services.catalogue_metadata import enrich_skill_item, enrich_skill_items
 from app.storage.d1 import D1MetadataStore
 
 SKILL_LANE = "hive_skills"
@@ -579,7 +580,8 @@ def _skill_records(*, settings: Settings, query: str | None, limit: int) -> dict
     else:
         payload = recent_ecosystem_metadata(settings=settings, lane=SKILL_LANE, limit=safe_limit)
     if payload.get("ok") and isinstance(payload.get("items"), list) and payload.get("items"):
-        result = {**payload, "source": "d1:hive_ecosystem_metadata", "cached": False}
+        enriched_items = enrich_skill_items(payload.get("items", []))
+        result = {**payload, "items": enriched_items, "source": "d1:hive_ecosystem_metadata", "cached": False}
         _SKILL_RECORDS_CACHE[cache_key] = {
             "expires_at": now + max(1, min(int(settings.skill_registry_fallback_cache_seconds or 60), 600)),
             "payload": result,
@@ -652,11 +654,13 @@ def _r2_search_document_records(*, settings: Settings, limit: int) -> dict[str, 
     for doc in documents[:500]:
         item = _skill_document_to_metadata(settings, doc)
         records.append(
-            {
-                **item,
-                "lane": SKILL_LANE,
-                "source_type": "skill_descriptor",
-            }
+            enrich_skill_item(
+                {
+                    **item,
+                    "lane": SKILL_LANE,
+                    "source_type": "skill_descriptor",
+                }
+            )
         )
     if not records:
         return {
@@ -704,6 +708,7 @@ def _skill_document_to_metadata(settings: Settings, doc: dict[str, Any]) -> dict
         "reference_prefix": reference,
         "slug": metadata.get("slug") or name,
         "name": name,
+        "description": doc.get("description") or metadata.get("description"),
         "object_key": object_key,
         "descriptor_url": settings.public_url_for_r2_lane(SKILL_LANE, object_key),
         "search_document_id": doc.get("document_id") or f"skill:{reference}",
@@ -717,13 +722,16 @@ def _skill_document_to_metadata(settings: Settings, doc: dict[str, Any]) -> dict
         "source_register": "HIVE_skills_availability_register_v2_repo_mapped.xlsx",
         "source_manifest_key": SEARCH_DOCUMENTS_KEY,
     }
-    return {
-        "id": f"skill:{skill_id or reference or name}",
-        "source_id": skill_id or reference or name,
-        "title": name,
-        "url": enriched_metadata["descriptor_url"],
-        "metadata": enriched_metadata,
-    }
+    return enrich_skill_item(
+        {
+            "id": f"skill:{skill_id or reference or name}",
+            "source_id": skill_id or reference or name,
+            "title": name,
+            "description": enriched_metadata.get("description"),
+            "url": enriched_metadata["descriptor_url"],
+            "metadata": enriched_metadata,
+        }
+    )
 
 
 def _catalogue_category(metadata: dict[str, Any], tags: list[str]) -> str:
@@ -1110,6 +1118,9 @@ def _recommendation_summary(item: dict[str, Any] | None) -> dict[str, object] | 
         "priority_tier": meta.get("priority_tier"),
         "risk_level": meta.get("risk_level"),
         "hive_lane": meta.get("hive_lane"),
+        "description": item.get("description") or meta.get("description"),
+        "category": item.get("category") or meta.get("catalogue_category"),
+        "requires_approval": meta.get("requires_approval", _execution_policy_for_skill(item).get("review_required")),
         "repos": meta.get("repos") or [],
         "matched_terms": item.get("matched_terms") or [],
         "matched_fields": item.get("matched_fields") or {},

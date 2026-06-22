@@ -6,6 +6,7 @@ from typing import Any
 from app.core.config import Settings
 from app.core.version import BUILD_STAGE
 from app.services.model_router import Mode
+from app.services.catalogue_metadata import enrich_task_item
 
 
 @dataclass(frozen=True)
@@ -35,7 +36,10 @@ class WorkflowPreset:
     def safe_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["mode"] = str(self.mode)
-        return data
+        enriched = enrich_task_item(data, item_id=self.name)
+        enriched["name"] = self.name
+        enriched["label"] = self.label
+        return enriched
 
 
 BASE_FREE_TIER_NOTE = (
