@@ -1,6 +1,36 @@
 #!/usr/bin/env sh
 set -eu
 
+# Load repo-committed non-secret production defaults before starting Uvicorn.
+# Existing Koyeb environment variables always win, so secrets and emergency
+# runtime overrides are not overwritten by this file.
+load_shared_env_file() {
+  env_file="${HIVE_PRODUCTION_ENV_FILE:-HIVE-PRODUCTION-SHARED.env}"
+  [ -f "$env_file" ] || return 0
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      ''|'#'*) continue ;;
+    esac
+    case "$line" in
+      *=*) ;;
+      *) continue ;;
+    esac
+    key=${line%%=*}
+    value=${line#*=}
+    case "$key" in
+      ''|*[!A-Za-z0-9_]*|[0-9]*) continue ;;
+    esac
+    eval "already_set=\${$key+x}"
+    if [ -z "${already_set:-}" ]; then
+      export "$key=$value"
+    fi
+  done < "$env_file"
+}
+
+load_shared_env_file
+
+
 PORT="${PORT:-8080}"
 APP_DIR="${APP_DIR:-backend}"
 WEB_CONCURRENCY="${WEB_CONCURRENCY:-1}"
