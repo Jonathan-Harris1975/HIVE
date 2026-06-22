@@ -34,7 +34,7 @@ class ChatRequest(BaseModel):
     mode: Mode = Mode.AUTO
     model: str | None = None
     temperature: float = 0.4
-    max_tokens: int = 2048
+    max_tokens: int = 2600
     conversation_id: str | None = None
     use_persisted_history: bool = True
     db_history_limit: int = Field(20, ge=0, le=100)
@@ -353,6 +353,9 @@ def _record_streamed_turn(
             "skills_used": _skill_summaries(skill_context),
             "skill_context_status": _skill_context_status(skill_context),
             "timings": timings or {},
+            "finish_reason": event.get("finish_reason"),
+            "completion_truncated": bool(event.get("completion_truncated")),
+            "partial_response": bool(event.get("partial_response")),
         },
     )
 
