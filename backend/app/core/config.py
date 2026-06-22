@@ -8,14 +8,17 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env", env_file_encoding="utf-8", extra="ignore", populate_by_name=True
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        populate_by_name=True,
     )
 
     app_name: str = Field(
         "JH Ops Chat", validation_alias=AliasChoices("APP_NAME", "OPENROUTER_APP_NAME")
     )
     app_env: str = Field("development", validation_alias=AliasChoices("APP_ENV"))
-    app_version: str = Field("1.26.10-production", validation_alias=AliasChoices("APP_VERSION"))
+    app_version: str = Field("1.26.11-production", validation_alias=AliasChoices("APP_VERSION"))
     admin_bearer_token: str = Field(
         "change-me-local-only", validation_alias=AliasChoices("ADMIN_BEARER_TOKEN")
     )
