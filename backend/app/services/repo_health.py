@@ -102,7 +102,10 @@ def _safe_payload(response: httpx.Response) -> dict[str, Any] | None:
 
     allowed = {
         "ok",
+        "ready",
+        "healthy",
         "status",
+        "state",
         "readiness",
         "service",
         "app",
@@ -119,6 +122,36 @@ def _safe_payload(response: httpx.Response) -> dict[str, Any] | None:
         "last_tick_at",
     }
     return {key: value for key, value in raw.items() if key in allowed}
+
+
+def _normalise_probe_value(value: object) -> str:
+    return str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+
+
+def _payload_status(payload: dict[str, Any] | None) -> str | None:
+    if not payload:
+        return None
+
+    if payload.get("ok") is False or payload.get("healthy") is False or payload.get("ready") is False:
+        return "degraded"
+
+    candidates = (payload.get("readiness"), payload.get("status"), payload.get("state"))
+    for candidate in candidates:
+        value = _normalise_probe_value(candidate)
+        if not value:
+            continue
+        if value in {"ok", "ready", "healthy", "live", "online", "active", "running", "up"}:
+            return "healthy"
+        if value in {"blocked", "auth_blocked", "forbidden", "unauthorised", "unauthorized"}:
+            return "blocked"
+        if value in {"degraded", "partial", "warning", "warn", "stale", "not_ready", "unready"}:
+            return "degraded"
+        if value in {"down", "offline", "failed", "failure", "error", "critical"}:
+            return "down"
+
+    if payload.get("ok") is True or payload.get("healthy") is True or payload.get("ready") is True:
+        return "healthy"
+    return None
 
 
 async def _probe(
@@ -145,15 +178,34 @@ async def _probe(
     try:
         response = await client.get(url, headers=headers, follow_redirects=True)
         latency_ms = round((time.perf_counter() - started) * 1000)
-        healthy = 200 <= response.status_code < 400
+        payload = _safe_payload(response)
+        payload_status = _payload_status(payload)
+        if 200 <= response.status_code < 400:
+            status = payload_status or "healthy"
+            detail = "Probe returned a successful response."
+            if status == "degraded":
+                detail = "Probe responded but reported degraded or not-ready payload state."
+            elif status == "blocked":
+                detail = "Probe responded but reported a blocked payload state."
+            elif status == "down":
+                detail = "Probe responded but reported a down payload state."
+        elif response.status_code in {401, 403}:
+            status = "blocked"
+            detail = f"Probe was blocked by authentication or authorisation (HTTP {response.status_code})."
+        elif response.status_code in {408, 409, 425, 429, 500, 502, 503, 504}:
+            status = "degraded"
+            detail = f"Probe returned transient or degraded HTTP {response.status_code}."
+        else:
+            status = "down"
+            detail = f"Probe returned HTTP {response.status_code}."
         return {
-            "status": "healthy" if healthy else "down",
+            "status": status,
             "configured": True,
             "http_status": response.status_code,
             "latency_ms": latency_ms,
             "checked_at": _now_iso(),
-            "detail": "Probe returned a successful response." if healthy else f"Probe returned HTTP {response.status_code}.",
-            "payload": _safe_payload(response),
+            "detail": detail,
+            "payload": payload,
         }
     except httpx.TimeoutException:
         return {
@@ -176,13 +228,17 @@ async def _probe(
 
 
 def _combine_status(liveness: dict[str, Any], operational: dict[str, Any] | None) -> str:
-    if liveness["status"] == "not_configured":
+    liveness_status = str(liveness.get("status") or "not_configured")
+    operational_status = str((operational or {}).get("status") or "")
+    if liveness_status == "not_configured":
         return "not_configured"
-    if liveness["status"] != "healthy":
-        return "down"
-    if operational and operational["status"] not in {"healthy", "not_configured"}:
+    if liveness_status in {"blocked", "degraded"}:
         return "degraded"
-    if operational and operational["status"] == "not_configured":
+    if liveness_status != "healthy":
+        return "down"
+    if operational and operational_status not in {"healthy", "not_configured"}:
+        return "degraded"
+    if operational and operational_status == "not_configured":
         return "degraded"
     return "healthy"
 
@@ -193,7 +249,9 @@ def _readiness_probe(operational: dict[str, Any] | None, status: str) -> dict[st
     source_status = str(source.get("status") or status)
     if source_status == "healthy":
         readiness_status = "ready"
-    elif source_status in {"down", "failed", "error", "blocked"}:
+    elif source_status in {"blocked", "auth_blocked", "forbidden", "unauthorised", "unauthorized"}:
+        readiness_status = "blocked"
+    elif source_status in {"down", "failed", "error"}:
         readiness_status = "not_ready"
     else:
         readiness_status = "partial"
