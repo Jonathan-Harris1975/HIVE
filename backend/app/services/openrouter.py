@@ -226,7 +226,12 @@ class OpenRouterClient:
                             "event": "done",
                             "ok": False,
                             "model_used": event.get("model_used") or state.model_used,
+                            "provider": event.get("provider"),
+                            "usage": event.get("usage"),
                             "message": event.get("message"),
+                            "finish_reason": event.get("finish_reason"),
+                            "completion_truncated": bool(event.get("completion_truncated")),
+                            "partial_response": bool(event.get("partial_response")),
                         }
                         return
                     state = OpenRouterStreamState(
@@ -249,11 +254,19 @@ class OpenRouterClient:
                         "model_used": state.model_used,
                         "provider": state.provider,
                         "usage": state.usage,
+                        "finish_reason": event.get("finish_reason"),
+                        "completion_truncated": bool(event.get("completion_truncated")),
                     }
                     return
 
                 yield event
-        yield {"event": "done", "ok": False, "message": "All model attempts failed or returned no visible assistant text"}
+        yield {
+            "event": "done",
+            "ok": False,
+            "message": "All model attempts failed or returned no visible assistant text",
+            "finish_reason": "all_attempts_failed",
+            "completion_truncated": False,
+        }
 
     def _has_empty_visible_reply(self, response_payload: dict[str, Any]) -> bool:
         choices = response_payload.get("choices") or []
@@ -374,9 +387,9 @@ class OpenRouterClient:
         url = f"{self.settings.openrouter_base_url.rstrip('/')}/chat/completions"
         request_payload = {**payload, "stream": True}
 
-        # Bound both connection failures and silent streams. OpenRouter/provider
-        # routes that emit no visible tokens should not leave the UI parked at
-        # "thinking" while a Koyeb worker waits like a forgotten printer queue.
+        # Bound connection failures without cutting off healthy providers that pause
+        # briefly while composing. The previous 6s read window was fast, but it could
+        # guillotine a valid answer mid-sentence on mobile/Koyeb routes.
         attempt_seconds = max(1.0, float(self.settings.openrouter_attempt_timeout_seconds))
         idle_seconds = max(1.0, float(self.settings.openrouter_stream_idle_timeout_seconds))
         first_token_seconds = max(1.0, float(self.settings.openrouter_stream_first_token_timeout_seconds))
@@ -387,6 +400,13 @@ class OpenRouterClient:
             write=attempt_seconds,
             pool=attempt_seconds,
         )
+        final_model = payload.get("model")
+        final_provider = None
+        final_usage = None
+        final_chunk = None
+        final_finish_reason = None
+        attempt_started = time.perf_counter()
+        saw_visible_token = False
 
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
@@ -400,13 +420,6 @@ class OpenRouterClient:
                         yield {"event": "error", "message": message, "status_code": response.status_code}
                         yield {"event": "done", "ok": False, "model_used": payload.get("model")}
                         return
-
-                    final_model = payload.get("model")
-                    final_provider = None
-                    final_usage = None
-                    final_chunk = None
-                    attempt_started = time.perf_counter()
-                    saw_visible_token = False
 
                     async for raw_line in response.aiter_lines():
                         if not raw_line:
@@ -439,6 +452,8 @@ class OpenRouterClient:
                                 "model_used": final_model,
                                 "provider": final_provider,
                                 "usage": final_usage,
+                                "finish_reason": final_finish_reason,
+                                "completion_truncated": final_finish_reason == "length",
                                 "raw_final_chunk": final_chunk,
                             }
                             return
@@ -465,6 +480,9 @@ class OpenRouterClient:
                         final_usage = chunk.get("usage") or final_usage
 
                         for choice in chunk.get("choices", []):
+                            finish_reason = choice.get("finish_reason")
+                            if finish_reason:
+                                final_finish_reason = finish_reason
                             delta = choice.get("delta") or {}
                             content = delta.get("content")
                             if content:
@@ -482,9 +500,24 @@ class OpenRouterClient:
                         "model_used": final_model,
                         "provider": final_provider,
                         "usage": final_usage,
+                        "finish_reason": final_finish_reason,
+                        "completion_truncated": final_finish_reason == "length",
                         "raw_final_chunk": final_chunk,
                     }
         except httpx.TimeoutException as exc:
+            if saw_visible_token:
+                yield {
+                    "event": "done",
+                    "ok": False,
+                    "message": f"OpenRouter stream paused for more than {idle_seconds:.1f}s before finishing.",
+                    "model_used": final_model,
+                    "provider": final_provider,
+                    "usage": final_usage,
+                    "finish_reason": "stream_timeout",
+                    "completion_truncated": True,
+                    "partial_response": True,
+                }
+                return
             yield {
                 "event": "retry_model",
                 "message": f"OpenRouter stream timed out for {payload.get('model')}: {exc}",
