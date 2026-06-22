@@ -155,7 +155,7 @@ def test_chat_payload_injects_bounded_skill_content_with_provenance(
     )
 
     payload, _fallbacks, context = chat_api.build_payload_with_context(
-        chat_api.ChatRequest(message="Audit HIVE production readiness", model="test/model"),
+        chat_api.ChatRequest(message="Audit HIVE production readiness", model="test/model", use_skills=True),
         settings,
     )
 

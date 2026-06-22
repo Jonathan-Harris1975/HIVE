@@ -170,3 +170,63 @@ async def test_repo_health_marks_stopped_mast_heartbeat_down() -> None:
     mast = next(item for item in report["repos"] if item["repo"] == "MAST")
     assert mast["status"] == "down"
     assert mast["operational"]["payload"]["heartbeat_age_seconds"] >= 600
+
+@pytest.mark.asyncio
+async def test_repo_health_uses_json_payload_state_not_just_http_status() -> None:
+    clear_repo_health_cache()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "aims.example" and request.url.path == "/ops/health":
+            return httpx.Response(200, json={"ok": False, "readiness": "not_ready"})
+        return httpx.Response(200, json={"ok": True, "status": "ok"})
+
+    settings = Settings(
+        app_env="test",
+        repo_health_cache_seconds=0,
+        aims_health_url="https://aims.example/health",
+        aims_operational_health_url="https://aims.example/ops/health",
+        hive_ui_health_url="",
+        rams_health_url="",
+        mast_health_url="",
+        mast_status_url="",
+        irs_health_url="",
+        website_health_url="",
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        report = await build_repo_health_report(settings, client=client, force_refresh=True)
+
+    aims = next(item for item in report["repos"] if item["repo"] == "AIMS")
+    assert aims["status"] == "degraded"
+    assert aims["operational"]["status"] == "degraded"
+    assert aims["readiness"]["status"] == "partial"
+
+
+@pytest.mark.asyncio
+async def test_repo_health_marks_auth_blocked_operational_probe_without_calling_service_down() -> None:
+    clear_repo_health_cache()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "rams.example" and request.url.path == "/readiness":
+            return httpx.Response(403, json={"ok": False, "status": "forbidden"})
+        return httpx.Response(200, json={"ok": True, "status": "ok"})
+
+    settings = Settings(
+        app_env="test",
+        repo_health_cache_seconds=0,
+        hive_ui_health_url="",
+        aims_health_url="",
+        rams_health_url="https://rams.example/livez",
+        rams_readiness_url="https://rams.example/readiness",
+        mast_health_url="",
+        mast_status_url="",
+        irs_health_url="",
+        website_health_url="",
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        report = await build_repo_health_report(settings, client=client, force_refresh=True)
+
+    rams = next(item for item in report["repos"] if item["repo"] == "RAMS")
+    assert rams["status"] == "degraded"
+    assert rams["liveness"]["status"] == "healthy"
+    assert rams["operational"]["status"] == "blocked"
+    assert rams["readiness"]["status"] == "blocked"
