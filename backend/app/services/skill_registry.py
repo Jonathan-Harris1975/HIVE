@@ -498,7 +498,7 @@ def shared_execution_plan(
         "workflow_preset": workflow_preset,
         "execution_mode": "review_gated_execution",
         "can_execute_now": False,
-        "can_execute_after_approval": True,
+        "can_execute_after_approval": bool(execution_adapter_policy(settings)["enabled"]),
         "requires_approval": True,
         "adapter_execution_enabled": bool(execution_adapter_policy(settings)["enabled"]),
         "execution_adapter_policy": execution_adapter_policy(settings),

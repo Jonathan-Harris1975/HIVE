@@ -462,12 +462,19 @@ def _json_or_none(value: Any) -> Any:
 
 def _review_summary(item: dict[str, Any]) -> dict[str, object]:
     meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    plan = meta.get("plan") if isinstance(meta.get("plan"), dict) else {}
+    routed = plan.get("routed_skill_plan") if isinstance(plan.get("routed_skill_plan"), dict) else {}
+    primary = routed.get("primary_skill") if isinstance(routed.get("primary_skill"), dict) else None
+    risk_level = _review_risk_level(meta, plan, routed, primary)
+    skill_name = _review_skill_name(primary)
+    task = meta.get("task")
     return {
         "id": item.get("id"),
         "plan_id": meta.get("plan_id") or item.get("id"),
         "status": meta.get("status") or "unknown",
-        "task": meta.get("task"),
+        "task": task,
         "repo": meta.get("repo"),
+        "target": meta.get("repo") or "HIVE",
         "workflow_preset": meta.get("workflow_preset"),
         "requested_by": meta.get("requested_by"),
         "created_at": item.get("created_at") or meta.get("created_at"),
@@ -476,15 +483,73 @@ def _review_summary(item: dict[str, Any]) -> dict[str, object]:
         "can_execute_now": bool(meta.get("can_execute_now")),
         "adapter_execution_enabled": bool(meta.get("adapter_execution_enabled")),
         "execution_state": meta.get("execution_state") or "awaiting_approval",
-        "primary_skill": ((meta.get("plan") or {}).get("routed_skill_plan") or {}).get(
-            "primary_skill"
-        )
-        if isinstance(meta.get("plan"), dict)
-        else None,
+        "execution_mode": meta.get("execution_mode") or "review_gated_execution",
+        "risk_level": risk_level,
+        "risk": risk_level,
+        "action_type": "review_gated_plan",
+        "skill_name": skill_name,
+        "primary_skill": primary,
+        "evidence_summary": _review_evidence_summary(task, skill_name, risk_level),
         "decision_count": len(meta.get("decision_log") or [])
         if isinstance(meta.get("decision_log"), list)
         else 0,
     }
+
+
+def _review_risk_level(
+    meta: dict[str, Any],
+    plan: dict[str, Any],
+    routed: dict[str, Any],
+    primary: dict[str, Any] | None,
+) -> str:
+    for value in (
+        meta.get("risk_level"),
+        meta.get("risk"),
+        routed.get("risk_level"),
+        (primary or {}).get("risk_level"),
+        ((primary or {}).get("metadata") or {}).get("risk_level")
+        if isinstance((primary or {}).get("metadata"), dict)
+        else None,
+    ):
+        cleaned = _clean_risk(value)
+        if cleaned:
+            return cleaned
+
+    candidates = routed.get("candidate_skills") if isinstance(routed.get("candidate_skills"), list) else []
+    for candidate in candidates:
+        if isinstance(candidate, dict):
+            cleaned = _clean_risk(candidate.get("risk_level"))
+            if cleaned:
+                return cleaned
+
+    guardrails = plan.get("guardrails") if isinstance(plan.get("guardrails"), dict) else {}
+    gates = guardrails.get("risk_gates_required") if isinstance(guardrails.get("risk_gates_required"), list) else []
+    if "high" in {str(item).lower() for item in gates}:
+        return "medium"
+    return "medium"
+
+
+def _clean_risk(value: Any) -> str:
+    cleaned = str(value or "").strip().lower().replace(" ", "_")
+    if cleaned in {"low", "medium", "high", "critical"}:
+        return cleaned
+    return ""
+
+
+def _review_skill_name(primary: dict[str, Any] | None) -> str | None:
+    if not isinstance(primary, dict):
+        return None
+    for key in ("name", "title", "skill_id", "source_id"):
+        value = primary.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()[:120]
+    return None
+
+
+def _review_evidence_summary(task: Any, skill_name: str | None, risk_level: str) -> str:
+    task_text = " ".join(str(task or "").split())
+    skill_text = skill_name or "No specific skill linked"
+    return f"{skill_text}; {risk_level} risk; {task_text[:180]}"
 
 
 def _title_for_plan(

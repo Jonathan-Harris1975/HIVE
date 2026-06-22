@@ -54,6 +54,9 @@ def execution_adapter_policy(settings: Settings | Any) -> dict[str, object]:
         "allowlist_count": len(EXECUTION_ADAPTER_ALLOWLIST),
         "allowlist": EXECUTION_ADAPTER_ALLOWLIST,
         "can_execute_after_approval": bool(enabled and requires_approval),
+        "approval_gate_enforced": bool(requires_approval),
+        "auto_run_on_decision": False,
+        "configuration_state": "ready" if enabled and requires_approval else ("disabled" if not enabled else "unsafe_requires_approval_false"),
         "note": (
             "Execution adapters are available for approved, allow-listed production handoffs."
             if enabled
