@@ -386,3 +386,7 @@ OPS_EVENT_MEMORY_LIMIT=200
 ```
 
 Use a dedicated random token of at least 32 characters. Do not reuse `ADMIN_BEARER_TOKEN`. GitHub and provider deployment watchers post redacted events to `/v1/ops/events`; HIVE-UI reads them through its authenticated server-side proxy.
+
+## Environment split
+
+Paste only `HIVE-KOYEB-SECRETS-ONLY.env` into Koyeb. The repo-committed `HIVE-PRODUCTION-SHARED.env` contains the non-secret production defaults and is loaded by `scripts/start.sh` without overriding existing Koyeb values.

@@ -6,13 +6,13 @@
 
 This hardening layer keeps the existing HIVE API contract intact while tightening deployment, configuration, observability, and container behaviour.
 
-**Current production marker:** `APP_VERSION=1.26.10-production`; backend health build `v1.26.10-chat-persistence-sync`.
+**Current production marker:** `APP_VERSION=1.26.11-production`; backend health build `v1.26.11-env-split`.
 
 ## Mandatory Koyeb settings
 
 ```env
 APP_ENV=production
-APP_VERSION=1.26.10-production
+APP_VERSION=1.26.11-production
 ADMIN_BEARER_TOKEN=<unique random value, at least 32 characters>
 CORS_ORIGINS=https://<your-hive-ui-domain>
 ALLOWED_HOSTS=<your-service>.koyeb.app
@@ -73,3 +73,7 @@ The production image:
 ## Dependency maintenance
 
 `requirements.in` contains the reviewed direct versions. `requirements.txt` and `requirements.lock` contain the compiled runtime set. Regenerate them deliberately after testing, then let CI run unit tests and `pip-audit`.
+
+## Production environment split
+
+Non-secret production defaults are committed in `HIVE-PRODUCTION-SHARED.env`. Koyeb should keep only the secret-backed values listed in `HIVE-KOYEB-SECRETS-ONLY.env`; runtime env values override the shared file.

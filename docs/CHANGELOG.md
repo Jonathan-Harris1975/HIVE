@@ -1,3 +1,10 @@
+## 22 June 2026 - v1.26.11 env split
+
+- Split production configuration into repo-committed non-secret defaults and Koyeb secrets-only values.
+- Added `HIVE-PRODUCTION-SHARED.env` for e-medium production defaults.
+- Added `HIVE-KOYEB-SECRETS-ONLY.env` for paste-ready Koyeb secret references.
+- Updated startup loading so Koyeb runtime variables override the shared file.
+
 ## 22 June 2026 - v1.26.10 chat persistence sync
 
 - Raised OpenRouter stream idle/first-token windows so healthy replies are not clipped mid-answer.
