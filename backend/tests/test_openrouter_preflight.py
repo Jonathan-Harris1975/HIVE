@@ -356,10 +356,19 @@ async def test_stream_chat_completion_retries_provider_error_before_tokens(
     assert attempted_models == ["bad-primary", "fallback-good:free"]
     assert events[0] == {
         "event": "meta",
+        "type": "model_attempt",
+        "model_used": "bad-primary",
+        "message": "Trying bad-primary",
+    }
+    assert events[1] == {
+        "event": "meta",
         "type": "model_fallback",
         "from_model": "bad-primary",
+        "model_used": "bad-primary",
         "message": "provider stream error",
     }
+    assert events[2]["type"] == "model_attempt"
+    assert events[2]["model_used"] == "fallback-good:free"
     assert events[-1]["event"] == "done"
     assert events[-1]["ok"] is True
     assert events[-1]["model_used"] == "fallback-good:free"
