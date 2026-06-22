@@ -131,7 +131,7 @@ def test_v112_shared_execution_plan_is_review_gated(monkeypatch):
     )
 
     assert result["ok"] is True
-    assert result["build_stage_hint"] == "v1.26.8-production-readiness-sync"
+    assert result["build_stage_hint"] == "v1.26.9-review-state-sync"
     assert result["execution_mode"] == "review_gated_execution"
     assert result["can_execute_now"] is False
     assert result["guardrails"]["no_auto_install"] is True

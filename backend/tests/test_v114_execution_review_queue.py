@@ -68,7 +68,7 @@ def _fake_plan(**kwargs):
 
 
 def test_v114_build_stage():
-    assert BUILD_STAGE == "v1.26.8-production-readiness-sync"
+    assert BUILD_STAGE == "v1.26.9-review-state-sync"
 
 
 def test_create_execution_review_dry_run(monkeypatch):
@@ -123,6 +123,17 @@ def test_create_list_and_decide_execution_review(monkeypatch):
     assert decided["review"]["adapter_execution_enabled"] is True
     assert decided["review"]["execution_state"] == "ready_for_execution"
     assert decided["review"]["review_gate"]["approved"] is True
+
+    active_queue = reviews.list_execution_review_plans(settings=_SettingsStub(), status="open")
+    assert active_queue["ok"] is True
+    assert active_queue["count"] == 0
+    assert active_queue["open_count"] == 0
+    assert active_queue["ready_count"] == 1
+
+    ready_queue = reviews.list_execution_review_plans(settings=_SettingsStub(), status="ready")
+    assert ready_queue["ok"] is True
+    assert ready_queue["count"] == 1
+    assert ready_queue["items"][0]["is_ready"] is True
 
     detail = reviews.get_execution_review_plan(settings=_SettingsStub(), plan_id=plan_id)
     assert detail["ok"] is True

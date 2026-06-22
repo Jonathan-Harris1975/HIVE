@@ -66,7 +66,7 @@ def _fake_plan(**kwargs):
 
 
 def test_v115_build_stage():
-    assert BUILD_STAGE == "v1.26.8-production-readiness-sync"
+    assert BUILD_STAGE == "v1.26.9-review-state-sync"
 
 
 def test_evidence_pack_audit_trail_and_exports(monkeypatch):

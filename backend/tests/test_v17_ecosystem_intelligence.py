@@ -37,7 +37,7 @@ def test_ecosystem_status_is_mast_friendly(monkeypatch, tmp_path) -> None:
     body = client.get("/v1/ecosystem/status").json()
 
     assert body["ok"] is True
-    assert body["build_stage_hint"] == "v1.26.8-production-readiness-sync"
+    assert body["build_stage_hint"] == "v1.26.9-review-state-sync"
     assert body["services"]["skills"]["configured"] is True
     assert body["services"]["vectorize"]["configured"] is True
     assert body["recommended_mast_probe"] == "/v1/ecosystem/status"

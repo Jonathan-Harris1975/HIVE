@@ -74,7 +74,7 @@ def _fake_shared_execution_plan(**kwargs):
 
 
 def test_v122_build_marker():
-    assert BUILD_STAGE == "v1.26.8-production-readiness-sync"
+    assert BUILD_STAGE == "v1.26.9-review-state-sync"
 
 
 def test_v121_policy_profiles_enable_approved_handoff():
