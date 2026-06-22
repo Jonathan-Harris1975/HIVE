@@ -15,6 +15,8 @@ EXECUTION_REVIEW_LANE = "hive_execution_reviews"
 SOURCE_TYPE = "execution_review_plan"
 ALLOWED_DECISIONS = {"approved", "rejected", "needs_changes", "archived"}
 OPEN_STATUSES = {"pending_review", "needs_changes"}
+READY_STATUSES = {"approved"}
+CLOSED_STATUSES = {"approved", "rejected", "archived"}
 
 
 def _now() -> str:
@@ -135,22 +137,32 @@ def list_execution_review_plans(
     payload = d1.list_metadata(lane=EXECUTION_REVIEW_LANE, limit=max(1, min(int(limit or 50), 500)))
     if not payload.get("ok"):
         return payload
-    reviews = [_review_summary(item) for item in payload.get("items", []) if isinstance(item, dict)]
-    if status:
-        clean_status = _clean_status(status)
-        reviews = [item for item in reviews if item.get("status") == clean_status]
+    all_reviews = [_review_summary(item) for item in payload.get("items", []) if isinstance(item, dict)]
     if repo:
         clean_repo = repo.strip().lower()
-        reviews = [item for item in reviews if str(item.get("repo") or "").lower() == clean_repo]
+        all_reviews = [item for item in all_reviews if str(item.get("repo") or "").lower() == clean_repo]
+
+    status_filter = _status_filter(status)
+    reviews = _filter_reviews_by_status(all_reviews, status_filter)
+
     return {
         "ok": True,
         "enabled": True,
         "build_stage_hint": BUILD_STAGE,
         "lane": EXECUTION_REVIEW_LANE,
         "count": len(reviews),
-        "open_count": sum(1 for item in reviews if item.get("status") in OPEN_STATUSES),
+        "total_count": len(all_reviews),
+        "open_count": sum(1 for item in all_reviews if item.get("status") in OPEN_STATUSES),
+        "ready_count": sum(1 for item in all_reviews if item.get("status") in READY_STATUSES or item.get("can_execute_now")),
+        "closed_count": sum(1 for item in all_reviews if item.get("status") in CLOSED_STATUSES),
         "items": reviews,
-        "filters": {"status": status, "repo": repo},
+        "filters": {"status": status_filter, "repo": repo},
+        "status_aliases": {
+            "open": sorted(OPEN_STATUSES),
+            "ready": sorted(READY_STATUSES),
+            "closed": sorted(CLOSED_STATUSES),
+            "all": "all stored execution review records",
+        },
         "safety_note": _safety_note(),
     }
 
@@ -493,6 +505,9 @@ def _review_summary(item: dict[str, Any]) -> dict[str, object]:
         "decision_count": len(meta.get("decision_log") or [])
         if isinstance(meta.get("decision_log"), list)
         else 0,
+        "is_open": (meta.get("status") or "unknown") in OPEN_STATUSES,
+        "is_ready": bool(meta.get("can_execute_now")) or (meta.get("status") in READY_STATUSES),
+        "is_closed": (meta.get("status") or "unknown") in CLOSED_STATUSES,
     }
 
 
@@ -528,6 +543,34 @@ def _review_risk_level(
         return "medium"
     return "medium"
 
+
+
+def _status_filter(value: str | None) -> str | None:
+    cleaned = _clean_status(value)
+    if not cleaned or cleaned in {"all", "any", "*"}:
+        return None
+    if cleaned in {"open", "active", "pending", "pending_only", "queue"}:
+        return "open"
+    if cleaned in {"ready", "ready_for_execution", "approved_ready"}:
+        return "ready"
+    if cleaned in {"closed", "complete", "completed", "done", "decided"}:
+        return "closed"
+    return cleaned
+
+
+def _filter_reviews_by_status(
+    reviews: list[dict[str, object]],
+    status_filter: str | None,
+) -> list[dict[str, object]]:
+    if not status_filter:
+        return reviews
+    if status_filter == "open":
+        return [item for item in reviews if item.get("status") in OPEN_STATUSES]
+    if status_filter == "ready":
+        return [item for item in reviews if item.get("status") in READY_STATUSES or item.get("can_execute_now")]
+    if status_filter == "closed":
+        return [item for item in reviews if item.get("status") in CLOSED_STATUSES]
+    return [item for item in reviews if item.get("status") == status_filter]
 
 def _clean_risk(value: Any) -> str:
     cleaned = str(value or "").strip().lower().replace(" ", "_")
