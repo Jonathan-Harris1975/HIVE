@@ -16,6 +16,7 @@ from app.api.files import router as files_router
 from app.api.health import router as health_router
 from app.api.models import router as models_router
 from app.api.ops_events import router as ops_events_router
+from app.api.repositories import router as repositories_router
 from app.api.runtime import router as runtime_router
 from app.api.skills import router as skills_router
 from app.api.system import router as system_router
@@ -129,6 +130,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(execution_router, prefix="/v1")
     application.include_router(system_router, prefix="/v1")
     application.include_router(ops_events_router, prefix="/v1")
+    application.include_router(repositories_router, prefix="/v1")
     return application
 
 
