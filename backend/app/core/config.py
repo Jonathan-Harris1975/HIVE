@@ -419,6 +419,36 @@ class Settings(BaseSettings):
         32, validation_alias=AliasChoices("EMBEDDINGS_MAX_BATCH_SIZE")
     )
 
+    # Phase 2 - Repository Memory. Cloudflare AI Search lets Repository Memory
+    # be queried semantically without loading a repository's full working
+    # copy. Kept as its own adapter (distinct from Vectorize) since AI Search
+    # indexes are managed per named instance rather than per-chunk-id.
+    ai_search_enabled: bool = Field(False, validation_alias=AliasChoices("AI_SEARCH_ENABLED"))
+    ai_search_account_id: str = Field(
+        "",
+        validation_alias=AliasChoices(
+            "AI_SEARCH_ACCOUNT_ID", "CF_ACCOUNT_ID", "VECTORIZE_ACCOUNT_ID", "R2_ACCOUNT_ID"
+        ),
+    )
+    ai_search_api_token: str = Field(
+        "", validation_alias=AliasChoices("CF_WORKERS_AI_API", "AI_SEARCH_API_TOKEN")
+    )
+    ai_search_instance: str = Field(
+        "hive-repositories", validation_alias=AliasChoices("AI_SEARCH_INSTANCE")
+    )
+    ai_search_timeout_seconds: int = Field(
+        15, validation_alias=AliasChoices("AI_SEARCH_TIMEOUT_SECONDS")
+    )
+    ai_search_max_attempts: int = Field(2, validation_alias=AliasChoices("AI_SEARCH_MAX_ATTEMPTS"))
+    ai_search_top_k: int = Field(8, validation_alias=AliasChoices("AI_SEARCH_TOP_K"))
+
+    # Phase 3 - Model Registry. Optional JSON seed so ranked models per
+    # category survive process restarts without requiring D1; the in-memory
+    # ModelRegistry always takes precedence once populated at runtime.
+    model_registry_seed_json: str = Field(
+        "", validation_alias=AliasChoices("MODEL_REGISTRY_SEED_JSON")
+    )
+
     # Backwards-compatible aliases for older adapter references.
     @property
     def cf_account_id(self) -> str:
@@ -539,6 +569,7 @@ class Settings(BaseSettings):
         "d1_api_key",
         "vectorize_api_token",
         "embeddings_api_token",
+        "ai_search_api_token",
         mode="before",
     )
     @classmethod
