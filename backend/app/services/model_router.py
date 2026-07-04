@@ -4,6 +4,7 @@ from enum import StrEnum
 from typing import Any
 
 from app.core.config import Settings
+from app.services import model_registry
 
 
 class TaskType(StrEnum):
@@ -94,11 +95,16 @@ class ModelRouter:
     def select_model(self, task: TaskType, requested_model: str | None = None) -> str:
         if requested_model:
             return requested_model
+        # Phase 3 - Model Registry: the highest-ranked coding model, once the
+        # registry has been populated, automatically becomes the default
+        # coding model. Falls back to the static settings.code_model when the
+        # registry is empty so existing deployments are unaffected.
+        registry_code_default = model_registry.get_default_model("coding")
         return {
             TaskType.SUMMARY: self.settings.cheap_model,
             TaskType.FILE_TRIAGE: self.settings.balanced_model,
             TaskType.GENERAL: self.settings.default_model,
-            TaskType.CODE: self.settings.code_model,
+            TaskType.CODE: registry_code_default or self.settings.code_model,
             TaskType.AUDIT: self.settings.audit_model,
             TaskType.PREMIUM: self.settings.premium_model,
         }[task]
