@@ -255,6 +255,13 @@ class Settings(BaseSettings):
     r2_bucket_rss_feeds: str = Field("", validation_alias=AliasChoices("R2_BUCKET_RSS_FEEDS"))
     r2_bucket_transcripts: str = Field("", validation_alias=AliasChoices("R2_BUCKET_TRANSCRIPTS"))
     r2_bucket_hive_skills: str = Field("", validation_alias=AliasChoices("R2_BUCKET_HIVE_SKILLS"))
+    r2_bucket_repositories: str = Field(
+        "hive-repositories", validation_alias=AliasChoices("R2_BUCKET_REPOSITORIES")
+    )
+    r2_public_base_url_repositories: str = Field(
+        "https://pub-c48ec7e8f0b64be39259e09db7de0f94.r2.dev",
+        validation_alias=AliasChoices("R2_PUBLIC_BASE_URL_REPOSITORIES"),
+    )
     r2_public_base_url_art: str = Field("", validation_alias=AliasChoices("R2_PUBLIC_BASE_URL_ART"))
     r2_public_base_url_audits: str = Field(
         "", validation_alias=AliasChoices("R2_PUBLIC_BASE_URL_AUDITS")
@@ -292,6 +299,26 @@ class Settings(BaseSettings):
     )
     r2_public_base_url_hive_skills: str = Field(
         "", validation_alias=AliasChoices("R2_PUBLIC_BASE_URL_HIVE_SKILLS")
+    )
+
+    # Phase 1 - Repository Intelligence. Uploaded repository ZIPs are extracted
+    # into a per-process temp root and are never persisted permanently on
+    # local disk. repository_ttl_seconds controls automatic cleanup of idle
+    # working copies.
+    repository_manager_enabled: bool = Field(
+        True, validation_alias=AliasChoices("REPOSITORY_MANAGER_ENABLED")
+    )
+    repository_temp_dir: str = Field(
+        "", validation_alias=AliasChoices("REPOSITORY_TEMP_DIR")
+    )
+    repository_ttl_seconds: int = Field(
+        6 * 3600, validation_alias=AliasChoices("REPOSITORY_TTL_SECONDS")
+    )
+    repository_max_files: int = Field(
+        20_000, validation_alias=AliasChoices("REPOSITORY_MAX_FILES")
+    )
+    repository_max_uncompressed_bytes: int = Field(
+        512 * 1024 * 1024, validation_alias=AliasChoices("REPOSITORY_MAX_UNCOMPRESSED_BYTES")
     )
 
     # Optional SQL persistence. HIVE v1 works without this; enable when you want
@@ -637,6 +664,12 @@ class Settings(BaseSettings):
                 "Podcast RSS feeds",
             ),
             ("rss", self.r2_bucket_rss_feeds, self.r2_public_base_url_rss, "AI/news RSS feeds"),
+            (
+                "repositories",
+                self.r2_bucket_repositories,
+                self.r2_public_base_url_repositories,
+                "Repository Manager temporary extraction archives",
+            ),
             (
                 "transcripts",
                 self.r2_bucket_transcripts,
