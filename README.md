@@ -27,6 +27,7 @@ HIVE-UI (Cloudflare Pages)
 - Cost-aware model routing and grouped model discovery.
 - Upload, extraction and bounded file chat for supported documents and ZIPs.
 - Read-only browsing and chat across configured ecosystem R2 buckets.
+- Repository Manager: safe ZIP extraction, fingerprinting, manifest generation (language + dependency detection), incremental re-indexing and TTL-based cleanup of uploaded repositories.
 - Cloudflare Workers AI embeddings and Vectorize retrieval.
 - Skills search, integrity checks and review-gated workflow planning.
 - Repository hygiene, execution previews, evidence packs, review queues and approved production adapter handoff.
@@ -42,6 +43,9 @@ HIVE-UI (Cloudflare Pages)
 | `GET /v1/system/repo-health` | Bearer | Cached ecosystem health |
 | `GET /v1/models` | Bearer | OpenRouter model catalogue and groups |
 | `GET /v1/files/r2-lanes` | Bearer | Configured storage lanes |
+| `POST /v1/repositories` | Bearer | Upload and register a repository ZIP (Repository Manager) |
+| `GET /v1/repositories` | Bearer | List registered repositories |
+| `GET /v1/repositories/{id}` | Bearer | Repository manifest (fingerprint, languages, dependencies) |
 
 All `/v1/*` routes require `Authorization: Bearer <ADMIN_BEARER_TOKEN>` unless explicitly documented otherwise.
 
