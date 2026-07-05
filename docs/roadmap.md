@@ -247,3 +247,21 @@ Next logical direction: operator-dashboard API polish and eventual allow-listed 
 - v1.22: Pretend-mode workflow simulation.
 
 The next logical branch is an operator dashboard API or R2 export writing for evidence packs, but only after review-gated preview history is stable in production.
+
+## v1.27-v1.32 Repository Intelligence Platform (Phases 1-14)
+
+Status: implemented (static-analysis and heuristic scope — see caveats below).
+
+- v1.27: Phase 1 Repository Manager (ZIP extraction, fingerprinting, manifests, incremental indexing, cleanup).
+- v1.28: Phase 2 Repository Memory + Phase 3 Model Registry.
+- v1.29: Phase 4 Provider Framework + Phase 5 AI Council + Phase 6 Benchmark Engine.
+- v1.30-v1.32: Phase 7 Repository QA, Phase 8 Repository Council, Phase 9 Bucket Manager, Phase 10 Connector Framework, Phase 11 Optimisation Engine, Phase 12 Repository Learning, Phase 13 Environment audit, Phase 14 documentation.
+
+Known caveats carried forward deliberately rather than papered over:
+
+- Repository QA and Repository Council are static/heuristic — no arbitrary code from an uploaded repository is ever executed, by design (security boundary, not a shortcut).
+- AI Council promotion scoring has no live coding/reasoning benchmark data source yet; it promotes based on price/context/declared-capability signals until one is wired in.
+- The Model Registry and Optimisation Engine are in-process only (D1-backed history exists, but the live ranked/decision state resets on restart unless re-seeded).
+
+Next logical direction: a real benchmark data source for AI Council, D1-backed persistence for the Model Registry itself, and — if HIVE ever needs real dynamic build/test execution — an isolated sandboxed CI runner kept explicitly separate from Repository QA's static pipeline.
+

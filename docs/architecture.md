@@ -287,3 +287,120 @@ Data remains split deliberately:
 - Vectorize remains semantic retrieval.
 
 The simulation endpoint is deterministic and production-bounded. It estimates service touches, risk class, affected repos/buckets and missing prerequisites without model calls or external mutations.
+
+
+## v1.27-v1.32 Repository Intelligence Platform (Phases 1-14)
+
+A fourteen-phase programme layered on top of everything above, scoped strictly
+to the HIVE backend repository (never HIVE-UI, AIMS, or RAMS). Every phase
+reuses an existing pattern rather than introducing a parallel one:
+`hive_ecosystem_metadata` (D1) backs every new history/registry table need
+instead of new schemas; the workflow/skill/model-router patterns are extended
+rather than replaced.
+
+**Phase 1 - Repository Manager** (`services/repository_manager.py`): safe ZIP
+extraction into a per-process temp working directory (reusing the existing
+`zip_ingestion` path-traversal guards), fingerprinting, manifest generation
+(language + dependency detection), incremental re-indexing, an in-process
+registry, and TTL-based cleanup. Extraction is never permanent.
+
+**Phase 2 - Repository Memory** (`services/repository_memory.py`,
+`storage/ai_search.py`): Project DNA, architecture summary, coding standards,
+build/deployment profiles, environment schema, and append-only history
+(known issues, learned patterns, previous patches, optimisation/QA/Council
+history) — all stored as rows in the existing `hive_ecosystem_metadata` D1
+table under `lane="repository_memory"`. Cloudflare AI Search (instance
+`hive-repositories`) provides semantic query without reloading a repository.
+
+**Phase 3 - Model Registry** (`services/model_registry.py`): ranked models
+per category (coding, reasoning, planning, vision, research, fast, cheap,
+creative, long_context). `ModelRouter.select_model` prefers the top-ranked
+"coding" model once the registry is populated, falling back to the static
+`code_model` setting otherwise — additive, not a breaking change.
+
+**Phase 4 - Provider Framework** (`services/providers/`): a uniform adapter
+shape (models, pricing, context, tool/structured-output support, health,
+latency). `OpenRouterProvider` wraps the existing `OpenRouterClient`;
+`OpenRouterCompatibleProvider` is a generic adapter for any future
+OpenRouter-shaped provider, added purely through
+`PROVIDER_FRAMEWORK_EXTRA_PROVIDERS_JSON` configuration.
+
+**Phase 5 - AI Council** (`services/ai_council.py`): discovers providers,
+refreshes catalogues, diffs new/retired models against the last snapshot,
+scores coding-capable models with the Benchmark Engine, auto-promotes above
+`AI_COUNCIL_PROMOTION_THRESHOLD` into the Model Registry, and notifies
+downstream services via the existing ops-event inbox. **Scoring caveat**: no
+live coding/reasoning benchmark data source is wired in; metrics are derived
+only from price/context/declared-capability signals until a real benchmark
+integration exists.
+
+**Phase 6 - Benchmark Engine** (`services/benchmark_engine.py`): configurable
+weighted scoring across ten metric axes (coding/reasoning benchmarks, cost,
+latency, reliability, long-context, JSON reliability, structured output,
+community maturity, internal historical performance). Missing axes default
+neutral rather than zero.
+
+**Phase 7 - Repository QA** (`services/repository_qa.py`): a *static-only*
+validation pipeline (build/lint/type/dependency/import/dead-code/security/
+regression/patch/architecture checks) over a Phase 1 working copy. It
+deliberately never installs dependencies or executes the repository's own
+build/test commands — uploaded ZIPs are untrusted input, and doing so would
+be an arbitrary-code-execution risk inside HIVE's own process. Dead-code
+detection reuses the existing `repo_hygiene_report`.
+
+**Phase 8 - Repository Council** (`services/repository_council.py`): scores
+nine review dimensions (architecture, documentation, dependencies, technical
+debt, security, performance, maintainability, AI-generated code, repository
+health), most derived from the Phase 7 QA report, with configurable
+dimension weights. "Performance" and "AI-generated code" are explicitly
+documented low-confidence placeholders pending real profiling/classifier
+data. History persists via Repository Memory's `repository_council_history`.
+
+**Phase 9 - Bucket Manager** (`services/bucket_manager.py`): the explicit
+accessible/hidden bucket registry from the programme spec, with an
+`assert_accessible()` guard so hidden buckets (`metasystem`,
+`podcast-chunks`, etc.) can never surface through normal workflows.
+
+**Phase 10 - Connector Framework** (`services/connectors/`): a lighter-weight
+diagnostic wrapper (health, authentication, capabilities, rate limits) around
+the four initial connectors — OpenRouter (wraps the Phase 4 provider), R2
+(wraps `R2Storage`), Cloudflare AI Search (wraps the Phase 2 adapter), and
+GitHub (new, minimal REST client for repo metadata + rate limit).
+
+**Phase 11 - Optimisation Engine** (`services/optimisation_engine.py`):
+records every optimisation decision with `previous_state`/`new_state` and a
+confidence score, supports rollback, and tracks experiment success rates.
+The engine is the ledger of what to revert to; actually re-applying a
+reverted state to whatever system it touched is the caller's responsibility.
+
+**Phase 12 - Repository Learning** (`services/repository_learning.py`):
+records patch outcomes, coding patterns, and repository-scoped model
+preferences into the existing Repository Memory history fields, then rolls
+that history up into a refreshed `project_dna` summary on demand.
+
+**Phase 13 - Environment** (`services/env_audit.py`): audits every `Settings`
+field's declared environment variable name(s) against `.env.example` so
+infrastructure-configuration drift is caught by a tool rather than by
+inspection. Running this audit while building Phase 10 caught a real gap
+(`GITHUB_TOKEN`/`GITHUB_REPOSITORY` had been added to `Settings` but not yet
+to `.env.example`) before it shipped.
+
+**Phase 14 - Documentation**: this section, the per-phase `docs/releases/`
+notes, and the updated `.env.example`/README endpoint table.
+
+### Extension points
+
+- New provider: add an entry to `PROVIDER_FRAMEWORK_EXTRA_PROVIDERS_JSON` —
+  no new adapter code required if it exposes an OpenRouter-shaped `/models`.
+- New connector: add a `services/connectors/<name>_connector.py` exposing
+  `async def report(settings) -> ConnectorReport` and register it in
+  `services/connectors/registry.py`.
+- New Repository Memory field: extend `SCALAR_FIELDS`/`HISTORY_FIELDS` in
+  `services/repository_memory.py` — no schema change needed, it's still the
+  same `hive_ecosystem_metadata` table.
+- New Model Registry category: extend `CATEGORIES` in
+  `services/model_registry.py`; wire a router preference into
+  `ModelRouter.select_model` the same way `TaskType.CODE` was wired.
+- New Repository QA / Council check: add a `_check_*` function and include
+  it in the `checks` list — each check is independent and additive.
+
