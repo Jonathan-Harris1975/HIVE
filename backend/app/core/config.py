@@ -476,6 +476,13 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("AI_COUNCIL_CODING_KEYWORDS"),
     )
 
+    # Phase 10 - Connector Framework. GitHub is one of the four initial
+    # connectors (OpenRouter, Cloudflare R2, Cloudflare AI Search, GitHub).
+    github_token: str = Field("", validation_alias=AliasChoices("GITHUB_TOKEN"))
+    github_repository: str = Field(
+        "", validation_alias=AliasChoices("GITHUB_REPOSITORY")
+    )
+
     # Backwards-compatible aliases for older adapter references.
     @property
     def cf_account_id(self) -> str:
@@ -597,6 +604,7 @@ class Settings(BaseSettings):
         "vectorize_api_token",
         "embeddings_api_token",
         "ai_search_api_token",
+        "github_token",
         mode="before",
     )
     @classmethod
