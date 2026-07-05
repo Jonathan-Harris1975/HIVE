@@ -449,6 +449,33 @@ class Settings(BaseSettings):
         "", validation_alias=AliasChoices("MODEL_REGISTRY_SEED_JSON")
     )
 
+    # Phase 4 - Provider Framework. OpenRouter is always discovered when
+    # openrouter_api_key is configured. Additional OpenRouter-compatible
+    # providers (same /models shape) can be added purely via this JSON list,
+    # e.g. '[{"name": "example", "base_url": "https://example.ai/api/v1",
+    # "api_token": "..."}]', without any new provider code.
+    provider_framework_extra_providers_json: str = Field(
+        "", validation_alias=AliasChoices("PROVIDER_FRAMEWORK_EXTRA_PROVIDERS_JSON")
+    )
+
+    # Phase 6 - Benchmark Engine. Optional override of the default per-metric
+    # weighting (coding/reasoning benchmarks, cost, latency, reliability,
+    # long-context, JSON reliability, structured output, community maturity,
+    # internal historical performance). Leave empty to use built-in defaults.
+    benchmark_weights_json: str = Field(
+        "", validation_alias=AliasChoices("BENCHMARK_WEIGHTS_JSON")
+    )
+
+    # Phase 5 - AI Council. Monthly (or on-demand) discovery/benchmark/
+    # promotion run across all configured providers.
+    ai_council_promotion_threshold: float = Field(
+        0.72, validation_alias=AliasChoices("AI_COUNCIL_PROMOTION_THRESHOLD")
+    )
+    ai_council_coding_keywords: str = Field(
+        "code,coder,coding,dev,program",
+        validation_alias=AliasChoices("AI_COUNCIL_CODING_KEYWORDS"),
+    )
+
     # Backwards-compatible aliases for older adapter references.
     @property
     def cf_account_id(self) -> str:
