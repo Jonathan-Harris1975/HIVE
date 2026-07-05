@@ -10,18 +10,25 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.api.ai_council import router as ai_council_router
 from app.api.benchmark import router as benchmark_router
+from app.api.buckets import router as buckets_router
 from app.api.chat import router as chat_router
+from app.api.connectors import router as connectors_router
 from app.api.db import router as db_router
 from app.api.ecosystem import router as ecosystem_router
+from app.api.env_audit import router as env_audit_router
 from app.api.execution import router as execution_router
 from app.api.files import router as files_router
 from app.api.health import router as health_router
 from app.api.model_registry import router as model_registry_router
 from app.api.models import router as models_router
 from app.api.ops_events import router as ops_events_router
+from app.api.optimisation_engine import router as optimisation_engine_router
 from app.api.providers import router as providers_router
 from app.api.repositories import router as repositories_router
+from app.api.repository_council import router as repository_council_router
+from app.api.repository_learning import router as repository_learning_router
 from app.api.repository_memory import router as repository_memory_router
+from app.api.repository_qa import router as repository_qa_router
 from app.api.runtime import router as runtime_router
 from app.api.skills import router as skills_router
 from app.api.system import router as system_router
@@ -145,6 +152,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(providers_router, prefix="/v1")
     application.include_router(ai_council_router, prefix="/v1")
     application.include_router(benchmark_router, prefix="/v1")
+    application.include_router(repository_qa_router, prefix="/v1")
+    application.include_router(repository_council_router, prefix="/v1")
+    application.include_router(buckets_router, prefix="/v1")
+    application.include_router(connectors_router, prefix="/v1")
+    application.include_router(optimisation_engine_router, prefix="/v1")
+    application.include_router(repository_learning_router, prefix="/v1")
+    application.include_router(env_audit_router, prefix="/v1")
     return application
 
 
