@@ -256,10 +256,10 @@ class Settings(BaseSettings):
     r2_bucket_transcripts: str = Field("", validation_alias=AliasChoices("R2_BUCKET_TRANSCRIPTS"))
     r2_bucket_hive_skills: str = Field("", validation_alias=AliasChoices("R2_BUCKET_HIVE_SKILLS"))
     r2_bucket_repositories: str = Field(
-        "hive-repositories", validation_alias=AliasChoices("R2_BUCKET_REPOSITORIES")
+        "", validation_alias=AliasChoices("R2_BUCKET_REPOSITORIES")
     )
     r2_public_base_url_repositories: str = Field(
-        "https://pub-c48ec7e8f0b64be39259e09db7de0f94.r2.dev",
+        "",
         validation_alias=AliasChoices("R2_PUBLIC_BASE_URL_REPOSITORIES"),
     )
     r2_public_base_url_art: str = Field("", validation_alias=AliasChoices("R2_PUBLIC_BASE_URL_ART"))
