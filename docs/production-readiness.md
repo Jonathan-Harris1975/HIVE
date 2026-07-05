@@ -1,18 +1,18 @@
 > **Document status:** Production reference  
-> **Last reviewed:** 22 June 2026  
+> **Last reviewed:** 5 July 2026  
 > **Operational authority:** Current repository README, SECURITY policy and operations guide.
 
 # HIVE backend production readiness
 
 This hardening layer keeps the existing HIVE API contract intact while tightening deployment, configuration, observability, and container behaviour.
 
-**Current production marker:** `APP_VERSION=1.26.12-production`; backend health build `v1.26.12-catalogue-metadata`.
+**Current production marker:** `APP_VERSION=1.30-production`; backend health build `v1.30-repository-qa-through-documentation`.
 
 ## Mandatory Koyeb settings
 
 ```env
 APP_ENV=production
-APP_VERSION=1.26.12-production
+APP_VERSION=1.30-production
 ADMIN_BEARER_TOKEN=<unique random value, at least 32 characters>
 CORS_ORIGINS=https://<your-hive-ui-domain>
 ALLOWED_HOSTS=<your-service>.koyeb.app
