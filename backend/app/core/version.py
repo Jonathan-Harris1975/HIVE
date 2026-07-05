@@ -1,1 +1,1 @@
-BUILD_STAGE = "v1.26.12-catalogue-metadata"
+BUILD_STAGE = "v1.30-repository-qa-through-documentation"
