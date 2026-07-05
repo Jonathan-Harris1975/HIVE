@@ -30,6 +30,9 @@ HIVE-UI (Cloudflare Pages)
 - Repository Manager: safe ZIP extraction, fingerprinting, manifest generation (language + dependency detection), incremental re-indexing and TTL-based cleanup of uploaded repositories.
 - Repository Memory: persistent Project DNA, architecture, coding standards, build/deployment profiles, known issues, learned patterns, patch/optimisation/QA/Council history per repository, queryable via Cloudflare AI Search without reloading the repository.
 - Model Registry: dynamic, ranked models per category (coding, reasoning, planning, vision, research, fast, cheap, creative, long context); the highest-ranked coding model automatically becomes the default coding model.
+- Provider Framework: OpenRouter plus any configured OpenRouter-compatible provider, each exposing available models, pricing, context length, tool/structured-output support, and health/latency through one adapter shape.
+- AI Council: on-demand run that discovers providers, refreshes catalogues, detects new/retired models, scores coding-capable models with the Benchmark Engine, auto-promotes those above a configurable threshold into the Model Registry, and notifies downstream services via the ops-event inbox.
+- Benchmark Engine: configurable weighted scoring across coding/reasoning benchmarks, cost, latency, reliability, long-context, JSON reliability, structured output, community maturity, and internal historical performance.
 - Cloudflare Workers AI embeddings and Vectorize retrieval.
 - Skills search, integrity checks and review-gated workflow planning.
 - Repository hygiene, execution previews, evidence packs, review queues and approved production adapter handoff.
@@ -51,6 +54,11 @@ HIVE-UI (Cloudflare Pages)
 | `GET /v1/repositories/{id}/memory` | Bearer | Repository Memory (Project DNA, architecture, QA/optimisation history, etc.) |
 | `GET /v1/repository-memory/ai-search` | Bearer | Cloudflare AI Search query across Repository Memory |
 | `GET /v1/model-registry/{category}` | Bearer | Ranked models and default for a Model Registry category |
+| `GET /v1/providers` | Bearer | Discovered providers (Provider Framework) |
+| `GET /v1/providers/health` | Bearer | Latency/model-count health check per provider |
+| `POST /v1/ai-council/run` | Bearer | Run discovery/benchmark/promotion across all providers |
+| `GET /v1/ai-council/history` | Bearer | Past AI Council run reports |
+| `POST /v1/benchmark/rank` | Bearer | Ad-hoc weighted ranking of arbitrary model metrics |
 
 All `/v1/*` routes require `Authorization: Bearer <ADMIN_BEARER_TOKEN>` unless explicitly documented otherwise.
 
