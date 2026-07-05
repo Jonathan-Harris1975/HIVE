@@ -33,6 +33,13 @@ HIVE-UI (Cloudflare Pages)
 - Provider Framework: OpenRouter plus any configured OpenRouter-compatible provider, each exposing available models, pricing, context length, tool/structured-output support, and health/latency through one adapter shape.
 - AI Council: on-demand run that discovers providers, refreshes catalogues, detects new/retired models, scores coding-capable models with the Benchmark Engine, auto-promotes those above a configurable threshold into the Model Registry, and notifies downstream services via the ops-event inbox.
 - Benchmark Engine: configurable weighted scoring across coding/reasoning benchmarks, cost, latency, reliability, long-context, JSON reliability, structured output, community maturity, and internal historical performance.
+- Repository QA: a static-only validation pipeline (build/lint/type/dependency/import/dead-code/security/regression/patch/architecture checks) — never executes an uploaded repository's own code, by design.
+- Repository Council: nine-dimension scored review (architecture, documentation, dependencies, technical debt, security, performance, maintainability, AI-generated code, repository health) with historical tracking.
+- Bucket Manager: explicit accessible/hidden R2 bucket registry; hidden buckets can never surface through normal workflows.
+- Connector Framework: uniform health/auth/capability/rate-limit diagnostics for OpenRouter, Cloudflare R2, Cloudflare AI Search, and GitHub.
+- Optimisation Engine: every optimisation decision recorded with confidence and a reversible previous/new state; experiment success-rate tracking.
+- Repository Learning: patch outcomes, coding patterns, and repository-scoped model preferences roll up automatically into a refreshed Project DNA summary.
+- Environment audit: cross-checks every configuration field against `.env.example` to catch infrastructure-configuration drift.
 - Cloudflare Workers AI embeddings and Vectorize retrieval.
 - Skills search, integrity checks and review-gated workflow planning.
 - Repository hygiene, execution previews, evidence packs, review queues and approved production adapter handoff.
@@ -59,6 +66,14 @@ HIVE-UI (Cloudflare Pages)
 | `POST /v1/ai-council/run` | Bearer | Run discovery/benchmark/promotion across all providers |
 | `GET /v1/ai-council/history` | Bearer | Past AI Council run reports |
 | `POST /v1/benchmark/rank` | Bearer | Ad-hoc weighted ranking of arbitrary model metrics |
+| `POST /v1/repositories/{id}/qa` | Bearer | Run the static Repository QA pipeline |
+| `POST /v1/repositories/{id}/council` | Bearer | Run a Repository Council review |
+| `GET /v1/buckets` | Bearer | Accessible R2 buckets (hidden buckets never appear here) |
+| `GET /v1/connectors` | Bearer | Diagnostics for OpenRouter, R2, AI Search, GitHub |
+| `POST /v1/optimisation/decisions` | Bearer | Record a reversible optimisation decision |
+| `POST /v1/optimisation/decisions/{id}/rollback` | Bearer | Roll back a recorded decision |
+| `POST /v1/repositories/{id}/learning/refresh-project-dna` | Bearer | Roll up learned history into Project DNA |
+| `GET /v1/environment/audit` | Bearer | Audit Settings fields against `.env.example` |
 
 All `/v1/*` routes require `Authorization: Bearer <ADMIN_BEARER_TOKEN>` unless explicitly documented otherwise.
 
