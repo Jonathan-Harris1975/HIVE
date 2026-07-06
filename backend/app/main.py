@@ -22,6 +22,7 @@ from app.api.health import router as health_router
 from app.api.model_registry import router as model_registry_router
 from app.api.models import router as models_router
 from app.api.ops_events import router as ops_events_router
+from app.api.optimisation_engine import qa_ingest_router as optimisation_qa_ingest_router
 from app.api.optimisation_engine import router as optimisation_engine_router
 from app.api.providers import router as providers_router
 from app.api.repositories import router as repositories_router
@@ -157,6 +158,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(buckets_router, prefix="/v1")
     application.include_router(connectors_router, prefix="/v1")
     application.include_router(optimisation_engine_router, prefix="/v1")
+    application.include_router(optimisation_qa_ingest_router, prefix="/v1")
     application.include_router(repository_learning_router, prefix="/v1")
     application.include_router(env_audit_router, prefix="/v1")
     return application
