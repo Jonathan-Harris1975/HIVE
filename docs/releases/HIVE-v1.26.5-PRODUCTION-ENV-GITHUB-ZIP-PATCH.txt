@@ -1,0 +1,19 @@
+HIVE v1.26.5 production env + GitHub ZIP extraction patch
+
+Updated files:
+- backend/app/api/chat.py
+- backend/app/api/files.py
+- backend/app/core/config.py
+- backend/app/ingestion/text_extractors.py
+- backend/app/ingestion/zip_ingestion.py
+- backend/tests/test_zip_ingestion.py
+- .env.example
+- HIVE-KOYEB-PRODUCTION-ENV.txt
+
+Changes:
+- Chat API now defaults use_skills=false so helpers are opt-in for API clients that do not send the UI toggle.
+- APP_VERSION bumped to 1.26.5-production.
+- Production env now explicitly sets R2_MULTI_BUCKET_WRITE_ENABLED=true.
+- Production D1 and skill-helper timeout defaults remain fast: D1 3s/1 attempt, skill import 6s, skill context 2 items / 4000 chars.
+- ZIP extraction now accepts broad GitHub repository source/config/document suffixes.
+- ZIP extraction also supports common extensionless repository files through ZIP_EXTRACT_SUPPORTED_FILENAMES.

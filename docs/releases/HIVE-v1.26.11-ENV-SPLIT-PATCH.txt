@@ -1,0 +1,19 @@
+HIVE v1.26.11 env split
+
+Purpose
+- Keep Koyeb clean: only secret-backed env values are configured in Koyeb.
+- Keep non-secret production defaults in the HIVE repository.
+
+Added
+- HIVE-PRODUCTION-SHARED.env: committed non-secret production defaults for Koyeb e-medium.
+- HIVE-KOYEB-SECRETS-ONLY.env: paste-ready Koyeb secrets-only list.
+
+Changed
+- scripts/start.sh loads HIVE-PRODUCTION-SHARED.env without overriding existing Koyeb env values.
+- Settings still supports explicit _env_file loading; production startup uses scripts/start.sh.
+- APP_VERSION set to 1.26.11-production.
+- BUILD_STAGE set to v1.26.11-env-split.
+
+Safety
+- Shared env file contains no {{ secret.* }} placeholders and no secret key assignments.
+- Koyeb secret file contains only secret-backed values.

@@ -1,0 +1,24 @@
+HIVE v1.26.8 version/readiness/adapter patch
+
+Date: 22 June 2026
+
+Updated files:
+- backend/app/core/version.py
+- backend/app/core/config.py
+- backend/app/core/production.py
+- backend/app/services/repo_health.py
+- backend/app/services/openrouter.py
+- backend/app/services/execution_adapters.py
+- backend/app/services/execution_reviews.py
+- backend/app/services/skill_registry.py
+- backend/tests/* build-stage expectations
+- HIVE-KOYEB-PRODUCTION-ENV.txt
+- HIVE-v1.26.8-KOYEB-E-MEDIUM-ENV.txt
+- README.md and current production docs
+
+Purpose:
+- Stop HIVE-UI Ops from displaying stale backend build references.
+- Keep RAMS readiness auth configured through RAMS_READINESS_BEARER_TOKEN/RMS_API_KEY.
+- Keep execution adapters enabled only behind the human approval gate.
+- Keep OpenRouter streaming bounded for Koyeb e-medium testing.
+- Expand GitHub repository ZIP suffix/filename support within bounded extraction limits.

@@ -1,0 +1,18 @@
+HIVE v1.26.8 CI test-sync notes
+Date: 22 June 2026
+
+CI failure diagnosed from logs_75354111725.zip:
+- Container build job passed.
+- Backend pytest job failed with 16 failures.
+- 15 failures were stale build marker assertions still expecting v1.26.3-skill-catalogue-cleanup.
+- 1 failure was production readiness worker-monitoring test not supplying RAMS_READINESS_BEARER_TOKEN after the RAMS readiness auth gate was added.
+
+Fix included in this patch:
+- Sync backend tests to v1.26.8-production-readiness-sync.
+- Keep backend/app/core/version.py on v1.26.8-production-readiness-sync.
+- Add RAMS_READINESS_BEARER_TOKEN to the R2 worker monitoring readiness test.
+- Keep docs/env files aligned with v1.26.8-production.
+
+Local validation:
+PYTHONPATH=backend python -m pytest backend/tests -q
+Result: 177 passed
