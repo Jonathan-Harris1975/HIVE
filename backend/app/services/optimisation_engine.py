@@ -162,3 +162,86 @@ def success_rate_report(settings: Settings) -> dict[str, Any]:
         "experiment_count": len(experiments),
         "experiment_success_rate": (len(successful_experiments) / len(experiments)) if experiments else 0.0,
     }
+
+
+# ---------------------------------------------------------------------------
+# RAMS QA-event ingestion adapter.
+#
+# This is the wiring the deployment-readiness audit flagged as critical:
+# previously nothing connected an incoming RAMS QA event to the
+# optimisation decision ledger above. A QA event describes something RAMS
+# observed about a repository/skill/workflow it QA'd (a score, a pass/fail
+# check, a recommended action); this adapter turns that observation into a
+# recorded, reviewable, and rollback-able optimisation decision so it shows
+# up in both `list_decisions` and `success_rate_report` (the two places the
+# audit's integration test checks).
+# ---------------------------------------------------------------------------
+
+REQUIRED_QA_EVENT_FIELDS = ("event_id", "category", "subject_id", "qa_score", "recommendation")
+
+
+class QAEventValidationError(ValueError):
+    pass
+
+
+def _validate_qa_event(payload: dict[str, Any]) -> None:
+    missing = [field for field in REQUIRED_QA_EVENT_FIELDS if field not in payload]
+    if missing:
+        raise QAEventValidationError(f"QA event missing required field(s): {', '.join(missing)}")
+    qa_score = payload["qa_score"]
+    if not isinstance(qa_score, (int, float)) or not (0.0 <= float(qa_score) <= 1.0):
+        raise QAEventValidationError("QA event 'qa_score' must be a number between 0.0 and 1.0")
+
+
+def ingest_qa_event(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
+    """Ingest a single QA event from RAMS and record it as an optimisation
+    decision. Idempotent on `event_id`: re-ingesting the same event_id
+    returns the existing decision rather than creating a duplicate, since
+    RAMS may retry delivery.
+
+    Returns the recorded decision dict (same shape `record_decision` and
+    `get_decision` return), plus '_ingested' indicating whether this call
+    created a new decision (True) or matched an existing one (False).
+    """
+    _validate_qa_event(payload)
+
+    event_id = str(payload["event_id"])
+    existing = _find_decision_by_source_event(settings, event_id)
+    if existing is not None:
+        return {**existing, "_ingested": False}
+
+    qa_score = float(payload["qa_score"])
+    decision = record_decision(
+        settings,
+        decision_type="rams_qa_event",
+        description=(
+            f"RAMS QA event for {payload['subject_id']} "
+            f"(category={payload['category']}): {payload['recommendation']}"
+        ),
+        previous_state={"source": "rams", "event_id": event_id, "raw": payload},
+        new_state={"recommendation": payload["recommendation"], "applied": True},
+        confidence=qa_score,
+    )
+    decision["source_event_id"] = event_id
+    decision["source"] = "rams_qa_event"
+    # Persist the enriched fields (record_decision already wrote the base
+    # record; overwrite with the source-tracking fields added above so
+    # idempotency lookups and audit trails have them).
+    store = D1MetadataStore(settings)
+    store.upsert_metadata(
+        item_id=f"optimisation:decision:{decision['decision_id']}",
+        lane=LANE,
+        source_type="decision",
+        source_id=decision["decision_id"],
+        title=decision["description"],
+        url=None,
+        metadata=decision,
+    )
+    return {**decision, "_ingested": True}
+
+
+def _find_decision_by_source_event(settings: Settings, event_id: str) -> dict[str, Any] | None:
+    for decision in list_decisions(settings, decision_type="rams_qa_event"):
+        if decision.get("source_event_id") == event_id:
+            return decision
+    return None

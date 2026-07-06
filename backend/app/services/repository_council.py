@@ -50,11 +50,39 @@ _AI_GENERATED_MARKERS = re.compile(
 )
 
 
+# Confidence tiers for a dimension score. "measured" means the score is
+# derived from a real, executed check (Repository QA, lint output, etc.).
+# "heuristic" means the score is a stand-in proxy with no real data source
+# behind it yet, and MUST be surfaced to every consumer (API response, UI,
+# optimisation engine input) rather than silently blended in as if it were
+# equally trustworthy.
+DIMENSION_CONFIDENCE: dict[str, str] = {
+    "architecture": "measured",
+    "documentation": "measured",
+    "dependencies": "measured",
+    "technical_debt": "measured",
+    "security": "measured",
+    "performance": "heuristic",
+    "maintainability": "measured",
+    "ai_generated_code": "heuristic",
+    "repository_health": "measured",
+}
+
+# Dimensions whose score is a heuristic placeholder rather than measured
+# signal. Any consumer of a CouncilReport can check this set (or the
+# per-dimension `confidence` field) to decide whether to discount, flag,
+# or exclude these dimensions.
+HEURISTIC_DIMENSIONS: frozenset[str] = frozenset(
+    dim for dim, confidence in DIMENSION_CONFIDENCE.items() if confidence == "heuristic"
+)
+
+
 @dataclass(frozen=True)
 class CouncilDimensionScore:
     dimension: str
     score: float
     rationale: str
+    confidence: str = "measured"
 
 
 @dataclass(frozen=True)
@@ -65,6 +93,13 @@ class CouncilReport:
     dimensions: list[CouncilDimensionScore]
     recommendations: list[str]
 
+    @property
+    def heuristic_dimensions(self) -> list[str]:
+        """Names of dimensions in this report whose score is a heuristic
+        placeholder rather than measured signal. Non-empty whenever the
+        report includes performance and/or ai_generated_code."""
+        return [d.dimension for d in self.dimensions if d.confidence == "heuristic"]
+
     def public_payload(self) -> dict[str, Any]:
         return {
             "repository_id": self.repository_id,
@@ -72,6 +107,8 @@ class CouncilReport:
             "overall_score": self.overall_score,
             "dimensions": [asdict(d) for d in self.dimensions],
             "recommendations": self.recommendations,
+            "heuristic_dimensions": self.heuristic_dimensions,
+            "has_unmeasured_signal": bool(self.heuristic_dimensions),
         }
 
 
@@ -173,13 +210,17 @@ def run_repository_council(
             _score_from_qa(qa_payload, ("security_scanning",)),
             "Derived from Repository QA security_scanning check",
         ),
-        CouncilDimensionScore("performance", performance_score, performance_rationale),
+        CouncilDimensionScore(
+            "performance", performance_score, performance_rationale, confidence="heuristic"
+        ),
         CouncilDimensionScore(
             "maintainability",
             _score_from_qa(qa_payload, ("lint", "type_checking", "import_validation")),
             "Derived from Repository QA lint/type_checking/import_validation checks",
         ),
-        CouncilDimensionScore("ai_generated_code", ai_generated_score, ai_generated_rationale),
+        CouncilDimensionScore(
+            "ai_generated_code", ai_generated_score, ai_generated_rationale, confidence="heuristic"
+        ),
         CouncilDimensionScore("repository_health", qa_payload["score"], "Overall Repository QA score"),
     ]
 
