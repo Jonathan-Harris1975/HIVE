@@ -70,7 +70,12 @@ class AiSearchClient:
         }
 
     async def diagnostics(self) -> dict[str, object]:
-        payload: dict[str, object] = {"ok": self.enabled, **self.safe_config}
+        payload: dict[str, object] = {
+            "ok": self.enabled,
+            "configured": self.enabled,
+            "status": "ok" if self.enabled else "not_configured",
+            **self.safe_config,
+        }
         if not self.enabled:
             payload["reason"] = "AI Search disabled or not fully configured."
         return payload
