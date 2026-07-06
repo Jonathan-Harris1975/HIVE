@@ -116,6 +116,20 @@ class Settings(BaseSettings):
             "RAMS_READINESS_BEARER_TOKEN", "RAMS_API_KEY", "RMS_API_KEY"
         ),
     )
+
+    # RAMS QA-event ingestion into the Optimisation Engine. This is the
+    # missing wire-up the deployment-readiness audit flagged as critical:
+    # without it, RAMS QA events never reach the optimisation decision
+    # ledger at all. Token is deliberately separate from both the HIVE admin
+    # token and the ops-event ingest token, since RAMS is a distinct trusted
+    # caller with its own credential.
+    rams_qa_ingest_enabled: bool = Field(
+        False, validation_alias=AliasChoices("RAMS_QA_INGEST_ENABLED")
+    )
+    rams_qa_ingest_token: str = Field(
+        "", validation_alias=AliasChoices("RAMS_QA_INGEST_TOKEN")
+    )
+
     mast_health_url: str = Field("", validation_alias=AliasChoices("MAST_HEALTH_URL"))
     mast_status_url: str = Field("", validation_alias=AliasChoices("MAST_STATUS_URL"))
     mast_monitor_mode: Literal["auto", "r2", "http", "disabled"] = Field(
@@ -594,6 +608,7 @@ class Settings(BaseSettings):
         "ops_event_ingest_token",
         "rams_health_bearer_token",
         "rams_readiness_bearer_token",
+        "rams_qa_ingest_token",
         "openrouter_api_key",
         "cf_r2_access_key_id",
         "cf_r2_secret_access_key",

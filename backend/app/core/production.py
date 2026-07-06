@@ -113,6 +113,18 @@ def build_readiness_report(settings: Settings) -> ReadinessReport:
         )
     )
 
+    rams_qa_token = settings.rams_qa_ingest_token.strip()
+    rams_qa_token_valid = bool(rams_qa_token) and len(rams_qa_token) >= 32
+    checks.append(
+        _check(
+            "rams_qa_ingest",
+            not settings.rams_qa_ingest_enabled or rams_qa_token_valid,
+            "RAMS QA-event ingestion is disabled or protected by a dedicated token.",
+            "RAMS_QA_INGEST_ENABLED=true requires RAMS_QA_INGEST_TOKEN of at least 32 characters.",
+            required=production and settings.rams_qa_ingest_enabled,
+        )
+    )
+
     mast_mode = settings.mast_monitor_mode.strip().lower()
     mast_monitor_ready = (
         mast_mode == "disabled"
