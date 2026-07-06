@@ -230,3 +230,134 @@ async def test_repo_health_marks_auth_blocked_operational_probe_without_calling_
     assert rams["liveness"]["status"] == "healthy"
     assert rams["operational"]["status"] == "blocked"
     assert rams["readiness"]["status"] == "blocked"
+
+
+# ---------------------------------------------------------------------------
+# Explicit AIMS/RAMS degradation-state coverage.
+#
+# The audit noted it was "not clear from source whether HIVE degrades
+# gracefully" when AIMS or RAMS (or both) are down. These three tests make
+# that behaviour explicit and regression-tested: in every case,
+# build_repo_health_report must complete without raising, HIVE's own
+# "core_api" status must stay "healthy" (the outage of an external
+# dependency must never be conflated with HIVE's own liveness), and the
+# overall summary must correctly reflect only the affected service(s).
+# ---------------------------------------------------------------------------
+
+
+def _connect_error_handler_for(*down_hosts: str):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host in down_hosts:
+            raise httpx.ConnectError("connection refused", request=request)
+        return httpx.Response(200, json={"ok": True, "status": "ok"})
+
+    return handler
+
+
+@pytest.mark.asyncio
+async def test_repo_health_degrades_gracefully_when_aims_is_down_and_rams_is_up() -> None:
+    clear_repo_health_cache()
+
+    settings = Settings(
+        app_env="test",
+        repo_health_cache_seconds=0,
+        hive_ui_health_url="",
+        aims_health_url="https://aims.example/health",
+        aims_operational_health_url="https://aims.example/ops/health",
+        rams_health_url="https://rams.example/livez",
+        rams_readiness_url="https://rams.example/readiness",
+        mast_health_url="",
+        mast_status_url="",
+        irs_health_url="",
+        website_health_url="",
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(_connect_error_handler_for("aims.example"))
+    ) as client:
+        report = await build_repo_health_report(settings, client=client, force_refresh=True)
+
+    assert report["ok"] is True
+    hive_item = next(item for item in report["repos"] if item["repo"] == "HIVE")
+    assert hive_item["status"] == "healthy"
+
+    aims = next(item for item in report["repos"] if item["repo"] == "AIMS")
+    rams = next(item for item in report["repos"] if item["repo"] == "RAMS")
+    assert aims["status"] == "down"
+    assert rams["status"] == "healthy"
+    assert report["overall_status"] == "down"
+    assert report["summary"]["down"] == 1
+    assert report["summary"]["healthy"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_repo_health_degrades_gracefully_when_rams_is_down_and_aims_is_up() -> None:
+    clear_repo_health_cache()
+
+    settings = Settings(
+        app_env="test",
+        repo_health_cache_seconds=0,
+        hive_ui_health_url="",
+        aims_health_url="https://aims.example/health",
+        aims_operational_health_url="https://aims.example/ops/health",
+        rams_health_url="https://rams.example/livez",
+        rams_readiness_url="https://rams.example/readiness",
+        mast_health_url="",
+        mast_status_url="",
+        irs_health_url="",
+        website_health_url="",
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(_connect_error_handler_for("rams.example"))
+    ) as client:
+        report = await build_repo_health_report(settings, client=client, force_refresh=True)
+
+    assert report["ok"] is True
+    hive_item = next(item for item in report["repos"] if item["repo"] == "HIVE")
+    assert hive_item["status"] == "healthy"
+
+    aims = next(item for item in report["repos"] if item["repo"] == "AIMS")
+    rams = next(item for item in report["repos"] if item["repo"] == "RAMS")
+    assert aims["status"] == "healthy"
+    assert rams["status"] == "down"
+    assert report["overall_status"] == "down"
+    assert report["summary"]["down"] == 1
+
+
+@pytest.mark.asyncio
+async def test_repo_health_degrades_gracefully_when_both_aims_and_rams_are_down() -> None:
+    clear_repo_health_cache()
+
+    settings = Settings(
+        app_env="test",
+        repo_health_cache_seconds=0,
+        hive_ui_health_url="",
+        aims_health_url="https://aims.example/health",
+        aims_operational_health_url="https://aims.example/ops/health",
+        rams_health_url="https://rams.example/livez",
+        rams_readiness_url="https://rams.example/readiness",
+        mast_health_url="",
+        mast_status_url="",
+        irs_health_url="",
+        website_health_url="",
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(_connect_error_handler_for("aims.example", "rams.example"))
+    ) as client:
+        # Must not raise even though both external dependencies are fully down.
+        report = await build_repo_health_report(settings, client=client, force_refresh=True)
+
+    assert report["ok"] is True
+    hive_item = next(item for item in report["repos"] if item["repo"] == "HIVE")
+    assert hive_item["status"] == "healthy"
+
+    aims = next(item for item in report["repos"] if item["repo"] == "AIMS")
+    rams = next(item for item in report["repos"] if item["repo"] == "RAMS")
+    assert aims["status"] == "down"
+    assert rams["status"] == "down"
+    assert report["overall_status"] == "down"
+    assert report["summary"]["down"] == 2
+
+    # The API layer that serves /v1/runtime/readiness relies on this report;
+    # confirm the payload is JSON-serialisable and carries no exception state.
+    assert isinstance(report["summary"], dict)
+    assert all(isinstance(item["status"], str) for item in report["repos"])

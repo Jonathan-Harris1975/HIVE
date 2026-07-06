@@ -107,3 +107,58 @@ def test_run_repository_council_raises_for_unknown_repository(settings):
 
     with pytest.raises(RepositoryManagerError):
         repository_council.run_repository_council(settings, "does-not-exist")
+
+
+def test_heuristic_dimensions_are_tagged_and_propagate_to_public_payload(settings):
+    """Regression test for the 'unmeasured heuristic' honesty note in
+    repository_council.py: performance and ai_generated_code must always be
+    tagged confidence='heuristic', every other dimension must be 'measured',
+    and the public payload (what the API layer and every other consumer
+    receives) must explicitly surface which dimensions are heuristic rather
+    than silently blending them in as if equally trustworthy."""
+    manifest = rm.register_repository(
+        _build_zip({"main.py": "x = 1\n", "README.md": "# demo\n"}),
+        settings=settings,
+        source_filename="demo.zip",
+    )
+
+    report = repository_council.run_repository_council(settings, manifest.repository_id)
+
+    by_dimension = {d.dimension: d for d in report.dimensions}
+    assert by_dimension["performance"].confidence == "heuristic"
+    assert by_dimension["ai_generated_code"].confidence == "heuristic"
+    for measured_dimension in (
+        "architecture",
+        "documentation",
+        "dependencies",
+        "technical_debt",
+        "security",
+        "maintainability",
+        "repository_health",
+    ):
+        assert by_dimension[measured_dimension].confidence == "measured"
+
+    assert set(report.heuristic_dimensions) == {"performance", "ai_generated_code"}
+
+    payload = report.public_payload()
+    assert payload["has_unmeasured_signal"] is True
+    assert set(payload["heuristic_dimensions"]) == {"performance", "ai_generated_code"}
+    payload_by_dimension = {d["dimension"]: d for d in payload["dimensions"]}
+    assert payload_by_dimension["performance"]["confidence"] == "heuristic"
+    assert payload_by_dimension["security"]["confidence"] == "measured"
+
+
+def test_heuristic_dimension_confidence_reaches_downstream_learning_consumer(settings):
+    """repository_learning.py reads repository_council_history entries
+    (i.e. public_payload() output) to build project_dna. Confirm the
+    persisted history entry still carries the heuristic-confidence flags,
+    so any downstream consumer of that history has the same signal."""
+    manifest = rm.register_repository(
+        _build_zip({"main.py": "x = 1\n"}), settings=settings, source_filename="demo.zip"
+    )
+
+    repository_council.run_and_record_council(settings, manifest.repository_id)
+    history = repository_council.get_council_history(settings, manifest.repository_id)
+
+    assert history[-1]["has_unmeasured_signal"] is True
+    assert "performance" in history[-1]["heuristic_dimensions"]
