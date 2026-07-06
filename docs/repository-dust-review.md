@@ -47,3 +47,14 @@ The following root-level files were superseded by `README.md`, `docs/CHANGELOG.m
 - release notes under `docs/releases/`
 
 The two frozen hash manifests are kept for now because they may still be useful historical deployment evidence. They can be removed in a later dedicated cleanup if no workflow references them.
+
+## Follow-up: production-readiness closeout pass
+
+The `HIVE-v1.26.x-*` patch/manifest files this review had listed as still
+present at repository root have now actually been moved into
+`docs/releases/` (they were previously only planned for removal, not yet
+moved). All release history for v1.26.x is therefore under
+`docs/releases/` alongside the rest of the versioned patch notes, and the
+repository root now only carries the current, active env templates
+(`HIVE-KOYEB-PRODUCTION-ENV.txt`, `HIVE-REPO-HEALTH-KOYEB-ENV-PATCH.txt`)
+and the two frozen hash manifests noted above.
