@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import secrets
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 
 from app.core.config import Settings, get_settings
-from app.core.security import require_admin
+from app.core.security import bearer, require_admin
 from app.services.optimisation_engine import (
     OptimisationEngineError,
+    QAEventValidationError,
+    ingest_qa_event,
     list_decisions,
     list_experiments,
     record_decision,
@@ -18,6 +22,12 @@ from app.services.optimisation_engine import (
 )
 
 router = APIRouter(tags=["optimisation-engine"], dependencies=[Depends(require_admin)])
+
+# Separate router for RAMS's own QA-event ingestion call. This must NOT sit
+# behind the operator admin token above — RAMS is a distinct trusted external
+# caller with its own credential (RAMS_QA_INGEST_TOKEN), the same pattern
+# already used for the central ops-event inbox in app/api/ops_events.py.
+qa_ingest_router = APIRouter(tags=["optimisation-engine"])
 
 
 class RecordDecisionRequest(BaseModel):
@@ -83,3 +93,36 @@ async def get_experiments(settings: Settings = Depends(get_settings)) -> dict[st
 @router.get("/optimisation/stats")
 async def get_stats(settings: Settings = Depends(get_settings)) -> dict[str, object]:
     return success_rate_report(settings)
+
+
+def require_rams_qa_token(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
+    settings: Settings = Depends(get_settings),
+) -> None:
+    if not settings.rams_qa_ingest_enabled:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="RAMS QA-event ingestion is disabled")
+    expected = settings.rams_qa_ingest_token.strip()
+    supplied = credentials.credentials.strip() if credentials and credentials.scheme.lower() == "bearer" else ""
+    if not expected or not supplied or not secrets.compare_digest(supplied, expected):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid RAMS QA-event ingestion token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+
+@qa_ingest_router.post(
+    "/optimisation/qa-events",
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(require_rams_qa_token)],
+)
+async def post_ingest_qa_event(
+    payload: dict[str, Any] = Body(...), settings: Settings = Depends(get_settings)
+) -> dict[str, object]:
+    """Ingestion endpoint RAMS calls with a real QA event. Wires directly
+    into the optimisation decision ledger — this is the connection the
+    deployment-readiness audit found missing."""
+    try:
+        return ingest_qa_event(settings, payload)
+    except QAEventValidationError as error:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)) from error
