@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
+from app.core.config import Settings, get_settings
 from app.core.security import require_admin
 from app.services.model_registry import (
     CATEGORIES,
@@ -13,6 +14,7 @@ from app.services.model_registry import (
     register_model,
     remove_model,
 )
+from app.storage.d1 import D1MetadataStore
 
 router = APIRouter(tags=["model-registry"], dependencies=[Depends(require_admin)])
 
@@ -66,10 +68,20 @@ async def get_category_default(category: str) -> dict[str, object]:
 
 
 @router.post("/model-registry/{category}")
-async def post_register_model(category: str, body: RegisterModelRequest) -> dict[str, object]:
+async def post_register_model(
+    category: str,
+    body: RegisterModelRequest,
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    store = D1MetadataStore(settings)
     try:
         ranked = register_model(
-            category, body.model_id, score=body.score, provider=body.provider, notes=body.notes
+            category,
+            body.model_id,
+            score=body.score,
+            provider=body.provider,
+            notes=body.notes,
+            store=store,
         )
     except ModelRegistryError as error:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
@@ -77,13 +89,19 @@ async def post_register_model(category: str, body: RegisterModelRequest) -> dict
         "category": category,
         "default_model": ranked[0].model_id if ranked else None,
         "model_count": len(ranked),
+        "persisted": store.enabled,
     }
 
 
 @router.delete("/model-registry/{category}/{model_id}")
-async def delete_registered_model(category: str, model_id: str) -> dict[str, object]:
+async def delete_registered_model(
+    category: str,
+    model_id: str,
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    store = D1MetadataStore(settings)
     try:
-        removed = remove_model(category, model_id)
+        removed = remove_model(category, model_id, store=store)
     except ModelRegistryError as error:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
     if not removed:
@@ -91,4 +109,4 @@ async def delete_registered_model(category: str, model_id: str) -> dict[str, obj
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"{model_id!r} not registered in category {category!r}",
         )
-    return {"category": category, "model_id": model_id, "removed": True}
+    return {"category": category, "model_id": model_id, "removed": True, "persisted": store.enabled}
