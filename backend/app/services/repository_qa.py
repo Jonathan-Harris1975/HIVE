@@ -104,8 +104,13 @@ def _check_build_verification(root: Path) -> QaCheckResult:
     with tempfile.TemporaryDirectory() as cache_dir:
         for path in python_files:
             try:
+                # quiet=2 tells py_compile to swallow compile errors *instead of*
+                # raising them, regardless of doraise — so quiet=2 here silently
+                # defeated this whole check (every file "passed" even with a
+                # syntax error). quiet=1 still suppresses the printed traceback
+                # but leaves doraise honored, which is what this check needs.
                 py_compile.compile(
-                    str(path), cfile=str(Path(cache_dir) / "out.pyc"), doraise=True, quiet=2
+                    str(path), cfile=str(Path(cache_dir) / "out.pyc"), doraise=True, quiet=1
                 )
             except py_compile.PyCompileError as error:
                 failures.append({"path": str(path.relative_to(root)), "error": str(error.exc_value)})
