@@ -692,6 +692,14 @@ class Settings(BaseSettings):
 
     @property
     def r2_ecosystem_lanes(self) -> list[dict[str, Any]]:
+        # Lanes listed here are hidden from every consumer of this property:
+        # the /ecosystem endpoint, the file API's per-lane list/read/write
+        # routes, and r2_lane() resolution. They remain configurable and are
+        # still checked directly (e.g. settings.r2_bucket_meta_system in
+        # core/production.py) for internal readiness/monitoring purposes,
+        # but must never be reachable as a user/UI-selectable lane. This
+        # mirrors the HIDDEN_BUCKETS registry in services/bucket_manager.py.
+        _hidden_lanes: frozenset[str] = frozenset({"meta_system"})
         lanes = [
             (
                 "uploads",
@@ -786,6 +794,8 @@ class Settings(BaseSettings):
             )
         )
         for name, bucket, public_base_url, description in lanes:
+            if name in _hidden_lanes:
+                continue
             primary = name == "uploads"
             configured = bool(bucket or public_base_url)
             readable = bool(bucket) and read_credentials_configured
