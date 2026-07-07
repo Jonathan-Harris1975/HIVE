@@ -28,7 +28,7 @@ jobs:
         run: >-
           PYTHONPATH=backend python -m pytest backend/tests -q
           --cov=app --cov-report=term-missing --cov-report=xml
-          --cov-fail-under=${{ vars.HIVE_COVERAGE_MIN || 60 }}
+          --cov-fail-under=${{ vars.HIVE_COVERAGE_MIN || 72 }}
       - run: python -m ruff check backend/app backend/tests scripts
       - run: python -m pip check
       - name: Static type checking (mypy)
