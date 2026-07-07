@@ -40,6 +40,7 @@ from app.core.config import Settings, get_settings
 from app.core.middleware import ProductionMiddleware
 from app.core.production import enforce_production_readiness
 from app.services import model_registry
+from app.storage.d1 import D1MetadataStore
 from app.storage.sql_store import SqlStore
 
 logger = logging.getLogger("uvicorn.error.hive.startup")
@@ -58,6 +59,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             report.app_version,
             len(report.warnings),
         )
+        loaded_count = model_registry.load_registry_from_store(D1MetadataStore(active_settings))
+        if loaded_count:
+            logger.info("HIVE Model Registry restored from D1 entries=%s", loaded_count)
         seeded_count = model_registry.seed_from_json(active_settings.model_registry_seed_json)
         if seeded_count:
             logger.info("HIVE Model Registry seeded entries=%s", seeded_count)
