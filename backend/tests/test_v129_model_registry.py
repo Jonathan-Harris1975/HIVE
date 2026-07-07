@@ -6,7 +6,7 @@ import pytest
 
 from app.core.config import Settings
 from app.services import model_registry as registry
-from app.services.model_router import Mode, ModelRouter, TaskType
+from app.services.model_router import ModelRouter, TaskType
 
 
 @pytest.fixture(autouse=True)
