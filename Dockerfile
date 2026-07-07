@@ -1,4 +1,4 @@
-FROM python:3.11.15-slim-bookworm AS builder
+FROM python:3.14.6-slim-bookworm AS builder
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -12,7 +12,7 @@ COPY requirements.txt /build/requirements.txt
 RUN python -m pip install --upgrade pip \
     && python -m pip install --requirement /build/requirements.txt
 
-FROM python:3.11.15-slim-bookworm AS runtime
+FROM python:3.14.6-slim-bookworm AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
