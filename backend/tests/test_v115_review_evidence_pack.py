@@ -66,7 +66,7 @@ def _fake_plan(**kwargs):
 
 
 def test_v115_build_stage():
-    assert BUILD_STAGE == "v1.26.12-catalogue-metadata"
+    assert BUILD_STAGE == "v1.30-repository-qa-through-documentation"
 
 
 def test_evidence_pack_audit_trail_and_exports(monkeypatch):
