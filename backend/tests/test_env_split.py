@@ -40,7 +40,7 @@ def test_settings_loads_repo_shared_env_file() -> None:
     from app.core.config import Settings
 
     settings = Settings(_env_file="HIVE-PRODUCTION-SHARED.env")
-    assert settings.app_version == "1.26.12-production"
+    assert settings.app_version == "1.30-production"
     assert settings.database_auto_init is True
     assert settings.default_model == "~google/gemini-flash-latest"
     assert "hive.jonathan-harris.online" in settings.effective_allowed_hosts
