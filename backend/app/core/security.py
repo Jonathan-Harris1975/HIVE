@@ -19,9 +19,6 @@ async def require_admin(
 ) -> None:
     """Protect admin/API routes while allowing local development convenience."""
 
-    if request.url.path == "/health":
-        return
-
     if settings.is_dev and settings.admin_bearer_token == _LOCAL_DEVELOPMENT_SENTINEL:
         return
 
