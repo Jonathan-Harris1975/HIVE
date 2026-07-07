@@ -95,3 +95,71 @@ def test_model_router_explicit_request_still_wins_over_registry():
     router = ModelRouter(settings)
 
     assert router.select_model(TaskType.CODE, requested_model="explicit-model") == "explicit-model"
+
+
+class _FakeD1Store:
+    """Duck-types the subset of D1MetadataStore used by model_registry
+    persistence, backed by an in-memory dict instead of a real D1 HTTP
+    call, so registry restart-survival can be tested without network."""
+
+    def __init__(self) -> None:
+        self.enabled = True
+        self._rows: dict[str, dict[str, object]] = {}
+
+    def upsert_metadata(self, *, item_id, lane, source_type, source_id, title, url, metadata):
+        self._rows[item_id] = {
+            "id": item_id,
+            "lane": lane,
+            "source_type": source_type,
+            "source_id": source_id,
+            "metadata": metadata,
+        }
+        return {"ok": True}
+
+    def list_metadata(self, *, lane=None, limit=50):
+        items = [row for row in self._rows.values() if lane is None or row["lane"] == lane]
+        return {"ok": True, "count": len(items), "items": items}
+
+    def delete_metadata_ids(self, item_ids):
+        for item_id in item_ids:
+            self._rows.pop(item_id, None)
+        return {"ok": True, "deleted_count": len(item_ids)}
+
+
+def test_registered_model_survives_simulated_restart_via_d1_store():
+    store = _FakeD1Store()
+    registry.register_model("coding", "persisted-model", score=0.8, provider="openrouter", store=store)
+
+    # Simulate a process restart: the in-memory registry is wiped, then
+    # rehydrated from the (fake) D1 store, exactly as app/main.py does at
+    # startup via load_registry_from_store().
+    registry.clear_registry()
+    assert registry.get_default_model("coding") is None
+
+    loaded = registry.load_registry_from_store(store)
+
+    assert loaded == 1
+    assert registry.get_default_model("coding") == "persisted-model"
+
+
+def test_removed_model_is_deleted_from_d1_store_and_not_restored():
+    store = _FakeD1Store()
+    registry.register_model("cheap", "temp-model", score=0.5, store=store)
+    assert registry.remove_model("cheap", "temp-model", store=store) is True
+
+    registry.clear_registry()
+    loaded = registry.load_registry_from_store(store)
+
+    assert loaded == 0
+    assert registry.get_default_model("cheap") is None
+
+
+def test_load_registry_from_store_noop_when_disabled_or_missing():
+    assert registry.load_registry_from_store(None) == 0
+
+    class _DisabledStore(_FakeD1Store):
+        def __init__(self) -> None:
+            super().__init__()
+            self.enabled = False
+
+    assert registry.load_registry_from_store(_DisabledStore()) == 0

@@ -38,6 +38,25 @@ def test_lane_registry_exposes_read_write_access() -> None:
     assert lanes["uploads"]["writable"] is True
     assert lanes["audits"]["access_mode"] == "read_write"
     assert lanes["audits"]["readable"] is True
+
+
+def test_meta_system_lane_is_never_exposed_even_when_configured() -> None:
+    # Regression test: the internal `metasystem` R2 bucket must never be
+    # reachable as a user/UI-selectable lane, matching its HIDDEN_BUCKETS
+    # status in app/services/bucket_manager.py. Previously, configuring
+    # R2_BUCKET_META_SYSTEM caused it to appear in /v1/files/r2-lanes and
+    # become readable/writable like any other lane.
+    settings = _settings(
+        r2_bucket_meta_system="metasystem",
+        r2_public_base_url_meta_system="https://internal.example.test",
+    )
+    client = TestClient(create_app(settings))
+
+    body = client.get("/v1/files/r2-lanes").json()
+    lanes = {item["lane"] for item in body["lanes"]}
+
+    assert "meta_system" not in lanes
+    assert settings.r2_lane("meta_system") is None
     assert lanes["audits"]["writable"] is True
 
 
