@@ -37,7 +37,6 @@ async def health() -> dict[str, object]:
         "sql": {
             "enabled": bool(settings.database_enabled),
             "configured": sql.enabled,
-            "dialect": sql.dialect if sql.enabled else None,
         },
         "d1": {
             "enabled": bool(settings.d1_enabled),
@@ -46,16 +45,17 @@ async def health() -> dict[str, object]:
         "vectorize": {
             "enabled": bool(settings.vectorize_enabled),
             "configured": vectorize.enabled,
-            "index_name": settings.vectorize_index_name or None,
         },
         "embeddings": {
             "enabled": bool(settings.embeddings_enabled),
             "configured": embeddings.enabled,
-            "provider": settings.embeddings_provider,
-            "model": settings.embeddings_model,
-            "dimensions": settings.embeddings_dimensions,
         },
     }
+    # NOTE: this endpoint is intentionally unauthenticated (MAST/uptime checks hit it
+    # directly), so it deliberately reports only enabled/configured *booleans* nested
+    # under storage_flags, not top-level duplicates of the same data and not any
+    # provider/model/dialect detail. Anything more specific than "is this on" belongs
+    # behind /v1/runtime/readiness, which requires the admin bearer token.
     return {
         "ok": True,
         "build": BUILD_STAGE,
@@ -64,7 +64,6 @@ async def health() -> dict[str, object]:
         "workflow_presets_enabled": True,
         "r2_ecosystem_lanes_enabled": True,
         "execution_adapters_enabled": bool(execution_adapter_policy(settings)["enabled"]),
-        "execution_adapter_policy": execution_adapter_policy(settings),
         "free_tier": {
             "enabled": settings.hive_free_tier_mode,
             "platform": "koyeb-free-web-service" if settings.hive_free_tier_mode else None,
@@ -77,17 +76,6 @@ async def health() -> dict[str, object]:
             },
         },
         "storage_flags": storage_flags,
-        "r2_configured": r2.enabled,
-        "openrouter_configured": bool(settings.openrouter_api_key),
-        "vectorize_configured": vectorize.enabled,
-        "vectorize_enabled": bool(settings.vectorize_enabled),
-        "embeddings_configured": embeddings.enabled,
-        "embeddings_enabled": bool(settings.embeddings_enabled),
-        "database_configured": sql.enabled,
-        "database_enabled": bool(settings.database_enabled),
-        "database_dialect": sql.dialect if sql.enabled else None,
-        "d1_configured": d1.enabled,
-        "d1_enabled": bool(settings.d1_enabled),
     }
 
 
