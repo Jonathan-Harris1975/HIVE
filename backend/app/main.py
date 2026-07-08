@@ -15,6 +15,7 @@ from app.api.chat import router as chat_router
 from app.api.connectors import router as connectors_router
 from app.api.db import router as db_router
 from app.api.ecosystem import router as ecosystem_router
+from app.api.service_actions import router as service_actions_router
 from app.api.env_audit import router as env_audit_router
 from app.api.execution import router as execution_router
 from app.api.files import router as files_router
@@ -147,6 +148,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(workflows_router, prefix="/v1")
     application.include_router(workflow_graphs_router, prefix="/v1")
     application.include_router(ecosystem_router, prefix="/v1")
+    application.include_router(service_actions_router, prefix="/v1")
     application.include_router(skills_router, prefix="/v1")
     application.include_router(execution_router, prefix="/v1")
     application.include_router(system_router, prefix="/v1")
