@@ -160,6 +160,27 @@ class Settings(BaseSettings):
         le=8_388_608,
         validation_alias=AliasChoices("MAST_STATE_MAX_BYTES"),
     )
+
+    # Used only for the on-demand "wake a standby service" flow: HIVE calls MAST's
+    # mutating /services/{service}/resume endpoint (reads of the lifecycle ledger go
+    # through the existing durable R2 state above and need no extra config).
+    mast_base_url: str = Field("", validation_alias=AliasChoices("MAST_BASE_URL"))
+    mast_admin_token: str = Field(
+        "", validation_alias=AliasChoices("MAST_ADMIN_TOKEN", "CRON_ADMIN_TOKEN")
+    )
+    service_wake_timeout_seconds: int = Field(
+        150,
+        ge=15,
+        le=600,
+        validation_alias=AliasChoices("SERVICE_WAKE_TIMEOUT_SECONDS"),
+    )
+    service_wake_poll_interval_seconds: float = Field(
+        3.0,
+        ge=1.0,
+        le=30.0,
+        validation_alias=AliasChoices("SERVICE_WAKE_POLL_INTERVAL_SECONDS"),
+    )
+
     irs_health_url: str = Field(
         "https://images.jonathan-harris.online/health.json",
         validation_alias=AliasChoices("IRS_HEALTH_URL"),
