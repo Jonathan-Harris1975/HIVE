@@ -257,6 +257,10 @@ def _readiness_probe(operational: dict[str, Any] | None, status: str) -> dict[st
         readiness_status = "blocked"
     elif source_status in {"down", "failed", "error"}:
         readiness_status = "not_ready"
+    elif source_status in {"standby", "maintenance", "starting"}:
+        # Intentional, non-fault states: surfaced verbatim rather than folded into
+        # "not_ready" so the UI can distinguish "asleep on purpose" from "broken".
+        readiness_status = source_status
     else:
         readiness_status = "partial"
     return {
@@ -275,7 +279,44 @@ def _with_readiness(item: dict[str, Any]) -> dict[str, Any]:
         return item
     return {**item, "readiness": _readiness_probe(item.get("operational"), str(item.get("status") or "not_configured"))}
 
-async def _probe_target(client: httpx.AsyncClient, target: ProbeTarget) -> dict[str, Any]:
+_INTENTIONAL_LIFECYCLE_STATES = {"standby", "maintenance"}
+
+
+async def _probe_target(
+    client: httpx.AsyncClient,
+    target: ProbeTarget,
+    *,
+    lifecycle_hint: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    # MAST's lifecycle ledger is authoritative for AIMS/RAMS while paused: a paused
+    # Koyeb instance cannot answer any network probe at all, so a failed probe here
+    # would otherwise be indistinguishable from a genuine outage. Trust the ledger
+    # instead of probing when it reports an intentional non-running state.
+    hint_state = str((lifecycle_hint or {}).get("state") or "")
+    if hint_state in _INTENTIONAL_LIFECYCLE_STATES:
+        reason = (lifecycle_hint or {}).get("reason") or "n/a"
+        since = (lifecycle_hint or {}).get("since")
+        detail = f"MAST reports this service is intentionally in {hint_state} (reason: {reason})."
+        probe = {
+            "status": hint_state,
+            "configured": True,
+            "http_status": None,
+            "latency_ms": None,
+            "checked_at": _now_iso(),
+            "detail": detail,
+            "payload": {"source": "mast_lifecycle_ledger", "since": since, "reason": reason},
+        }
+        return _with_readiness({
+            "repo": target.repo,
+            "label": target.label,
+            "category": target.category,
+            "description": target.description,
+            "status": hint_state,
+            "detail": detail,
+            "liveness": probe,
+            "operational": probe,
+        })
+
     liveness_task = _probe(client, url=target.health_url)
     operational_task = (
         _probe(client, url=target.operational_url, token=target.operational_token)
@@ -292,6 +333,13 @@ async def _probe_target(client: httpx.AsyncClient, target: ProbeTarget) -> dict[
     detail = liveness.get("detail") or ""
     if status == "degraded" and operational:
         detail = f"Liveness passed; operational check: {operational.get('detail', 'not ready')}"
+
+    # If MAST believes it just told this service to resume, a still-failing network
+    # probe means "starting up", not "down" - avoid flapping the dashboard to a fault
+    # colour during a normal, expected wake-up window.
+    if status == "down" and hint_state == "starting":
+        status = "starting"
+        detail = f"MAST is resuming this service (starting since {(lifecycle_hint or {}).get('since') or 'recently'})."
 
     return _with_readiness({
         "repo": target.repo,
@@ -377,6 +425,60 @@ def _mast_state_summary(payload: dict[str, Any]) -> dict[str, Any]:
             (latest.get("finishedAt") or latest.get("finished_at")) if latest else None
         ),
     }
+
+
+async def _fetch_mast_service_ledger(
+    client: httpx.AsyncClient, *, settings: Settings
+) -> dict[str, Any] | None:
+    """Best-effort read of MAST's durable AIMS/RAMS lifecycle ledger.
+
+    MAST is the only actor able to distinguish an intentional Standby (it paused the
+    service via Koyeb) from a genuine outage, since a paused instance cannot answer
+    any probe of its own. A miss here (unreadable/not configured) simply means
+    AIMS/RAMS fall back to ordinary network probing.
+    """
+    lane = settings.r2_lane(settings.mast_state_r2_lane)
+    key = settings.mast_state_object_key.strip().lstrip("/")
+    public_url = settings.public_url_for_r2_lane(settings.mast_state_r2_lane, key)
+    if not (lane and key and (lane.get("readable") or public_url)):
+        return None
+
+    raw: bytes | None = None
+    if lane.get("readable") and lane.get("bucket"):
+        storage = R2Storage(settings)
+        try:
+            obj = await asyncio.wait_for(
+                asyncio.to_thread(
+                    storage.read_object,
+                    key,
+                    settings.mast_state_max_bytes,
+                    bucket=str(lane["bucket"]),
+                    public_base_url=lane.get("public_base_url"),
+                    read_only=not bool(lane.get("writable")),
+                ),
+                timeout=settings.repo_health_timeout_seconds,
+            )
+            raw = obj.content
+        except Exception:
+            raw = None
+
+    if raw is None and public_url:
+        raw, _http_status, _error = await _read_public_object(
+            client, url=public_url, max_bytes=settings.mast_state_max_bytes,
+        )
+
+    if raw is None:
+        return None
+
+    try:
+        decoded = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(decoded, dict):
+        return None
+
+    services = decoded.get("services")
+    return services if isinstance(services, dict) else None
 
 
 async def _probe_mast_worker(
@@ -637,11 +739,18 @@ async def build_repo_health_report(
             headers={"User-Agent": f"HIVE/{settings.app_version} ecosystem-health"},
         )
         try:
+            service_ledger = await _fetch_mast_service_ledger(active_client, settings=settings)
             tasks = [
                 (
                     _probe_mast_worker(active_client, settings=settings, target=target)
                     if target.repo == "MAST"
-                    else _probe_target(active_client, target)
+                    else _probe_target(
+                        active_client,
+                        target,
+                        lifecycle_hint=(service_ledger or {}).get(target.repo.lower())
+                        if target.repo in {"AIMS", "RAMS"}
+                        else None,
+                    )
                 )
                 for target in _targets(settings)
             ]
@@ -657,12 +766,16 @@ async def build_repo_health_report(
             "degraded": sum(1 for item in repos if item["status"] == "degraded"),
             "down": sum(1 for item in repos if item["status"] == "down"),
             "not_configured": sum(1 for item in repos if item["status"] == "not_configured"),
+            "standby": sum(1 for item in repos if item["status"] in {"standby", "maintenance"}),
+            "starting": sum(1 for item in repos if item["status"] == "starting"),
         }
         if summary["down"]:
             overall = "down"
-        elif summary["degraded"] or summary["not_configured"]:
+        elif summary["degraded"] or summary["not_configured"] or summary["starting"]:
             overall = "degraded"
         else:
+            # Standby/Maintenance are intentional operational states, not faults: they
+            # never push the ecosystem overview into "down" or "degraded" on their own.
             overall = "healthy"
 
         payload = {
