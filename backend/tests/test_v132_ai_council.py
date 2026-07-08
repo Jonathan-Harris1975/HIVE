@@ -90,6 +90,28 @@ async def test_run_council_promotes_high_scoring_coding_model(monkeypatch, setti
 
 
 @pytest.mark.asyncio
+async def test_run_council_promotion_populates_registry_context_fields(monkeypatch, settings):
+    # A cheap, tool-capable, long-context model: cost/long_context/structured_output
+    # are the only 3 of 10 benchmark axes _metrics_for_model ever supplies today
+    # (confidence = 3/10 = 0.3), which should land on "heuristic", not "measured".
+    good_coder = _model("acme/good-coder", context_length=200_000, price=0.0000001)
+    monkeypatch.setattr(
+        ai_council, "discover_providers", lambda s: [FakeProvider("acme", [good_coder])]
+    )
+
+    await ai_council.run_council(settings)
+    ranked = model_registry.get_ranked_models("coding")
+
+    assert len(ranked) == 1
+    promoted = ranked[0]
+    assert promoted.confidence == "heuristic"
+    assert promoted.benchmark_score is not None
+    assert 0.0 <= promoted.benchmark_score <= 100.0
+    # price=0.0000001/token -> $0.0001 per 1k tokens
+    assert promoted.cost_per_1k_tokens == pytest.approx(0.0001, abs=1e-6)
+
+
+@pytest.mark.asyncio
 async def test_run_council_does_not_promote_non_coding_or_low_scoring_models(monkeypatch, settings):
     non_tool_model = _model("acme/no-tools", tools=False)
     monkeypatch.setattr(

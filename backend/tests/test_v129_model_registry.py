@@ -163,3 +163,99 @@ def test_load_registry_from_store_noop_when_disabled_or_missing():
             self.enabled = False
 
     assert registry.load_registry_from_store(_DisabledStore()) == 0
+
+
+def test_register_model_defaults_new_fields_to_unset():
+    ranked = registry.register_model("coding", "model-a", score=0.5)[0]
+
+    assert ranked.benchmark_score is None
+    assert ranked.confidence == "unverified"
+    assert ranked.latency_ms is None
+    assert ranked.cost_per_1k_tokens is None
+
+
+def test_register_model_accepts_benchmark_confidence_latency_cost():
+    ranked = registry.register_model(
+        "coding",
+        "model-a",
+        score=0.9,
+        benchmark_score=82.5,
+        confidence="measured",
+        latency_ms=420.0,
+        cost_per_1k_tokens=0.015,
+    )[0]
+
+    assert ranked.benchmark_score == 82.5
+    assert ranked.confidence == "measured"
+    assert ranked.latency_ms == 420.0
+    assert ranked.cost_per_1k_tokens == 0.015
+
+
+def test_register_model_rejects_unknown_confidence_level():
+    with pytest.raises(registry.ModelRegistryError):
+        registry.register_model("coding", "model-a", score=0.5, confidence="very-sure")
+
+
+def test_score_alone_still_determines_ranking_regardless_of_benchmark_score():
+    # benchmark_score is informational context, not a ranking input - a
+    # lower benchmark_score with a higher `score` still wins the category.
+    registry.register_model("coding", "model-a", score=0.5, benchmark_score=99.0)
+    registry.register_model("coding", "model-b", score=0.9, benchmark_score=10.0)
+
+    assert registry.get_default_model("coding") == "model-b"
+
+
+def test_seed_from_json_carries_new_fields():
+    seed = json.dumps(
+        {
+            "coding": [
+                {
+                    "model_id": "seed-coding-1",
+                    "score": 0.8,
+                    "benchmark_score": 91.2,
+                    "confidence": "measured",
+                    "latency_ms": 350.0,
+                    "cost_per_1k_tokens": 0.02,
+                }
+            ]
+        }
+    )
+
+    registry.seed_from_json(seed)
+    ranked = registry.get_ranked_models("coding")[0]
+
+    assert ranked.benchmark_score == 91.2
+    assert ranked.confidence == "measured"
+    assert ranked.latency_ms == 350.0
+    assert ranked.cost_per_1k_tokens == 0.02
+
+
+def test_seed_from_json_falls_back_to_unverified_for_bad_confidence():
+    seed = json.dumps({"coding": [{"model_id": "seed-1", "score": 0.5, "confidence": "nonsense"}]})
+
+    registry.seed_from_json(seed)
+
+    assert registry.get_ranked_models("coding")[0].confidence == "unverified"
+
+
+def test_new_fields_survive_simulated_restart_via_d1_store():
+    store = _FakeD1Store()
+    registry.register_model(
+        "coding",
+        "persisted-model",
+        score=0.8,
+        benchmark_score=77.0,
+        confidence="heuristic",
+        latency_ms=500.0,
+        cost_per_1k_tokens=0.01,
+        store=store,
+    )
+
+    registry.clear_registry()
+    registry.load_registry_from_store(store)
+    ranked = registry.get_ranked_models("coding")[0]
+
+    assert ranked.benchmark_score == 77.0
+    assert ranked.confidence == "heuristic"
+    assert ranked.latency_ms == 500.0
+    assert ranked.cost_per_1k_tokens == 0.01
