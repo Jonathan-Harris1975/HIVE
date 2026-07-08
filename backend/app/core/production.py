@@ -208,7 +208,7 @@ def build_readiness_report(settings: Settings) -> ReadinessReport:
         )
     )
 
-    configured_lanes = {str(item["lane"]): item for item in settings.r2_ecosystem_lanes}
+    configured_lanes = {str(item["lane"]): item for item in settings.r2_all_lanes}
     required_lane_names = settings.required_r2_read_lane_names
     non_primary_buckets_configured = any(
         bool(item.get("bucket")) and not bool(item.get("primary_upload_lane"))

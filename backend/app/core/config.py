@@ -711,18 +711,33 @@ class Settings(BaseSettings):
             return ""
         return f"https://{self.cf_r2_account_id.strip()}.r2.cloudflarestorage.com"
 
+    _HIDDEN_R2_LANES: frozenset[str] = frozenset({"meta_system"})
+
     @property
     def r2_ecosystem_lanes(self) -> list[dict[str, Any]]:
-        # Lanes listed here are hidden from every consumer of this property:
-        # the /ecosystem endpoint, the file API's per-lane list/read/write
-        # routes, and r2_lane() resolution. They remain configurable and are
-        # still checked directly (e.g. settings.r2_bucket_meta_system in
-        # core/production.py) for internal readiness/monitoring purposes,
-        # but must never be reachable as a user/UI-selectable lane. This
-        # mirrors the HIDDEN_BUCKETS registry in services/bucket_manager.py.
-        _hidden_lanes: frozenset[str] = frozenset({"meta_system"})
+        # Lanes listed in _HIDDEN_R2_LANES are hidden from every consumer of this
+        # property: the /ecosystem endpoint and the file API's per-lane
+        # list/read/write routes. This mirrors the HIDDEN_BUCKETS registry in
+        # services/bucket_manager.py. Internal readiness/monitoring code (e.g.
+        # core/production.py, the MAST heartbeat reader in repo_health.py) must
+        # resolve hidden lanes too, so it uses `r2_all_lanes`/`r2_lane()` below,
+        # which deliberately do NOT apply this filter.
+        return [
+            item for item in self._r2_lane_registry() if item["lane"] not in self._HIDDEN_R2_LANES
+        ]
+
+    @property
+    def r2_all_lanes(self) -> list[dict[str, Any]]:
+        """Full R2 lane registry, including internal-only lanes such as
+        `meta_system`. For internal readiness/monitoring resolution only -
+        never expose this via a user-facing endpoint; use `r2_ecosystem_lanes`
+        for anything reachable by the UI or file API."""
+        return self._r2_lane_registry()
+
+    def _r2_lane_registry(self) -> list[dict[str, Any]]:
         lanes = [
             (
+
                 "uploads",
                 self.cf_r2_bucket,
                 self.cf_r2_public_base_url,
@@ -815,8 +830,6 @@ class Settings(BaseSettings):
             )
         )
         for name, bucket, public_base_url, description in lanes:
-            if name in _hidden_lanes:
-                continue
             primary = name == "uploads"
             configured = bool(bucket or public_base_url)
             readable = bool(bucket) and read_credentials_configured
@@ -848,6 +861,14 @@ class Settings(BaseSettings):
         return payload
 
     def r2_lane(self, lane: str) -> dict[str, Any] | None:
+        """Resolve a lane name against the user/UI-facing registry only.
+
+        This is safe to call with untrusted input (e.g. a `lane` path param from
+        the file API): hidden internal lanes such as `meta_system` will never
+        resolve here. Internal callers that legitimately need a hidden lane
+        (driven only by operator-configured env vars, never by a request) must
+        use `internal_r2_lane()` instead.
+        """
         clean_lane = (lane or "").strip().lower().replace("-", "_")
         aliases = {
             "upload": "uploads",
@@ -858,6 +879,25 @@ class Settings(BaseSettings):
         }
         clean_lane = aliases.get(clean_lane, clean_lane)
         for item in self.r2_ecosystem_lanes:
+            if item["lane"] == clean_lane:
+                return item
+        return None
+
+    def internal_r2_lane(self, lane: str) -> dict[str, Any] | None:
+        """Resolve a lane name against the full registry, including hidden
+        internal-only lanes (e.g. `meta_system`). Only call this with
+        operator-configured lane names (settings/env values); never with
+        user-supplied input, or a hidden lane could become reachable."""
+        clean_lane = (lane or "").strip().lower().replace("-", "_")
+        aliases = {
+            "upload": "uploads",
+            "skills": "hive_skills",
+            "podcast_rss_feeds": "podcast_rss",
+            "rss_feeds": "rss",
+            "transcript": "transcripts",
+        }
+        clean_lane = aliases.get(clean_lane, clean_lane)
+        for item in self.r2_all_lanes:
             if item["lane"] == clean_lane:
                 return item
         return None
@@ -883,13 +923,29 @@ class Settings(BaseSettings):
         )
 
     def public_url_for_r2_lane(self, lane: str, key: str) -> str | None:
+        """Resolve a public object URL against the user/UI-facing registry only.
+
+        Safe for untrusted `lane` input; hidden lanes (e.g. `meta_system`) never
+        resolve here. See `internal_public_url_for_r2_lane()` for operator-config
+        driven lookups that must be able to reach hidden lanes.
+        """
+        return self._public_url_for_lane(lane, key, self.r2_ecosystem_lanes)
+
+    def internal_public_url_for_r2_lane(self, lane: str, key: str) -> str | None:
+        """Like `public_url_for_r2_lane()`, but also resolves hidden internal-only
+        lanes. Only call this with operator-configured lane names; never with
+        user-supplied input."""
+        return self._public_url_for_lane(lane, key, self.r2_all_lanes)
+
+    @staticmethod
+    def _public_url_for_lane(lane: str, key: str, lanes: list[dict[str, Any]]) -> str | None:
         clean_lane = (lane or "").strip().lower().replace("-", "_")
         clean_key = (key or "").replace("\\", "/").lstrip("/")
         decoded_key = unquote(clean_key)
         if any(part in {"", ".", ".."} for part in decoded_key.split("/")) and clean_key:
             return None
         encoded_key = quote(clean_key, safe="/~")
-        for item in self.r2_ecosystem_lanes:
+        for item in lanes:
             if item["lane"] == clean_lane:
                 base = item.get("public_base_url")
                 return f"{base}/{encoded_key}" if base and encoded_key else base
@@ -911,11 +967,14 @@ class Settings(BaseSettings):
         ]
         if not requested and not self.is_dev and self.production_require_r2:
             requested = [
-                str(item["lane"]) for item in self.r2_ecosystem_lanes if item.get("bucket")
+                str(item["lane"]) for item in self.r2_all_lanes if item.get("bucket")
             ]
         canonical: list[str] = []
         for name in requested:
-            lane = self.r2_lane(name)
+            # This list is entirely operator-configured (R2_REQUIRED_READ_LANES or
+            # every bucket lane in production), never user input, so it is safe -
+            # and necessary - to resolve against the full registry here.
+            lane = self.internal_r2_lane(name)
             if lane and lane["lane"] not in canonical:
                 canonical.append(str(lane["lane"]))
             elif not lane and name not in canonical:
