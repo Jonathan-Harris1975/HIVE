@@ -115,7 +115,9 @@ def _probe_required_r2_lanes(settings: Settings) -> list[DependencyProbe]:
     storage = R2Storage(settings)
     probes: list[DependencyProbe] = []
     for lane_name in required:
-        lane = settings.r2_lane(lane_name)
+        # required_r2_read_lane_names is entirely operator-configured, never
+        # user input, so it is safe to resolve hidden lanes (e.g. meta_system).
+        lane = settings.internal_r2_lane(lane_name)
         if not lane or not lane.get("bucket"):
             probes.append(
                 DependencyProbe(
@@ -204,7 +206,7 @@ def _probe_governed_skill_objects(
 
 def _cache_key(settings: Settings) -> tuple[object, ...]:
     lanes = tuple(
-        (name, (settings.r2_lane(name) or {}).get("bucket"))
+        (name, (settings.internal_r2_lane(name) or {}).get("bucket"))
         for name in settings.required_r2_read_lane_names
     )
     return (

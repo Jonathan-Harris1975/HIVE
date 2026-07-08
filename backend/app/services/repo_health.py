@@ -374,7 +374,7 @@ def _mast_monitor_mode(settings: Settings, target: ProbeTarget) -> str:
         return mode
     if target.health_url or target.operational_url:
         return "http"
-    lane = settings.r2_lane(settings.mast_state_r2_lane)
+    lane = settings.internal_r2_lane(settings.mast_state_r2_lane)
     if lane and (lane.get("readable") or lane.get("public_base_url")):
         return "r2"
     return "disabled"
@@ -437,9 +437,9 @@ async def _fetch_mast_service_ledger(
     any probe of its own. A miss here (unreadable/not configured) simply means
     AIMS/RAMS fall back to ordinary network probing.
     """
-    lane = settings.r2_lane(settings.mast_state_r2_lane)
+    lane = settings.internal_r2_lane(settings.mast_state_r2_lane)
     key = settings.mast_state_object_key.strip().lstrip("/")
-    public_url = settings.public_url_for_r2_lane(settings.mast_state_r2_lane, key)
+    public_url = settings.internal_public_url_for_r2_lane(settings.mast_state_r2_lane, key)
     if not (lane and key and (lane.get("readable") or public_url)):
         return None
 
@@ -510,9 +510,9 @@ async def _probe_mast_worker(
             "operational": None,
         }
 
-    lane = settings.r2_lane(settings.mast_state_r2_lane)
+    lane = settings.internal_r2_lane(settings.mast_state_r2_lane)
     key = settings.mast_state_object_key.strip().lstrip("/")
-    public_url = settings.public_url_for_r2_lane(settings.mast_state_r2_lane, key)
+    public_url = settings.internal_public_url_for_r2_lane(settings.mast_state_r2_lane, key)
     configured = bool(lane and key and (lane.get("readable") or public_url))
     if not configured:
         not_configured = {
