@@ -58,6 +58,16 @@ class ModelRegistryError(ValueError):
     pass
 
 
+#: Confidence levels for a model's benchmark/latency/cost figures, mirroring
+#: the confidence convention already used by Repository Council
+#: (app/services/repository_council.py): "measured" means the figure came
+#: from an actual benchmark run or provider-reported metric, "heuristic"
+#: means it was estimated/derived, and "unverified" (the default) means no
+#: real signal has been attached yet and the figure should be treated as a
+#: placeholder ranking hint only.
+CONFIDENCE_LEVELS: tuple[str, ...] = ("measured", "heuristic", "unverified")
+
+
 @dataclass(frozen=True)
 class RankedModel:
     model_id: str
@@ -66,6 +76,20 @@ class RankedModel:
     provider: str | None
     notes: str | None
     registered_at: float
+    # Benchmark score for this model within this category (e.g. a HumanEval
+    # or MMLU-style figure, or an internal eval score), 0-100. None if no
+    # benchmark has been recorded.
+    benchmark_score: float | None = None
+    # Confidence in benchmark_score/latency_ms/cost_per_1k_tokens. One of
+    # CONFIDENCE_LEVELS. Defaults to "unverified" so callers can distinguish
+    # real measurements from unset fields at a glance.
+    confidence: str = "unverified"
+    # Observed or provider-reported latency in milliseconds for a typical
+    # request. None if unmeasured.
+    latency_ms: float | None = None
+    # Cost per 1,000 tokens in USD (blended input/output, or input-only if
+    # that is all that is known - see notes for detail). None if unknown.
+    cost_per_1k_tokens: float | None = None
 
 
 def _require_known_category(category: str) -> None:
@@ -77,6 +101,16 @@ def _require_known_category(category: str) -> None:
 
 def _item_id(category: str, model_id: str) -> str:
     return f"model-registry:{category}:{model_id}"
+
+
+def _optional_float(metadata: dict, key: str) -> float | None:
+    value = metadata.get(key)
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _persist_model(store: "D1MetadataStore | None", ranked: RankedModel) -> None:
@@ -102,6 +136,10 @@ def _persist_model(store: "D1MetadataStore | None", ranked: RankedModel) -> None
                 "provider": ranked.provider,
                 "notes": ranked.notes,
                 "registered_at": ranked.registered_at,
+                "benchmark_score": ranked.benchmark_score,
+                "confidence": ranked.confidence,
+                "latency_ms": ranked.latency_ms,
+                "cost_per_1k_tokens": ranked.cost_per_1k_tokens,
             },
         )
     except Exception:  # noqa: BLE001 - persistence must never break registration
@@ -126,16 +164,30 @@ def register_model(
     score: float,
     provider: str | None = None,
     notes: str | None = None,
+    benchmark_score: float | None = None,
+    confidence: str = "unverified",
+    latency_ms: float | None = None,
+    cost_per_1k_tokens: float | None = None,
     store: "D1MetadataStore | None" = None,
 ) -> list[RankedModel]:
     """Register (or re-score) a model within a category and return the
     category's models re-ranked highest score first.
+
+    `score` remains the single ranking value (highest score = category
+    default, unchanged behaviour). `benchmark_score`, `latency_ms`, and
+    `cost_per_1k_tokens` are informational context for that score, not
+    additional ranking inputs, so existing callers that omit them keep
+    working exactly as before.
 
     If `store` is provided, the registration is also mirrored into D1 so it
     survives a process restart (see `load_registry_from_store`)."""
     _require_known_category(category)
     if not model_id:
         raise ModelRegistryError("model_id is required")
+    if confidence not in CONFIDENCE_LEVELS:
+        raise ModelRegistryError(
+            f"Unknown confidence level: {confidence!r}. Expected one of {CONFIDENCE_LEVELS}."
+        )
 
     ranked = RankedModel(
         model_id=model_id,
@@ -144,6 +196,10 @@ def register_model(
         provider=provider,
         notes=notes,
         registered_at=time.time(),
+        benchmark_score=benchmark_score,
+        confidence=confidence,
+        latency_ms=latency_ms,
+        cost_per_1k_tokens=cost_per_1k_tokens,
     )
     with _LOCK:
         existing = [m for m in _REGISTRY[category] if m.model_id != model_id]
@@ -197,6 +253,11 @@ def load_registry_from_store(store: "D1MetadataStore | None") -> int:
                 score = float(metadata.get("score", 0.0))
             except (TypeError, ValueError):
                 score = 0.0
+
+            confidence = metadata.get("confidence") or "unverified"
+            if confidence not in CONFIDENCE_LEVELS:
+                confidence = "unverified"
+
             ranked = RankedModel(
                 model_id=str(model_id),
                 category=category,
@@ -204,6 +265,10 @@ def load_registry_from_store(store: "D1MetadataStore | None") -> int:
                 provider=metadata.get("provider"),
                 notes=metadata.get("notes"),
                 registered_at=float(metadata.get("registered_at") or time.time()),
+                benchmark_score=_optional_float(metadata, "benchmark_score"),
+                confidence=confidence,
+                latency_ms=_optional_float(metadata, "latency_ms"),
+                cost_per_1k_tokens=_optional_float(metadata, "cost_per_1k_tokens"),
             )
             _REGISTRY[category] = [m for m in _REGISTRY[category] if m.model_id != model_id]
             _REGISTRY[category].append(ranked)
@@ -269,12 +334,19 @@ def seed_from_json(seed_json: str) -> int:
                 score = float(entry.get("score", 0.0))
             except (TypeError, ValueError):
                 score = 0.0
+            confidence = entry.get("confidence") or "unverified"
+            if confidence not in CONFIDENCE_LEVELS:
+                confidence = "unverified"
             register_model(
                 category,
                 str(entry["model_id"]),
                 score=score,
                 provider=entry.get("provider"),
                 notes=entry.get("notes"),
+                benchmark_score=_optional_float(entry, "benchmark_score"),
+                confidence=confidence,
+                latency_ms=_optional_float(entry, "latency_ms"),
+                cost_per_1k_tokens=_optional_float(entry, "cost_per_1k_tokens"),
             )
             count += 1
     return count

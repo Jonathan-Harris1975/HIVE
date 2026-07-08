@@ -98,6 +98,29 @@ def _metrics_for_model(model: ProviderModelInfo) -> dict[str, float]:
     return metrics
 
 
+def _confidence_label(confidence_fraction: float) -> str:
+    """Map benchmark_engine's supplied-axes fraction (0.0-1.0) onto the
+    Model Registry's CONFIDENCE_LEVELS. Most axes today are unset pending a
+    real benchmark data source (see _metrics_for_model), so this will
+    typically land on "heuristic" or "unverified" rather than "measured" -
+    that's accurate, not a bug: the promotion score is real and reproducible,
+    but it isn't yet backed by measured coding/reasoning benchmarks."""
+    if confidence_fraction >= 0.7:
+        return "measured"
+    if confidence_fraction >= 0.3:
+        return "heuristic"
+    return "unverified"
+
+
+def _cost_per_1k(model: ProviderModelInfo) -> float | None:
+    """Provider-reported prompt price, converted from per-token to
+    per-1,000-tokens for the Model Registry's cost field. None if the
+    provider didn't report pricing."""
+    if model.pricing_prompt is None:
+        return None
+    return round(model.pricing_prompt * 1000, 6)
+
+
 def _previous_snapshot(store: D1MetadataStore, provider_name: str) -> set[str]:
     result = store.list_metadata(lane=LANE, limit=500)
     if not result.get("ok"):
@@ -179,7 +202,17 @@ async def run_council(settings: Settings, *, run_id: str | None = None) -> Counc
             result = benchmark_engine.score_model(metrics, weights=weights)
             if result.score >= settings.ai_council_promotion_threshold:
                 model_registry.register_model(
-                    "coding", model.model_id, score=result.score, provider=provider.name
+                    "coding",
+                    model.model_id,
+                    score=result.score,
+                    provider=provider.name,
+                    benchmark_score=round(result.score * 100, 1),
+                    confidence=_confidence_label(result.confidence),
+                    cost_per_1k_tokens=_cost_per_1k(model),
+                    notes=(
+                        f"AI Council: {result.confidence * 100:.0f}% of benchmark axes "
+                        f"had real signal (rest scored neutral)."
+                    ),
                 )
                 promotions.append(
                     CouncilPromotion(
