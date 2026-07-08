@@ -7,6 +7,7 @@ from app.core.config import Settings, get_settings
 from app.core.security import require_admin
 from app.services.model_registry import (
     CATEGORIES,
+    CONFIDENCE_LEVELS,
     ModelRegistryError,
     get_default_model,
     get_ranked_models,
@@ -24,6 +25,10 @@ class RegisterModelRequest(BaseModel):
     score: float = Field(..., ge=0.0, le=1000.0)
     provider: str | None = Field(None, max_length=80)
     notes: str | None = Field(None, max_length=500)
+    benchmark_score: float | None = Field(None, ge=0.0, le=100.0)
+    confidence: str = Field("unverified", description=f"One of {CONFIDENCE_LEVELS}")
+    latency_ms: float | None = Field(None, ge=0.0)
+    cost_per_1k_tokens: float | None = Field(None, ge=0.0)
 
 
 @router.get("/model-registry/categories")
@@ -52,6 +57,10 @@ async def get_category_models(category: str) -> dict[str, object]:
                 "provider": model.provider,
                 "notes": model.notes,
                 "registered_at": model.registered_at,
+                "benchmark_score": model.benchmark_score,
+                "confidence": model.confidence,
+                "latency_ms": model.latency_ms,
+                "cost_per_1k_tokens": model.cost_per_1k_tokens,
             }
             for model in ranked
         ],
@@ -81,6 +90,10 @@ async def post_register_model(
             score=body.score,
             provider=body.provider,
             notes=body.notes,
+            benchmark_score=body.benchmark_score,
+            confidence=body.confidence,
+            latency_ms=body.latency_ms,
+            cost_per_1k_tokens=body.cost_per_1k_tokens,
             store=store,
         )
     except ModelRegistryError as error:
