@@ -41,6 +41,7 @@ from app.core.config import Settings, get_settings
 from app.core.middleware import ProductionMiddleware
 from app.core.production import enforce_production_readiness
 from app.services import model_registry
+from app.services.repository_manager import rehydrate_registry_from_r2
 from app.storage.d1 import D1MetadataStore
 from app.storage.sql_store import SqlStore
 
@@ -66,6 +67,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         seeded_count = model_registry.seed_from_json(active_settings.model_registry_seed_json)
         if seeded_count:
             logger.info("HIVE Model Registry seeded entries=%s", seeded_count)
+        repo_rehydrated = rehydrate_registry_from_r2(active_settings)
+        if repo_rehydrated:
+            logger.info("HIVE Repository Registry rehydrated from R2 count=%s", repo_rehydrated)
         if active_settings.database_enabled and active_settings.database_auto_init:
             schema_result = SqlStore(active_settings).init_schema()
             logger.info(
