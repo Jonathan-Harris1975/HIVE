@@ -438,3 +438,121 @@ def cleanup_expired_repositories(*, ttl_seconds: int) -> list[str]:
 def registry_size() -> int:
     with _REGISTRY_LOCK:
         return len(_REGISTRY)
+
+
+# ---------------------------------------------------------------------------
+# Startup rehydration (RC1 fix — Audit Finding #1)
+# ---------------------------------------------------------------------------
+# On process startup the in-memory _REGISTRY is empty even though manifest
+# JSON objects persist in R2 under `manifests/{repository_id}.json`.  This
+# function is called from main.py's lifespan (mirrors model_registry's
+# load_registry_from_store pattern) and rebuilds lightweight RepositoryRecord
+# stubs from every manifest found in R2.
+#
+# Because extracted working directories (workdir) are ephemeral temp files
+# that do NOT survive restarts, rehydrated records have no valid workdir.
+# Operations that require the workdir (reindex, QA, Council) will detect the
+# missing directory and return a clear RepositoryManagerError rather than
+# crashing silently.  The manifest metadata (fingerprint, languages, file
+# count, etc.) is immediately available for listing and dashboard display.
+
+_TOMBSTONE_DIR = Path("/dev/null")  # sentinel — workdir absent after rehydration
+
+
+def rehydrate_registry_from_r2(settings: "Settings") -> int:  # noqa: F821 (forward ref OK)
+    """Load repository manifests from R2 and rebuild the in-memory registry.
+
+    Called once during HIVE startup.  Returns the number of manifests
+    successfully rehydrated.  Failures are logged individually and never
+    prevent startup.
+    """
+    import json
+    import logging
+
+    logger = logging.getLogger("uvicorn.error.hive.repository_manager")
+
+    try:
+        from app.storage.r2 import R2Storage
+
+        r2 = R2Storage(settings)
+        if not r2.enabled:
+            logger.info("Repository rehydration skipped — R2 not configured")
+            return 0
+
+        keys = r2.list_objects(
+            prefix="manifests/",
+            limit=5_000,
+            bucket="hive-repositories",
+            read_only=True,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Repository rehydration aborted — R2 list failed: %s", exc)
+        return 0
+
+    rehydrated = 0
+    for obj in keys:
+        key = obj.key
+        if not key.endswith(".json"):
+            continue
+        try:
+            raw = r2.read_object(
+                key,
+                max_bytes=2 * 1024 * 1024,  # 2 MB cap per manifest
+                bucket="hive-repositories",
+                read_only=True,
+            )
+            data: dict = json.loads(raw.content)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Repository rehydration skipped key=%s error=%s", key, exc)
+            continue
+
+        repository_id = data.get("repository_id")
+        if not repository_id:
+            continue
+
+        with _REGISTRY_LOCK:
+            if repository_id in _REGISTRY:
+                # Already registered (e.g. uploaded in this process run) — skip.
+                continue
+
+        try:
+            deps = [
+                DependencyFinding(
+                    manifest_path=d["manifest_path"],
+                    ecosystem=d["ecosystem"],
+                    declared=list(d.get("declared") or []),
+                )
+                for d in (data.get("dependencies") or [])
+            ]
+            manifest = RepositoryManifest(
+                repository_id=repository_id,
+                source_filename=data.get("source_filename", "unknown"),
+                fingerprint=data.get("fingerprint", ""),
+                file_count=int(data.get("file_count", 0)),
+                total_bytes=int(data.get("total_bytes", 0)),
+                languages=dict(data.get("languages") or {}),
+                dependencies=deps,
+                created_at=float(data.get("created_at", 0)),
+                updated_at=float(data.get("updated_at", 0)),
+                indexed_version=int(data.get("indexed_version", 1)),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Repository rehydration manifest parse failed key=%s error=%s", key, exc
+            )
+            continue
+
+        record = RepositoryRecord(
+            repository_id=repository_id,
+            workdir=_TOMBSTONE_DIR,
+            manifest=manifest,
+            files_index={},
+            last_accessed_at=float(data.get("updated_at", time.time())),
+        )
+        with _REGISTRY_LOCK:
+            _REGISTRY[repository_id] = record
+        rehydrated += 1
+        logger.debug("Repository rehydrated repository_id=%s", repository_id)
+
+    logger.info("Repository registry rehydrated from R2 count=%d", rehydrated)
+    return rehydrated

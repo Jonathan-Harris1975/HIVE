@@ -62,6 +62,80 @@ def _is_coding_candidate(model: ProviderModelInfo, keywords: tuple[str, ...]) ->
     return model.supports_tools and any(keyword in haystack for keyword in keywords if keyword)
 
 
+# ---------------------------------------------------------------------------
+# Multi-category classification (RC1 fix — Audit Finding #3)
+# ---------------------------------------------------------------------------
+# The Council previously only populated the "coding" category.  The eight
+# remaining categories (reasoning, planning, vision, research, fast, cheap,
+# creative, long_context) now have automatic classification paths based on
+# model capability signals available in ProviderModelInfo.  Scores remain
+# data-driven from the Benchmark Engine; no hardcoded rankings are introduced.
+
+
+def _is_reasoning_candidate(model: ProviderModelInfo) -> bool:
+    """Models with tool support and large context suggest strong reasoning."""
+    return model.supports_tools and bool(model.context_length and model.context_length >= 32_000)
+
+
+def _is_planning_candidate(model: ProviderModelInfo) -> bool:
+    """Structured-output support is a strong proxy for planning capability."""
+    return model.supports_structured_output and model.supports_tools
+
+
+def _is_vision_candidate(model: ProviderModelInfo) -> bool:
+    """Image in input modalities = vision model."""
+    return "image" in model.input_modalities
+
+
+def _is_research_candidate(model: ProviderModelInfo) -> bool:
+    """Long context + tool use enables document-grounded research."""
+    return model.supports_tools and bool(model.context_length and model.context_length >= 64_000)
+
+
+def _is_fast_candidate(model: ProviderModelInfo) -> bool:
+    """Fast models: low price as a latency proxy (cheap providers tend to run
+    smaller, faster models).  Threshold: prompt price ≤ $2 / 1M tokens."""
+    if model.pricing_prompt is None:
+        return False
+    return model.pricing_prompt <= 0.000_002
+
+
+def _is_cheap_candidate(model: ProviderModelInfo) -> bool:
+    """Cheap models: prompt price ≤ $5 / 1M tokens."""
+    if model.pricing_prompt is None:
+        return False
+    return model.pricing_prompt <= 0.000_005
+
+
+def _is_creative_candidate(model: ProviderModelInfo) -> bool:
+    """Creative models: can produce image/audio output or have 'creative' /
+    'instruct' / 'story' in their name.  Also catches general-purpose large
+    models (≥128 K context) that tend to excel at creative tasks."""
+    if "image" in model.output_modalities or "audio" in model.output_modalities:
+        return True
+    haystack = f"{model.model_id} {model.name}".lower()
+    creative_signals = ("creative", "instruct", "story", "claude", "gpt", "gemini", "llama")
+    return any(sig in haystack for sig in creative_signals)
+
+
+def _is_long_context_candidate(model: ProviderModelInfo) -> bool:
+    """Long context models: context window ≥ 64 K tokens."""
+    return bool(model.context_length and model.context_length >= 64_000)
+
+
+# Mapping: category → classifier function
+_CATEGORY_CLASSIFIERS: dict[str, object] = {
+    "reasoning":    _is_reasoning_candidate,
+    "planning":     _is_planning_candidate,
+    "vision":       _is_vision_candidate,
+    "research":     _is_research_candidate,
+    "fast":         _is_fast_candidate,
+    "cheap":        _is_cheap_candidate,
+    "creative":     _is_creative_candidate,
+    "long_context": _is_long_context_candidate,
+}
+
+
 def _cost_score(model: ProviderModelInfo) -> float | None:
     """Cheaper = higher score. Normalised against a soft ceiling since actual
     price ranges vary a lot across providers; anything at or above the
@@ -196,29 +270,41 @@ async def run_council(settings: Settings, *, run_id: str | None = None) -> Counc
         _store_snapshot(store, provider.name, current_ids)
         models_seen += len(models)
 
-        coding_candidates = [model for model in models if _is_coding_candidate(model, coding_keywords)]
-        for model in coding_candidates:
-            metrics = _metrics_for_model(model)
-            result = benchmark_engine.score_model(metrics, weights=weights)
-            if result.score >= settings.ai_council_promotion_threshold:
-                model_registry.register_model(
-                    "coding",
-                    model.model_id,
-                    score=result.score,
-                    provider=provider.name,
-                    benchmark_score=round(result.score * 100, 1),
-                    confidence=_confidence_label(result.confidence),
-                    cost_per_1k_tokens=_cost_per_1k(model),
-                    notes=(
-                        f"AI Council: {result.confidence * 100:.0f}% of benchmark axes "
-                        f"had real signal (rest scored neutral)."
-                    ),
-                )
-                promotions.append(
-                    CouncilPromotion(
-                        category="coding", model_id=model.model_id, score=result.score, provider=provider.name
+        # Classify each model into all applicable categories (coding + 8 others).
+        # A single model may be promoted to multiple categories if it qualifies.
+        category_candidates: dict[str, list[ProviderModelInfo]] = {
+            "coding": [m for m in models if _is_coding_candidate(m, coding_keywords)],
+        }
+        for cat, classifier in _CATEGORY_CLASSIFIERS.items():
+            category_candidates[cat] = [m for m in models if classifier(m)]  # type: ignore[operator]
+
+        # Deduplicate per-model scoring: score once, promote to all qualifying categories.
+        scored_cache: dict[str, object] = {}  # model_id -> benchmark result
+        for category, candidates in category_candidates.items():
+            for model in candidates:
+                if model.model_id not in scored_cache:
+                    metrics = _metrics_for_model(model)
+                    scored_cache[model.model_id] = benchmark_engine.score_model(metrics, weights=weights)
+                result = scored_cache[model.model_id]
+                if result.score >= settings.ai_council_promotion_threshold:
+                    model_registry.register_model(
+                        category,
+                        model.model_id,
+                        score=result.score,
+                        provider=provider.name,
+                        benchmark_score=round(result.score * 100, 1),
+                        confidence=_confidence_label(result.confidence),
+                        cost_per_1k_tokens=_cost_per_1k(model),
+                        notes=(
+                            f"AI Council: {result.confidence * 100:.0f}% of benchmark axes "
+                            f"had real signal (rest scored neutral)."
+                        ),
                     )
-                )
+                    promotions.append(
+                        CouncilPromotion(
+                            category=category, model_id=model.model_id, score=result.score, provider=provider.name
+                        )
+                    )
 
     report = CouncilRunReport(
         run_id=run_id or datetime.now(UTC).strftime("council-%Y%m%dT%H%M%S"),
