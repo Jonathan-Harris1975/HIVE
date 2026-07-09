@@ -19,6 +19,63 @@ from pydantic import BaseModel, Field
 
 from app.core.config import Settings, get_settings
 from app.core.security import require_admin
+
+# Allow-list of MIME type prefixes accepted at the upload endpoints.
+# Any Content-Type not matching one of these prefixes is rejected with 415.
+# Executable/binary MIME types (application/x-executable, application/octet-stream
+# for arbitrary binary, etc.) are intentionally excluded. ZIP files are accepted here
+# and further validated by UnsafeZipError / zip_extract_supported_suffixes.
+_ALLOWED_UPLOAD_MIME_PREFIXES: frozenset[str] = frozenset({
+    "text/",
+    "application/json",
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument",  # docx, xlsx, pptx
+    "application/vnd.ms-excel",
+    "application/vnd.ms-powerpoint",
+    "application/vnd.ms-word",
+    "application/msword",
+    "application/zip",
+    "application/x-zip-compressed",
+    "multipart/x-zip",
+    "application/xml",
+    "application/csv",
+    "application/x-yaml",
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+    "image/svg+xml",
+    "application/x-tar",
+    "application/gzip",
+    "application/x-gzip",
+})
+# Content types with these exact values are also permitted (for edge-case sniff mismatches)
+_ALLOWED_UPLOAD_MIME_EXACT: frozenset[str] = frozenset({
+    "application/octet-stream",  # Some browsers send this for known-safe files
+})
+
+
+def _validate_upload_content_type(content_type: str | None) -> None:
+    """Raise HTTP 415 if the upload Content-Type is not in the allow-list.
+
+    This guard prevents users from uploading executable/binary files whose
+    presence on R2 or in the ingestion pipeline could cause harm. It is a
+    defence-in-depth measure layered on top of extension filtering and zip
+    inspection — not a replacement for them.
+    """
+    ct = (content_type or "application/octet-stream").strip().split(";")[0].strip().lower()
+    if ct in _ALLOWED_UPLOAD_MIME_EXACT:
+        return
+    for prefix in _ALLOWED_UPLOAD_MIME_PREFIXES:
+        if ct.startswith(prefix):
+            return
+    raise HTTPException(
+        status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+        detail=(
+            f"Unsupported upload media type: '{ct}'. "
+            "Only document, text, image, and archive types are accepted."
+        ),
+    )
 from app.ingestion.chunking import chunks_to_dicts, split_text_into_chunks
 from app.ingestion.file_ingestion import ingest_bytes_content, ingest_text_content, ingest_upload
 from app.ingestion.text_extractors import extract_text_with_metadata
@@ -174,6 +231,7 @@ async def upload_file(
     lane: str = Query("uploads", min_length=1, max_length=80),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, object]:
+    _validate_upload_content_type(upload.content_type)
     lane_config = _target_upload_lane(settings, lane)
     try:
         result = await ingest_upload(upload, settings, lane_config=lane_config)

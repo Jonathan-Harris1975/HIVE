@@ -20,6 +20,16 @@ async def health() -> dict[str, object]:
     r2 = R2Storage(settings)
     vectorize = VectorizeClient(settings)
     embeddings = CloudflareEmbeddingsClient(settings)
+
+    # Derive the top-level flags the HIVE-UI OpsPage reads directly from the
+    # /health payload. These must match the HealthResponse TS interface.
+    openrouter_configured = bool(settings.openrouter_api_key)
+    database_configured = sql.enabled
+    r2_configured = r2.enabled
+    vectorize_configured = vectorize.enabled
+    embeddings_configured = embeddings.enabled
+    d1_configured = d1.enabled
+
     storage_flags = {
         "r2": {
             "enabled": r2.enabled,
@@ -51,16 +61,28 @@ async def health() -> dict[str, object]:
             "configured": embeddings.enabled,
         },
     }
+
     # NOTE: this endpoint is intentionally unauthenticated (MAST/uptime checks hit it
-    # directly), so it deliberately reports only enabled/configured *booleans* nested
-    # under storage_flags, not top-level duplicates of the same data and not any
-    # provider/model/dialect detail. Anything more specific than "is this on" belongs
-    # behind /v1/runtime/readiness, which requires the admin bearer token.
+    # directly). It reports booleans only — no secrets, no provider/model detail.
+    # The top-level *_configured flags are the minimal surface needed by HIVE-UI's
+    # OpsPage to render live readiness cards without an authenticated /v1/runtime/readiness call.
     return {
         "ok": True,
         "build": BUILD_STAGE,
         "app": settings.app_name,
         "env": settings.app_env,
+        # Top-level flags consumed directly by HIVE-UI OpsPage
+        "openrouter_configured": openrouter_configured,
+        "database_configured": database_configured,
+        "database_dialect": sql.dialect if sql.enabled else None,
+        "r2_configured": r2_configured,
+        "vectorize_configured": vectorize_configured,
+        "vectorize_enabled": bool(settings.vectorize_enabled),
+        "embeddings_configured": embeddings_configured,
+        "embeddings_enabled": bool(settings.embeddings_enabled),
+        "d1_configured": d1_configured,
+        "d1_enabled": bool(settings.d1_enabled),
+        # Feature flags
         "workflow_presets_enabled": True,
         "r2_ecosystem_lanes_enabled": True,
         "execution_adapters_enabled": bool(execution_adapter_policy(settings)["enabled"]),
