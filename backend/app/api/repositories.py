@@ -17,6 +17,7 @@ from app.services.repository_manager import (
     repository_diff,
 )
 from app.storage.r2 import R2Storage
+from app.services.repository_pipeline import run_repository_pipeline
 
 router = APIRouter(tags=["repositories"], dependencies=[Depends(require_admin)])
 
@@ -73,6 +74,8 @@ async def upload_repository(
     upload: UploadFile = File(...),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, object]:
+    # RC1: Full pipeline — upload → extraction → fingerprint → manifest →
+    # R2 persist → Repository Memory → QA → Council → Learning → AI Search.
     if not settings.repository_manager_enabled:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Repository Manager disabled")
     content = await upload.read()
@@ -90,6 +93,11 @@ async def upload_repository(
     payload = manifest.public_payload()
     r2_persisted = _persist_manifest_to_r2(payload, settings)
     payload["r2_persisted"] = r2_persisted
+
+    # Execute the downstream pipeline (non-blocking stages, graceful degradation).
+    pipeline_result = await run_repository_pipeline(settings, manifest, r2_persisted=r2_persisted)
+    payload["pipeline"] = pipeline_result
+
     return payload
 
 
