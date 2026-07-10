@@ -102,6 +102,17 @@ class RepositoryManagerError(ValueError):
     pass
 
 
+class RepositoryWorkdirUnavailableError(RepositoryManagerError):
+    """Raised when an operation needs a local working copy that no longer exists.
+
+    This happens for repositories rehydrated from R2 manifests after a process
+    restart (see rehydrate_registry_from_r2 below): the manifest metadata is
+    available, but the extracted temp directory was never restored, so any
+    operation that reads files from disk (reindex, diff) cannot proceed until
+    the repository is re-uploaded.
+    """
+
+
 @dataclass(frozen=True)
 class RepositoryFileEntry:
     path: str
@@ -155,6 +166,7 @@ class RepositorySummary:
     created_at: float
     updated_at: float
     indexed_version: int
+    rehydrated: bool = False
 
 
 def _repository_temp_root(settings: Settings) -> Path:
@@ -345,6 +357,7 @@ def list_repositories() -> list[RepositorySummary]:
             created_at=record.manifest.created_at,
             updated_at=record.manifest.updated_at,
             indexed_version=record.manifest.indexed_version,
+            rehydrated=is_rehydrated(record),
         )
         for record in sorted(records, key=lambda item: item.manifest.updated_at, reverse=True)
     ]
@@ -361,6 +374,11 @@ def reindex_repository(repository_id: str) -> RepositoryManifest:
         record = _REGISTRY.get(repository_id)
         if record is None:
             raise RepositoryManagerError(f"Unknown repository_id: {repository_id}")
+        if is_rehydrated(record):
+            raise RepositoryWorkdirUnavailableError(
+                f"Repository {repository_id} was rehydrated from R2 after a restart and has "
+                "no local working copy. Re-upload the repository to enable reindexing."
+            )
 
     new_index = _build_file_index(record.workdir)
     old_index = record.files_index
@@ -401,6 +419,11 @@ def repository_diff(repository_id: str) -> dict[str, list[str]] | None:
     record = get_repository(repository_id)
     if record is None:
         return None
+    if is_rehydrated(record):
+        raise RepositoryWorkdirUnavailableError(
+            f"Repository {repository_id} was rehydrated from R2 after a restart and has "
+            "no local working copy. Re-upload the repository to preview changes."
+        )
     new_index = _build_file_index(record.workdir)
     old_index = record.files_index
     return {
@@ -457,6 +480,11 @@ def registry_size() -> int:
 # count, etc.) is immediately available for listing and dashboard display.
 
 _TOMBSTONE_DIR = Path("/dev/null")  # sentinel — workdir absent after rehydration
+
+
+def is_rehydrated(record: RepositoryRecord) -> bool:
+    """True if `record` has no local working copy (rehydrated from R2 after a restart)."""
+    return record.workdir == _TOMBSTONE_DIR
 
 
 def rehydrate_registry_from_r2(settings: "Settings") -> int:  # noqa: F821 (forward ref OK)
