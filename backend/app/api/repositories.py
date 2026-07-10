@@ -8,9 +8,11 @@ from app.core.config import Settings, get_settings
 from app.core.security import require_admin
 from app.services.repository_manager import (
     RepositoryManagerError,
+    RepositoryWorkdirUnavailableError,
     cleanup_expired_repositories,
     cleanup_repository,
     get_repository,
+    is_rehydrated,
     list_repositories,
     register_repository,
     reindex_repository,
@@ -31,6 +33,14 @@ def _not_found(repository_id: str) -> HTTPException:
         status_code=status.HTTP_404_NOT_FOUND,
         detail=f"Unknown repository_id: {repository_id}",
     )
+
+
+def _workdir_unavailable(error: RepositoryWorkdirUnavailableError) -> HTTPException:
+    # 409 Conflict: the repository exists (manifest metadata is present) but its
+    # local working copy does not, so the request cannot be satisfied until the
+    # operator re-uploads it. Distinct from 404 so the UI can tell "never
+    # existed" apart from "exists, but needs a re-upload".
+    return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error))
 
 
 def _persist_manifest_to_r2(manifest_payload: dict, settings: Settings) -> bool:
@@ -111,12 +121,17 @@ async def get_repository_manifest(repository_id: str) -> dict[str, object]:
     record = get_repository(repository_id)
     if record is None:
         raise _not_found(repository_id)
-    return record.manifest.public_payload()
+    payload = record.manifest.public_payload()
+    payload["rehydrated"] = is_rehydrated(record)
+    return payload
 
 
 @router.get("/repositories/{repository_id}/diff")
 async def get_repository_diff(repository_id: str) -> dict[str, object]:
-    diff = repository_diff(repository_id)
+    try:
+        diff = repository_diff(repository_id)
+    except RepositoryWorkdirUnavailableError as error:
+        raise _workdir_unavailable(error) from error
     if diff is None:
         raise _not_found(repository_id)
     return diff
@@ -129,6 +144,8 @@ async def post_repository_reindex(
 ) -> dict[str, object]:
     try:
         manifest = reindex_repository(repository_id)
+    except RepositoryWorkdirUnavailableError as error:
+        raise _workdir_unavailable(error) from error
     except RepositoryManagerError as error:
         raise _not_found(repository_id) from error
 
