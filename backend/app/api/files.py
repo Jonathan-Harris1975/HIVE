@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+import logging
 import tempfile
 import time
 import zipfile
@@ -18,6 +19,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.core.config import Settings, get_settings
+
+logger = logging.getLogger("uvicorn.error.hive.files")
 from app.core.security import require_admin
 
 # Allow-list of MIME type prefixes accepted at the upload endpoints.
@@ -581,6 +584,9 @@ def download_r2_lane_object(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)
         ) from exc
     except RuntimeError as exc:
+        logger.warning(
+            "R2 object download failed lane=%s key=%s error=%s", lane_config.get("lane"), clean_key, exc
+        )
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
     filename = Path(clean_key).name.replace("\r", "_").replace("\n", "_") or "download"
@@ -622,6 +628,9 @@ def view_r2_lane_object(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)
         ) from exc
     except RuntimeError as exc:
+        logger.warning(
+            "R2 object view failed lane=%s key=%s error=%s", lane_config.get("lane"), clean_key, exc
+        )
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
     filename = Path(clean_key).name.replace("\r", "_").replace("\n", "_") or "view"
@@ -1546,6 +1555,7 @@ def files_diagnostics(
             "files": [asdict(item) for item in objects],
         }
     except RuntimeError as exc:
+        logger.warning("Storage diagnostics list probe failed prefix=%s error=%s", clean_prefix, exc)
         diagnostics["ok"] = False
         diagnostics["list_probe"] = {
             "ok": False,
@@ -2432,6 +2442,13 @@ def _lane_storage_error_response(
     key_or_prefix: str,
     error: RuntimeError,
 ) -> dict[str, object]:
+    logger.warning(
+        "Lane storage operation failed operation=%s lane=%s key_or_prefix=%s error=%s",
+        operation,
+        lane_config.get("lane"),
+        key_or_prefix,
+        error,
+    )
     return {
         "ok": False,
         "error": {
@@ -2716,6 +2733,12 @@ def _storage_error_response(
     key_or_prefix: str,
     error: RuntimeError,
 ) -> dict[str, object]:
+    logger.warning(
+        "Storage operation failed operation=%s key_or_prefix=%s error=%s",
+        operation,
+        key_or_prefix,
+        error,
+    )
     return {
         "ok": False,
         "error": {

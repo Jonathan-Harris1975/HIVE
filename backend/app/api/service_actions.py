@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 import uuid
 from typing import Any, Literal
@@ -19,6 +20,8 @@ from app.services.service_lifecycle import (
     UnknownServiceError,
     ensure_service_ready,
 )
+
+logger = logging.getLogger("uvicorn.error.hive.service_actions")
 
 router = APIRouter(prefix="/services", tags=["services"], dependencies=[Depends(require_admin)])
 
@@ -68,6 +71,7 @@ async def _run_wake_ticket(ticket_id: str, repo: str, settings: Settings) -> Non
         ticket["status"] = "failed"
         ticket["error"] = str(exc)
     except Exception as exc:  # defensive: never leave a ticket stuck "running"
+        logger.exception("Unexpected error while waking service repo=%s ticket_id=%s", repo, ticket_id)
         ticket["status"] = "failed"
         ticket["error"] = f"Unexpected error: {exc.__class__.__name__}."
     finally:
