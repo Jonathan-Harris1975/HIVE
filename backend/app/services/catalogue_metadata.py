@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import logging
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 from app.core.version import BUILD_STAGE
+
+logger = logging.getLogger("uvicorn.error.hive.catalogue_metadata")
 
 
 CATALOGUE_SCHEMA_VERSION = "2026-06-22.catalogue-metadata.v1"
@@ -30,7 +33,13 @@ def _load_catalogue_file(relative_path: str) -> dict[str, object]:
     path = repo_root() / relative_path
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, json.JSONDecodeError) as error:
+        logger.error(
+            "Bundled catalogue file failed to load path=%s error_type=%s error=%s",
+            relative_path,
+            type(error).__name__,
+            error,
+        )
         return {
             "schema_version": CATALOGUE_SCHEMA_VERSION,
             "updated_at": None,

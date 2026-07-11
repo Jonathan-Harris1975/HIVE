@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -13,6 +14,8 @@ from app.core.config import Settings
 from app.core.production import build_readiness_report
 from app.core.version import BUILD_STAGE
 from app.storage.r2 import R2Storage
+
+logger = logging.getLogger("uvicorn.error.hive.repo_health")
 
 
 @dataclass(frozen=True)
@@ -212,6 +215,7 @@ async def _probe(
             "payload": payload,
         }
     except httpx.TimeoutException:
+        logger.warning("Repo health probe timed out url=%s", url)
         return {
             "status": "down",
             "configured": True,
@@ -221,6 +225,9 @@ async def _probe(
             "detail": "Probe timed out.",
         }
     except httpx.HTTPError as exc:
+        logger.warning(
+            "Repo health probe failed url=%s error_type=%s error=%s", url, type(exc).__name__, exc
+        )
         return {
             "status": "down",
             "configured": True,
@@ -404,8 +411,12 @@ async def _read_public_object(
                     return None, response.status_code, "Public state exceeded the configured size limit."
             return bytes(body), response.status_code, None
     except httpx.TimeoutException:
+        logger.warning("MAST public-state probe timed out url=%s", url)
         return None, None, "Public state probe timed out."
     except httpx.HTTPError as exc:
+        logger.warning(
+            "MAST public-state probe failed url=%s error_type=%s error=%s", url, type(exc).__name__, exc
+        )
         return None, None, f"Public state probe failed: {exc.__class__.__name__}."
 
 
@@ -459,7 +470,14 @@ async def _fetch_mast_service_ledger(
                 timeout=settings.repo_health_timeout_seconds,
             )
             raw = obj.content
-        except Exception:
+        except Exception as error:  # noqa: BLE001 - any failure here must fall back to the public URL, not crash
+            logger.warning(
+                "MAST state R2 read failed lane=%s key=%s error_type=%s error=%s",
+                settings.mast_state_r2_lane,
+                key,
+                type(error).__name__,
+                error,
+            )
             raw = None
 
     if raw is None and public_url:
@@ -472,7 +490,13 @@ async def _fetch_mast_service_ledger(
 
     try:
         decoded = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError):
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        logger.warning(
+            "MAST state payload could not be decoded lane=%s error_type=%s error=%s",
+            settings.mast_state_r2_lane,
+            type(error).__name__,
+            error,
+        )
         return None
     if not isinstance(decoded, dict):
         return None
@@ -597,7 +621,13 @@ async def _probe_mast_worker(
 
     try:
         decoded = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError):
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        logger.warning(
+            "MAST durable worker state could not be decoded lane=%s error_type=%s error=%s",
+            settings.mast_state_r2_lane,
+            type(error).__name__,
+            error,
+        )
         decoded = None
     if not isinstance(decoded, dict):
         detail = "MAST durable worker state is not valid JSON object data."

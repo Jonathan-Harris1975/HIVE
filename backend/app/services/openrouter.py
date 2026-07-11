@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -12,6 +13,8 @@ import httpx
 from fastapi import HTTPException, status
 
 from app.core.config import Settings
+
+logger = logging.getLogger("uvicorn.error.hive.openrouter")
 
 
 RETRYABLE_STATUS_CODES = {400, 404, 408, 409, 425, 429, 500, 502, 503, 504}
@@ -364,12 +367,14 @@ class OpenRouterClient:
             async with httpx.AsyncClient(timeout=self._attempt_timeout()) as client:
                 response = await client.post(url, headers=self._headers(), json={**payload, "stream": False})
         except httpx.TimeoutException as exc:
+            logger.info("OpenRouter attempt timed out model=%s error=%s", payload.get("model"), exc)
             return {
                 "_retryable_model_error": True,
                 "status_code": 408,
                 "message": f"OpenRouter attempt timed out for {payload.get('model')}: {exc}",
             }
         except httpx.HTTPError as exc:
+            logger.info("OpenRouter attempt failed model=%s error=%s", payload.get("model"), exc)
             return {
                 "_retryable_model_error": True,
                 "status_code": 502,
@@ -505,6 +510,12 @@ class OpenRouterClient:
                         "raw_final_chunk": final_chunk,
                     }
         except httpx.TimeoutException as exc:
+            logger.info(
+                "OpenRouter stream timed out model=%s saw_visible_token=%s error=%s",
+                payload.get("model"),
+                saw_visible_token,
+                exc,
+            )
             if saw_visible_token:
                 yield {
                     "event": "done",
@@ -525,6 +536,7 @@ class OpenRouterClient:
                 "model_used": payload.get("model"),
             }
         except httpx.HTTPError as exc:
+            logger.info("OpenRouter stream attempt failed model=%s error=%s", payload.get("model"), exc)
             yield {
                 "event": "retry_model",
                 "message": f"OpenRouter stream attempt failed for {payload.get('model')}: {exc}",

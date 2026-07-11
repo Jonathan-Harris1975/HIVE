@@ -299,6 +299,14 @@ async def run_council(settings: Settings, *, run_id: str | None = None) -> Counc
                             f"AI Council: {result.confidence * 100:.0f}% of benchmark axes "
                             f"had real signal (rest scored neutral)."
                         ),
+                        # Bug fix: `store` was constructed above (line 244) but never
+                        # threaded through here, so every monthly promotion was silently
+                        # in-memory-only and vanished on the next Koyeb restart even
+                        # though load_registry_from_store()/_persist_model() have always
+                        # existed and worked correctly for callers that remembered to
+                        # pass `store`. This was the persistence gap referenced in
+                        # MAST's hive-ai-council-run job notes.
+                        store=store,
                     )
                     promotions.append(
                         CouncilPromotion(

@@ -79,12 +79,36 @@ def _seed_repository_memory(settings: Settings, manifest: RepositoryManifest) ->
 # ---------------------------------------------------------------------------
 
 
-def _run_qa(repository_id: str) -> dict[str, Any]:
+def _run_qa(settings: Settings, repository_id: str) -> dict[str, Any]:
     try:
+        from datetime import UTC, datetime
+
+        from app.services.repository_memory import append_history_entry
         from app.services.repository_qa import run_repository_qa
+        from app.storage.d1 import D1MetadataStore
 
         report = run_repository_qa(repository_id)
-        return {"ok": True, "score": report.score, "warning_count": report.warning_count}
+        payload = report.public_payload()
+
+        # Bug fix: this automatic pipeline stage ran QA but never wrote to
+        # qa_history, unlike the manual POST /repositories/{id}/qa endpoint
+        # (api/repository_qa.py) which does. Every QA run triggered by a zip
+        # upload was silently invisible to Repository Memory. Mirror the
+        # manual endpoint's persistence so history is complete regardless of
+        # trigger path.
+        store = D1MetadataStore(settings)
+        history_result = append_history_entry(
+            store,
+            repository_id=repository_id,
+            field_name="qa_history",
+            entry={**payload, "occurred_at": datetime.now(UTC).isoformat()},
+        )
+        return {
+            "ok": True,
+            "score": report.score,
+            "warning_count": report.warning_count,
+            "history_persisted": bool(history_result.get("ok")) if isinstance(history_result, dict) else False,
+        }
     except Exception as exc:  # noqa: BLE001
         logger.warning(
             "Repository pipeline QA failed repository_id=%s error=%s", repository_id, exc
@@ -189,7 +213,7 @@ async def run_repository_pipeline(
     )
 
     # Stage: QA (sync, may take a few seconds on large repos)
-    pipeline["qa"] = await asyncio.to_thread(_run_qa, repository_id)
+    pipeline["qa"] = await asyncio.to_thread(_run_qa, settings, repository_id)
 
     # Stage: Council (sync, depends on QA)
     pipeline["council"] = await asyncio.to_thread(_run_council, settings, repository_id)

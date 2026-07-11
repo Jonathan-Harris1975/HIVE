@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import httpx
 
 from app.core.config import Settings
+
+logger = logging.getLogger("uvicorn.error.hive.embeddings")
 
 
 class CloudflareEmbeddingsClient:
@@ -92,6 +95,7 @@ class CloudflareEmbeddingsClient:
                 "raw": raw,
             }
         except Exception as exc:  # pragma: no cover - network errors vary
+            logger.warning("Cloudflare embeddings request failed error_type=%s error=%s", type(exc).__name__, exc)
             return {"ok": False, "enabled": True, "error": str(exc), "type": type(exc).__name__}
 
 

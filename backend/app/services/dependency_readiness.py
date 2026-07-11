@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import threading
 import time
 from dataclasses import asdict, dataclass
@@ -10,6 +11,8 @@ from app.core.config import Settings
 from app.core.production import build_readiness_report
 from app.services.skill_registry import SEARCH_DOCUMENTS_KEY, SHARED_MANIFEST_KEY
 from app.storage.r2 import R2Storage
+
+logger = logging.getLogger("uvicorn.error.hive.dependency_readiness")
 
 _CACHE_LOCK = threading.Lock()
 _CACHE: dict[str, object] = {"key": None, "expires_at": 0.0, "report": None}
@@ -145,7 +148,13 @@ def _probe_required_r2_lanes(settings: Settings) -> list[DependencyProbe]:
                     message="A bounded object-list probe succeeded.",
                 )
             )
-        except (RuntimeError, ValueError, OSError):
+        except (RuntimeError, ValueError, OSError) as error:
+            logger.warning(
+                "Dependency readiness probe failed lane=%s error_type=%s error=%s",
+                lane_name,
+                type(error).__name__,
+                error,
+            )
             probes.append(
                 DependencyProbe(
                     name=f"r2_lane:{lane_name}",
@@ -193,7 +202,13 @@ def _probe_governed_skill_objects(
                     message="The governed JSON object was read and schema-checked.",
                 )
             )
-        except (RuntimeError, ValueError, OSError, UnicodeDecodeError, json.JSONDecodeError):
+        except (RuntimeError, ValueError, OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+            logger.warning(
+                "Dependency readiness probe failed object_key=%s error_type=%s error=%s",
+                key,
+                type(error).__name__,
+                error,
+            )
             probes.append(
                 DependencyProbe(
                     name=f"hive_skills_object:{key}",
