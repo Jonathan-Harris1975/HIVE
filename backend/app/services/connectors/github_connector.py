@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import logging
+
 import httpx
 
 from app.core.config import Settings
 from app.services.connectors.base import ConnectorReport
+
+logger = logging.getLogger("uvicorn.error.hive.github_connector")
 
 
 async def report(settings: Settings, *, transport: httpx.BaseTransport | None = None) -> ConnectorReport:
@@ -58,6 +62,7 @@ async def report(settings: Settings, *, transport: httpx.BaseTransport | None = 
             error=None,
         )
     except httpx.HTTPError as error:
+        logger.warning("GitHub connector health check failed error=%s", error)
         return ConnectorReport(
             name="github",
             configured=True,
