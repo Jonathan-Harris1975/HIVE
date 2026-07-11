@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import random
 from typing import Any
 
 import httpx
@@ -124,6 +126,15 @@ class AiSearchClient:
                 if ok:
                     return result
                 last = result
+                # Non-retryable client errors (bad request, auth, not found,
+                # forbidden) will fail identically on every retry - stop
+                # burning the attempt budget and surface the error now.
+                # Only 429 (rate limited) and 5xx (transient server issues)
+                # are worth retrying.
+                if response.status_code < 500 and response.status_code != 429:
+                    return result
+                if attempt < attempts:
+                    await self._sleep_before_retry(attempt, response=response)
             except httpx.HTTPError as error:
                 last = {
                     "ok": False,
@@ -133,4 +144,22 @@ class AiSearchClient:
                     "raw": None,
                     "error": str(error),
                 }
+                if attempt < attempts:
+                    await self._sleep_before_retry(attempt)
         return last or {"ok": False, "enabled": True, "error": "AI Search request failed."}
+
+    @staticmethod
+    async def _sleep_before_retry(attempt: int, *, response: "httpx.Response | None" = None) -> None:
+        """Exponential backoff with jitter; honours Cloudflare's Retry-After
+        header on 429 responses instead of guessing at a delay."""
+        if response is not None and response.status_code == 429:
+            retry_after = response.headers.get("Retry-After")
+            if retry_after:
+                try:
+                    delay = min(30.0, max(0.0, float(retry_after)))
+                    await asyncio.sleep(delay)
+                    return
+                except ValueError:
+                    pass
+        base_delay = min(8.0, 0.5 * (2 ** (attempt - 1)))
+        await asyncio.sleep(base_delay + random.uniform(0, 0.25))

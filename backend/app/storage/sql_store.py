@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import uuid
 from contextlib import contextmanager
@@ -11,6 +12,8 @@ from typing import Any, Iterator
 from urllib.parse import quote_plus
 
 from app.core.config import Settings
+
+logger = logging.getLogger("uvicorn.error.hive.sql_store")
 
 
 def _strip_nul_text(value: str) -> str:
@@ -653,7 +656,13 @@ class SqlStore:
                     (conversation_id,),
                 )
                 rows = self._fetch_dicts(cur)
-        except Exception:
+        except Exception as error:
+            logger.warning(
+                "SQL query failed conversation_id=%s method=first_conversation_exchange error_type=%s error=%s",
+                conversation_id,
+                type(error).__name__,
+                error,
+            )
             return {"user_message": None, "assistant_reply": None}
 
         first_user: str | None = None
@@ -696,7 +705,13 @@ class SqlStore:
                 for row in rows
                 if row.get("role") in {"user", "assistant"} and row.get("content")
             ]
-        except Exception:
+        except Exception as error:
+            logger.warning(
+                "SQL query failed conversation_id=%s method=recent_chat_turns error_type=%s error=%s",
+                conversation_id,
+                type(error).__name__,
+                error,
+            )
             return []
 
     def list_files(self, *, limit: int = 50) -> dict[str, object]:
