@@ -130,6 +130,11 @@ def build_payload_with_context(
         "messages": window.trimmed_messages(),
         "temperature": request.temperature,
         "max_tokens": max(request.max_tokens, settings.openrouter_min_response_tokens),
+        # Ask OpenRouter to return real per-request cost accounting in `usage.cost`.
+        # SqlStore.record_chat already reads usage["cost"] and persists it to
+        # hive_messages.cost_usd; without this flag OpenRouter omits the field and
+        # every conversation's cost_usd/total_cost_usd silently stays null.
+        "usage": {"include": True},
     }
     return payload, fallback_models, skill_context
 

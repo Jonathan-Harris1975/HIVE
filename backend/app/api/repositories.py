@@ -23,10 +23,6 @@ from app.services.repository_pipeline import run_repository_pipeline
 
 router = APIRouter(tags=["repositories"], dependencies=[Depends(require_admin)])
 
-# The dedicated R2 bucket for repository manifests and metadata.
-# Matches the CF R2 bucket 'hive-repositories' specified in the sprint brief.
-_REPOSITORIES_BUCKET = "hive-repositories"
-
 
 def _not_found(repository_id: str) -> HTTPException:
     return HTTPException(
@@ -46,7 +42,8 @@ def _workdir_unavailable(error: RepositoryWorkdirUnavailableError) -> HTTPExcept
 def _persist_manifest_to_r2(manifest_payload: dict, settings: Settings) -> bool:
     """Best-effort persistence of a repository manifest to R2.
 
-    Writes to the 'hive-repositories' bucket (CF R2) under the key
+    Writes to the configured repositories bucket (`settings.r2_bucket_repositories`,
+    overridable via R2_BUCKET_REPOSITORIES) under the key
     `manifests/{repository_id}.json`. Failures are swallowed and logged
     as False so an R2 outage never breaks repository registration.
     """
@@ -69,7 +66,7 @@ def _persist_manifest_to_r2(manifest_payload: dict, settings: Settings) -> bool:
                 tmp_path,
                 key,
                 content_type="application/json",
-                bucket=_REPOSITORIES_BUCKET,
+                bucket=settings.r2_bucket_repositories,
                 public_base_url=None,  # manifests are not publicly exposed
             )
         finally:

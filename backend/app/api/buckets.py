@@ -9,9 +9,9 @@ from __future__ import annotations
 #
 # This endpoint is now derived from the live `r2_ecosystem_lanes` property on
 # Settings (the same authoritative source used by /v1/files/r2-lanes).
-# bucket_manager.py's static lists are retained for backwards-compatible
-# is_accessible() / assert_accessible() guards but are no longer the source
-# of truth for the operator-facing bucket catalogue.
+# bucket_manager.py's ACCESSIBLE_BUCKETS-based guard functions were removed
+# in the 2026-07 production-readiness audit (zero production callers); only
+# HIDDEN_BUCKETS survives, still used below to filter operator-facing listings.
 
 from fastapi import APIRouter, Depends
 
