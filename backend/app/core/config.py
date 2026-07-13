@@ -276,7 +276,7 @@ class Settings(BaseSettings):
     # controlled read/write operations across every configured lane when the
     # shared R2 write credentials and R2_MULTI_BUCKET_WRITE_ENABLED are enabled.
     r2_bucket_art: str = Field("", validation_alias=AliasChoices("R2_BUCKET_ART"))
-    r2_bucket_audits: str = Field("", validation_alias=AliasChoices("R2_BUCKET_AUDITS"))
+    r2_bucket_audits: str = Field("audits", validation_alias=AliasChoices("R2_BUCKET_AUDITS"))
     r2_bucket_blog: str = Field("", validation_alias=AliasChoices("R2_BUCKET_BLOG"))
     r2_bucket_blog_images: str = Field("", validation_alias=AliasChoices("R2_BUCKET_BLOG_IMAGES"))
     r2_bucket_blog_rss: str = Field("", validation_alias=AliasChoices("R2_BUCKET_BLOG_RSS"))
@@ -291,7 +291,7 @@ class Settings(BaseSettings):
     r2_bucket_transcripts: str = Field("", validation_alias=AliasChoices("R2_BUCKET_TRANSCRIPTS"))
     r2_bucket_hive_skills: str = Field("", validation_alias=AliasChoices("R2_BUCKET_HIVE_SKILLS"))
     r2_bucket_repositories: str = Field(
-        "", validation_alias=AliasChoices("R2_BUCKET_REPOSITORIES")
+        "hive-repositories", validation_alias=AliasChoices("R2_BUCKET_REPOSITORIES")
     )
     r2_public_base_url_repositories: str = Field(
         "",
