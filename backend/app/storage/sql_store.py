@@ -735,15 +735,30 @@ class SqlStore:
         except Exception as exc:  # pragma: no cover
             return {"ok": False, "enabled": True, "error": str(exc)}
 
-    def cost_summary(self, *, by_model_limit: int = 20) -> dict[str, object]:
+    def cost_summary(
+        self,
+        *,
+        by_model_limit: int = 20,
+        since: str | None = None,
+        until: str | None = None,
+    ) -> dict[str, object]:
         if not self.enabled:
             return {"ok": False, "enabled": False}
         p = self._param()
+        where_clauses: list[str] = []
+        params: list[object] = []
+        if since:
+            where_clauses.append(f"created_at >= {p}")
+            params.append(since)
+        if until:
+            where_clauses.append(f"created_at < {p}")
+            params.append(until)
+        where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
         try:
             with self._connect() as conn:
                 cur = conn.cursor()
                 cur.execute(
-                    """
+                    f"""
                     SELECT
                       COUNT(*) AS event_count,
                       COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
@@ -751,7 +766,9 @@ class SqlStore:
                       COALESCE(SUM(total_tokens), 0) AS total_tokens,
                       COALESCE(SUM(cost_usd), 0) AS cost_usd
                     FROM hive_cost_events
-                    """
+                    {where_sql}
+                    """,
+                    tuple(params),
                 )
                 totals = self._fetch_dicts(cur)[0]
                 cur.execute(
@@ -763,11 +780,12 @@ class SqlStore:
                       COALESCE(SUM(total_tokens), 0) AS total_tokens,
                       COALESCE(SUM(cost_usd), 0) AS cost_usd
                     FROM hive_cost_events
+                    {where_sql}
                     GROUP BY model, provider
                     ORDER BY cost_usd DESC, total_tokens DESC
                     LIMIT {p}
                     """,
-                    (_int_or_none(by_model_limit) or 20,),
+                    (*params, _int_or_none(by_model_limit) or 20),
                 )
                 by_model = self._fetch_dicts(cur)
             return {"ok": True, "enabled": True, "totals": totals, "by_model": by_model}
