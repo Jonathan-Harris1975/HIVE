@@ -390,7 +390,10 @@ class OpenRouterClient:
 
     async def _stream_one_attempt(self, payload: dict[str, Any]) -> AsyncIterator[dict[str, Any]]:
         url = f"{self.settings.openrouter_base_url.rstrip('/')}/chat/completions"
-        request_payload = {**payload, "stream": True}
+        # stream_options.include_usage is required for OpenRouter/OpenAI-compatible
+        # streaming to emit a usage object on the final chunk at all; without it,
+        # `final_usage` below always stays None regardless of the usage.include flag.
+        request_payload = {**payload, "stream": True, "stream_options": {"include_usage": True}}
 
         # Bound connection failures without cutting off healthy providers that pause
         # briefly while composing. The previous 6s read window was fast, but it could

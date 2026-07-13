@@ -510,7 +510,7 @@ def rehydrate_registry_from_r2(settings: "Settings") -> int:  # noqa: F821 (forw
         keys = r2.list_objects(
             prefix="manifests/",
             limit=5_000,
-            bucket="hive-repositories",
+            bucket=settings.r2_bucket_repositories,
             read_only=True,
         )
     except Exception as exc:  # noqa: BLE001
@@ -526,7 +526,7 @@ def rehydrate_registry_from_r2(settings: "Settings") -> int:  # noqa: F821 (forw
             raw = r2.read_object(
                 key,
                 max_bytes=2 * 1024 * 1024,  # 2 MB cap per manifest
-                bucket="hive-repositories",
+                bucket=settings.r2_bucket_repositories,
                 read_only=True,
             )
             data: dict = json.loads(raw.content)
