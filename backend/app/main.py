@@ -27,6 +27,7 @@ from app.api.optimisation_engine import qa_ingest_router as optimisation_qa_inge
 from app.api.optimisation_engine import router as optimisation_engine_router
 from app.api.providers import router as providers_router
 from app.api.repositories import router as repositories_router
+from app.api.monthly_review import router as monthly_review_router
 from app.api.repository_council import router as repository_council_router
 from app.api.repository_learning import router as repository_learning_router
 from app.api.repository_memory import router as repository_memory_router
@@ -158,6 +159,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(system_router, prefix="/v1")
     application.include_router(ops_events_router, prefix="/v1")
     application.include_router(repositories_router, prefix="/v1")
+    application.include_router(monthly_review_router, prefix="/v1")
     application.include_router(repository_memory_router, prefix="/v1")
     application.include_router(model_registry_router, prefix="/v1")
     application.include_router(providers_router, prefix="/v1")
