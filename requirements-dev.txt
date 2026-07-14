@@ -2,7 +2,7 @@
 pytest>=9.1.1,<10
 pytest-asyncio>=1.4.0,<2
 pytest-cov>=7.1.0,<8
-ruff>=0.15.20,<1
+ruff>=0.15.21,<1
 mypy>=2.1.0,<3
 pip-audit>=2.10.1,<3
 
