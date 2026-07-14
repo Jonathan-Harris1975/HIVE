@@ -17,9 +17,9 @@ anyio==4.14.0
     #   watchfiles
 beautifulsoup4==4.15.0
     # via -r requirements.in
-boto3==1.43.41
+boto3==1.43.47
     # via -r requirements.in
-botocore==1.43.41
+botocore==1.43.47
     # via
     #   boto3
     #   s3transfer
@@ -116,7 +116,7 @@ urllib3==2.7.0
     # via
     #   botocore
     #   requests
-uvicorn==0.50.2
+uvicorn==0.51.0
     # via -r requirements.in
 uvloop==0.22.1
     # via uvicorn
