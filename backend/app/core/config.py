@@ -224,6 +224,35 @@ class Settings(BaseSettings):
     openrouter_max_fallback_attempts: int = 1
     openrouter_empty_reply_retry_enabled: bool = True
     openrouter_min_response_tokens: int = 80
+
+    # Headroom inline context optimisation. HIVE uses the library directly
+    # instead of a second proxy process, preserving the existing Koyeb topology.
+    # The latest conversational message and system instructions are protected by
+    # default; the optional Kompress ML model stays disabled unless deliberately
+    # enabled after resource testing.
+    headroom_enabled: bool = Field(True, validation_alias=AliasChoices("HEADROOM_ENABLED"))
+    headroom_target_ratio: float = Field(
+        0.7, ge=0.5, le=0.95, validation_alias=AliasChoices("HEADROOM_TARGET_RATIO")
+    )
+    headroom_min_tokens_to_compress: int = Field(
+        250, ge=64, le=4096, validation_alias=AliasChoices("HEADROOM_MIN_TOKENS_TO_COMPRESS")
+    )
+    headroom_max_input_chars: int = Field(
+        262_144,
+        ge=16_384,
+        le=1_048_576,
+        validation_alias=AliasChoices("HEADROOM_MAX_INPUT_CHARS"),
+    )
+    headroom_protect_recent: int = Field(
+        1, ge=0, le=20, validation_alias=AliasChoices("HEADROOM_PROTECT_RECENT")
+    )
+    headroom_kompress_model: str = Field(
+        "disabled", validation_alias=AliasChoices("HEADROOM_KOMPRESS_MODEL")
+    )
+    headroom_log_savings: bool = Field(
+        True, validation_alias=AliasChoices("HEADROOM_LOG_SAVINGS")
+    )
+
     chat_with_file_model_timeout_seconds: float = 30
 
     cf_r2_account_id: str = Field(
