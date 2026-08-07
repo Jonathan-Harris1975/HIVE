@@ -13,6 +13,7 @@ import httpx
 from fastapi import HTTPException, status
 
 from app.core.config import Settings
+from app.services.headroom_optimizer import HeadroomOptimizer, HeadroomOutcome
 
 logger = logging.getLogger("uvicorn.error.hive.openrouter")
 
@@ -36,6 +37,7 @@ class OpenRouterClient:
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        self._headroom = HeadroomOptimizer(settings)
 
     def _cache_key(self) -> str:
         key_digest = hashlib.sha256(self.settings.openrouter_api_key.encode("utf-8")).hexdigest()[:16]
@@ -344,8 +346,68 @@ class OpenRouterClient:
 
         max_attempts = 1 + max(0, int(self.settings.openrouter_max_fallback_attempts))
         for model in ordered_models[:max_attempts]:
-            yield {**payload, "model": model}
+            candidate = {**payload, "model": model}
+            yield await self._optimise_candidate_payload(candidate)
 
+    async def _optimise_candidate_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Apply Headroom to eligible chat messages without blocking the event loop."""
+        raw_messages = payload.get("messages")
+        model = payload.get("model")
+        if not isinstance(raw_messages, list) or not isinstance(model, str) or not model:
+            return payload
+
+        messages: list[dict[str, str]] = []
+        for raw in raw_messages:
+            if not isinstance(raw, dict):
+                return payload
+            role = raw.get("role")
+            content = raw.get("content")
+            if not isinstance(role, str) or not isinstance(content, str):
+                return payload
+            messages.append({"role": role, "content": content})
+
+        exact_context = self._requires_exact_context(messages)
+        outcome = await asyncio.to_thread(
+            self._headroom.optimise,
+            messages,
+            model=model,
+            exact_context=exact_context,
+        )
+        self._log_headroom(outcome, model=model)
+        if outcome.messages == messages:
+            return payload
+        return {**payload, "messages": outcome.messages}
+
+    @staticmethod
+    def _requires_exact_context(messages: list[dict[str, str]]) -> bool:
+        """Bypass compression where HIVE must retain exact source-file context."""
+        exact_markers = (
+            "Answer using the attached file content only where relevant.",
+            "AnchorPatch/v1",
+        )
+        return any(
+            message.get("role") == "system"
+            and any(marker in message.get("content", "") for marker in exact_markers)
+            for message in messages
+        )
+
+    def _log_headroom(self, outcome: HeadroomOutcome, *, model: str) -> None:
+        if outcome.failed:
+            logger.warning(
+                "Headroom fail-open model=%s reason=%s", model, outcome.skipped_reason or "unknown"
+            )
+            return
+        if outcome.skipped_reason and outcome.skipped_reason not in {"disabled", "exact_context"}:
+            logger.debug("Headroom skipped model=%s reason=%s", model, outcome.skipped_reason)
+        if self.settings.headroom_log_savings and outcome.tokens_saved > 0:
+            logger.info(
+                "Headroom saved=%d tokens model=%s before=%d after=%d transforms=%s",
+                outcome.tokens_saved,
+                model,
+                outcome.tokens_before,
+                outcome.tokens_after,
+                ",".join(outcome.transforms) or "unknown",
+            )
 
     def _is_controlled_fallback_alias(self, model: str) -> bool:
         """Allow configured free/router aliases even when the model list returns dated IDs."""
