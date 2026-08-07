@@ -9,6 +9,8 @@ aiosqlite==0.22.1
     # via -r requirements.in
 annotated-doc==0.0.4
     # via fastapi
+ast-grep-cli==0.44.0
+    # via -r requirements.in
 annotated-types==0.7.0
     # via pydantic
 anyio==4.14.0
@@ -45,6 +47,8 @@ httpcore==1.0.9
     # via httpx
 httptools==0.8.0
     # via uvicorn
+headroom-ai==0.32.0
+    # via -r requirements.in
 httpx==0.28.1
     # via -r requirements.in
 idna==3.18
