@@ -372,3 +372,87 @@ async def test_stream_chat_completion_retries_provider_error_before_tokens(
     assert events[-1]["event"] == "done"
     assert events[-1]["ok"] is True
     assert events[-1]["model_used"] == "fallback-good:free"
+
+
+@pytest.mark.asyncio
+async def test_payload_attempts_apply_headroom_per_selected_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = Settings(
+        openrouter_api_key="test-key",
+        openrouter_model_preflight_enabled=False,
+        allow_paid_fallback=True,
+        openrouter_max_fallback_attempts=0,
+    )
+    client = OpenRouterClient(settings)
+    calls: list[tuple[str, bool]] = []
+
+    def fake_optimise(messages, *, model, exact_context=False):  # noqa: ANN001
+        from app.services.headroom_optimizer import HeadroomOutcome
+
+        calls.append((model, exact_context))
+        compressed = [dict(message) for message in messages]
+        compressed[0]["content"] = "compressed history"
+        return HeadroomOutcome(
+            messages=compressed,
+            attempted=True,
+            compressed=True,
+            tokens_before=500,
+            tokens_after=300,
+            tokens_saved=200,
+        )
+
+    monkeypatch.setattr(client._headroom, "optimise", fake_optimise)
+    payload = {
+        "model": "primary:free",
+        "messages": [
+            {"role": "assistant", "content": "long old history"},
+            {"role": "user", "content": "current request"},
+        ],
+    }
+
+    attempts = [item async for item in client._payload_attempts(payload, [])]
+
+    assert attempts[0]["messages"][0]["content"] == "compressed history"
+    assert attempts[0]["messages"][1]["content"] == "current request"
+    assert calls == [("primary:free", False)]
+
+
+@pytest.mark.asyncio
+async def test_file_chat_exact_context_bypasses_headroom(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = Settings(
+        openrouter_api_key="test-key",
+        openrouter_model_preflight_enabled=False,
+        openrouter_max_fallback_attempts=0,
+    )
+    client = OpenRouterClient(settings)
+    seen_exact: list[bool] = []
+
+    def fake_optimise(messages, *, model, exact_context=False):  # noqa: ANN001, ARG001
+        from app.services.headroom_optimizer import HeadroomOutcome
+
+        seen_exact.append(exact_context)
+        return HeadroomOutcome(
+            messages=[dict(message) for message in messages],
+            skipped_reason="exact_context",
+        )
+
+    monkeypatch.setattr(client._headroom, "optimise", fake_optimise)
+    payload = {
+        "model": "primary:free",
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "Answer using the attached file content only where relevant. "
+                    "Do not invent details."
+                ),
+            },
+            {"role": "user", "content": "Exact source excerpt here"},
+        ],
+    }
+
+    attempts = [item async for item in client._payload_attempts(payload, [])]
+
+    assert attempts[0]["messages"] == payload["messages"]
+    assert seen_exact == [True]
