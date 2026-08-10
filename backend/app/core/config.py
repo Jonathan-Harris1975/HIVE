@@ -280,7 +280,7 @@ class Settings(BaseSettings):
     r2_max_attempts: int = 2
     r2_addressing_style: str = "path"
     r2_multi_bucket_read_enabled: bool = Field(
-        True, validation_alias=AliasChoices("R2_MULTI_BUCKET_READ_ENABLED")
+        False, validation_alias=AliasChoices("R2_MULTI_BUCKET_READ_ENABLED")
     )
     r2_multi_bucket_write_enabled: bool = Field(
         True, validation_alias=AliasChoices("R2_MULTI_BUCKET_WRITE_ENABLED")
@@ -310,7 +310,6 @@ class Settings(BaseSettings):
     r2_bucket_blog_images: str = Field("", validation_alias=AliasChoices("R2_BUCKET_BLOG_IMAGES"))
     r2_bucket_blog_rss: str = Field("", validation_alias=AliasChoices("R2_BUCKET_BLOG_RSS"))
     r2_bucket_brand_assets: str = Field("", validation_alias=AliasChoices("R2_BUCKET_BRAND_ASSETS"))
-    r2_bucket_meta: str = Field("", validation_alias=AliasChoices("R2_BUCKET_META"))
     r2_bucket_meta_system: str = Field("", validation_alias=AliasChoices("R2_BUCKET_META_SYSTEM"))
     r2_bucket_podcast: str = Field("", validation_alias=AliasChoices("R2_BUCKET_PODCAST"))
     r2_bucket_podcast_rss_feeds: str = Field(
@@ -342,9 +341,6 @@ class Settings(BaseSettings):
     r2_public_base_url_brand_assets: str = Field(
         "", validation_alias=AliasChoices("R2_PUBLIC_BASE_URL_BRAND_ASSETS")
     )
-    r2_public_base_url_meta: str = Field(
-        "", validation_alias=AliasChoices("R2_PUBLIC_BASE_URL_META")
-    )
     r2_public_base_url_meta_system: str = Field(
         "", validation_alias=AliasChoices("R2_PUBLIC_BASE_URL_META_SYSTEM")
     )
@@ -357,9 +353,6 @@ class Settings(BaseSettings):
     r2_public_base_url_rss: str = Field("", validation_alias=AliasChoices("R2_PUBLIC_BASE_URL_RSS"))
     r2_public_base_url_transcript: str = Field(
         "", validation_alias=AliasChoices("R2_PUBLIC_BASE_URL_TRANSCRIPT")
-    )
-    r2_public_base_url_transcript_html: str = Field(
-        "", validation_alias=AliasChoices("R2_PUBLIC_BASE_URL_TRANSCRIPT_HTML")
     )
     r2_public_base_url_hive_skills: str = Field(
         "", validation_alias=AliasChoices("R2_PUBLIC_BASE_URL_HIVE_SKILLS")
@@ -798,7 +791,6 @@ class Settings(BaseSettings):
                 self.r2_public_base_url_brand_assets,
                 "Shared brand assets",
             ),
-            ("meta", self.r2_bucket_meta, self.r2_public_base_url_meta, "Podcast metadata"),
             (
                 "meta_system",
                 self.r2_bucket_meta_system,
@@ -829,12 +821,6 @@ class Settings(BaseSettings):
                 self.r2_bucket_transcripts,
                 self.r2_public_base_url_transcript,
                 "Podcast transcripts",
-            ),
-            (
-                "transcript_html",
-                self.r2_bucket_transcripts,
-                self.r2_public_base_url_transcript_html,
-                "Transcript HTML mirror",
             ),
             (
                 "hive_skills",
