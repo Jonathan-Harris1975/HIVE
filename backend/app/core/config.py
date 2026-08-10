@@ -142,6 +142,10 @@ class Settings(BaseSettings):
         "state/mast/scheduler-state.json",
         validation_alias=AliasChoices("MAST_STATE_OBJECT_KEY"),
     )
+    mast_operator_control_object_key: str = Field(
+        "state/mast/operator-control.json",
+        validation_alias=AliasChoices("MAST_OPERATOR_CONTROL_OBJECT_KEY"),
+    )
     mast_state_healthy_max_age_seconds: int = Field(
         90,
         ge=20,
@@ -161,9 +165,10 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("MAST_STATE_MAX_BYTES"),
     )
 
-    # Used only for the on-demand "wake a standby service" flow: HIVE calls MAST's
-    # mutating /services/{service}/resume endpoint (reads of the lifecycle ledger go
-    # through the existing durable R2 state above and need no extra config).
+    # On-demand wake-up transport. MAST normally runs as a Koyeb Worker, so HIVE
+    # writes a bounded command into MAST's hidden R2 operator-control object.
+    # MAST_BASE_URL remains an optional compatibility path for deployments that expose
+    # MAST as an HTTP service; it is intentionally not required for Worker mode.
     mast_base_url: str = Field("", validation_alias=AliasChoices("MAST_BASE_URL"))
     mast_admin_token: str = Field(
         "", validation_alias=AliasChoices("MAST_ADMIN_TOKEN", "CRON_ADMIN_TOKEN")

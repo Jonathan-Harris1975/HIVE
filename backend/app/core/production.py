@@ -147,6 +147,24 @@ def build_readiness_report(settings: Settings) -> ReadinessReport:
     )
 
 
+    mast_lane = settings.internal_r2_lane(settings.mast_state_r2_lane)
+    mast_wake_ready = bool(settings.mast_base_url.strip()) or bool(
+        mast_lane
+        and mast_lane.get("bucket")
+        and mast_lane.get("writable")
+        and settings.mast_operator_control_object_key.strip()
+    )
+    checks.append(
+        _check(
+            "mast_wake_control",
+            mast_wake_ready,
+            "HIVE can request AIMS/RAMS wake-ups through MAST.",
+            "Configure MAST_BASE_URL for an HTTP MAST deployment, or enable hidden R2 multi-bucket writes to the MAST operator-control object for Worker mode.",
+            required=production and settings.repo_health_enabled,
+        )
+    )
+
+
     rams_readiness_requires_token = bool(
         settings.repo_health_enabled
         and settings.rams_readiness_url.strip()
