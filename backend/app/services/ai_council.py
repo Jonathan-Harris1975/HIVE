@@ -23,13 +23,10 @@ from app.storage.d1 import D1MetadataStore
 # optimisation history, and each promotion is pushed through the existing
 # ops-event inbox so downstream services (MAST, AIMS) can react.
 #
-# HONESTY NOTE: real coding/reasoning benchmark scores (e.g. HumanEval,
-# SWE-bench) are not available inside this adapter — there is no live
-# benchmark data source wired up. Metrics derived here come only from what a
-# provider's /models response actually exposes (pricing, context length,
-# declared tool/structured-output support) plus this run's own historical
-# comparisons. Wire a real benchmark data source into
-# `_metrics_for_model` before trusting promotion decisions in production.
+# Benchmark quality is sourced from OpenRouter's authenticated /benchmarks
+# endpoint when the primary OpenRouter adapter is present. Providers that do
+# not expose measured benchmark data still participate in discovery, but their
+# catalogue-only confidence remains below the automatic-promotion gate.
 
 LANE = "ai_council"
 
@@ -157,7 +154,9 @@ def _long_context_score(model: ProviderModelInfo) -> float | None:
     return max(0.0, min(1.0, model.context_length / ceiling))
 
 
-def _metrics_for_model(model: ProviderModelInfo) -> dict[str, float]:
+def _metrics_for_model(
+    model: ProviderModelInfo, benchmark: dict[str, Any] | None = None
+) -> dict[str, float]:
     metrics: dict[str, float] = {}
     cost = _cost_score(model)
     if cost is not None:
@@ -166,11 +165,39 @@ def _metrics_for_model(model: ProviderModelInfo) -> dict[str, float]:
     if long_context is not None:
         metrics["long_context"] = long_context
     metrics["structured_output"] = 1.0 if model.supports_structured_output else 0.0
-    # coding_benchmark / reasoning_benchmark / reliability / latency /
-    # json_reliability / community_maturity / internal_historical_performance
-    # are intentionally left unset here (benchmark_engine.score_model treats
-    # missing axes as neutral 0.5) pending a real benchmark data source.
+
+    # OpenRouter's unified benchmark endpoint exposes Artificial Analysis
+    # coding/intelligence/agentic indices on a 0-100 scale. These are measured
+    # external quality signals rather than name/cost heuristics, and therefore
+    # are the primary evidence used by the monthly model review.
+    if benchmark:
+        coding_index = benchmark.get("coding_index")
+        intelligence_index = benchmark.get("intelligence_index")
+        agentic_index = benchmark.get("agentic_index")
+        try:
+            if coding_index is not None:
+                metrics["coding_benchmark"] = float(coding_index) / 100.0
+            if intelligence_index is not None:
+                metrics["reasoning_benchmark"] = float(intelligence_index) / 100.0
+            if agentic_index is not None:
+                # Agentic performance is the best externally measured proxy
+                # available for real tool/workflow execution. It is recorded
+                # as reliability evidence rather than pretending it is an
+                # internal HIVE benchmark.
+                metrics["reliability"] = float(agentic_index) / 100.0
+        except (TypeError, ValueError):
+            pass
     return metrics
+
+
+def _benchmark_map(items: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Index benchmark rows by OpenRouter permanent model slug."""
+    result: dict[str, dict[str, Any]] = {}
+    for item in items:
+        model_id = str(item.get("model_permaslug") or "").strip()
+        if model_id:
+            result[model_id] = item
+    return result
 
 
 def _confidence_label(confidence_fraction: float) -> str:
@@ -262,6 +289,16 @@ async def run_council(settings: Settings, *, run_id: str | None = None) -> Counc
         except Exception:  # noqa: BLE001 - one provider failing must not sink the run
             continue
 
+        benchmark_by_model: dict[str, dict[str, Any]] = {}
+        benchmark_loader = getattr(provider, "list_benchmarks", None)
+        if callable(benchmark_loader):
+            try:
+                benchmark_by_model = _benchmark_map(
+                    await benchmark_loader(source="artificial-analysis")
+                )
+            except Exception:  # noqa: BLE001 - discovery must degrade safely
+                benchmark_by_model = {}
+
         current_ids = [model.model_id for model in models if model.model_id]
         previous_ids = _previous_snapshot(store, provider.name)
         new_ids = sorted(set(current_ids) - previous_ids)
@@ -284,7 +321,7 @@ async def run_council(settings: Settings, *, run_id: str | None = None) -> Counc
         for category, candidates in category_candidates.items():
             for model in candidates:
                 if model.model_id not in scored_cache:
-                    metrics = _metrics_for_model(model)
+                    metrics = _metrics_for_model(model, benchmark_by_model.get(model.model_id))
                     scored_cache[model.model_id] = benchmark_engine.score_model(metrics, weights=weights)
                 result = scored_cache[model.model_id]
                 if (
@@ -296,7 +333,13 @@ async def run_council(settings: Settings, *, run_id: str | None = None) -> Counc
                         model.model_id,
                         score=result.score,
                         provider=provider.name,
-                        benchmark_score=round(result.score * 100, 1),
+                        benchmark_score=(
+                            round(float(benchmark_by_model[model.model_id].get("coding_index")
+                                        or benchmark_by_model[model.model_id].get("intelligence_index")
+                                        or result.score * 100), 1)
+                            if model.model_id in benchmark_by_model
+                            else round(result.score * 100, 1)
+                        ),
                         confidence=_confidence_label(result.confidence),
                         cost_per_1k_tokens=_cost_per_1k(model),
                         notes=(

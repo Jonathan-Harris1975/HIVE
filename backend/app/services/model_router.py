@@ -92,22 +92,45 @@ class ModelRouter:
             TaskType.PREMIUM: Mode.AUDIT,
         }[task]
 
+    def _registry_default(self, category: str) -> str | None:
+        """Return the best model only when it clears HIVE's quality floor.
+
+        Low-ranked models remain in D1 for audit/history, but they must never
+        silently become task defaults just because a category is populated.
+        """
+        ranked = model_registry.get_ranked_models(category)
+        if not ranked:
+            return None
+        candidate = ranked[0]
+        if candidate.score < self.settings.model_registry_min_visible_score:
+            return None
+        return candidate.model_id
+
     def select_model(self, task: TaskType, requested_model: str | None = None) -> str:
         if requested_model:
             return requested_model
-        # Phase 3 - Model Registry: the highest-ranked coding model, once the
-        # registry has been populated, automatically becomes the default
-        # coding model. Falls back to the static settings.code_model when the
-        # registry is empty so existing deployments are unaffected.
-        registry_code_default = model_registry.get_default_model("coding")
-        return {
+
+        # Category defaults are reviewed by the monthly AI Council and stored
+        # in D1. Each task prefers the best high-quality registry model for the
+        # appropriate capability, while retaining the existing static setting
+        # as a standalone-safe fallback when the registry is empty/unavailable.
+        category_by_task = {
+            TaskType.SUMMARY: "cheap",
+            TaskType.FILE_TRIAGE: "long_context",
+            TaskType.GENERAL: "reasoning",
+            TaskType.CODE: "coding",
+            TaskType.AUDIT: "reasoning",
+            TaskType.PREMIUM: "reasoning",
+        }
+        static_by_task = {
             TaskType.SUMMARY: self.settings.cheap_model,
             TaskType.FILE_TRIAGE: self.settings.balanced_model,
             TaskType.GENERAL: self.settings.default_model,
-            TaskType.CODE: registry_code_default or self.settings.code_model,
+            TaskType.CODE: self.settings.code_model,
             TaskType.AUDIT: self.settings.audit_model,
             TaskType.PREMIUM: self.settings.premium_model,
-        }[task]
+        }
+        return self._registry_default(category_by_task[task]) or static_by_task[task]
 
     def fallback_models_for_task(self, task: TaskType, selected_model: str) -> list[str]:
         by_task = {
