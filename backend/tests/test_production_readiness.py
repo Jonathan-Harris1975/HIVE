@@ -69,6 +69,7 @@ def test_production_readiness_accepts_r2_worker_monitoring() -> None:
         MAST_MONITOR_MODE="r2",
         R2_BUCKET_META_SYSTEM="metasystem",
         R2_MULTI_BUCKET_READ_ENABLED=True,
+        R2_MULTI_BUCKET_WRITE_ENABLED=True,
         R2_ACCOUNT_ID="0" * 32,
         R2_ACCESS_KEY_ID="write-key",
         R2_SECRET_ACCESS_KEY="write-secret",

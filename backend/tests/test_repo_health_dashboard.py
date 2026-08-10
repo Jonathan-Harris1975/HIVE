@@ -142,7 +142,7 @@ async def test_repo_health_monitors_mast_worker_from_r2_heartbeat() -> None:
         report = await build_repo_health_report(settings, client=client, force_refresh=True)
 
     mast = next(item for item in report["repos"] if item["repo"] == "MAST")
-    assert mast["category"] == "background_api"
+    assert mast["category"] == "background_worker"
     assert mast["status"] == "healthy"
     assert mast["operational"]["payload"]["source"] == "r2_public"
     assert mast["operational"]["payload"]["recent_failures"] == 0

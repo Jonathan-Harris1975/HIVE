@@ -10,7 +10,9 @@ def test_production_shared_env_contains_no_secret_placeholders() -> None:
     assert "R2_SECRET_ACCESS_KEY=" not in text
     assert "RMS_API_KEY=" not in text
     assert "R2_BUCKET_META=" not in text
-    assert "R2_BUCKET_META_SYSTEM=" not in text
+    # meta_system is a hidden internal control plane for the MAST Worker heartbeat
+    # and wake-command queue. It is never exposed through HIVE's user-facing R2 lanes.
+    assert "R2_BUCKET_META_SYSTEM=metasystem" in text
 
 
 def test_koyeb_secrets_file_is_secrets_only() -> None:
