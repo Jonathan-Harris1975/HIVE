@@ -25,6 +25,33 @@ class OpenRouterProvider:
         raw_models = await self._client.list_models(force_refresh=force_refresh)
         return [parse_provider_model(model) for model in raw_models]
 
+    async def list_benchmarks(
+        self, *, source: str = "artificial-analysis", task_type: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Return OpenRouter's first-party aggregated benchmark feed.
+
+        OpenRouter exposes measured benchmark data from Artificial Analysis,
+        Design Arena and its own evaluations at ``/benchmarks``. Keeping this
+        call in the provider adapter prevents benchmark-source knowledge from
+        leaking into the rest of HIVE. A failed benchmark request is allowed
+        to bubble to the AI Council, which degrades to catalogue-only scoring
+        and therefore cannot satisfy the automatic-promotion confidence gate.
+        """
+        params: dict[str, str] = {"source": source}
+        if task_type:
+            params["task_type"] = task_type
+        headers = {"Authorization": f"Bearer {self.settings.openrouter_api_key}"}
+        async with httpx.AsyncClient(timeout=max(5.0, self.settings.openrouter_model_list_timeout_seconds)) as client:
+            response = await client.get(
+                f"{self.settings.openrouter_base_url.rstrip('/')}/benchmarks",
+                headers=headers,
+                params=params,
+            )
+            response.raise_for_status()
+            payload: Any = response.json()
+        data = payload.get("data") if isinstance(payload, dict) else None
+        return [item for item in (data or []) if isinstance(item, dict)]
+
     async def health(self) -> ProviderHealth:
         start = time.perf_counter()
         try:
