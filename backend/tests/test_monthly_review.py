@@ -14,7 +14,9 @@ class FakeD1Store:
 
     def __init__(self, _settings=None) -> None:
         self.enabled = True
-        self._rows: dict[str, dict] = {}
+        if not hasattr(type(self), "_rows"):
+            type(self)._rows = {}
+        self._rows = type(self)._rows
 
     def upsert_metadata(self, *, item_id, lane, source_type, source_id, title, url, metadata):
         self._rows[item_id] = {
@@ -113,8 +115,8 @@ async def test_generate_monthly_review_assembles_all_sections(monkeypatch):
 
     assert report["ok"] is True
     assert report["period"] == "2026-06"
-    assert report["sections_total"] == 11
-    assert report["sections_ok"] == 11
+    assert report["sections_total"] == 12
+    assert report["sections_ok"] == 12
     assert report["sections"]["cost_and_tokens"]["data"]["totals"]["cost_usd"] == 4.5
     assert report["sections"]["repo_health"]["data"]["status"] == "healthy"
     assert report["report_id"].startswith("monthly-review-2026-06-")
@@ -164,6 +166,7 @@ async def test_generate_monthly_review_isolates_a_failing_section(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_generate_and_archive_writes_r2_and_indexes_d1(monkeypatch, tmp_path):
+    FakeD1Store._rows = {}
     settings = _settings()
 
     async def fake_generate(settings, *, period=None):

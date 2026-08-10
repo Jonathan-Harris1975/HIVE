@@ -48,6 +48,8 @@ async def test_repo_health_reports_all_governed_repositories() -> None:
         "degraded": 0,
         "down": 0,
         "not_configured": 0,
+        "standby": 0,
+        "starting": 0,
     }
     assert [item["repo"] for item in report["repos"]] == [
         "HIVE",

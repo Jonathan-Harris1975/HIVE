@@ -9,6 +9,8 @@ def test_production_shared_env_contains_no_secret_placeholders() -> None:
     assert "DATABASE_PASSWORD=" not in text
     assert "R2_SECRET_ACCESS_KEY=" not in text
     assert "RMS_API_KEY=" not in text
+    assert "R2_BUCKET_META=" not in text
+    assert "R2_BUCKET_META_SYSTEM=" not in text
 
 
 def test_koyeb_secrets_file_is_secrets_only() -> None:
@@ -20,6 +22,7 @@ def test_koyeb_secrets_file_is_secrets_only() -> None:
     keys = {line.split("=", 1)[0] for line in lines}
     assert keys == {
         "ADMIN_BEARER_TOKEN",
+        "CF_WORKERS_AI_API",
         "D1_API_KEY",
         "D1_DATABASE_ID",
         "DATABASE_PASSWORD",
@@ -43,4 +46,10 @@ def test_settings_loads_repo_shared_env_file() -> None:
     assert settings.app_version == "1.30-production"
     assert settings.database_auto_init is True
     assert settings.default_model == "~google/gemini-flash-latest"
+    assert settings.r2_bucket_repositories == "hive-repositories"
+    assert settings.r2_public_base_url_repositories == "https://pub-c48ec7e8f0b64be39259e09db7de0f94.r2.dev"
+    assert settings.ai_search_enabled is True
+    assert settings.ai_search_instance == "hive-repositories"
+    assert settings.r2_lane("meta") is None
+    assert settings.r2_lane("meta_system") is None
     assert "hive.jonathan-harris.online" in settings.effective_allowed_hosts

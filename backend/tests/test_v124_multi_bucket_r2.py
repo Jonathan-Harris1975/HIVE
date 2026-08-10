@@ -53,10 +53,12 @@ def test_meta_system_lane_is_never_exposed_even_when_configured() -> None:
     client = TestClient(create_app(settings))
 
     body = client.get("/v1/files/r2-lanes").json()
-    lanes = {item["lane"] for item in body["lanes"]}
+    lanes = {item["lane"]: item for item in body["lanes"]}
 
     assert "meta_system" not in lanes
+    assert "meta" not in lanes
     assert settings.r2_lane("meta_system") is None
+    assert settings.r2_lane("meta") is None
     assert lanes["audits"]["writable"] is True
 
 
