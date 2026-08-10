@@ -528,6 +528,12 @@ class Settings(BaseSettings):
     ai_council_promotion_threshold: float = Field(
         0.72, validation_alias=AliasChoices("AI_COUNCIL_PROMOTION_THRESHOLD")
     )
+    ai_council_auto_promotion_min_confidence: float = Field(
+        0.70,
+        ge=0.0,
+        le=1.0,
+        validation_alias=AliasChoices("AI_COUNCIL_AUTO_PROMOTION_MIN_CONFIDENCE"),
+    )
     ai_council_coding_keywords: str = Field(
         "code,coder,coding,dev,program",
         validation_alias=AliasChoices("AI_COUNCIL_CODING_KEYWORDS"),
