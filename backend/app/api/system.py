@@ -82,7 +82,11 @@ async def runtime_stats(settings: Settings = Depends(get_settings)) -> dict[str,
     reg = model_registry.list_categories()
     total_registered_models = sum(len(models) for models in reg.values())
     categories_with_models = [cat for cat, models in reg.items() if models]
-    default_coding_model = model_registry.get_default_model("coding")
+    coding_models = model_registry.get_ranked_models("coding")
+    default_coding_model = next(
+        (model.model_id for model in coding_models if model.score >= settings.model_registry_min_visible_score),
+        None,
+    )
 
     # Provider Framework: discover live configured providers
     providers = discover_providers(settings)

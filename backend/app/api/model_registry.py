@@ -42,14 +42,22 @@ async def get_registry() -> dict[str, object]:
 
 
 @router.get("/model-registry/{category}")
-async def get_category_models(category: str) -> dict[str, object]:
+async def get_category_models(
+    category: str, settings: Settings = Depends(get_settings)
+) -> dict[str, object]:
     try:
-        ranked = get_ranked_models(category)
+        all_ranked = get_ranked_models(category)
     except ModelRegistryError as error:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+    ranked = [
+        model for model in all_ranked
+        if model.score >= settings.model_registry_min_visible_score
+    ]
     return {
         "category": category,
         "default_model": ranked[0].model_id if ranked else None,
+        "min_visible_score": settings.model_registry_min_visible_score,
+        "hidden_low_score_count": len(all_ranked) - len(ranked),
         "models": [
             {
                 "model_id": model.model_id,
