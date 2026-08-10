@@ -1,0 +1,2 @@
+Delete these obsolete files from HIVE:
+backend/app/services/cost_estimator.py
