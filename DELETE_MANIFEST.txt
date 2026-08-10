@@ -1,2 +1,3 @@
-Delete these obsolete files from HIVE:
-backend/app/services/cost_estimator.py
+# HIVE files confirmed redundant after this sweep.
+# Delete these from the repository after applying the update.
+DELETE_MANIFEST.txt
