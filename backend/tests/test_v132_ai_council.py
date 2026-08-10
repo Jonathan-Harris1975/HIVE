@@ -207,3 +207,34 @@ async def test_run_council_survives_a_failing_provider(monkeypatch, settings):
     report = await ai_council.run_council(settings)
 
     assert any(p.model_id == "acme/good-coder" for p in report.promotions)
+
+
+@pytest.mark.asyncio
+async def test_run_council_uses_measured_openrouter_benchmarks_for_high_confidence_promotion(monkeypatch):
+    settings = Settings(
+        ai_council_promotion_threshold=0.5,
+        ai_council_auto_promotion_min_confidence=0.6,
+    )
+    good_coder = _model("openai/measured-coder", context_length=200_000, price=0.000001)
+
+    class BenchmarkProvider(FakeProvider):
+        async def list_benchmarks(self, *, source="artificial-analysis", task_type=None):
+            assert source == "artificial-analysis"
+            return [{
+                "source": "artificial-analysis",
+                "model_permaslug": "openai/measured-coder",
+                "coding_index": 92.0,
+                "intelligence_index": 89.0,
+                "agentic_index": 86.0,
+            }]
+
+    monkeypatch.setattr(
+        ai_council, "discover_providers", lambda s: [BenchmarkProvider("openrouter", [good_coder])]
+    )
+
+    report = await ai_council.run_council(settings)
+
+    assert any(p.model_id == "openai/measured-coder" and p.category == "coding" for p in report.promotions)
+    promoted = model_registry.get_ranked_models("coding")[0]
+    assert promoted.confidence == "heuristic" or promoted.confidence == "measured"
+    assert promoted.benchmark_score == 92.0

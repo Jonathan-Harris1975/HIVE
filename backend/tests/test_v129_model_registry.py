@@ -259,3 +259,26 @@ def test_new_fields_survive_simulated_restart_via_d1_store():
     assert ranked.confidence == "heuristic"
     assert ranked.latency_ms == 500.0
     assert ranked.cost_per_1k_tokens == 0.01
+
+
+def test_model_router_ignores_registry_model_below_quality_floor():
+    settings = Settings(code_model="static-code-model", model_registry_min_visible_score=0.72)
+    registry.register_model("coding", "low-ranked-code-model", score=0.71)
+
+    router = ModelRouter(settings)
+
+    assert router.select_model(TaskType.CODE) == "static-code-model"
+
+
+def test_model_router_uses_registry_categories_beyond_coding():
+    settings = Settings(
+        default_model="static-general",
+        audit_model="static-audit",
+        model_registry_min_visible_score=0.72,
+    )
+    registry.register_model("reasoning", "ranked-reasoning", score=0.91)
+
+    router = ModelRouter(settings)
+
+    assert router.select_model(TaskType.GENERAL) == "ranked-reasoning"
+    assert router.select_model(TaskType.AUDIT) == "ranked-reasoning"
