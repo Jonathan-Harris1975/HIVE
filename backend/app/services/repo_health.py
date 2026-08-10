@@ -74,7 +74,7 @@ def _targets(settings: Settings) -> list[ProbeTarget]:
         ProbeTarget(
             repo="MAST",
             label="MAST",
-            category="background_api",
+            category="background_worker",
             description="Master automation scheduler worker",
             health_url=_clean_url(settings.mast_health_url),
             operational_url=_clean_url(settings.mast_status_url),
@@ -600,7 +600,7 @@ async def _probe_mast_worker(
     if raw is None:
         detail = " ".join(errors) or "MAST durable worker state could not be read."
         liveness = {
-            "status": "down",
+            "status": "unavailable",
             "configured": True,
             "http_status": http_status,
             "latency_ms": latency_ms,
@@ -613,7 +613,7 @@ async def _probe_mast_worker(
             "label": target.label,
             "category": target.category,
             "description": target.description,
-            "status": "down",
+            "status": "unavailable",
             "detail": detail,
             "liveness": liveness,
             "operational": None,

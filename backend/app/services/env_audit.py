@@ -19,6 +19,19 @@ from app.core.config import Settings
 
 _ENV_LINE_PATTERN = re.compile(r"^([A-Z][A-Z0-9_]*)=")
 
+# Process/server variables are intentionally documented in .env.example even though
+# they are consumed by Uvicorn/Koyeb rather than the Pydantic Settings object. They
+# must not be reported as stale HIVE settings.
+_EXTERNAL_RUNTIME_ENV_NAMES = {
+    "FORWARDED_ALLOW_IPS",
+    "LOG_LEVEL",
+    "UVICORN_BACKLOG",
+    "UVICORN_LIMIT_CONCURRENCY",
+    "UVICORN_TIMEOUT_GRACEFUL_SHUTDOWN",
+    "UVICORN_TIMEOUT_KEEP_ALIVE",
+    "WEB_CONCURRENCY",
+}
+
 
 def _field_env_names(field_name: str, field_info: Any) -> list[str]:
     alias = getattr(field_info, "validation_alias", None)
@@ -71,7 +84,7 @@ def audit_environment(*, env_example_path: str | Path | None = None) -> dict[str
         else:
             undocumented_fields.append({"field": field_name, "expected_env_names": env_names})
 
-    extra_in_env_example = sorted(documented_names - all_declared_names)
+    extra_in_env_example = sorted(documented_names - all_declared_names - _EXTERNAL_RUNTIME_ENV_NAMES)
 
     total_fields = len(Settings.model_fields)
     return {
