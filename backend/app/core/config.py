@@ -203,7 +203,7 @@ class Settings(BaseSettings):
     cheap_model: str = "~google/gemini-flash-latest"
     balanced_model: str = "~google/gemini-flash-latest"
     premium_model: str = "~anthropic/claude-sonnet-latest"
-    code_model: str = "x-ai/grok-build-0.1"
+    code_model: str = "openai/gpt-5.3-codex"
     audit_model: str = "~google/gemini-flash-latest"
     openrouter_free_fallback_model: str = "nvidia/nemotron-3-ultra-550b-a55b:free"
     allow_paid_fallback: bool = False
@@ -529,7 +529,7 @@ class Settings(BaseSettings):
         0.72, validation_alias=AliasChoices("AI_COUNCIL_PROMOTION_THRESHOLD")
     )
     ai_council_auto_promotion_min_confidence: float = Field(
-        0.70,
+        0.60,
         ge=0.0,
         le=1.0,
         validation_alias=AliasChoices("AI_COUNCIL_AUTO_PROMOTION_MIN_CONFIDENCE"),
@@ -537,6 +537,16 @@ class Settings(BaseSettings):
     ai_council_coding_keywords: str = Field(
         "code,coder,coding,dev,program",
         validation_alias=AliasChoices("AI_COUNCIL_CODING_KEYWORDS"),
+    )
+    # Models below this quality score remain retained in the registry for
+    # history/audit purposes, but are not exposed as selectable defaults in
+    # HIVE-UI and are not used for automatic task routing. Keep this aligned
+    # with the AI Council promotion threshold unless intentionally overridden.
+    model_registry_min_visible_score: float = Field(
+        0.72,
+        ge=0.0,
+        le=1.0,
+        validation_alias=AliasChoices("MODEL_REGISTRY_MIN_VISIBLE_SCORE"),
     )
 
     # Phase 10 - Connector Framework. GitHub is one of the four initial
