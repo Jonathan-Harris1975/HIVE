@@ -17,8 +17,9 @@ from app.storage.d1 import D1MetadataStore
 # refreshes their model catalogues, diffs each catalogue against the last
 # recorded snapshot (new/retired models), scores every model with the
 # Benchmark Engine (Phase 6), and auto-promotes models scoring above
-# `ai_council_promotion_threshold` into the Model Registry (Phase 3) for the
-# "coding" category. Every run is recorded to D1 (lane="ai_council") for
+# `ai_council_promotion_threshold` into the Model Registry (Phase 3) only when
+# the evidence coverage also meets `ai_council_auto_promotion_min_confidence`.
+# Every run is recorded to D1 (lane="ai_council") for
 # optimisation history, and each promotion is pushed through the existing
 # ops-event inbox so downstream services (MAST, AIMS) can react.
 #
@@ -286,7 +287,10 @@ async def run_council(settings: Settings, *, run_id: str | None = None) -> Counc
                     metrics = _metrics_for_model(model)
                     scored_cache[model.model_id] = benchmark_engine.score_model(metrics, weights=weights)
                 result = scored_cache[model.model_id]
-                if result.score >= settings.ai_council_promotion_threshold:
+                if (
+                    result.score >= settings.ai_council_promotion_threshold
+                    and result.confidence >= settings.ai_council_auto_promotion_min_confidence
+                ):
                     model_registry.register_model(
                         category,
                         model.model_id,
@@ -337,8 +341,9 @@ async def run_council(settings: Settings, *, run_id: str | None = None) -> Counc
                 "title": f"{promotion.model_id} promoted to default {promotion.category} model",
                 "summary": (
                     f"{promotion.model_id} (provider={promotion.provider}) scored "
-                    f"{promotion.score:.3f}, above threshold "
-                    f"{settings.ai_council_promotion_threshold:.3f}."
+                    f"{promotion.score:.3f}, above score threshold "
+                    f"{settings.ai_council_promotion_threshold:.3f} with sufficient benchmark coverage "
+                    f"(minimum confidence {settings.ai_council_auto_promotion_min_confidence:.2f})."
                 ),
                 "status": "open",
             },

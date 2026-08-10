@@ -28,16 +28,19 @@ METRIC_KEYS: tuple[str, ...] = (
 )
 
 DEFAULT_WEIGHTS: dict[str, float] = {
-    "coding_benchmark": 0.20,
-    "reasoning_benchmark": 0.15,
-    "cost": 0.10,
-    "latency": 0.10,
+    # Quality and reliability deliberately dominate price. HIVE may prefer a
+    # more expensive model when the measured evidence says it is materially
+    # better for production work. Cost remains a ranking input, not the goal.
+    "coding_benchmark": 0.30,
+    "reasoning_benchmark": 0.18,
     "reliability": 0.15,
-    "long_context": 0.08,
-    "json_reliability": 0.07,
-    "structured_output": 0.07,
+    "internal_historical_performance": 0.10,
+    "long_context": 0.06,
+    "cost": 0.05,
+    "latency": 0.05,
+    "json_reliability": 0.04,
+    "structured_output": 0.04,
     "community_maturity": 0.03,
-    "internal_historical_performance": 0.05,
 }
 
 
