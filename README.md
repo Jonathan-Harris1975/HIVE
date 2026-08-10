@@ -122,3 +122,13 @@ HIVE receives redacted GitHub, Koyeb, Cloudflare Pages and runtime failure event
 ## Operational alerting
 
 GitHub, Koyeb, Cloudflare Pages and runtime services can submit redacted events to the authenticated `/v1/ops/events` contract. See [`docs/OPERATIONAL_ALERTING.md`](docs/OPERATIONAL_ALERTING.md).
+
+## MAST Worker monitoring and on-demand wake-up
+
+MAST is deployed as a Koyeb Worker, not as a public web service. HIVE therefore reads
+MAST's scheduler heartbeat from the hidden `meta_system` R2 lane and writes bounded
+`service.resume` commands to `state/mast/operator-control.json` when AIMS or RAMS must
+be woken on demand. The hidden lane is never exposed through HIVE's file/bucket UI.
+`MAST_BASE_URL` remains optional and is used only if MAST is deliberately deployed with
+HTTP ingress.
+
