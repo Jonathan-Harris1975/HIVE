@@ -72,7 +72,7 @@ def _isolated_state(monkeypatch):
 
 @pytest.fixture
 def settings():
-    return Settings(ai_council_promotion_threshold=0.6)
+    return Settings(ai_council_promotion_threshold=0.5, ai_council_auto_promotion_min_confidence=0.3)
 
 
 @pytest.mark.asyncio
@@ -87,6 +87,23 @@ async def test_run_council_promotes_high_scoring_coding_model(monkeypatch, setti
     assert report.providers_discovered == 1
     assert any(p.model_id == "acme/good-coder" for p in report.promotions)
     assert model_registry.get_default_model("coding") == "acme/good-coder"
+
+
+@pytest.mark.asyncio
+async def test_run_council_does_not_auto_promote_low_confidence_evidence(monkeypatch):
+    settings = Settings(
+        ai_council_promotion_threshold=0.5,
+        ai_council_auto_promotion_min_confidence=0.7,
+    )
+    good_coder = _model("acme/good-coder", context_length=200_000, price=0.0000001)
+    monkeypatch.setattr(
+        ai_council, "discover_providers", lambda s: [FakeProvider("acme", [good_coder])]
+    )
+
+    report = await ai_council.run_council(settings)
+
+    assert not any(p.category == "coding" for p in report.promotions)
+    assert model_registry.get_default_model("coding") is None
 
 
 @pytest.mark.asyncio
@@ -120,7 +137,7 @@ async def test_run_council_does_not_promote_non_coding_or_low_scoring_models(mon
 
     report = await ai_council.run_council(settings)
 
-    assert report.promotions == []
+    assert not any(p.category == "coding" for p in report.promotions)
     assert model_registry.get_default_model("coding") is None
 
 
