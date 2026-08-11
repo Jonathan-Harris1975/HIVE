@@ -12,6 +12,10 @@ COPY requirements.txt /build/requirements.txt
 RUN python -m pip install --upgrade pip \
     && python -m pip install --requirement /build/requirements.txt
 
+# HIVE's repository QA executes real repository tooling. Keep a current Node
+# runtime available without relying on Debian Bookworm's older nodejs package.
+FROM node:22-bookworm-slim AS node_runtime
+
 FROM python:3.14.6-slim-bookworm AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -24,6 +28,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app/backend
 
 WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates git \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=node_runtime /usr/local/bin/node /usr/local/bin/node
+COPY --from=node_runtime /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -sf ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
 
 RUN groupadd --system hive \
     && useradd --system --gid hive --create-home --home-dir /home/hive hive \
