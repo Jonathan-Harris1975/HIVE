@@ -15,7 +15,7 @@ from app.core.security import require_admin
 from app.services.repo_health import clear_repo_health_cache
 from app.services.service_lifecycle import (
     MANAGED_SERVICES,
-    MastResumeError,
+    ServiceResumeError,
     ServiceWakeTimeout,
     UnknownServiceError,
     ensure_service_ready,
@@ -67,7 +67,7 @@ async def _run_wake_ticket(ticket_id: str, repo: str, settings: Settings) -> Non
     except ServiceWakeTimeout as exc:
         ticket["status"] = "timeout"
         ticket["error"] = str(exc)
-    except (MastResumeError, UnknownServiceError) as exc:
+    except (ServiceResumeError, UnknownServiceError) as exc:
         ticket["status"] = "failed"
         ticket["error"] = str(exc)
     except Exception as exc:  # defensive: never leave a ticket stuck "running"
@@ -146,7 +146,7 @@ async def ensure_ready_and_proxy(
     """Transparently wake `repo` if needed, then execute and return the original request.
 
     This is the generic building block for "user requests functionality requiring a
-    standby service": it ensures readiness (requesting a MAST resume and polling health
+    standby service": it ensures readiness (requesting a Koyeb resume and polling health
     if the service is asleep), executes the forwarded call, and returns the result in a
     single round trip - no separate user interaction needed. Callers with tight latency
     budgets should instead use /ensure-ready + their own follow-up call, since this
@@ -170,7 +170,7 @@ async def ensure_ready_and_proxy(
             )
         except ServiceWakeTimeout as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
-        except (MastResumeError, UnknownServiceError) as exc:
+        except (ServiceResumeError, UnknownServiceError) as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
         clear_repo_health_cache()
