@@ -8,13 +8,14 @@ from app.storage.ai_search import AiSearchClient
 async def report(settings: Settings) -> ConnectorReport:
     client = AiSearchClient(settings)
     diagnostics = await client.diagnostics()
+    healthy = bool(diagnostics.get("ok"))
     return ConnectorReport(
         name="cloudflare_ai_search",
         configured=client.enabled,
-        healthy=bool(diagnostics.get("ok")),
-        authenticated=client.enabled,
-        capabilities=("semantic_search",) if client.enabled else (),
+        healthy=healthy,
+        authenticated=client.enabled and healthy,
+        capabilities=("semantic_search", "repository_memory") if client.enabled else (),
         rate_limit=None,
         diagnostics=diagnostics,
-        error=None if client.enabled else diagnostics.get("reason"),
+        error=None if healthy else str(diagnostics.get("reason") or "AI Search health check failed."),
     )
