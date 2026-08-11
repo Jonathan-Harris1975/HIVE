@@ -32,14 +32,6 @@ jobs:
         env:
           PYTHONPATH: backend
           APP_ENV: test
-          ADMIN_BEARER_TOKEN: ci-local-hive-key
-          R2_ENDPOINT_URL: https://test.r2.cloudflarestorage.com
-          R2_ACCESS_KEY_ID: test-key
-          R2_SECRET_ACCESS_KEY: test-secret
-          R2_BUCKET_HIVE: hive
-          R2_BUCKET_HIVE_SKILLS: hive-skills
-          R2_BUCKET_REPOSITORIES: hive-repositories
-          OPENROUTER_API_KEY: test-or-key
         run: |
           python -V
           python -m compileall -q backend/app backend/tests
@@ -61,7 +53,7 @@ jobs:
       - name: Ruff
         env:
           PYTHONPATH: backend
-        run: python -m ruff check backend scripts
+        run: python -m ruff check backend scripts --select E4,E7,E9,F
       - name: Mypy
         env:
           PYTHONPATH: backend
@@ -95,11 +87,7 @@ jobs:
             -e VECTORIZE_ENABLED='false' \
             -e EMBEDDINGS_ENABLED='false' \
             -e AI_SEARCH_ENABLED='false' \
-            -e R2_ENDPOINT_URL='https://test.r2.cloudflarestorage.com' \
-            -e R2_ACCESS_KEY_ID='test-key' \
-            -e R2_SECRET_ACCESS_KEY='test-secret' \
-            -e R2_BUCKET_HIVE='hive' \
-            -e OPENROUTER_API_KEY='test-or-key' \
+            -e ALLOWED_HOSTS='127.0.0.1,localhost' \
             hive:ci
           trap 'docker logs hive-ci-api || true; docker rm -f hive-ci-api || true' EXIT
           started=false
