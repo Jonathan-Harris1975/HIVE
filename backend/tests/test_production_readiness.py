@@ -63,19 +63,14 @@ def test_production_readiness_requires_dedicated_ops_event_token() -> None:
     assert any(item.name == "ops_event_ingest" for item in report.errors)
 
 
-def test_production_readiness_accepts_r2_worker_monitoring() -> None:
+def test_production_readiness_accepts_koyeb_worker_monitoring_and_wake_control() -> None:
     settings = _production_settings(
         REPO_HEALTH_ENABLED=True,
-        MAST_MONITOR_MODE="r2",
-        R2_BUCKET_META_SYSTEM="metasystem",
-        R2_MULTI_BUCKET_READ_ENABLED=True,
-        R2_MULTI_BUCKET_WRITE_ENABLED=True,
-        R2_ACCOUNT_ID="0" * 32,
-        R2_ACCESS_KEY_ID="write-key",
-        R2_SECRET_ACCESS_KEY="write-secret",
-        R2_BUCKET_UPLOADS="hive",
-        R2_READ_ACCESS_KEY_ID="read-key",
-        R2_READ_SECRET_ACCESS_KEY="read-secret",
+        MAST_MONITOR_MODE="koyeb",
+        KOYEB_TOKEN="k" * 48,
+        KOYEB_SERVICE_ID_AIMS="aims-service-id",
+        KOYEB_SERVICE_ID_RAMS="rams-service-id",
+        KOYEB_SERVICE_ID_MAST="mast-service-id",
         RAMS_READINESS_BEARER_TOKEN="r" * 48,
     )
 
@@ -83,6 +78,7 @@ def test_production_readiness_accepts_r2_worker_monitoring() -> None:
 
     assert report.ready is True
     assert next(item for item in report.checks if item.name == "mast_monitoring").status == "ok"
+    assert next(item for item in report.checks if item.name == "service_wake_control").status == "ok"
 
 
 def test_production_readiness_requires_rams_readiness_auth_when_enabled() -> None:
