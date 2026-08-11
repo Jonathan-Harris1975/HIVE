@@ -14,6 +14,7 @@ from app.core.config import Settings
 from app.core.production import build_readiness_report
 from app.core.version import BUILD_STAGE
 from app.storage.r2 import R2Storage
+from app.services.koyeb_control import service_status as koyeb_service_status
 
 logger = logging.getLogger("uvicorn.error.hive.repo_health")
 
@@ -379,6 +380,8 @@ def _mast_monitor_mode(settings: Settings, target: ProbeTarget) -> str:
     mode = settings.mast_monitor_mode
     if mode != "auto":
         return mode
+    if settings.koyeb_token.strip() and settings.koyeb_service_id_mast.strip():
+        return "koyeb"
     if target.health_url or target.operational_url:
         return "http"
     lane = settings.internal_r2_lane(settings.mast_state_r2_lane)
@@ -512,6 +515,31 @@ async def _probe_mast_worker(
     target: ProbeTarget,
 ) -> dict[str, Any]:
     mode = _mast_monitor_mode(settings, target)
+    if mode == "koyeb":
+        started = time.perf_counter()
+        status = await koyeb_service_status(
+            client, token=settings.koyeb_token, service_id=settings.koyeb_service_id_mast
+        )
+        probe = {
+            "status": status.get("status", "degraded"),
+            "configured": bool(status.get("configured")),
+            "http_status": status.get("http_status"),
+            "latency_ms": round((time.perf_counter() - started) * 1000),
+            "checked_at": _now_iso(),
+            "detail": status.get("detail") or "Koyeb Worker status checked.",
+            "payload": {"provider_status": status.get("provider_status"), "source": "koyeb_api"},
+        }
+        item = {
+            "repo": target.repo,
+            "label": target.label,
+            "category": target.category,
+            "description": target.description,
+            "status": probe["status"],
+            "detail": probe["detail"],
+            "liveness": probe,
+            "operational": probe,
+        }
+        return _with_readiness(item)
     if mode == "http":
         return await _probe_target(client, target)
     if mode == "disabled":

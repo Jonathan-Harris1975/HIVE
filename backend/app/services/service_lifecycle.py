@@ -1,31 +1,21 @@
-"""Transparent wake-up orchestration for lifecycle-aware services (AIMS, RAMS).
+"""Transparent Koyeb wake-up orchestration for lifecycle-aware services.
 
-When a user (or an internal HIVE workflow) needs functionality from a service that is
-currently in Standby, HIVE should not surface an error and stop - it should:
-
-  1. Ask MAST to resume the service (MAST owns the Koyeb power management call).
-  2. Poll the service's own health endpoint until it reports ready.
-  3. Let the caller proceed with the original request once ready.
-
-MAST's on-demand resume endpoint is idempotent (a resume request against an
-already-starting/online service is a no-op that returns the current ledger entry), so
-this module can call it unconditionally rather than trying to out-guess MAST's state.
+HIVE controls AIMS and RAMS directly through Koyeb's service API, then polls each
+service's own health endpoint until it is ready. MAST remains the independent
+scheduler Worker and is not used as an HTTP/R2 command relay.
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 import time
-import uuid
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from typing import Any, Awaitable, Callable
 
 import httpx
 
 from app.core.config import Settings
-from app.storage.r2 import R2Storage
+from app.services.koyeb_control import KoyebControlError, service_action
 
 ProgressCallback = Callable[[dict[str, Any]], Awaitable[None]] | None
 
@@ -53,7 +43,7 @@ class ServiceWakeTimeout(ServiceLifecycleError):
         self.attempts = attempts
 
 
-class MastResumeError(ServiceLifecycleError):
+class ServiceResumeError(ServiceLifecycleError):
     pass
 
 
@@ -64,7 +54,7 @@ class WakeResult:
     already_online: bool
     attempts: list[dict[str, Any]] = field(default_factory=list)
     elapsed_seconds: float = 0.0
-    mast_resume_response: dict[str, Any] | None = None
+    mast_resume_response: dict[str, Any] | None = None  # backwards-compatible payload field
 
 
 def _health_url_for(settings: Settings, repo: str) -> str:
@@ -72,6 +62,14 @@ def _health_url_for(settings: Settings, repo: str) -> str:
         return (settings.aims_health_url or "").strip()
     if repo.upper() == "RAMS":
         return (settings.rams_health_url or "").strip()
+    raise UnknownServiceError(f"Unknown service: {repo}")
+
+
+def _service_id_for(settings: Settings, repo: str) -> str:
+    if repo.upper() == "AIMS":
+        return settings.koyeb_service_id_aims.strip()
+    if repo.upper() == "RAMS":
+        return settings.koyeb_service_id_rams.strip()
     raise UnknownServiceError(f"Unknown service: {repo}")
 
 
@@ -88,155 +86,26 @@ async def _probe_healthy(client: httpx.AsyncClient, url: str) -> tuple[bool, dic
         return False, {"ok": False, "reason": exc.__class__.__name__, "latency_ms": latency_ms}
 
 
-async def _queue_mast_resume_via_r2(settings: Settings, repo: str) -> dict[str, Any]:
-    """Queue a wake request for the MAST Worker through its hidden R2 control object.
-
-    MAST is normally deployed as a Koyeb Worker and therefore has no public HTTP
-    ingress.  The Worker already polls its durable operator-control object on each
-    scheduler tick, so this channel keeps power-management ownership in MAST without
-    exposing the internal ``meta_system`` bucket in HIVE-UI.
-    """
-    service_key = MANAGED_SERVICES.get(repo.upper())
-    if not service_key:
-        raise UnknownServiceError(f"Unknown service: {repo}")
-
-    lane = settings.internal_r2_lane(settings.mast_state_r2_lane)
-    key = settings.mast_operator_control_object_key.strip().lstrip("/")
-    if not lane or not lane.get("bucket") or not lane.get("writable") or not key:
-        raise MastResumeError(
-            "MAST Worker control is not writable. Configure the hidden MAST R2 lane "
-            "and multi-bucket write credentials; MAST_BASE_URL is only needed for an HTTP deployment."
-        )
-
-    storage = R2Storage(settings)
-    bucket = str(lane["bucket"])
-    payload: dict[str, Any] = {}
-    try:
-        existing = await asyncio.to_thread(
-            storage.read_object,
-            key,
-            settings.mast_state_max_bytes,
-            bucket=bucket,
-            public_base_url=lane.get("public_base_url"),
-            read_only=False,
-        )
-        decoded = json.loads(existing.content.decode("utf-8"))
-        if isinstance(decoded, dict):
-            payload = decoded
-    except FileNotFoundError:
-        payload = {}
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        payload = {}
-    except Exception as exc:
-        raise MastResumeError(
-            f"Could not read MAST Worker control state: {exc.__class__.__name__}."
-        ) from exc
-
-    now = datetime.now(UTC)
-    commands = [item for item in payload.get("commands", []) if isinstance(item, dict)]
-    # Avoid stacking duplicate requests while the Worker is between scheduler ticks.
-    for item in reversed(commands[-20:]):
-        if item.get("type") != "service.resume" or item.get("service") != service_key:
-            continue
-        requested_at = str(item.get("requestedAt") or "")
-        try:
-            requested = datetime.fromisoformat(requested_at.replace("Z", "+00:00"))
-            if requested.tzinfo is None:
-                requested = requested.replace(tzinfo=UTC)
-            if (now - requested.astimezone(UTC)).total_seconds() < 60:
-                return {
-                    "ok": True,
-                    "service": service_key,
-                    "idempotent": True,
-                    "queued": True,
-                    "transport": "r2_worker_control",
-                    "command_id": item.get("id"),
-                }
-        except ValueError:
-            pass
-
-    command_id = uuid.uuid4().hex
-    commands.append({
-        "id": command_id,
-        "type": "service.resume",
-        "service": service_key,
-        "reason": "hive-user-request",
-        "source": "HIVE",
-        "requestedAt": now.isoformat(),
-    })
-    payload["commands"] = commands[-50:]
-    payload.setdefault("schedulerEnabled", True)
-    payload.setdefault("maintenanceMode", False)
-    payload["updatedAt"] = now.isoformat()
-
-    body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-    if len(body) > settings.mast_state_max_bytes:
-        raise MastResumeError("MAST Worker control object would exceed the configured size limit.")
-    try:
-        await asyncio.to_thread(
-            storage.client(read_only=False).put_object,
-            Bucket=bucket,
-            Key=key,
-            Body=body,
-            ContentType="application/json",
-            CacheControl="no-store",
-        )
-    except Exception as exc:
-        raise MastResumeError(
-            f"Could not queue MAST Worker resume request: {exc.__class__.__name__}."
-        ) from exc
-
-    return {
-        "ok": True,
-        "service": service_key,
-        "idempotent": False,
-        "queued": True,
-        "transport": "r2_worker_control",
-        "command_id": command_id,
-    }
-
-
-async def request_mast_resume(
+async def request_service_resume(
     client: httpx.AsyncClient, settings: Settings, repo: str
 ) -> dict[str, Any]:
-    """Ask MAST to resume a managed service.
-
-    Worker deployments use R2 operator-control commands.  The legacy HTTP route is
-    retained for deployments that deliberately expose MAST as a web service.
-    """
+    """Resume AIMS/RAMS directly through Koyeb's control plane."""
     service_key = MANAGED_SERVICES.get(repo.upper())
     if not service_key:
         raise UnknownServiceError(f"Unknown service: {repo}")
-
-    base_url = (settings.mast_base_url or "").strip().rstrip("/")
-    if not base_url:
-        return await _queue_mast_resume_via_r2(settings, repo)
-
-    headers = {"Accept": "application/json"}
-    if settings.mast_admin_token:
-        headers["Authorization"] = f"Bearer {settings.mast_admin_token}"
-
-    try:
-        response = await client.post(
-            f"{base_url}/services/{service_key}/resume",
-            headers=headers,
-            json={"reason": "hive-user-request"},
+    service_id = _service_id_for(settings, repo)
+    if not settings.koyeb_token.strip() or not service_id:
+        raise ServiceResumeError(
+            f"Koyeb wake control for {repo} is not configured. Set KOYEB_TOKEN and "
+            f"KOYEB_SERVICE_ID_{repo.upper()} in HIVE."
         )
-    except httpx.HTTPError as exc:
-        raise MastResumeError(f"Could not reach MAST to request resume: {exc.__class__.__name__}.") from exc
-
     try:
-        response_payload = response.json()
-    except ValueError:
-        response_payload = {"ok": response.status_code < 400}
-
-    if response.status_code >= 500 or (response.status_code >= 400 and not response_payload.get("idempotent")):
-        raise MastResumeError(
-            f"MAST refused the resume request for {repo} (HTTP {response.status_code}): "
-            f"{response_payload.get('error') or response_payload.get('detail') or 'unknown error'}."
+        result = await service_action(
+            client, token=settings.koyeb_token, service_id=service_id, action="resume"
         )
-
-    return response_payload
+    except KoyebControlError as exc:
+        raise ServiceResumeError(str(exc)) from exc
+    return {**result, "service": service_key, "transport": "koyeb_api"}
 
 
 async def ensure_service_ready(
@@ -252,7 +121,7 @@ async def ensure_service_ready(
 
     Transparent to the caller: this is the single entry point other HIVE code should
     use before proxying a request to a lifecycle-aware service. Raises
-    `ServiceWakeTimeout` or `MastResumeError` on failure; the caller decides how to
+    `ServiceWakeTimeout` or `ServiceResumeError` on failure; the caller decides how to
     surface that (e.g. HTTP 503 with a retry hint).
     """
     repo_upper = repo.upper()
@@ -281,8 +150,8 @@ async def ensure_service_ready(
 
         await emit({"phase": "requesting-resume", "repo": repo_upper})
         try:
-            mast_response = await request_mast_resume(active_client, settings, repo_upper)
-        except MastResumeError as exc:
+            mast_response = await request_service_resume(active_client, settings, repo_upper)
+        except ServiceResumeError as exc:
             await emit({"phase": "resume-request-failed", "repo": repo_upper, "error": str(exc)})
             raise
 
