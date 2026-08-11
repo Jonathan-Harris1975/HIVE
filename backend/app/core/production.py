@@ -128,6 +128,7 @@ def build_readiness_report(settings: Settings) -> ReadinessReport:
     mast_mode = settings.mast_monitor_mode.strip().lower()
     mast_monitor_ready = (
         mast_mode == "disabled"
+        or (mast_mode == "koyeb" and bool(settings.koyeb_token.strip()) and bool(settings.koyeb_service_id_mast.strip()))
         or (mast_mode == "http" and bool(settings.mast_health_url.strip()))
         or (
             mast_mode == "r2"
@@ -141,25 +142,23 @@ def build_readiness_report(settings: Settings) -> ReadinessReport:
             "mast_monitoring",
             mast_monitor_ready,
             "MAST monitoring contract is configured.",
-            "MAST_MONITOR_MODE must be disabled, a configured HTTP probe, or an R2 heartbeat with scoped read credentials.",
+            "MAST_MONITOR_MODE must be disabled, a configured Koyeb service probe, HTTP probe, or R2 heartbeat fallback.",
             required=production and settings.repo_health_enabled,
         )
     )
 
 
-    mast_lane = settings.internal_r2_lane(settings.mast_state_r2_lane)
-    mast_wake_ready = bool(settings.mast_base_url.strip()) or bool(
-        mast_lane
-        and mast_lane.get("bucket")
-        and mast_lane.get("writable")
-        and settings.mast_operator_control_object_key.strip()
+    koyeb_wake_ready = bool(
+        settings.koyeb_token.strip()
+        and settings.koyeb_service_id_aims.strip()
+        and settings.koyeb_service_id_rams.strip()
     )
     checks.append(
         _check(
-            "mast_wake_control",
-            mast_wake_ready,
-            "HIVE can request AIMS/RAMS wake-ups through MAST.",
-            "Configure MAST_BASE_URL for an HTTP MAST deployment, or enable hidden R2 multi-bucket writes to the MAST operator-control object for Worker mode.",
+            "service_wake_control",
+            koyeb_wake_ready,
+            "HIVE can resume AIMS/RAMS directly through Koyeb.",
+            "Configure KOYEB_TOKEN plus KOYEB_SERVICE_ID_AIMS and KOYEB_SERVICE_ID_RAMS in HIVE.",
             required=production and settings.repo_health_enabled,
         )
     )

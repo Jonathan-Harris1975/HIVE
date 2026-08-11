@@ -132,7 +132,7 @@ class Settings(BaseSettings):
 
     mast_health_url: str = Field("", validation_alias=AliasChoices("MAST_HEALTH_URL"))
     mast_status_url: str = Field("", validation_alias=AliasChoices("MAST_STATUS_URL"))
-    mast_monitor_mode: Literal["auto", "r2", "http", "disabled"] = Field(
+    mast_monitor_mode: Literal["auto", "koyeb", "r2", "http", "disabled"] = Field(
         "auto", validation_alias=AliasChoices("MAST_MONITOR_MODE")
     )
     mast_state_r2_lane: str = Field(
@@ -165,10 +165,14 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("MAST_STATE_MAX_BYTES"),
     )
 
-    # On-demand wake-up transport. MAST normally runs as a Koyeb Worker, so HIVE
-    # writes a bounded command into MAST's hidden R2 operator-control object.
-    # MAST_BASE_URL remains an optional compatibility path for deployments that expose
-    # MAST as an HTTP service; it is intentionally not required for Worker mode.
+    # Koyeb control-plane integration. HIVE talks to Koyeb directly for on-demand
+    # AIMS/RAMS wake requests and for MAST Worker status. This avoids treating the
+    # Koyeb Worker as an HTTP service or using R2 as a command bus.
+    koyeb_token: str = Field("", validation_alias=AliasChoices("KOYEB_TOKEN"))
+    koyeb_service_id_aims: str = Field("", validation_alias=AliasChoices("KOYEB_SERVICE_ID_AIMS"))
+    koyeb_service_id_rams: str = Field("", validation_alias=AliasChoices("KOYEB_SERVICE_ID_RAMS"))
+    koyeb_service_id_mast: str = Field("", validation_alias=AliasChoices("KOYEB_SERVICE_ID_MAST"))
+    koyeb_service_id_hive: str = Field("", validation_alias=AliasChoices("KOYEB_SERVICE_ID_HIVE"))
     mast_base_url: str = Field("", validation_alias=AliasChoices("MAST_BASE_URL"))
     mast_admin_token: str = Field(
         "", validation_alias=AliasChoices("MAST_ADMIN_TOKEN", "CRON_ADMIN_TOKEN")
