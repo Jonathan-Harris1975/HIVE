@@ -19,41 +19,34 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
-
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
           cache: "pip"
-
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-
-      - name: Run tests
+          python -m pip install -r requirements-dev.txt
+      - name: Run tests with coverage
         env:
-          R2_ENDPOINT: "https://test.r2.cloudflarestorage.com"
-          R2_ACCESS_KEY_ID: "test-key"
-          R2_SECRET_ACCESS_KEY: "test-secret"
-          R2_BUCKET_HIVE_SKILLS: "hive-skills"
-          R2_PUBLIC_BASE_URL_HIVE_SKILLS: "https://pub-da50a6512f164566955a3076a1c795ef.r2.dev"
-          OPENROUTER_API_KEY: "test-or-key"
-          OPENROUTER_PRIMARY_MODEL: "qwen/qwen3.7-plus"
-          OPENROUTER_SECONDARY_MODEL: "openai/gpt-5.4-mini"
-          OPENROUTER_TRIAGE_MODEL: "openai/gpt-5.4-nano"
-          RMS_WEBSITE_REPO_PATH: "/tmp/fake-website"
-          RMS_AIMS_REPO_PATH: "/tmp/fake-aims"
-          RMS_DRY_RUN: "true"
-          RMS_LIVE_WRITE_ENABLED: "false"
+          PYTHONPATH: backend
+          APP_ENV: test
+          ADMIN_BEARER_TOKEN: ci-local-hive-key
+          R2_ENDPOINT_URL: https://test.r2.cloudflarestorage.com
+          R2_ACCESS_KEY_ID: test-key
+          R2_SECRET_ACCESS_KEY: test-secret
+          R2_BUCKET_HIVE: hive
+          R2_BUCKET_HIVE_SKILLS: hive-skills
+          R2_BUCKET_REPOSITORIES: hive-repositories
+          OPENROUTER_API_KEY: test-or-key
         run: |
-          mkdir -p /tmp/fake-website /tmp/fake-aims
           python -V
-          python -m compileall -q repo_mgmt tests
-          python -m pytest tests/ -q --tb=short
+          python -m compileall -q backend/app backend/tests
+          python -m pytest backend/tests -q --tb=short --cov=app --cov-report=term-missing --cov-fail-under=72
 
   lint:
-    name: Lint and type check
+    name: Lint, type and security checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -61,14 +54,22 @@ jobs:
         with:
           python-version: "3.11"
           cache: "pip"
-      - name: Install linters
+      - name: Install tooling
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-      - name: Ruff check
-        run: python -m ruff check .
+          python -m pip install -r requirements-dev.txt
+      - name: Ruff
+        env:
+          PYTHONPATH: backend
+        run: python -m ruff check backend scripts
       - name: Mypy
-        run: python -m mypy repo_mgmt/ --no-incremental --show-error-codes
+        env:
+          PYTHONPATH: backend
+        run: python -m mypy backend/app --no-incremental --show-error-codes
+      - name: Bandit
+        run: python -m bandit -q -r backend/app -ll
+      - name: Dependency audit
+        run: python -m pip_audit -r requirements.txt
 
   docker:
     name: Docker runtime and API smoke
@@ -76,78 +77,54 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Build Docker image
-        run: docker build --target runtime -t rams:ci .
-      - name: Verify runtime binaries
+        run: docker build --target runtime -t hive:ci .
+      - name: Verify runtime engineering binaries
         run: |
-          docker run --rm rams:ci python --version
-          docker run --rm rams:ci git --version
-          docker run --rm rams:ci node --version
-          docker run --rm rams:ci npm --version
-          docker run --rm rams:ci node -e "process.exit(Number(process.versions.node.split('.')[0]) >= 20 ? 0 : 1)"
-      - name: Boot API and probe health/readiness shape
+          docker run --rm hive:ci python --version
+          docker run --rm hive:ci git --version
+          docker run --rm hive:ci node --version
+          docker run --rm hive:ci npm --version
+          docker run --rm hive:ci node -e "process.exit(Number(process.versions.node.split('.')[0]) >= 20 ? 0 : 1)"
+      - name: Boot API and probe HIVE health
         run: |
-          docker run -d --name rams-ci-api -p 8000:8000 \
-            -e R2_ENDPOINT='https://test.r2.cloudflarestorage.com' \
+          docker run -d --name hive-ci-api -p 8000:8080 \
+            -e APP_ENV='test' \
+            -e ADMIN_BEARER_TOKEN='ci-local-hive-key' \
+            -e DATABASE_ENABLED='false' \
+            -e D1_ENABLED='false' \
+            -e VECTORIZE_ENABLED='false' \
+            -e EMBEDDINGS_ENABLED='false' \
+            -e AI_SEARCH_ENABLED='false' \
+            -e R2_ENDPOINT_URL='https://test.r2.cloudflarestorage.com' \
             -e R2_ACCESS_KEY_ID='test-key' \
             -e R2_SECRET_ACCESS_KEY='test-secret' \
-            -e R2_BUCKET_HIVE_SKILLS='hive-skills' \
-            -e R2_PUBLIC_BASE_URL_HIVE_SKILLS='https://pub-da50a6512f164566955a3076a1c795ef.r2.dev' \
+            -e R2_BUCKET_HIVE='hive' \
             -e OPENROUTER_API_KEY='test-or-key' \
-            -e OPENROUTER_PRIMARY_MODEL='qwen/qwen3.7-plus' \
-            -e OPENROUTER_SECONDARY_MODEL='openai/gpt-5.4-mini' \
-            -e OPENROUTER_TRIAGE_MODEL='openai/gpt-5.4-nano' \
-            -e RMS_AIMS_REPO_PATH='/tmp/fake-aims' \
-            -e RMS_WEBSITE_REPO_PATH='/tmp/fake-website' \
-            -e RMS_DRY_RUN='true' \
-            -e RMS_LIVE_WRITE_ENABLED='false' \
-            -e RMS_PUSH_ENABLED='false' \
-            -e RMS_CREATE_PR='false' \
-            -e RMS_API_KEY='ci-local-rams-key' \
-            rams:ci
-          trap 'docker logs rams-ci-api || true; docker rm -f rams-ci-api || true' EXIT
-          api_started=false
+            hive:ci
+          trap 'docker logs hive-ci-api || true; docker rm -f hive-ci-api || true' EXIT
+          started=false
           for i in {1..30}; do
-            if curl -fsS http://127.0.0.1:8000/health >/tmp/startup-health.json; then
-              api_started=true
+            if curl -fsS http://127.0.0.1:8000/livez >/tmp/livez.json; then
+              started=true
               break
             fi
             sleep 1
           done
-          test "$api_started" = "true"
-
-          curl -fsS http://127.0.0.1:8000/livez | tee /tmp/health.json
-          readiness_http_status="$(curl -sS \
-            -o /tmp/readiness.json \
-            -w '%{http_code}' \
-            -H 'Authorization: Bearer ci-local-rams-key' \
-            http://127.0.0.1:8000/readyz)"
-          test "$readiness_http_status" = "503"
-          cat /tmp/readiness.json
-          curl -fsS -H 'Authorization: Bearer ci-local-rams-key' http://127.0.0.1:8000/ops/warmup | tee /tmp/warmup.json
-          python - <<'PY'
+          test "$started" = "true"
+          curl -fsS http://127.0.0.1:8000/health | tee /tmp/health.json
+          curl -fsS -H 'Authorization: Bearer ci-local-hive-key' http://127.0.0.1:8000/v1/system/runtime-stats | tee /tmp/runtime.json
+          python - <<'PY2'
           import json
           from pathlib import Path
           health = json.loads(Path('/tmp/health.json').read_text())
-          readiness = json.loads(Path('/tmp/readiness.json').read_text())
-          warmup = json.loads(Path('/tmp/warmup.json').read_text())
-          assert health['status'] == 'ok'
-          assert health['pipelines'] == {
-              'website': 'idle',
-              'seo-aeo-geo': 'idle',
-              'mobile-ux': 'idle',
-              'on-brand': 'idle',
-              'content': 'idle',
-          }
-          assert health['lifecycle']['state'] in {'starting', 'online', 'busy', 'maintenance'}
-          assert health['lifecycle']['maintenance']['on'] is False
-          deps = readiness['dependencies']
-          assert deps['r2_configured'] is True
-          assert deps['r2_verified'] is False
-          assert deps['validation_runtime_ready'] is True
-          assert readiness['status'] == 'degraded'
-          assert warmup['status'] == 'warm'
-          assert 'OpenRouter requests' in warmup['excludedWork']
-          PY
+          runtime = json.loads(Path('/tmp/runtime.json').read_text())
+          assert health['ok'] is True
+          assert health['app'] == 'HIVE'
+          assert runtime['ok'] is True
+          assert 'repository_manager' in runtime
+          assert 'model_registry' in runtime
+          assert 'providers' in runtime
+          PY2
 
   notify_failure:
     name: Notify central operations on CI failure
@@ -156,18 +133,17 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Send redacted HIVE operational event
         env:
           OPS_ALERT_WEBHOOK_URL: ${{ secrets.OPS_ALERT_WEBHOOK_URL }}
           OPS_ALERT_WEBHOOK_TOKEN: ${{ secrets.OPS_ALERT_WEBHOOK_TOKEN }}
         run: >-
           python scripts/ops_notify.py
-          --service RAMS
+          --service HIVE
           --event-type ci_failed
-          --title "RAMS GitHub Actions failed"
-          --summary "The governed CI workflow failed. Open the linked run for the failing job and logs."
+          --title "HIVE GitHub Actions failed"
+          --summary "The HIVE CI workflow failed. Open the linked run for the failing job and logs."
           --event-id "github:${{ github.repository }}:${{ github.run_id }}:${{ github.run_attempt }}"
           --release-id "${{ github.sha }}"
           --url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-
