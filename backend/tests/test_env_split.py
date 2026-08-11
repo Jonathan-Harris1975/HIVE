@@ -29,6 +29,7 @@ def test_koyeb_secrets_file_is_secrets_only() -> None:
         "D1_DATABASE_ID",
         "DATABASE_PASSWORD",
         "EMBEDDINGS_API_TOKEN",
+        "GITHUB_TOKEN",
         "KOYEB_TOKEN",
         "KOYEB_SERVICE_ID_AIMS",
         "KOYEB_SERVICE_ID_RAMS",
