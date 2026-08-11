@@ -14,7 +14,7 @@ RUN python -m pip install --upgrade pip \
 
 # HIVE's repository QA executes real repository tooling. Keep a current Node
 # runtime available without relying on Debian Bookworm's older nodejs package.
-FROM node:22-bookworm-slim AS node_runtime
+FROM node:26-bookworm-slim AS node_runtime
 
 FROM python:3.14.6-slim-bookworm AS runtime
 
