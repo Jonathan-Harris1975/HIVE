@@ -53,7 +53,6 @@ def _persist_manifest_to_r2(manifest_payload: dict, settings: Settings) -> bool:
     repository_id = manifest_payload.get("repository_id", "unknown")
     key = f"manifests/{repository_id}.json"
     try:
-        import io
         import tempfile
         from pathlib import Path
 
