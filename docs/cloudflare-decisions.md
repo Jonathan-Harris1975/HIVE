@@ -96,7 +96,7 @@ Rotate Cloudflare API tokens after accidental exposure. Update the Koyeb secret,
 
 ## v1.6 R2 ecosystem lanes
 
-The following public, non-secret R2 lane envs are recognised by HIVE:
+The following non-secret R2 lane envs are recognised by HIVE. Bucket names are always safe configuration; public base URLs are only used for lanes intentionally published for anonymous delivery. `uploads` (`hive`), `repositories` (`hive-repositories`) and `meta_system` (`metasystem`) are private and never advertise public URLs:
 
 - `R2_BUCKET_AUDITS` / `R2_PUBLIC_BASE_URL_AUDITS`
 - `R2_BUCKET_BLOG` / `R2_PUBLIC_BASE_URL_BLOG`
@@ -111,7 +111,7 @@ The following public, non-secret R2 lane envs are recognised by HIVE:
 - `R2_BUCKET_TRANSCRIPTS` / `R2_PUBLIC_BASE_URL_TRANSCRIPT`
 - `R2_BUCKET_HIVE_SKILLS` / `R2_PUBLIC_BASE_URL_HIVE_SKILLS`
 
-Use `GET /v1/files/r2-lanes` to inspect the configured registry. Use `GET /v1/files/r2-lanes/public-url?lane=audits&key=...` to safely build a public URL. This build does not yet add multi-bucket write automation; that is deliberate to avoid accidental cross-bucket writes while HIVE is still on the free web service.
+Use `GET /v1/files/r2-lanes` to inspect the configured registry. Public-URL helpers return `null` for the private `uploads`, `repositories` and hidden `meta_system` lanes even if a stale public-base environment value is present. Public URL construction remains available only for explicitly public/temporary lanes such as published media or audits while their migration is still pending.
 
 
 ## v1.12 Cloudflare role
