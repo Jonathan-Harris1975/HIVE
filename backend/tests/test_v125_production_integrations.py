@@ -14,7 +14,6 @@ def _skills_settings(**overrides: object) -> Settings:
     values: dict[str, object] = {
         "APP_ENV": "test",
         "R2_BUCKET_HIVE_SKILLS": "hive-skills",
-        "R2_PUBLIC_BASE_URL_HIVE_SKILLS": "https://skills.example.invalid",
         "SKILL_REGISTRY_FALLBACK_ENABLED": True,
     }
     values.update(overrides)
@@ -61,7 +60,7 @@ def test_skill_records_fall_back_to_governed_r2_search_documents(
 
     monkeypatch.setattr(
         skill_registry,
-        "_fetch_json",
+        "_read_skill_json",
         lambda *args, **kwargs: {
             "ok": True,
             "status_code": 200,
@@ -167,15 +166,16 @@ def test_chat_payload_injects_bounded_skill_content_with_provenance(
     assert context["skills"][0]["skill_id"] == "SK-001"
 
 
-def test_public_r2_urls_encode_safe_keys_and_reject_traversal() -> None:
+def test_private_r2_references_encode_safe_keys_and_reject_traversal() -> None:
     settings = _skills_settings()
 
     assert (
-        settings.public_url_for_r2_lane("hive_skills", "skills/My skill.json")
-        == "https://skills.example.invalid/skills/My%20skill.json"
+        settings.r2_reference_for_r2_lane("hive_skills", "skills/My skill.json")
+        == "r2://hive-skills/skills/My%20skill.json"
     )
-    assert settings.public_url_for_r2_lane("hive_skills", "../secret.txt") is None
-    assert settings.public_url_for_r2_lane("hive_skills", "%2e%2e/secret.txt") is None
+    assert settings.public_url_for_r2_lane("hive_skills", "skills/My skill.json") is None
+    assert settings.r2_reference_for_r2_lane("hive_skills", "../secret.txt") is None
+    assert settings.r2_reference_for_r2_lane("hive_skills", "%2e%2e/secret.txt") is None
 
 
 def test_production_readiness_accepts_required_r2_lanes_with_shared_write_credentials() -> None:
@@ -192,7 +192,6 @@ def test_production_readiness_accepts_required_r2_lanes_with_shared_write_creden
         CF_R2_SECRET_ACCESS_KEY="write-secret",
         CF_R2_BUCKET="uploads",
         R2_BUCKET_HIVE_SKILLS="hive-skills",
-        R2_PUBLIC_BASE_URL_HIVE_SKILLS="https://skills.example.invalid",
         R2_REQUIRED_READ_LANES="uploads,hive_skills",
     )
 
@@ -222,7 +221,6 @@ def test_dependency_readiness_probes_each_required_lane_and_skill_objects(
         R2_READ_ACCESS_KEY_ID="read-key",
         R2_READ_SECRET_ACCESS_KEY="read-secret",
         R2_BUCKET_HIVE_SKILLS="hive-skills",
-        R2_PUBLIC_BASE_URL_HIVE_SKILLS="https://skills.example.invalid",
         R2_REQUIRED_READ_LANES="uploads,hive_skills",
     )
     calls: list[tuple[str, str]] = []

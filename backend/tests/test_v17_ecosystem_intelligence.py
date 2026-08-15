@@ -3,11 +3,10 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.core.config import get_settings
 
 
 def _reset_settings(monkeypatch, tmp_path, **env):
-    from app.core.config import get_settings
-
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("APP_ENV", "test")
     monkeypatch.setenv("DATABASE_ENABLED", "true")
@@ -16,6 +15,7 @@ def _reset_settings(monkeypatch, tmp_path, **env):
     for key, value in env.items():
         monkeypatch.setenv(key, str(value))
     get_settings.cache_clear()
+    monkeypatch.setitem(app.dependency_overrides, get_settings, get_settings)
 
 
 def test_ecosystem_status_is_mast_friendly(monkeypatch, tmp_path) -> None:
@@ -23,7 +23,6 @@ def test_ecosystem_status_is_mast_friendly(monkeypatch, tmp_path) -> None:
         monkeypatch,
         tmp_path,
         R2_BUCKET_HIVE_SKILLS="hive-skills",
-        R2_PUBLIC_BASE_URL_HIVE_SKILLS="https://skills.example.test",
         SKILL_REGISTRY_FALLBACK_ENABLED=False,
         VECTORIZE_ENABLED="true",
         VECTORIZE_API_TOKEN="token",
@@ -48,7 +47,6 @@ def test_skills_list_and_search_return_safe_disabled_d1_response(monkeypatch, tm
         monkeypatch,
         tmp_path,
         R2_BUCKET_HIVE_SKILLS="hive-skills",
-        R2_PUBLIC_BASE_URL_HIVE_SKILLS="https://skills.example.test",
         SKILL_REGISTRY_FALLBACK_ENABLED=False,
     )
     client = TestClient(app)
@@ -58,10 +56,10 @@ def test_skills_list_and_search_return_safe_disabled_d1_response(monkeypatch, tm
 
     assert listed["ok"] is False
     assert listed["enabled"] is False
-    assert listed["manifest_hint"] == "https://skills.example.test/index/skills-manifest.json"
+    assert listed["manifest_hint"] == "r2://hive-skills/index/skills-manifest.json"
     assert searched["ok"] is False
     assert searched["enabled"] is False
-    assert searched["manifest_hint"] == "https://skills.example.test/index/skills-manifest.json"
+    assert searched["manifest_hint"] == "r2://hive-skills/index/skills-manifest.json"
 
 
 def test_ecosystem_search_requires_query(monkeypatch, tmp_path) -> None:
@@ -78,7 +76,6 @@ def test_r2_discovery_handles_unconfigured_storage_without_crashing(monkeypatch,
         monkeypatch,
         tmp_path,
         R2_BUCKET_AUDITS="audits",
-        R2_PUBLIC_BASE_URL_AUDITS="https://audits.example.test",
     )
     client = TestClient(app)
 

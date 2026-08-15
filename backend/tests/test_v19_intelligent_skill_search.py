@@ -62,7 +62,6 @@ def test_v19_skill_document_mapping_still_preserves_descriptor_url(monkeypatch, 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("APP_ENV", "test")
     monkeypatch.setenv("R2_BUCKET_HIVE_SKILLS", "hive-skills")
-    monkeypatch.setenv("R2_PUBLIC_BASE_URL_HIVE_SKILLS", "https://skills.example.test")
     get_settings.cache_clear()
     settings = get_settings()
 
@@ -85,4 +84,4 @@ def test_v19_skill_document_mapping_still_preserves_descriptor_url(monkeypatch, 
     })
 
     assert mapped["id"] == "skill:S902"
-    assert mapped["metadata"]["descriptor_url"] == "https://skills.example.test/skills/S902_podcast-seo.json"
+    assert mapped["metadata"]["descriptor_url"] == "r2://hive-skills/skills/S902_podcast-seo.json"

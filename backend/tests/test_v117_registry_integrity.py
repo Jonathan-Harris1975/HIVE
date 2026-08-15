@@ -5,8 +5,8 @@ from app.services import skill_registry as registry
 
 
 class _SettingsStub:
-    def public_url_for_r2_lane(self, lane: str, key: str) -> str:
-        base = "https://skills.example.test"
+    def r2_reference_for_r2_lane(self, lane: str, key: str) -> str:
+        base = "r2://hive-skills"
         return f"{base}/{key}" if key else base
 
 
@@ -20,14 +20,14 @@ def _valid_item(skill_id: str = "S194", slug: str = "podcast-seo") -> dict[str, 
         "source_type": "skill_descriptor",
         "source_id": skill_id,
         "title": slug,
-        "url": f"https://skills.example.test/skills/{skill_id}_{slug}.json",
+        "url": f"r2://hive-skills/skills/{skill_id}_{slug}.json",
         "metadata": {
             "skill_id": skill_id,
             "reference_prefix": skill_id,
             "slug": slug,
             "name": slug,
             "object_key": f"skills/{skill_id}_{slug}.json",
-            "descriptor_url": f"https://skills.example.test/skills/{skill_id}_{slug}.json",
+            "descriptor_url": f"r2://hive-skills/skills/{skill_id}_{slug}.json",
             "search_document_id": f"skill:{skill_id}",
             "priority_tier": "P0 - Foundation",
             "hive_lane": "SEO/AEO/GEO",

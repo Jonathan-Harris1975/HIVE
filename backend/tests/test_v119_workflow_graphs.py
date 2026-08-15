@@ -5,8 +5,9 @@ from app.services import workflow_graphs
 
 
 class _SettingsStub:
-    def public_url_for_r2_lane(self, lane: str, key: str) -> str:
-        return "https://skills.example.test"
+    def r2_reference_for_r2_lane(self, lane: str, key: str) -> str:
+        base = "r2://hive-skills"
+        return f"{base}/{key}" if key else base
 
 
 SETTINGS = _SettingsStub()

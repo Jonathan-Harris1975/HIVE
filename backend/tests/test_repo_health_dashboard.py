@@ -108,21 +108,28 @@ async def test_repo_health_can_be_disabled() -> None:
 
 
 @pytest.mark.asyncio
-async def test_repo_health_monitors_mast_worker_from_r2_heartbeat() -> None:
+async def test_repo_health_monitors_mast_worker_from_r2_heartbeat(monkeypatch: pytest.MonkeyPatch) -> None:
     clear_repo_health_cache()
     heartbeat = datetime.now(UTC).isoformat()
+    payload = {
+        "version": 1,
+        "startedAt": heartbeat,
+        "lastTickAt": heartbeat,
+        "recentResults": [{"ok": True, "finishedAt": heartbeat}],
+    }
+
+    def fake_read_object(self, key, max_bytes, **kwargs):
+        from types import SimpleNamespace
+        import json
+
+        assert key == "state/mast/scheduler-state.json"
+        assert kwargs["bucket"] == "metasystem"
+        assert kwargs["public_base_url"] is None
+        return SimpleNamespace(content=json.dumps(payload).encode("utf-8"))
+
+    monkeypatch.setattr("app.services.repo_health.R2Storage.read_object", fake_read_object)
 
     def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.host == "meta.example":
-            return httpx.Response(
-                200,
-                json={
-                    "version": 1,
-                    "startedAt": heartbeat,
-                    "lastTickAt": heartbeat,
-                    "recentResults": [{"ok": True, "finishedAt": heartbeat}],
-                },
-            )
         return httpx.Response(200, json={"ok": True, "status": "ok"})
 
     settings = Settings(
@@ -134,7 +141,11 @@ async def test_repo_health_monitors_mast_worker_from_r2_heartbeat() -> None:
         mast_monitor_mode="r2",
         mast_state_r2_lane="meta_system",
         mast_state_object_key="state/mast/scheduler-state.json",
-        r2_public_base_url_meta_system="https://meta.example",
+        cf_r2_endpoint_url="https://example.r2.cloudflarestorage.com",
+        cf_r2_access_key_id="access",
+        cf_r2_secret_access_key="secret",
+        r2_bucket_meta_system="metasystem",
+        r2_public_base_url_meta_system="https://stale-meta.example",
         irs_health_url="https://images.example/health.json",
         website_health_url="https://website.example/health.json",
     )
@@ -144,18 +155,28 @@ async def test_repo_health_monitors_mast_worker_from_r2_heartbeat() -> None:
     mast = next(item for item in report["repos"] if item["repo"] == "MAST")
     assert mast["category"] == "background_worker"
     assert mast["status"] == "healthy"
-    assert mast["operational"]["payload"]["source"] == "r2_public"
+    assert mast["operational"]["payload"]["source"] == "r2_s3"
     assert mast["operational"]["payload"]["recent_failures"] == 0
 
 
 @pytest.mark.asyncio
-async def test_repo_health_marks_stopped_mast_heartbeat_down() -> None:
+async def test_repo_health_marks_stopped_mast_heartbeat_down(monkeypatch: pytest.MonkeyPatch) -> None:
     clear_repo_health_cache()
     heartbeat = (datetime.now(UTC) - timedelta(minutes=10)).isoformat()
+    payload = {"lastTickAt": heartbeat, "recentResults": []}
+
+    def fake_read_object(self, key, max_bytes, **kwargs):
+        from types import SimpleNamespace
+        import json
+
+        assert key == "state/mast/scheduler-state.json"
+        assert kwargs["bucket"] == "metasystem"
+        assert kwargs["public_base_url"] is None
+        return SimpleNamespace(content=json.dumps(payload).encode("utf-8"))
+
+    monkeypatch.setattr("app.services.repo_health.R2Storage.read_object", fake_read_object)
 
     def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.host == "meta.example":
-            return httpx.Response(200, json={"lastTickAt": heartbeat, "recentResults": []})
         return httpx.Response(200, json={"ok": True, "status": "ok"})
 
     settings = Settings(
@@ -164,13 +185,18 @@ async def test_repo_health_marks_stopped_mast_heartbeat_down() -> None:
         mast_monitor_mode="r2",
         mast_state_healthy_max_age_seconds=90,
         mast_state_down_max_age_seconds=300,
-        r2_public_base_url_meta_system="https://meta.example",
+        cf_r2_endpoint_url="https://example.r2.cloudflarestorage.com",
+        cf_r2_access_key_id="access",
+        cf_r2_secret_access_key="secret",
+        r2_bucket_meta_system="metasystem",
+        r2_public_base_url_meta_system="https://stale-meta.example",
     )
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         report = await build_repo_health_report(settings, client=client, force_refresh=True)
 
     mast = next(item for item in report["repos"] if item["repo"] == "MAST")
     assert mast["status"] == "down"
+    assert mast["operational"]["payload"]["source"] == "r2_s3"
     assert mast["operational"]["payload"]["heartbeat_age_seconds"] >= 600
 
 @pytest.mark.asyncio

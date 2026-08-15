@@ -4,8 +4,8 @@ from app.services import skill_registry as registry
 
 
 class _SettingsStub:
-    def public_url_for_r2_lane(self, lane: str, key: str) -> str:
-        base = "https://skills.example.test"
+    def r2_reference_for_r2_lane(self, lane: str, key: str) -> str:
+        base = "r2://hive-skills"
         return f"{base}/{key}" if key else base
 
 
@@ -20,7 +20,7 @@ def _sample_items():
             "source_type": "skill_descriptor",
             "source_id": "S194",
             "title": "podcast-seo",
-            "url": "https://skills.example.test/skills/S194_podcast-seo.json",
+            "url": "r2://hive-skills/skills/S194_podcast-seo.json",
             "metadata": {
                 "skill_id": "S194",
                 "reference_prefix": "S194",
@@ -32,7 +32,7 @@ def _sample_items():
                 "repos": ["HIVE", "AIMS", "RAMS", "Website"],
                 "tags": ["podcast-seo", "seo-aeo-geo", "repo-aims", "risk-low"],
                 "catalogue_category": "content-operations",
-                "descriptor_url": "https://skills.example.test/skills/S194_podcast-seo.json",
+                "descriptor_url": "r2://hive-skills/skills/S194_podcast-seo.json",
                 "indexable_text": "Podcast SEO fresh signal review for AIMS amplification and RSS wording.",
             },
         },
@@ -42,7 +42,7 @@ def _sample_items():
             "source_type": "skill_descriptor",
             "source_id": "S198",
             "title": "sentry-cli",
-            "url": "https://skills.example.test/skills/S198_sentry-cli.json",
+            "url": "r2://hive-skills/skills/S198_sentry-cli.json",
             "metadata": {
                 "skill_id": "S198",
                 "reference_prefix": "S198",
@@ -54,7 +54,7 @@ def _sample_items():
                 "repos": ["HIVE", "AIMS", "RAMS", "Website"],
                 "tags": ["ops-monitoring", "sentry-cli", "risk-medium"],
                 "catalogue_category": "risk-and-audit",
-                "descriptor_url": "https://skills.example.test/skills/S198_sentry-cli.json",
+                "descriptor_url": "r2://hive-skills/skills/S198_sentry-cli.json",
                 "indexable_text": "Monitoring and error diagnostics for production services.",
             },
         },

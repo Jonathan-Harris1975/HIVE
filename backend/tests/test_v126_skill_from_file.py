@@ -11,7 +11,6 @@ def test_skill_from_file_dry_run_requires_hive_skills_folder() -> None:
         R2_BUCKET_UPLOADS="uploads",
         R2_PUBLIC_BASE_URL_UPLOADS="https://uploads.example.invalid",
         R2_BUCKET_HIVE_SKILLS="hive-skills",
-        R2_PUBLIC_BASE_URL_HIVE_SKILLS="https://skills.example.invalid",
     )
 
     with pytest.raises(HTTPException) as raised:
@@ -39,7 +38,6 @@ def test_skill_from_file_dry_run_uses_reviewed_hive_skills_metadata() -> None:
     settings = Settings(
         APP_ENV="test",
         R2_BUCKET_HIVE_SKILLS="hive-skills",
-        R2_PUBLIC_BASE_URL_HIVE_SKILLS="https://skills.example.invalid",
     )
     result = skill_from_file(
         SkillFromFileRequest(
@@ -67,4 +65,5 @@ def test_skill_from_file_dry_run_uses_reviewed_hive_skills_metadata() -> None:
     assert metadata["hive_lane"] == "podcast-seo"
     assert metadata["repos"] == ["HIVE"]
     assert metadata["created_from_hive_skills_folder_file"] is True
+    assert metadata["descriptor_url"] == "r2://hive-skills/skills/S999_podcast-seo-review-helper.json"
     assert "uploaded-file" in metadata["tags"]

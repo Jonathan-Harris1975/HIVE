@@ -3,12 +3,11 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.core.config import get_settings
 from app.services.workflow_presets import get_workflow_preset
 
 
 def _reset_settings(monkeypatch, tmp_path, **env):
-    from app.core.config import get_settings
-
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("APP_ENV", "test")
     monkeypatch.setenv("DATABASE_ENABLED", "true")
@@ -16,6 +15,7 @@ def _reset_settings(monkeypatch, tmp_path, **env):
     for key, value in env.items():
         monkeypatch.setenv(key, str(value))
     get_settings.cache_clear()
+    monkeypatch.setitem(app.dependency_overrides, get_settings, get_settings)
 
 
 def test_v16_health_reports_workflow_and_r2_lane_flags(monkeypatch, tmp_path) -> None:
@@ -23,9 +23,7 @@ def test_v16_health_reports_workflow_and_r2_lane_flags(monkeypatch, tmp_path) ->
         monkeypatch,
         tmp_path,
         R2_BUCKET_AUDITS="audits",
-        R2_PUBLIC_BASE_URL_AUDITS="https://audits.example.test",
         R2_BUCKET_HIVE_SKILLS="hive-skills",
-        R2_PUBLIC_BASE_URL_HIVE_SKILLS="https://skills.example.test",
     )
     client = TestClient(app)
 
@@ -58,7 +56,6 @@ def test_r2_lanes_endpoint_uses_new_ecosystem_envs(monkeypatch, tmp_path) -> Non
         monkeypatch,
         tmp_path,
         R2_BUCKET_AUDITS="audits",
-        R2_PUBLIC_BASE_URL_AUDITS="https://pub-audits.example.test",
         R2_BUCKET_PODCAST="podcast",
         R2_PUBLIC_BASE_URL_PODCAST="https://podcast.example.test",
     )
@@ -69,14 +66,15 @@ def test_r2_lanes_endpoint_uses_new_ecosystem_envs(monkeypatch, tmp_path) -> Non
     assert body["ok"] is True
     lanes = {item["lane"]: item for item in body["lanes"]}
     assert lanes["audits"]["bucket"] == "audits"
-    assert lanes["audits"]["public_base_url"] == "https://pub-audits.example.test"
+    assert lanes["audits"]["public_base_url"] is None
     assert lanes["podcast"]["configured"] is True
 
-    url = client.get(
+    response = client.get(
         "/v1/files/r2-lanes/public-url",
         params={"lane": "audits", "key": "reports/latest.html"},
-    ).json()
-    assert url["public_url"] == "https://pub-audits.example.test/reports/latest.html"
+    )
+    assert response.status_code == 404
+    assert "unconfigured R2 lane/base URL" in response.json()["detail"]["message"]
 
 
 def test_chat_with_file_applies_audit_preset_and_returns_source_chunks(monkeypatch, tmp_path) -> None:

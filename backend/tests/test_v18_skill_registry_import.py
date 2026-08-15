@@ -13,10 +13,10 @@ def _reset_settings(monkeypatch, tmp_path, **env):
     monkeypatch.setenv("APP_ENV", "test")
     monkeypatch.setenv("D1_ENABLED", "false")
     monkeypatch.setenv("R2_BUCKET_HIVE_SKILLS", "hive-skills")
-    monkeypatch.setenv("R2_PUBLIC_BASE_URL_HIVE_SKILLS", "https://skills.example.test")
     for key, value in env.items():
         monkeypatch.setenv(key, str(value))
     get_settings.cache_clear()
+    monkeypatch.setitem(app.dependency_overrides, get_settings, get_settings)
 
 
 def test_skills_status_exposes_v18_manifest_hints(monkeypatch, tmp_path) -> None:
@@ -27,8 +27,8 @@ def test_skills_status_exposes_v18_manifest_hints(monkeypatch, tmp_path) -> None
 
     assert body["ok"] is True
     assert body["build_stage_hint"] == "v1.30-repository-qa-through-documentation"
-    assert body["search_documents_url"] == "https://skills.example.test/index/search-documents.json"
-    assert body["shared_manifest_url"] == "https://skills.example.test/manifests/shared-skill-pool-manifest.json"
+    assert body["search_documents_url"] == "r2://hive-skills/index/search-documents.json"
+    assert body["shared_manifest_url"] == "r2://hive-skills/manifests/shared-skill-pool-manifest.json"
 
 
 def test_import_manifest_is_safe_when_d1_disabled(monkeypatch, tmp_path) -> None:
@@ -40,7 +40,7 @@ def test_import_manifest_is_safe_when_d1_disabled(monkeypatch, tmp_path) -> None
     assert body["ok"] is False
     assert body["enabled"] is False
     assert body["error_code"] == "d1_disabled"
-    assert body["search_documents_hint"] == "https://skills.example.test/index/search-documents.json"
+    assert body["search_documents_hint"] == "r2://hive-skills/index/search-documents.json"
 
 
 def test_skill_document_mapping_preserves_categories(monkeypatch, tmp_path) -> None:
@@ -75,7 +75,7 @@ def test_skill_document_mapping_preserves_categories(monkeypatch, tmp_path) -> N
     assert meta["risk_level"] == "low"
     assert meta["catalogue_category"] == "content-operations"
     assert "RAMS" in meta["repos"]
-    assert meta["descriptor_url"] == "https://skills.example.test/skills/S999_seo-audit-helper.json"
+    assert meta["descriptor_url"] == "r2://hive-skills/skills/S999_seo-audit-helper.json"
 
 
 def test_extract_search_documents_and_stats() -> None:

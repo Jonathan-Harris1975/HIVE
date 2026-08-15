@@ -55,7 +55,9 @@ def test_settings_loads_repo_shared_env_file() -> None:
     assert settings.database_auto_init is True
     assert settings.default_model == "~google/gemini-flash-latest"
     assert settings.r2_bucket_repositories == "hive-repositories"
-    assert settings.r2_public_base_url_repositories == "https://pub-c48ec7e8f0b64be39259e09db7de0f94.r2.dev"
+    assert settings.r2_public_base_url_repositories == ""
+    assert settings.r2_public_base_url_audits == ""
+    assert settings.r2_public_base_url_hive_skills == ""
     assert settings.ai_search_enabled is True
     assert settings.ai_search_instance == "hive-repositories"
     assert settings.r2_lane("meta") is None
