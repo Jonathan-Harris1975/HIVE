@@ -39,6 +39,21 @@ def test_lane_registry_exposes_read_write_access() -> None:
     assert lanes["audits"]["access_mode"] == "read_write"
     assert lanes["audits"]["readable"] is True
 
+def test_matrix_private_hive_lanes_never_advertise_public_urls() -> None:
+    settings = _settings(
+        cf_r2_public_base_url="https://stale-uploads.example.test",
+        r2_bucket_repositories="hive-repositories",
+        r2_public_base_url_repositories="https://stale-repositories.example.test",
+        r2_bucket_meta_system="metasystem",
+        r2_public_base_url_meta_system="https://stale-meta.example.test",
+    )
+
+    lanes = {item["lane"]: item for item in settings.r2_all_lanes}
+    assert lanes["uploads"]["public_base_url"] is None
+    assert lanes["repositories"]["public_base_url"] is None
+    assert lanes["meta_system"]["public_base_url"] is None
+    assert R2Storage(settings).public_url_for_key("uploads/example.txt") is None
+
 
 def test_meta_system_lane_is_never_exposed_even_when_configured() -> None:
     # Regression test: the internal `metasystem` R2 bucket must never be
