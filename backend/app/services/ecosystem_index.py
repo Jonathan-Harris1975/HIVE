@@ -73,8 +73,10 @@ def ecosystem_status(settings: Settings) -> dict[str, object]:
             },
             "skills": {
                 "lane": "hive_skills",
-                "configured": bool(settings.public_url_for_r2_lane("hive_skills", "")),
-                "public_base_url": settings.public_url_for_r2_lane("hive_skills", ""),
+                "configured": bool((settings.internal_r2_lane("hive_skills") or {}).get("bucket")),
+                "access_mode": "private-r2",
+                "public_base_url": None,
+                "storage_uri": settings.r2_reference_for_r2_lane("hive_skills", ""),
             },
         },
         "recommended_mast_probe": "/v1/ecosystem/status",
@@ -139,8 +141,9 @@ def skills_search(*, settings: Settings, query: str | None = None, limit: int = 
         payload = search_ecosystem_metadata(settings=settings, query=q, lane="hive_skills", limit=limit)
     else:
         payload = recent_ecosystem_metadata(settings=settings, lane="hive_skills", limit=limit)
-    payload["lane_public_base_url"] = settings.public_url_for_r2_lane("hive_skills", "")
-    payload["manifest_hint"] = settings.public_url_for_r2_lane("hive_skills", "index/skills-manifest.json")
+    payload["lane_public_base_url"] = None
+    payload["lane_storage_uri"] = settings.r2_reference_for_r2_lane("hive_skills", "")
+    payload["manifest_hint"] = settings.r2_reference_for_r2_lane("hive_skills", "index/skills-manifest.json")
     payload["note"] = "v1.8 searches imported D1 skill metadata. Run POST /v1/skills/import-manifest to index the R2 shared skill pool."
     return payload
 
@@ -149,7 +152,10 @@ def _enrich_metadata_item(settings: Settings, item: dict[str, Any], query: str) 
     metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
     lane = normalise_lane(str(item.get("lane") or "")) or "unknown"
     object_key = metadata.get("object_key") or metadata.get("key") or item.get("source_id")
-    public_url = item.get("url") or (settings.public_url_for_r2_lane(lane, str(object_key)) if object_key else settings.public_url_for_r2_lane(lane, ""))
+    if lane == "hive_skills":
+        public_url = settings.r2_reference_for_r2_lane(lane, str(object_key)) if object_key else settings.r2_reference_for_r2_lane(lane, "")
+    else:
+        public_url = item.get("url") or (settings.public_url_for_r2_lane(lane, str(object_key)) if object_key else settings.public_url_for_r2_lane(lane, ""))
     haystack = " ".join(
         str(part or "")
         for part in [item.get("title"), item.get("source_type"), item.get("source_id"), item.get("url"), metadata]

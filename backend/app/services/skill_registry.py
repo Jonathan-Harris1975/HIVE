@@ -1,17 +1,17 @@
 from __future__ import annotations
 
+import json
 import time
-from urllib.parse import urlparse
 from collections import Counter, defaultdict
 from typing import Any
 
-import httpx
 
 from app.core.config import Settings
 from app.core.version import BUILD_STAGE
 from app.services.execution_adapters import execution_adapter_policy
 from app.services.catalogue_metadata import enrich_skill_item, enrich_skill_items
 from app.storage.d1 import D1MetadataStore
+from app.storage.r2 import R2Storage
 
 SKILL_LANE = "hive_skills"
 SEARCH_DOCUMENTS_KEY = "index/search-documents.json"
@@ -43,29 +43,31 @@ SKILL_SYNONYMS = {
 
 
 def skills_registry_status(settings: Settings) -> dict[str, object]:
-    """Return lightweight status for the R2-backed shared skill pool."""
+    """Return lightweight status for the private R2-backed shared skill pool."""
 
-    base = settings.public_url_for_r2_lane(SKILL_LANE, "")
+    lane = settings.internal_r2_lane(SKILL_LANE) or {}
+    storage_uri = settings.r2_reference_for_r2_lane(SKILL_LANE, "")
     d1 = D1MetadataStore(settings)
     count_payload = _d1_skill_counts(d1)
     return {
         "ok": True,
         "build_stage_hint": BUILD_STAGE,
         "lane": SKILL_LANE,
-        "configured": bool(base),
-        "public_base_url": base,
-        "search_documents_url": str(settings.public_url_for_r2_lane(SKILL_LANE, SEARCH_DOCUMENTS_KEY) or ""),
-        "skills_index_url": settings.public_url_for_r2_lane(SKILL_LANE, SKILLS_INDEX_KEY),
-        "shared_manifest_url": settings.public_url_for_r2_lane(SKILL_LANE, SHARED_MANIFEST_KEY),
+        "configured": bool(lane.get("bucket")),
+        "access_mode": "private-r2",
+        "public_base_url": None,
+        "storage_uri": storage_uri,
+        "search_documents_url": str(settings.r2_reference_for_r2_lane(SKILL_LANE, SEARCH_DOCUMENTS_KEY) or ""),
+        "skills_index_url": settings.r2_reference_for_r2_lane(SKILL_LANE, SKILLS_INDEX_KEY),
+        "shared_manifest_url": settings.r2_reference_for_r2_lane(SKILL_LANE, SHARED_MANIFEST_KEY),
         "d1": {
             "enabled": d1.enabled,
             "indexed_skill_count": count_payload.get("count") if count_payload.get("ok") else None,
             "count_probe": count_payload,
         },
-        "source_of_truth": "R2 hive-skills descriptors + HIVE_skills_availability_register_v2_repo_mapped.xlsx",
-        "note": "v1.16 consolidates weighted skill search, recommendation, routing, review queue and evidence-pack endpoints into one clean build line.",
+        "source_of_truth": "Private R2 hive-skills descriptors + HIVE_skills_availability_register_v2_repo_mapped.xlsx",
+        "note": "Shared skill-pool objects are read through authenticated R2 access; no public bucket URL is required.",
     }
-
 
 def import_skills_manifest(
     *,
@@ -90,21 +92,21 @@ def import_skills_manifest(
             **_skill_manifest_hints(settings),
         }
 
-    candidate_url = search_documents_url or settings.public_url_for_r2_lane(
+    candidate_url = search_documents_url or settings.r2_reference_for_r2_lane(
         SKILL_LANE, SEARCH_DOCUMENTS_KEY
     )
-    url = _validated_skill_source_url(settings, candidate_url)
+    url = _validated_skill_source_reference(settings, candidate_url)
     if not url:
         return {
             "ok": False,
             "error_code": "invalid_skills_source_url",
-            "message": "The skills source must be the configured HTTPS HIVE skills search-document URL.",
+            "message": "The skills source must be the configured private R2 HIVE skills search-document reference.",
             **_skill_manifest_hints(settings),
         }
 
-    docs_payload = _fetch_json(
-        url,
-        timeout=settings.skill_registry_import_timeout_seconds,
+    docs_payload = _read_skill_json(
+        settings,
+        key=SEARCH_DOCUMENTS_KEY,
         max_bytes=settings.skill_registry_max_source_bytes,
     )
     if not docs_payload.get("ok"):
@@ -561,7 +563,7 @@ def _skill_records(*, settings: Settings, query: str | None, limit: int) -> dict
             str(settings.d1_database_id or settings.d1_database_name or "d1"),
             str(bool(settings.d1_enabled)),
             str(bool(settings.skill_registry_fallback_enabled)),
-            str(settings.public_url_for_r2_lane(SKILL_LANE, SEARCH_DOCUMENTS_KEY) or ""),
+            str(settings.r2_reference_for_r2_lane(SKILL_LANE, SEARCH_DOCUMENTS_KEY) or ""),
             SKILL_LANE,
             str(query or ""),
             str(safe_limit),
@@ -627,19 +629,19 @@ def _r2_search_document_records(*, settings: Settings, limit: int) -> dict[str, 
             "cached": True,
         }
 
-    url = _validated_skill_source_url(
+    source_ref = _validated_skill_source_reference(
         settings,
-        str(settings.public_url_for_r2_lane(SKILL_LANE, SEARCH_DOCUMENTS_KEY) or ""),
+        str(settings.r2_reference_for_r2_lane(SKILL_LANE, SEARCH_DOCUMENTS_KEY) or ""),
     )
-    if not url:
+    if not source_ref:
         return {
             "ok": False,
             "error_code": "skills_manifest_url_missing",
             **_skill_manifest_hints(settings),
         }
-    fetched = _fetch_json(
-        url,
-        timeout=settings.skill_registry_import_timeout_seconds,
+    fetched = _read_skill_json(
+        settings,
+        key=SEARCH_DOCUMENTS_KEY,
         max_bytes=settings.skill_registry_max_source_bytes,
     )
     if not fetched.get("ok"):
@@ -710,7 +712,7 @@ def _skill_document_to_metadata(settings: Settings, doc: dict[str, Any]) -> dict
         "name": name,
         "description": doc.get("description") or metadata.get("description"),
         "object_key": object_key,
-        "descriptor_url": settings.public_url_for_r2_lane(SKILL_LANE, object_key),
+        "descriptor_url": settings.r2_reference_for_r2_lane(SKILL_LANE, object_key),
         "search_document_id": doc.get("document_id") or f"skill:{reference}",
         "priority_tier": metadata.get("priority_tier"),
         "hive_lane": metadata.get("hive_lane"),
@@ -935,62 +937,47 @@ def _d1_skill_counts(d1: D1MetadataStore) -> dict[str, object]:
     return {"ok": True, "enabled": True, "count": rows[0].get("count") if rows else 0}
 
 
-def _validated_skill_source_url(settings: Settings, candidate: str | None) -> str | None:
-    expected = settings.public_url_for_r2_lane(SKILL_LANE, SEARCH_DOCUMENTS_KEY)
+def _validated_skill_source_reference(settings: Settings, candidate: str | None) -> str | None:
+    expected = settings.r2_reference_for_r2_lane(SKILL_LANE, SEARCH_DOCUMENTS_KEY)
     if not candidate or not expected:
         return None
-    parsed = urlparse(candidate)
-    expected_parsed = urlparse(expected)
-    if parsed.scheme != "https" or parsed.username or parsed.password or parsed.fragment:
-        return None
-    if (parsed.hostname, parsed.port, parsed.path, parsed.query) != (
-        expected_parsed.hostname,
-        expected_parsed.port,
-        expected_parsed.path,
-        expected_parsed.query,
-    ):
-        return None
-    return candidate
+    return str(candidate) if str(candidate) == str(expected) else None
 
 
-def _fetch_json(url: str, timeout: int, max_bytes: int = 5 * 1024 * 1024) -> dict[str, object]:
+def _read_skill_json(
+    settings: Settings,
+    *,
+    key: str,
+    max_bytes: int = 5 * 1024 * 1024,
+) -> dict[str, object]:
     safe_max = max(1024, min(int(max_bytes), 20 * 1024 * 1024))
+    lane = settings.internal_r2_lane(SKILL_LANE) or {}
+    bucket = str(lane.get("bucket") or "").strip()
+    if not bucket:
+        return {"ok": False, "error_code": "skills_r2_bucket_missing", "message": "Private hive-skills R2 bucket is not configured."}
+    if not settings.r2_read_credentials_configured:
+        return {"ok": False, "error_code": "skills_r2_credentials_missing", "message": "Authenticated R2 read credentials are not configured."}
+    use_read_only = bool(
+        settings.r2_multi_bucket_read_enabled
+        and settings.r2_read_access_key_id
+        and settings.r2_read_secret_access_key
+    )
     try:
-        with httpx.Client(timeout=timeout, follow_redirects=False) as client:
-            with client.stream("GET", url, headers={"Accept": "application/json"}) as response:
-                if 300 <= response.status_code < 400:
-                    return {
-                        "ok": False,
-                        "status_code": response.status_code,
-                        "message": "Redirects are not allowed for governed skill sources.",
-                    }
-                if response.status_code >= 400:
-                    body = response.read()[:500].decode("utf-8", errors="replace")
-                    return {"ok": False, "status_code": response.status_code, "message": body}
-                content_length = response.headers.get("content-length")
-                if content_length and int(content_length) > safe_max:
-                    return {
-                        "ok": False,
-                        "error_code": "skills_source_too_large",
-                        "message": f"Skill source exceeds {safe_max} bytes.",
-                    }
-                body = bytearray()
-                for chunk in response.iter_bytes():
-                    body.extend(chunk)
-                    if len(body) > safe_max:
-                        return {
-                            "ok": False,
-                            "error_code": "skills_source_too_large",
-                            "message": f"Skill source exceeds {safe_max} bytes.",
-                        }
+        stored = R2Storage(settings).read_object(
+            key,
+            safe_max,
+            bucket=bucket,
+            public_base_url=None,
+            read_only=use_read_only,
+        )
         return {
             "ok": True,
-            "status_code": response.status_code,
-            "json": httpx.Response(200, content=bytes(body)).json(),
+            "status_code": 200,
+            "json": json.loads(stored.content.decode("utf-8")),
+            "source": settings.r2_reference_for_r2_lane(SKILL_LANE, key),
         }
-    except Exception as exc:  # pragma: no cover - network only
+    except Exception as exc:  # pragma: no cover - external R2 only
         return {"ok": False, "message": str(exc), "error_type": type(exc).__name__}
-
 
 def _safe_import_limit(settings: Settings, limit: int | None) -> int:
     configured = max(1, min(int(settings.skill_registry_import_max_items or 250), 1000))
@@ -1001,12 +988,12 @@ def _safe_import_limit(settings: Settings, limit: int | None) -> int:
 
 def _skill_manifest_hints(settings: Settings) -> dict[str, object]:
     return {
-        "lane_public_base_url": settings.public_url_for_r2_lane(SKILL_LANE, ""),
-        "manifest_hint": settings.public_url_for_r2_lane(SKILL_LANE, "index/skills-manifest.json"),
-        "search_documents_hint": str(settings.public_url_for_r2_lane(SKILL_LANE, SEARCH_DOCUMENTS_KEY) or ""),
-        "skills_index_hint": settings.public_url_for_r2_lane(SKILL_LANE, SKILLS_INDEX_KEY),
+        "lane_public_base_url": None,
+        "lane_storage_uri": settings.r2_reference_for_r2_lane(SKILL_LANE, ""),
+        "manifest_hint": settings.r2_reference_for_r2_lane(SKILL_LANE, "index/skills-manifest.json"),
+        "search_documents_hint": str(settings.r2_reference_for_r2_lane(SKILL_LANE, SEARCH_DOCUMENTS_KEY) or ""),
+        "skills_index_hint": settings.r2_reference_for_r2_lane(SKILL_LANE, SKILLS_INDEX_KEY),
     }
-
 
 def build_skill_context(
     *,
@@ -1404,7 +1391,7 @@ def _skill_taxonomy_report(items: list[dict[str, Any]]) -> dict[str, object]:
 
 
 def _skill_orphan_report(*, settings: Settings, items: list[dict[str, Any]]) -> dict[str, object]:
-    base = (settings.public_url_for_r2_lane(SKILL_LANE, "") or "").rstrip("/")
+    base = (settings.r2_reference_for_r2_lane(SKILL_LANE, "") or "").rstrip("/")
     records: list[dict[str, object]] = []
     for item in items:
         meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
