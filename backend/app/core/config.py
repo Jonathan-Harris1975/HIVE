@@ -759,7 +759,7 @@ class Settings(BaseSettings):
         return f"https://{self.cf_r2_account_id.strip()}.r2.cloudflarestorage.com"
 
     _HIDDEN_R2_LANES: frozenset[str] = frozenset({"meta_system"})
-    _PRIVATE_R2_LANES: frozenset[str] = frozenset({"uploads", "repositories", "meta_system"})
+    _PRIVATE_R2_LANES: frozenset[str] = frozenset({"uploads", "repositories", "meta_system", "audits", "hive_skills"})
 
     @property
     def r2_ecosystem_lanes(self) -> list[dict[str, Any]]:
@@ -979,6 +979,30 @@ class Settings(BaseSettings):
         lanes. Only call this with operator-configured lane names; never with
         user-supplied input."""
         return self._public_url_for_lane(lane, key, self.r2_all_lanes)
+
+    def r2_reference_for_r2_lane(self, lane: str, key: str) -> str | None:
+        """Resolve an authenticated R2 object reference for a user-facing lane."""
+        return self._r2_reference_for_lane(lane, key, self.r2_ecosystem_lanes)
+
+    def internal_r2_reference_for_r2_lane(self, lane: str, key: str) -> str | None:
+        """Resolve an authenticated R2 reference including hidden internal lanes."""
+        return self._r2_reference_for_lane(lane, key, self.r2_all_lanes)
+
+    @staticmethod
+    def _r2_reference_for_lane(lane: str, key: str, lanes: list[dict[str, Any]]) -> str | None:
+        clean_lane = (lane or "").strip().lower().replace("-", "_")
+        clean_key = (key or "").replace("\\", "/").lstrip("/")
+        decoded_key = unquote(clean_key)
+        if any(part in {"", ".", ".."} for part in decoded_key.split("/")) and clean_key:
+            return None
+        encoded_key = quote(clean_key, safe="/~")
+        for item in lanes:
+            if item["lane"] == clean_lane:
+                bucket = str(item.get("bucket") or "").strip()
+                if not bucket:
+                    return None
+                return f"r2://{bucket}/{encoded_key}" if encoded_key else f"r2://{bucket}"
+        return None
 
     @staticmethod
     def _public_url_for_lane(lane: str, key: str, lanes: list[dict[str, Any]]) -> str | None:

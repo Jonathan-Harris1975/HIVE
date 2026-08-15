@@ -274,15 +274,14 @@ def build_readiness_report(settings: Settings) -> ReadinessReport:
     skills_lane = configured_lanes.get("hive_skills") or {}
     skills_contract_ok = bool(
         skills_lane.get("bucket")
-        and skills_lane.get("public_base_url")
-        and (skills_lane.get("readable") or settings.skill_registry_fallback_enabled)
+        and skills_lane.get("readable")
     )
     checks.append(
         _check(
             "shared_skills_source",
             skills_contract_ok or not (production and settings.production_require_r2),
-            "The shared skills bucket, public source and retrieval path are configured.",
-            "Production requires the HIVE shared skills bucket and public base URL, with either scoped R2 reads or the bounded public fallback enabled.",
+            "The private shared skills bucket and authenticated retrieval path are configured.",
+            "Production requires the private HIVE shared skills bucket with authenticated R2 read access.",
             required=production and settings.production_require_r2,
         )
     )
