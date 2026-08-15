@@ -110,7 +110,7 @@ def skill_from_file(
     skill_id = f"upload-{uuid.uuid4().hex[:12]}"
     slug = _slugify(payload.title)
     title = payload.title.strip()
-    source_url = settings.public_url_for_r2_lane(payload.source_lane, payload.object_key)
+    source_url = settings.r2_reference_for_r2_lane(payload.source_lane, payload.object_key)
     tags = [str(tag).strip() for tag in payload.tags if str(tag).strip()][:20]
     if "uploaded-file" not in [tag.lower() for tag in tags]:
         tags.insert(0, "uploaded-file")
