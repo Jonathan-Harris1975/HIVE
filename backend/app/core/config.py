@@ -759,6 +759,7 @@ class Settings(BaseSettings):
         return f"https://{self.cf_r2_account_id.strip()}.r2.cloudflarestorage.com"
 
     _HIDDEN_R2_LANES: frozenset[str] = frozenset({"meta_system"})
+    _PRIVATE_R2_LANES: frozenset[str] = frozenset({"uploads", "repositories", "meta_system"})
 
     @property
     def r2_ecosystem_lanes(self) -> list[dict[str, Any]]:
@@ -871,6 +872,8 @@ class Settings(BaseSettings):
         )
         for name, bucket, public_base_url, description in lanes:
             primary = name == "uploads"
+            if name in self._PRIVATE_R2_LANES:
+                public_base_url = ""
             configured = bool(bucket or public_base_url)
             readable = bool(bucket) and read_credentials_configured
             writable = bool(bucket) and write_credentials_configured and (
