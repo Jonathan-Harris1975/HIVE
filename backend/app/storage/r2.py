@@ -142,11 +142,10 @@ class R2Storage:
         key: str,
         public_base_url: str | None | object = _DEFAULT_PUBLIC_BASE,
     ) -> str | None:
-        base = (
-            self.settings.cf_r2_public_base_url
-            if public_base_url is _DEFAULT_PUBLIC_BASE
-            else public_base_url
-        )
+        # The primary HIVE upload bucket is private-by-default. A public base
+        # passed explicitly by a governed public ecosystem lane is still honoured,
+        # but the primary bucket never inherits CF_R2_PUBLIC_BASE_URL/R2_PUBLIC_BASE_URL.
+        base = None if public_base_url is _DEFAULT_PUBLIC_BASE else public_base_url
         clean_key = (key or "").replace("\\", "/").lstrip("/")
         decoded_key = unquote(clean_key)
         if not clean_key or any(part in {"", ".", ".."} for part in decoded_key.split("/")):
