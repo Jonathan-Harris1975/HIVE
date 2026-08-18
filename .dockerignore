@@ -21,4 +21,3 @@ build
 *.zip
 backend/tests
 docs
-frontend-placeholder
