@@ -25,10 +25,11 @@ HIVE-UI (Cloudflare Pages)
 
 - Persistent streamed conversations with rename and deletion.
 - Cost-aware model routing and grouped model discovery.
+- Headroom prompt compression for OpenRouter text requests, enabled in production with fail-open safeguards and protected system/recent-message handling.
 - Upload, extraction and bounded file chat for supported documents and ZIPs.
 - Read-only browsing and chat across configured ecosystem R2 buckets.
 - Repository Manager: safe ZIP extraction, fingerprinting, manifest generation (language + dependency detection), incremental re-indexing and TTL-based cleanup of uploaded repositories.
-- Repository Memory: persistent Project DNA, architecture, coding standards, build/deployment profiles, known issues, learned patterns, patch/optimisation/QA/Council history per repository, queryable via Cloudflare AI Search without reloading the repository.
+- Repository Memory: persistent Project DNA, architecture, coding standards, build/deployment profiles, known issues, learned patterns, patch/optimisation/QA/Council history per repository, queryable across every active Cloudflare AI Search instance visible to HIVE without reloading the repository.
 - Model Registry: dynamic, ranked models per category (coding, reasoning, planning, vision, research, fast, cheap, creative, long context); the highest-ranked coding model automatically becomes the default coding model.
 - Provider Framework: OpenRouter plus any configured OpenRouter-compatible provider, each exposing available models, pricing, context length, tool/structured-output support, and health/latency through one adapter shape.
 - AI Council: on-demand run that discovers providers, refreshes catalogues, detects new/retired models, scores coding-capable models with the Benchmark Engine, auto-promotes those above a configurable threshold into the Model Registry, and notifies downstream services via the ops-event inbox.
@@ -36,7 +37,7 @@ HIVE-UI (Cloudflare Pages)
 - Repository QA: a static-only validation pipeline (build/lint/type/dependency/import/dead-code/security/regression/patch/architecture checks) — never executes an uploaded repository's own code, by design.
 - Repository Council: nine-dimension scored review (architecture, documentation, dependencies, technical debt, security, performance, maintainability, AI-generated code, repository health) with historical tracking.
 - Bucket Manager: explicit accessible/hidden R2 bucket registry; hidden buckets can never surface through normal workflows.
-- Connector Framework: uniform health/auth/capability/rate-limit diagnostics for OpenRouter, Cloudflare R2, Cloudflare AI Search, and GitHub.
+- Connector Framework: uniform health/auth/capability/rate-limit diagnostics for OpenRouter, Cloudflare R2, Cloudflare AI Search, and GitHub. AI Search diagnostics enumerate every account instance and surface per-index indexing errors/degraded stats rather than treating a configured index as automatically healthy.
 - Optimisation Engine: every optimisation decision recorded with confidence and a reversible previous/new state; experiment success-rate tracking.
 - Repository Learning: patch outcomes, coding patterns, and repository-scoped model preferences roll up automatically into a refreshed Project DNA summary.
 - Environment audit: cross-checks every configuration field against `.env.example` to catch infrastructure-configuration drift.
@@ -59,7 +60,7 @@ HIVE-UI (Cloudflare Pages)
 | `GET /v1/repositories` | Bearer | List registered repositories |
 | `GET /v1/repositories/{id}` | Bearer | Repository manifest (fingerprint, languages, dependencies) |
 | `GET /v1/repositories/{id}/memory` | Bearer | Repository Memory (Project DNA, architecture, QA/optimisation history, etc.) |
-| `GET /v1/repository-memory/ai-search` | Bearer | Cloudflare AI Search query across Repository Memory |
+| `GET /v1/repository-memory/ai-search` | Bearer | Fan-out Cloudflare AI Search query across every active account instance |
 | `GET /v1/model-registry/{category}` | Bearer | Ranked models and default for a Model Registry category |
 | `GET /v1/providers` | Bearer | Discovered providers (Provider Framework) |
 | `GET /v1/providers/health` | Bearer | Latency/model-count health check per provider |
