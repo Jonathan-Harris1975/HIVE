@@ -28,10 +28,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates git \
-    && rm -rf /var/lib/apt/lists/*
-
+# The official Python slim image already includes the CA certificate bundle.
+# Keep the runtime build package-manager free: installing git here is unnecessary
+# for HIVE's static repository QA and can fail on overlay-backed remote builders
+# when dpkg attempts cross-device renames.
 COPY --from=node_runtime /usr/local/bin/node /usr/local/bin/node
 COPY --from=node_runtime /usr/local/lib/node_modules /usr/local/lib/node_modules
 RUN ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
