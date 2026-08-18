@@ -309,8 +309,7 @@ registry, and TTL-based cleanup. Extraction is never permanent.
 build/deployment profiles, environment schema, and append-only history
 (known issues, learned patterns, previous patches, optimisation/QA/Council
 history) — all stored as rows in the existing `hive_ecosystem_metadata` D1
-table under `lane="repository_memory"`. Cloudflare AI Search (instance
-`hive-repositories`) provides semantic query without reloading a repository.
+table under `lane="repository_memory"`. `hive-repositories` remains the deterministic primary instance for repository indexing, while paginated account-level discovery fans semantic queries out across every active Cloudflare AI Search instance and merges ranked results. Diagnostics also query per-instance indexing statistics so paused indexes, indexing errors and degraded stats are visible in HIVE. This avoids maintaining a second hard-coded list as HIVE gains indexes.
 
 **Phase 3 - Model Registry** (`services/model_registry.py`): ranked models
 per category (coding, reasoning, planning, vision, research, fast, cheap,
