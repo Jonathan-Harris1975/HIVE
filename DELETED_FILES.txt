@@ -1,4 +1,0 @@
-Files removed by the production remediation pass.
-Delete these paths from the repository when applying this update ZIP.
-
-HIVE-main/requirements.lock
