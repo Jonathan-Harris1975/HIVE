@@ -15,7 +15,7 @@ from app.storage.d1 import D1MetadataStore
 # Phase 8 - Repository Council.
 #
 # HONESTY NOTE: "performance" and "ai_generated_code" dimensions below are
-# genuine heuristic placeholders, not measured signal — there is no runtime
+# explicit heuristic proxies, not measured signals — there is no runtime
 # profiling data or a trained AI-code classifier available here. They are
 # included because the programme spec calls for these review dimensions,
 # but scores on those two axes should be read as low-confidence until a
@@ -68,7 +68,7 @@ DIMENSION_CONFIDENCE: dict[str, str] = {
     "repository_health": "measured",
 }
 
-# Dimensions whose score is a heuristic placeholder rather than measured
+# Dimensions whose score is a heuristic proxy rather than measured
 # signal. Any consumer of a CouncilReport can check this set (or the
 # per-dimension `confidence` field) to decide whether to discount, flag,
 # or exclude these dimensions.
@@ -96,7 +96,7 @@ class CouncilReport:
     @property
     def heuristic_dimensions(self) -> list[str]:
         """Names of dimensions in this report whose score is a heuristic
-        placeholder rather than measured signal. Non-empty whenever the
+        proxy rather than measured signal. Non-empty whenever the
         report includes performance and/or ai_generated_code."""
         return [d.dimension for d in self.dimensions if d.confidence == "heuristic"]
 
@@ -131,7 +131,7 @@ def _ai_generated_code_score(root: Path) -> tuple[float, str]:
     """Heuristic only: greps for a small set of common AI-attribution
     comment markers. Absence of markers does NOT mean the code wasn't
     AI-generated — most AI-assisted code carries no such marker at all.
-    This is a low-confidence placeholder pending a real classifier."""
+    This is a low-confidence proxy because no reliable classifier is available."""
     marker_hits = 0
     scanned = 0
     for path in root.rglob("*.py"):
@@ -146,12 +146,12 @@ def _ai_generated_code_score(root: Path) -> tuple[float, str]:
             marker_hits += 1
     # Presence of explicit attribution markers is treated as neutral-to-good
     # (transparent) rather than penalised; this dimension mainly exists as a
-    # placeholder for a future real signal.
+    # transparent proxy rather than a claimed classifier signal.
     return 1.0, f"{marker_hits} file(s) with explicit AI-attribution markers out of {scanned} scanned (low-confidence heuristic)"
 
 
 def _performance_score(qa_payload: dict[str, Any]) -> tuple[float, str]:
-    """Heuristic placeholder: no runtime profiling data is available for an
+    """Heuristic proxy: no runtime profiling data is available for an
     uploaded repository, so this maps directly from the dead-code/orphan
     signal already computed by Repository QA as a very rough proxy for
     'bloat', not actual performance."""

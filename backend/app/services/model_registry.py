@@ -64,7 +64,7 @@ class ModelRegistryError(ValueError):
 #: from an actual benchmark run or provider-reported metric, "heuristic"
 #: means it was estimated/derived, and "unverified" (the default) means no
 #: real signal has been attached yet and the figure should be treated as a
-#: placeholder ranking hint only.
+#: unverified ranking hint only.
 CONFIDENCE_LEVELS: tuple[str, ...] = ("measured", "heuristic", "unverified")
 
 

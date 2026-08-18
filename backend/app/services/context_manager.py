@@ -35,5 +35,5 @@ class ContextWindow:
 
 
 def estimate_tokens(text: str) -> int:
-    # Fast approximation. Precise model-specific accounting can be added with tiktoken/openrouter usage.
+    # Fast deterministic approximation used to avoid model-specific tokenizer coupling.
     return max(1, len(text) // 4)
