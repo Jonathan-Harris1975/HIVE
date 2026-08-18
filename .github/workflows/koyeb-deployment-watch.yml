@@ -19,13 +19,32 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # pinned release commit
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
-      - name: Install the official Koyeb CLI
+      - name: Install verified Koyeb CLI
+        env:
+          KOYEB_CLI_VERSION: "5.10.2"
         run: |
-          curl -fsSL https://raw.githubusercontent.com/koyeb/koyeb-cli/master/install.sh | sh
-          echo "$HOME/.koyeb/bin" >> "$GITHUB_PATH"
+          set -euo pipefail
+          archive="koyeb-cli_${KOYEB_CLI_VERSION}_linux_amd64.tar.gz"
+          release_url="https://github.com/koyeb/koyeb-cli/releases/download/v${KOYEB_CLI_VERSION}"
+          workdir="$(mktemp -d)"
+          trap 'rm -rf "$workdir"' EXIT
+          curl --fail --show-error --silent --location --proto '=https' --tlsv1.2 \
+            --output "$workdir/$archive" "$release_url/$archive"
+          curl --fail --show-error --silent --location --proto '=https' --tlsv1.2 \
+            --output "$workdir/checksums.txt" "$release_url/checksums.txt"
+          (
+            cd "$workdir"
+            grep -F "  $archive" checksums.txt > archive.sha256
+            test -s archive.sha256
+            sha256sum --check --strict archive.sha256
+            tar -xzf "$archive"
+          )
+          install -d -m 0755 "$HOME/.local/bin"
+          install -m 0755 "$workdir/koyeb" "$HOME/.local/bin/koyeb"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Watch production deployment
         env:
           KOYEB_TOKEN: ${{ secrets.KOYEB_TOKEN }}
