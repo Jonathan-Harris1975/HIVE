@@ -121,4 +121,4 @@ async def get_ai_search_query(
     top_k: int | None = Query(None, ge=1, le=50),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, object]:
-    return await AiSearchClient(settings).search(q, top_k=top_k)
+    return await AiSearchClient(settings).search_all(q, top_k=top_k)
