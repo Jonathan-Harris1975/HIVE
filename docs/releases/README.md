@@ -1,11 +1,13 @@
 # Historical release artefacts
 
-Files in this directory are retained as release history and **must not be used as current deployment configuration**. Some pre-audit environment snapshots contain settings that have since been superseded, including broad forwarded-header trust.
+Files in this directory are retained only as historical evidence. They are **not** current deployment configuration and must not override the repository's active environment, operations or security documentation.
 
-For current deployment values use, in order:
+For current behaviour use, in order:
 
-1. `HIVE-PRODUCTION-SHARED.env` for non-secret production defaults.
-2. `HIVE-KOYEB-SECRETS-ONLY.env` for Koyeb secret references.
-3. `docs/koyeb-deployment.md`, `docs/production-readiness.md`, `SECURITY.md`, and `README.md` for the active operational contract.
+1. repository code and tests;
+2. `README.md`;
+3. `SECURITY.md`;
+4. `docs/OPERATIONS.md` and the current deployment/model-policy documents;
+5. active environment templates.
 
-Historical files are intentionally not rewritten because doing so would corrupt the release record.
+Historical snapshots are deliberately left unchanged so the old record remains auditable.
