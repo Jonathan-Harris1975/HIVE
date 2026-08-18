@@ -14,10 +14,13 @@ import urllib.error
 import urllib.request
 
 BASE_URL = os.getenv("HIVE_BASE_URL", "https://liable-loreen-jonathanharris-57884580.koyeb.app")
-BEARER = os.getenv("ADMIN_BEARER_TOKEN") or os.getenv("HIVE_BEARER") or "ppqkTWPgnEmeJUwXgwLzHBPlkQuUiBXz"
+BEARER = (os.getenv("ADMIN_BEARER_TOKEN") or os.getenv("HIVE_BEARER") or "").strip()
 TIMEOUT = int(os.getenv("HIVE_TEST_TIMEOUT", "90"))
 LIVE = os.getenv("HIVE_CREATE_LIVE_REVIEW", "false").lower() == "true"
 APPROVE = os.getenv("HIVE_APPROVE_CREATED_REVIEW", "false").lower() == "true"
+
+if not BEARER:
+    raise SystemExit("ADMIN_BEARER_TOKEN or HIVE_BEARER must be set for this smoke test.")
 
 HEADERS = {"Authorization": f"Bearer {BEARER}", "Content-Type": "application/json"}
 
