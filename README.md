@@ -74,7 +74,7 @@ Unless explicitly documented otherwise, `/v1/*` routes require `Authorization: B
 
 Non-secret production defaults live in `HIVE-PRODUCTION-SHARED.env`. Secret-backed variables belong in Koyeb and are documented in `HIVE-KOYEB-SECRETS-ONLY.env`. Existing platform variables override shared defaults.
 
-There is currently **configuration version drift** between repository files: `.env.example` advertises a newer `APP_VERSION` than `HIVE-PRODUCTION-SHARED.env`/some runtime references. That should be normalised before using the version string as production evidence. Functional capability should be verified through tests/endpoints rather than a README marker.
+Runtime version markers are aligned at `APP_VERSION=1.31-production`; the health/runtime marker is `v1.31-production-readiness`. Functional capability is verified through tests and operational endpoints rather than documentation labels.
 
 ## Local verification
 
