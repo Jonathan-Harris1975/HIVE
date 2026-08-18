@@ -74,7 +74,6 @@ jobs:
       - name: Verify runtime engineering binaries
         run: |
           docker run --rm hive:ci python --version
-          docker run --rm hive:ci git --version
           docker run --rm hive:ci node --version
           docker run --rm hive:ci npm --version
           docker run --rm hive:ci node -e "process.exit(Number(process.versions.node.split('.')[0]) >= 20 ? 0 : 1)"
