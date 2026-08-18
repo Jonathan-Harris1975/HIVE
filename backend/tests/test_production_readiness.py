@@ -50,6 +50,14 @@ def test_production_readiness_rejects_wildcard_cors() -> None:
     assert any(item.name == "cors_origins" for item in report.errors)
 
 
+def test_production_readiness_rejects_wildcard_allowed_hosts() -> None:
+    settings = _production_settings(ALLOWED_HOSTS="*")
+
+    report = build_readiness_report(settings)
+    assert report.ready is False
+    assert any(item.name == "allowed_hosts" for item in report.errors)
+
+
 
 def test_production_readiness_requires_dedicated_ops_event_token() -> None:
     settings = _production_settings(
