@@ -26,7 +26,7 @@ def test_skills_status_exposes_v18_manifest_hints(monkeypatch, tmp_path) -> None
     body = client.get("/v1/skills/status").json()
 
     assert body["ok"] is True
-    assert body["build_stage_hint"] == "v1.30-repository-qa-through-documentation"
+    assert body["build_stage_hint"] == "v1.31-production-readiness"
     assert body["search_documents_url"] == "r2://hive-skills/index/search-documents.json"
     assert body["shared_manifest_url"] == "r2://hive-skills/manifests/shared-skill-pool-manifest.json"
 
