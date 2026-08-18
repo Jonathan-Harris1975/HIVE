@@ -1,5 +1,5 @@
 > **Document status:** Production reference  
-> **Last reviewed:** 5 July 2026  
+> **Last reviewed:** 18 August 2026  
 > **Operational authority:** Current repository README, SECURITY policy and operations guide.
 
 # HIVE backend production readiness
@@ -29,10 +29,12 @@ UVICORN_LIMIT_CONCURRENCY=32
 UVICORN_BACKLOG=128
 UVICORN_TIMEOUT_KEEP_ALIVE=10
 UVICORN_TIMEOUT_GRACEFUL_SHUTDOWN=30
-FORWARDED_ALLOW_IPS=*
+FORWARDED_ALLOW_IPS=127.0.0.1
 ```
 
 Add the existing OpenRouter and R2 secrets. Set `PRODUCTION_REQUIRE_DATABASE=true` once PostgreSQL persistence is provisioned and verified.
+
+`FORWARDED_ALLOW_IPS` deliberately uses Uvicorn's loopback-only trust boundary. HIVE's authentication limiter handles Koyeb separately: when `KOYEB_PUBLIC_DOMAIN` is present, it validates and uses only the final `X-Forwarded-For` address, which Koyeb documents as the certified connecting client IP.
 
 ## Health model
 
@@ -72,7 +74,7 @@ The production image:
 
 ## Dependency maintenance
 
-`requirements.in` contains the reviewed direct versions. `requirements.txt` and `requirements.lock` contain the compiled runtime set. Regenerate them deliberately after testing, then let CI run unit tests and `pip-audit`.
+`requirements.in` contains the reviewed direct versions and `requirements.txt` is the compiled runtime set. Regenerate `requirements.txt` with `pip-compile` after deliberate dependency changes, run `pip check`, and let CI run the full Python 3.11-3.14 test matrix plus `pip-audit`. The repository does not maintain a second `requirements.lock` file.
 
 ## Production environment split
 

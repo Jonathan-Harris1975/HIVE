@@ -1,3 +1,22 @@
+# HIVE Changelog
+
+> **Document status:** Production reference  
+> **Last reviewed:** 18 August 2026  
+> **Operational authority:** Current repository README, SECURITY policy and operations guide.
+
+## 18 August 2026 - repository audit and remediation
+
+- Hardened bearer-auth failure throttling with source-IP and token-fingerprint buckets so rotating credential guesses cannot evade lockout.
+- Replaced literal token-prefix bucket keys with truncated SHA-256 fingerprints.
+- Restricted the development sentinel bypass to loopback/test peers.
+- Corrected forwarded-header handling: Uvicorn now defaults to loopback-only proxy trust, while Koyeb auth throttling validates the platform-certified final `X-Forwarded-For` address.
+- Updated FastAPI to `0.141.1` and Starlette to `1.6.0`, removing the audited Starlette `0.50.0` advisory exposure.
+- Expanded CI compatibility testing to Python 3.11-3.14, added `pip check`, raised the coverage floor from 72% to 74%, and included tests in the Ruff target set.
+- Added `pip-tools` to the development toolchain and tightened environment/private-key ignore rules.
+- Added contributor guidance and refreshed README, security, deployment, and production-readiness documentation.
+- Marked `docs/releases/` explicitly as historical so superseded environment snapshots cannot be mistaken for active deployment guidance.
+- Added regression tests for rotated-token lockout, fingerprint privacy, Koyeb forwarded-IP selection, invalid forwarded-IP fallback, and loopback-only development bypass.
+
 ## 22 June 2026 - v1.26.12 catalogue metadata
 
 - Added `skills/catalogue_metadata.json` and `tasks/task_metadata.json` as governed metadata catalogues.
@@ -35,11 +54,7 @@
 - Normalised and URL-encoded public R2 object keys, rejecting direct and encoded traversal.
 - Corrected AIMS and RAMS liveness defaults to `/livez`.
 
-> **Document status:** Production reference  
-> **Last reviewed:** 22 June 2026  
-> **Operational authority:** Current repository README, SECURITY policy and operations guide.
-
-# Changelog
+## Historical entries
 
 ## v1.26 R2 write, skill and model selection
 
@@ -81,7 +96,7 @@
 - Added v1.20, v1.21 and v1.22 smoke scripts plus regression tests.
 
 
-# HIVE Changelog
+## Earlier release line
 
 ## v1.22-workflow-simulation-persistence
 

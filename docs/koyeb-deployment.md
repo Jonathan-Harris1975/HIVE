@@ -1,5 +1,5 @@
 > **Document status:** Production reference  
-> **Last reviewed:** 22 June 2026  
+> **Last reviewed:** 18 August 2026  
 > **Operational authority:** Current repository README, SECURITY policy and operations guide.
 
 # Koyeb deployment
@@ -15,6 +15,12 @@ Koyeb should detect the root-level `Dockerfile` and run the FastAPI backend usin
 ```
 
 The container exposes port `8080`, but the start script honours Koyeb's `PORT` environment variable when provided.
+
+## Runtime compatibility
+
+The preferred Docker path currently uses Python `3.14.6`; the buildpack/Nixpacks fallback pins Python `3.11.15`. Both are supported intentionally and CI exercises every minor from 3.11 through 3.14 before merge.
+
+Forwarded headers are not globally trusted: keep `FORWARDED_ALLOW_IPS=127.0.0.1` unless a specific trusted proxy range is known. For Koyeb authentication throttling, HIVE reads the raw `X-Forwarded-For` chain only when `KOYEB_PUBLIC_DOMAIN` is present, validates the final address, and uses that final hop because Koyeb certifies it as the connecting client IP.
 
 ## Fallback path: buildpack / Nixpacks
 
