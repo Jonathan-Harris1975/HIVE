@@ -19,9 +19,28 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.core.config import Settings, get_settings
+from app.core.security import require_admin
+from app.ingestion.chunking import chunks_to_dicts, split_text_into_chunks
+from app.ingestion.file_ingestion import ingest_bytes_content, ingest_text_content, ingest_upload
+from app.ingestion.text_extractors import extract_text_with_metadata
+from app.ingestion.zip_ingestion import UnsafeZipError, extract_text_from_zip, inspect_zip
+from app.services.brand_modes import build_system_prompt
+from app.services.context_manager import ContextWindow
+from app.services.embeddings import CloudflareEmbeddingsClient
+from app.services.model_router import Mode, ModelRouter
+from app.services.openrouter import OpenRouterClient
+from app.services.skill_registry import get_skill_catalogue_item
+from app.services.workflow_presets import (
+    allowed_workflow_presets,
+    apply_workflow_preset_to_request,
+    get_workflow_preset,
+)
+from app.storage.local_blob import LocalBlobStorage
+from app.storage.r2 import R2Storage
+from app.storage.sql_store import SqlStore
+from app.storage.vectorize import VectorizeClient
 
 logger = logging.getLogger("uvicorn.error.hive.files")
-from app.core.security import require_admin
 
 # Allow-list of MIME type prefixes accepted at the upload endpoints.
 # Any Content-Type not matching one of these prefixes is rejected with 415.
@@ -79,26 +98,6 @@ def _validate_upload_content_type(content_type: str | None) -> None:
             "Only document, text, image, and archive types are accepted."
         ),
     )
-from app.ingestion.chunking import chunks_to_dicts, split_text_into_chunks
-from app.ingestion.file_ingestion import ingest_bytes_content, ingest_text_content, ingest_upload
-from app.ingestion.text_extractors import extract_text_with_metadata
-from app.ingestion.zip_ingestion import UnsafeZipError, extract_text_from_zip, inspect_zip
-from app.services.brand_modes import build_system_prompt
-from app.services.context_manager import ContextWindow
-from app.services.model_router import Mode, ModelRouter
-from app.services.openrouter import OpenRouterClient
-from app.services.skill_registry import get_skill_catalogue_item
-from app.services.workflow_presets import (
-    allowed_workflow_presets,
-    apply_workflow_preset_to_request,
-    get_workflow_preset,
-)
-from app.services.embeddings import CloudflareEmbeddingsClient
-from app.storage.local_blob import LocalBlobStorage
-from app.storage.r2 import R2Storage
-from app.storage.sql_store import SqlStore
-from app.storage.vectorize import VectorizeClient
-
 router = APIRouter(tags=["files"], dependencies=[Depends(require_admin)])
 
 
