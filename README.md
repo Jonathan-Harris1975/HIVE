@@ -1,91 +1,80 @@
-> **Document status:** Production reference  
-> **Last reviewed:** 18 August 2026  
-> **Operational authority:** Current repository README, SECURITY policy and operations guide.
-
 # HIVE
 
-**Current build marker:** `v1.30-repository-qa-through-documentation` / `APP_VERSION=1.30-production`.
+HIVE (Harris Intelligent Virtual Entity) is the private operations backend for chat, file analysis, repository intelligence, model/provider governance, skills, workflow planning and ecosystem health. It is a Python/FastAPI service deployed on Koyeb and consumed by HIVE-UI through an authenticated Cloudflare proxy.
 
-HIVE (Harris Intelligent Virtual Entity) is the private operations backend for chat, file analysis, repository intelligence, skills, workflow planning and ecosystem health. It is a Python/FastAPI service deployed on Koyeb and consumed by HIVE-UI through an authenticated Cloudflare Pages proxy.
+This README describes the current capabilities and operating contract. Runtime version values are governed by the package and configuration files.
 
-## Production architecture
+## Architecture
 
 ```text
-HIVE-UI (Cloudflare Pages)
+HIVE-UI (Cloudflare)
   -> signed operator session
-  -> Cloudflare Pages API proxy
-  -> HIVE (Koyeb/FastAPI)
-      -> OpenRouter
-      -> PostgreSQL and optional D1
-      -> Cloudflare R2 and Vectorize
-      -> ecosystem health probes
+  -> authenticated proxy
+  -> HIVE (Koyeb / FastAPI)
+      -> OpenRouter and configured compatible providers
+      -> PostgreSQL / optional D1
+      -> Cloudflare R2, AI Search and Vectorize
+      -> GitHub and ecosystem health probes
 ```
 
-## Supported Python runtimes
+## Supported runtime
 
-- Production Docker image: Python `3.14.6`.
-- Koyeb buildpack/Nixpacks fallback: Python `3.11.15`.
-- CI compatibility matrix: Python `3.11`, `3.12`, `3.13`, and `3.14`.
-- Package metadata declares `>=3.11,<3.15`; dependency integrity is checked on every CI matrix job.
+`backend/pyproject.toml` declares Python `>=3.11,<3.15`. The Docker/runtime and CI files are the authority for the exact deployed/interpreted minor versions.
 
-The two deployment paths intentionally use different supported minors, but both are covered by CI so fallback deployments do not become an untested side road.
+## Production capabilities
 
-## Supported production capabilities
-
-- Persistent streamed conversations with rename and deletion.
-- Cost-aware model routing and grouped model discovery.
-- Headroom prompt compression for OpenRouter text requests, enabled in production with fail-open safeguards and protected system/recent-message handling.
-- Upload, extraction and bounded file chat for supported documents and ZIPs.
-- Read-only browsing and chat across configured ecosystem R2 buckets.
-- Repository Manager: safe ZIP extraction, fingerprinting, manifest generation (language + dependency detection), incremental re-indexing and TTL-based cleanup of uploaded repositories.
-- Repository Memory: persistent Project DNA, architecture, coding standards, build/deployment profiles, known issues, learned patterns, patch/optimisation/QA/Council history per repository, queryable across every active Cloudflare AI Search instance visible to HIVE without reloading the repository.
-- Model Registry: dynamic, ranked models per category (coding, reasoning, planning, vision, research, fast, cheap, creative, long context); the highest-ranked coding model automatically becomes the default coding model.
-- Provider Framework: OpenRouter plus any configured OpenRouter-compatible provider, each exposing available models, pricing, context length, tool/structured-output support, and health/latency through one adapter shape.
-- AI Council: on-demand run that discovers providers, refreshes catalogues, detects new/retired models, scores coding-capable models with the Benchmark Engine, auto-promotes those above a configurable threshold into the Model Registry, and notifies downstream services via the ops-event inbox.
-- Benchmark Engine: configurable weighted scoring across coding/reasoning benchmarks, cost, latency, reliability, long-context, JSON reliability, structured output, community maturity, and internal historical performance.
-- Repository QA: a static-only validation pipeline (build/lint/type/dependency/import/dead-code/security/regression/patch/architecture checks) — never executes an uploaded repository's own code, by design.
-- Repository Council: nine-dimension scored review (architecture, documentation, dependencies, technical debt, security, performance, maintainability, AI-generated code, repository health) with historical tracking.
-- Bucket Manager: explicit accessible/hidden R2 bucket registry; hidden buckets can never surface through normal workflows.
-- Connector Framework: uniform health/auth/capability/rate-limit diagnostics for OpenRouter, Cloudflare R2, Cloudflare AI Search, and GitHub. AI Search diagnostics enumerate every account instance and surface per-index indexing errors/degraded stats rather than treating a configured index as automatically healthy.
-- Optimisation Engine: every optimisation decision recorded with confidence and a reversible previous/new state; experiment success-rate tracking.
-- Repository Learning: patch outcomes, coding patterns, and repository-scoped model preferences roll up automatically into a refreshed Project DNA summary.
-- Environment audit: cross-checks every configuration field against `.env.example` to catch infrastructure-configuration drift.
-- Cloudflare Workers AI embeddings and Vectorize retrieval.
-- Skills search, integrity checks and review-gated workflow planning.
-- Repository hygiene, execution previews, evidence packs, review queues and approved production adapter handoff.
+- Persistent streamed conversations, rename and deletion.
+- Cost-aware model routing and model discovery.
+- Headroom prompt compression with protected system/recent-message handling.
+- Upload, extraction and bounded chat for supported documents and ZIPs.
+- Read-only browsing/chat across configured ecosystem R2 lanes.
+- Repository Manager: safe ZIP extraction, fingerprinting, language/dependency manifest and incremental re-indexing.
+- Repository Memory: Project DNA, architecture, standards, known issues and QA/optimisation/Council history.
+- Model Registry: ranked category-specific model lists and defaults.
+- Provider Framework: OpenRouter plus configured OpenRouter-compatible providers with model, pricing, capability and health metadata.
+- AI Council: provider discovery, catalogue refresh, model benchmarking, promotion decisions and downstream ops events.
+- Benchmark Engine: weighted quality/cost/latency/reliability/context/structured-output scoring.
+- Repository QA: static validation only. Uploaded repositories are not executed.
+- Repository Council: nine-dimension repository review with historical tracking.
+- Bucket Manager: explicit accessible/hidden R2 registry.
+- Connector diagnostics for OpenRouter, R2, AI Search and GitHub.
+- Optimisation Engine with confidence, previous/new state and rollback records.
+- Repository Learning and Project DNA refresh.
+- Environment audit against `.env.example`.
+- Cloudflare Workers AI embeddings, Vectorize retrieval and AI Search fan-out.
+- Skills discovery, integrity checks, workflow planning, review queues and approved adapter hand-off.
 - Authenticated ecosystem health aggregation for HIVE-UI Ops.
 
-## Health and operator endpoints
+## Important endpoints
 
-| Endpoint | Auth | Purpose |
-|---|---:|---|
-| `GET /livez` | No | Process liveness for Koyeb |
-| `GET /readyz` | No | Deployment readiness without secrets |
-| `GET /v1/runtime/readiness` | Bearer | Detailed runtime readiness |
-| `GET /v1/system/repo-health` | Bearer | Cached ecosystem health |
-| `GET /v1/models` | Bearer | OpenRouter model catalogue and groups |
-| `GET /v1/files/r2-lanes` | Bearer | Configured storage lanes |
-| `POST /v1/repositories` | Bearer | Upload and register a repository ZIP (Repository Manager) |
-| `GET /v1/repositories` | Bearer | List registered repositories |
-| `GET /v1/repositories/{id}` | Bearer | Repository manifest (fingerprint, languages, dependencies) |
-| `GET /v1/repositories/{id}/memory` | Bearer | Repository Memory (Project DNA, architecture, QA/optimisation history, etc.) |
-| `GET /v1/repository-memory/ai-search` | Bearer | Fan-out Cloudflare AI Search query across every active account instance |
-| `GET /v1/model-registry/{category}` | Bearer | Ranked models and default for a Model Registry category |
-| `GET /v1/providers` | Bearer | Discovered providers (Provider Framework) |
-| `GET /v1/providers/health` | Bearer | Latency/model-count health check per provider |
-| `POST /v1/ai-council/run` | Bearer | Run discovery/benchmark/promotion across all providers |
-| `GET /v1/ai-council/history` | Bearer | Past AI Council run reports |
-| `POST /v1/benchmark/rank` | Bearer | Ad-hoc weighted ranking of arbitrary model metrics |
-| `POST /v1/repositories/{id}/qa` | Bearer | Run the static Repository QA pipeline |
-| `POST /v1/repositories/{id}/council` | Bearer | Run a Repository Council review |
-| `GET /v1/buckets` | Bearer | Accessible R2 buckets (hidden buckets never appear here) |
-| `GET /v1/connectors` | Bearer | Diagnostics for OpenRouter, R2, AI Search, GitHub |
-| `POST /v1/optimisation/decisions` | Bearer | Record a reversible optimisation decision |
-| `POST /v1/optimisation/decisions/{id}/rollback` | Bearer | Roll back a recorded decision |
-| `POST /v1/repositories/{id}/learning/refresh-project-dna` | Bearer | Roll up learned history into Project DNA |
-| `GET /v1/environment/audit` | Bearer | Audit Settings fields against `.env.example` |
+| Endpoint | Purpose |
+|---|---|
+| `GET /livez` | process liveness |
+| `GET /readyz` | deployment readiness without secrets |
+| `GET /v1/runtime/readiness` | authenticated dependency/configuration readiness |
+| `GET /v1/system/repo-health` | ecosystem health snapshot |
+| `GET /v1/models` | model catalogue/groups |
+| `POST /v1/repositories` | register a repository ZIP |
+| `GET /v1/repositories/{id}/memory` | Repository Memory |
+| `POST /v1/repositories/{id}/qa` | static Repository QA |
+| `POST /v1/repositories/{id}/council` | Repository Council |
+| `GET /v1/model-registry/{category}` | ranked model category |
+| `GET /v1/providers` | provider discovery |
+| `GET /v1/providers/health` | provider health |
+| `POST /v1/ai-council/run` | model/provider Council run |
+| `POST /v1/benchmark/rank` | ad-hoc model ranking |
+| `GET /v1/buckets` | accessible bucket registry |
+| `GET /v1/connectors` | connector diagnostics |
+| `POST /v1/optimisation/decisions` | record reversible optimisation decision |
+| `GET /v1/environment/audit` | environment drift audit |
 
-All `/v1/*` routes require `Authorization: Bearer <ADMIN_BEARER_TOKEN>` unless explicitly documented otherwise.
+Unless explicitly documented otherwise, `/v1/*` routes require `Authorization: Bearer <ADMIN_BEARER_TOKEN>`.
+
+## Configuration split
+
+Non-secret production defaults live in `HIVE-PRODUCTION-SHARED.env`. Secret-backed variables belong in Koyeb and are documented in `HIVE-KOYEB-SECRETS-ONLY.env`. Existing platform variables override shared defaults.
+
+There is currently **configuration version drift** between repository files: `.env.example` advertises a newer `APP_VERSION` than `HIVE-PRODUCTION-SHARED.env`/some runtime references. That should be normalised before using the version string as production evidence. Functional capability should be verified through tests/endpoints rather than a README marker.
 
 ## Local verification
 
@@ -95,60 +84,21 @@ source .venv/bin/activate
 python -m pip install -r requirements-dev.txt
 python -m pip check
 PYTHONPATH=backend APP_ENV=test python -m compileall -q backend/app backend/tests scripts
-PYTHONPATH=backend APP_ENV=test python -m pytest backend/tests -q --tb=short \
-  --cov=app --cov-report=term-missing --cov-fail-under=74
+PYTHONPATH=backend APP_ENV=test python -m pytest backend/tests -q --tb=short
 PYTHONPATH=backend python -m ruff check backend/app backend/tests scripts --select E4,E7,E9,F
 PYTHONPATH=backend python -m mypy backend/app --no-incremental --show-error-codes
 python -m bandit -q -r backend/app -ll
 python -m pip_audit -r requirements.txt
 ```
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the dependency-lock and pull-request workflow.
-
-Run locally:
+Run locally with:
 
 ```bash
 PYTHONPATH=backend uvicorn app.main:app --host 0.0.0.0 --port 8080
 ```
 
-## Production environment split
+## Deployment and security
 
-HIVE now keeps non-secret production defaults in `HIVE-PRODUCTION-SHARED.env` in the repository. Koyeb should only hold secret-backed variables from `HIVE-KOYEB-SECRETS-ONLY.env`. The startup script loads the shared env file without overriding existing Koyeb variables, so secrets and emergency platform overrides still win.
+Use the root `Dockerfile` on Koyeb and the readiness/liveness endpoints above. Keep provider/storage credentials server-side, enforce production CORS/trusted-host policy, preserve upload/extraction limits and never expose hidden R2 lanes through ordinary browsing workflows.
 
-## Deployment
-
-Use the root `Dockerfile` on Koyeb. Keep one worker unless persistence and concurrency have been deliberately re-profiled. Configure `/readyz` as the readiness check and `/livez` as the liveness probe. Production configuration is described in [`docs/koyeb-deployment.md`](docs/koyeb-deployment.md).
-
-## Security boundaries
-
-- OpenRouter and storage credentials remain server-side.
-- The primary `hive` upload bucket may be read/write; all other ecosystem lanes are read-only.
-- Upload, ZIP and extraction limits are enforced before content reaches model context.
-- Production CORS and trusted hosts are fail-closed.
-- Operational responses redact tokens, credentials and unrestricted remote URLs.
-- Authentication failures are throttled by both source IP and a non-reversible credential fingerprint, so rotating guesses cannot bypass the lockout.
-- Uvicorn does not trust arbitrary forwarded headers by default. On Koyeb, authentication throttling uses only the final `X-Forwarded-For` address that Koyeb documents as certified.
-
-See [`SECURITY.md`](SECURITY.md), [`docs/architecture.md`](docs/architecture.md) and [`docs/production-readiness.md`](docs/production-readiness.md).
-
-## Operational event inbox
-
-HIVE receives redacted GitHub, Koyeb, Cloudflare Pages and runtime failure events through a dedicated bearer-protected endpoint. HIVE-UI displays them on `/ops`. See [`docs/OPERATIONAL_ALERTING.md`](docs/OPERATIONAL_ALERTING.md).
-
-## Paired skills integration contract
-
-`backend/app/api/chat.py` and `backend/app/services/skill_registry.py` are a release pair. The chat route imports `build_skill_context`, which performs bounded skill recommendation, provenance retention and untrusted-reference prompt construction. CI imports the production app and executes the real builder to prevent partial-file deployments.
-
-## Operational alerting
-
-GitHub, Koyeb, Cloudflare Pages and runtime services can submit redacted events to the authenticated `/v1/ops/events` contract. See [`docs/OPERATIONAL_ALERTING.md`](docs/OPERATIONAL_ALERTING.md).
-
-## MAST Worker monitoring and on-demand wake-up
-
-MAST is deployed as a Koyeb Worker, not as a public web service. HIVE therefore reads
-MAST's scheduler heartbeat from the hidden `meta_system` R2 lane and writes bounded
-`service.resume` commands to `state/mast/operator-control.json` when AIMS or RAMS must
-be woken on demand. The hidden lane is never exposed through HIVE's file/bucket UI.
-`MAST_BASE_URL` remains optional and is used only if MAST is deliberately deployed with
-HTTP ingress.
-
+See `SECURITY.md`, `docs/OPERATIONS.md`, `docs/koyeb-deployment.md`, `docs/model-policy.md` and `CONTRIBUTING.md`.
