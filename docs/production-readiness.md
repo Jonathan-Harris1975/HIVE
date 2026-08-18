@@ -6,13 +6,13 @@
 
 This hardening layer keeps the existing HIVE API contract intact while tightening deployment, configuration, observability, and container behaviour.
 
-**Current production marker:** `APP_VERSION=1.30-production`; backend health build `v1.30-repository-qa-through-documentation`.
+**Current production marker:** `APP_VERSION=1.31-production`; backend health marker `v1.31-production-readiness`.
 
 ## Mandatory Koyeb settings
 
 ```env
 APP_ENV=production
-APP_VERSION=1.30-production
+APP_VERSION=1.31-production
 ADMIN_BEARER_TOKEN=<unique random value, at least 32 characters>
 CORS_ORIGINS=https://<your-hive-ui-domain>
 ALLOWED_HOSTS=<your-service>.koyeb.app
