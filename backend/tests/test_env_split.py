@@ -13,6 +13,8 @@ def test_production_shared_env_contains_no_secret_placeholders() -> None:
     # meta_system is a hidden internal control plane for the MAST Worker heartbeat
     # and wake-command queue. It is never exposed through HIVE's user-facing R2 lanes.
     assert "R2_BUCKET_META_SYSTEM=metasystem" in text
+    assert "FORWARDED_ALLOW_IPS=127.0.0.1" in text
+    assert "FORWARDED_ALLOW_IPS=*" not in text
 
 
 def test_koyeb_secrets_file_is_secrets_only() -> None:
@@ -63,3 +65,9 @@ def test_settings_loads_repo_shared_env_file() -> None:
     assert settings.r2_lane("meta") is None
     assert settings.r2_lane("meta_system") is None
     assert "hive.jonathan-harris.online" in settings.effective_allowed_hosts
+
+
+def test_start_script_does_not_trust_all_forwarded_headers_by_default() -> None:
+    text = Path("scripts/start.sh").read_text()
+    assert 'FORWARDED_ALLOW_IPS="${FORWARDED_ALLOW_IPS:-127.0.0.1}"' in text
+    assert 'FORWARDED_ALLOW_IPS="${FORWARDED_ALLOW_IPS:-*}"' not in text

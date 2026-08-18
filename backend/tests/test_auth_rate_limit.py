@@ -4,8 +4,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.config import Settings
-from app.core.rate_limit import AuthRateLimiter
+from app.core.rate_limit import AuthRateLimiter, client_ip_from_request, token_fingerprint
 from app.main import create_app
+from app.core.security import _allow_local_development_bypass
 
 
 def _settings(**overrides: object) -> Settings:
@@ -115,3 +116,114 @@ def test_auth_rate_limiter_success_clears_failure_history():
     limiter.record_failure("5.6.7.8", "prefix01")
     # Only 2 failures since the reset from record_success, threshold is 3.
     limiter.check("5.6.7.8", "prefix01")
+
+
+def test_rotating_token_guesses_eventually_trigger_ip_lockout():
+    current_time = [0.0]
+    limiter = AuthRateLimiter(
+        max_failures=10,
+        ip_max_failures=4,
+        window_seconds=60.0,
+        lockout_seconds=30.0,
+        clock=lambda: current_time[0],
+    )
+
+    for index in range(4):
+        fingerprint = token_fingerprint(f"different-guess-{index}")
+        limiter.record_failure("9.8.7.6", fingerprint)
+
+    with pytest.raises(Exception):
+        limiter.check("9.8.7.6", token_fingerprint("yet-another-guess"))
+
+
+def test_token_fingerprint_does_not_store_raw_token_prefix():
+    token = "super-secret-bearer-token-value"
+    fingerprint = token_fingerprint(token)
+
+    assert fingerprint != token[:8]
+    assert token[:8] not in fingerprint
+    assert len(fingerprint) == 16
+
+
+def test_client_ip_uses_server_peer_outside_koyeb(monkeypatch):
+    from starlette.requests import Request
+
+    scope = {
+        "type": "http",
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "https",
+        "path": "/",
+        "raw_path": b"/",
+        "query_string": b"",
+        "headers": [(b"x-forwarded-for", b"203.0.113.77")],
+        "client": ("127.0.0.1", 43210),
+        "server": ("testserver", 443),
+    }
+
+    monkeypatch.delenv("KOYEB_PUBLIC_DOMAIN", raising=False)
+    assert client_ip_from_request(Request(scope)) == "127.0.0.1"
+
+
+def test_client_ip_uses_koyeb_certified_last_forwarded_hop(monkeypatch):
+    from starlette.requests import Request
+
+    monkeypatch.setenv("KOYEB_PUBLIC_DOMAIN", "example.koyeb.app")
+    scope = {
+        "type": "http",
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "https",
+        "path": "/",
+        "raw_path": b"/",
+        "query_string": b"",
+        "headers": [(b"x-forwarded-for", b"127.0.0.1, 198.51.100.23")],
+        "client": ("10.0.0.8", 43210),
+        "server": ("testserver", 443),
+    }
+
+    assert client_ip_from_request(Request(scope)) == "198.51.100.23"
+
+
+def test_client_ip_rejects_invalid_koyeb_forwarded_value(monkeypatch):
+    from starlette.requests import Request
+
+    monkeypatch.setenv("KOYEB_PUBLIC_DOMAIN", "example.koyeb.app")
+    scope = {
+        "type": "http",
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "https",
+        "path": "/",
+        "raw_path": b"/",
+        "query_string": b"",
+        "headers": [(b"x-forwarded-for", b"198.51.100.23, not-an-ip")],
+        "client": ("10.0.0.8", 43210),
+        "server": ("testserver", 443),
+    }
+
+    assert client_ip_from_request(Request(scope)) == "10.0.0.8"
+
+
+def test_development_sentinel_bypass_is_loopback_only():
+    from starlette.requests import Request
+
+    settings = Settings(APP_ENV="development", ADMIN_BEARER_TOKEN="change-me-local-only")
+
+    def request_for(peer: str) -> Request:
+        return Request({
+            "type": "http",
+            "http_version": "1.1",
+            "method": "GET",
+            "scheme": "http",
+            "path": "/",
+            "raw_path": b"/",
+            "query_string": b"",
+            "headers": [],
+            "client": (peer, 12345),
+            "server": ("localhost", 8000),
+        })
+
+    assert _allow_local_development_bypass(request_for("127.0.0.1"), settings) is True
+    assert _allow_local_development_bypass(request_for("::1"), settings) is True
+    assert _allow_local_development_bypass(request_for("198.51.100.23"), settings) is False
