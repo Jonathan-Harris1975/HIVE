@@ -1,5 +1,5 @@
 > **Document status:** Production reference  
-> **Last reviewed:** 5 July 2026  
+> **Last reviewed:** 18 August 2026  
 > **Operational authority:** Current repository README, SECURITY policy and operations guide.
 
 # HIVE
@@ -20,6 +20,15 @@ HIVE-UI (Cloudflare Pages)
       -> Cloudflare R2 and Vectorize
       -> ecosystem health probes
 ```
+
+## Supported Python runtimes
+
+- Production Docker image: Python `3.14.6`.
+- Koyeb buildpack/Nixpacks fallback: Python `3.11.15`.
+- CI compatibility matrix: Python `3.11`, `3.12`, `3.13`, and `3.14`.
+- Package metadata declares `>=3.11,<3.15`; dependency integrity is checked on every CI matrix job.
+
+The two deployment paths intentionally use different supported minors, but both are covered by CI so fallback deployments do not become an untested side road.
 
 ## Supported production capabilities
 
@@ -83,10 +92,18 @@ All `/v1/*` routes require `Authorization: Bearer <ADMIN_BEARER_TOKEN>` unless e
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-python -m pip install -r requirements.txt -r requirements-dev.txt
-PYTHONPATH=backend python -m pytest backend/tests -q
-python -m ruff check backend/app backend/tests scripts
+python -m pip install -r requirements-dev.txt
+python -m pip check
+PYTHONPATH=backend APP_ENV=test python -m compileall -q backend/app backend/tests scripts
+PYTHONPATH=backend APP_ENV=test python -m pytest backend/tests -q --tb=short \
+  --cov=app --cov-report=term-missing --cov-fail-under=74
+PYTHONPATH=backend python -m ruff check backend/app backend/tests scripts --select E4,E7,E9,F
+PYTHONPATH=backend python -m mypy backend/app --no-incremental --show-error-codes
+python -m bandit -q -r backend/app -ll
+python -m pip_audit -r requirements.txt
 ```
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the dependency-lock and pull-request workflow.
 
 Run locally:
 
@@ -109,6 +126,8 @@ Use the root `Dockerfile` on Koyeb. Keep one worker unless persistence and concu
 - Upload, ZIP and extraction limits are enforced before content reaches model context.
 - Production CORS and trusted hosts are fail-closed.
 - Operational responses redact tokens, credentials and unrestricted remote URLs.
+- Authentication failures are throttled by both source IP and a non-reversible credential fingerprint, so rotating guesses cannot bypass the lockout.
+- Uvicorn does not trust arbitrary forwarded headers by default. On Koyeb, authentication throttling uses only the final `X-Forwarded-For` address that Koyeb documents as certified.
 
 See [`SECURITY.md`](SECURITY.md), [`docs/architecture.md`](docs/architecture.md) and [`docs/production-readiness.md`](docs/production-readiness.md).
 

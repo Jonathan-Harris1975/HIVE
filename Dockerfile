@@ -9,8 +9,7 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 WORKDIR /build
 COPY requirements.txt /build/requirements.txt
-RUN python -m pip install --upgrade pip \
-    && python -m pip install --requirement /build/requirements.txt
+RUN python -m pip install --requirement /build/requirements.txt
 
 # HIVE's repository QA executes real repository tooling. Keep a current Node
 # runtime available without relying on Debian Bookworm's older nodejs package.

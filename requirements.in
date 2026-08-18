@@ -1,5 +1,7 @@
 # Direct production dependencies. Update deliberately and regenerate requirements.txt.
-fastapi==0.139.0
+fastapi==0.141.1
+# Direct pin keeps Starlette above all audited 2026 request/form parsing advisory floors.
+starlette==1.6.0
 uvicorn[standard]==0.50.2
 httpx==0.28.1
 pydantic-settings==2.14.2
