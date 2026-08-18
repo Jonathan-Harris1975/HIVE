@@ -97,7 +97,7 @@ def build_readiness_report(settings: Settings) -> ReadinessReport:
             not (production and settings.trusted_hosts_enabled and wildcard_host),
             "Trusted hosts are restricted.",
             "ALLOWED_HOSTS still permits every host. Set the Koyeb hostname and any custom API domain.",
-            required=False,
+            required=production and settings.trusted_hosts_enabled,
         )
     )
 
