@@ -391,8 +391,8 @@ class Settings(BaseSettings):
 
     # Phase 1 - Repository Intelligence. Uploaded repository ZIPs are extracted
     # into a per-process temp root and are never persisted permanently on
-    # local disk. repository_ttl_seconds controls automatic cleanup of idle
-    # working copies.
+    # local disk. repository_ttl_seconds is the expiry threshold used when
+    # cleanup is invoked manually or by an external scheduler.
     repository_manager_enabled: bool = Field(
         True, validation_alias=AliasChoices("REPOSITORY_MANAGER_ENABLED")
     )
