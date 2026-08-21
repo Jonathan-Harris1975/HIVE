@@ -58,7 +58,7 @@ jobs:
       - name: Mypy
         env:
           PYTHONPATH: backend
-        run: python -m mypy backend/app --no-incremental --show-error-codes
+        run: python scripts/mypy_guard.py
       - name: Bandit
         run: python -m bandit -q -r backend/app -ll
       - name: Dependency audit
