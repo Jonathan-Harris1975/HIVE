@@ -120,9 +120,9 @@ async def generate_monthly_review(settings: Settings, *, period: str | None = No
 
 
 def _write_report_to_r2(settings: Settings, report: dict[str, Any]) -> dict[str, Any] | None:
-    """Best-effort archive of the full report JSON to R2. Returns the stored
-    object descriptor, or None if R2 isn't configured / the write fails --
-    archival failure must never block returning the report to the caller."""
+    """Archive the full report JSON to R2 and return a machine-checkable
+    result descriptor. Failures are captured in the descriptor so scheduler
+    response policy can fail closed without losing the diagnostic payload."""
     try:
         r2 = R2Storage(settings)
         key = f"monthly-reviews/{report['period']}/{report['report_id']}.json"
@@ -136,7 +136,13 @@ def _write_report_to_r2(settings: Settings, report: dict[str, Any]) -> dict[str,
                 bucket=settings.r2_bucket_audits,
                 public_base_url=None,
             )
-        return {"bucket": stored.bucket, "key": stored.key, "size_bytes": stored.size_bytes, "sha256": stored.sha256}
+        return {
+            "ok": True,
+            "bucket": stored.bucket,
+            "key": stored.key,
+            "size_bytes": stored.size_bytes,
+            "sha256": stored.sha256,
+        }
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": str(exc)}
 
