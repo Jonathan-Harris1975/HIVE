@@ -124,8 +124,8 @@ jobs:
       - uses: actions/checkout@v6
       - name: Send redacted HIVE operational event
         env:
-          OPS_ALERT_WEBHOOK_URL: ${{ secrets.OPS_ALERT_WEBHOOK_URL }}
-          OPS_ALERT_WEBHOOK_TOKEN: ${{ secrets.OPS_ALERT_WEBHOOK_TOKEN }}
+          OPS_ALERT_WEBHOOK_URL: ${{ vars.OPS_ALERT_WEBHOOK_URL || secrets.OPS_ALERT_WEBHOOK_URL || 'https://hive.jonathan-harris.online/v1/ops/events' }}
+          OPS_ALERT_WEBHOOK_TOKEN: ${{ secrets.OPS_ALERT_WEBHOOK_TOKEN || secrets.OPS_EVENT_INGEST_TOKEN }}
         run: >-
           python scripts/ops_notify.py
           --service HIVE
