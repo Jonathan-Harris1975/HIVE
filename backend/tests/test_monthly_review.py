@@ -191,6 +191,7 @@ async def test_generate_and_archive_writes_r2_and_indexes_d1(monkeypatch, tmp_pa
 
     result = await monthly_review.generate_and_archive_monthly_review(settings, period="2026-06")
 
+    assert result["r2_object"]["ok"] is True
     assert result["r2_object"]["bucket"] == "audits"
     assert result["r2_object"]["key"] == "monthly-reviews/2026-06/monthly-review-2026-06-abc123.json"
     assert result["d1_index"]["ok"] is True

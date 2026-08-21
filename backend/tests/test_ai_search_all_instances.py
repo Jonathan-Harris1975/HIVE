@@ -54,6 +54,9 @@ async def test_diagnostics_discovers_every_instance_and_flags_paused(monkeypatch
     assert result["active_instance_count"] == 2
     assert result["paused_instance_count"] == 1
     assert result["indexing_error_count"] == 2
+    assert result["ok"] is True
+    assert result["availability_status"] == "available"
+    assert result["indexing_healthy"] is False
     assert result["status"] == "degraded"
 
 
