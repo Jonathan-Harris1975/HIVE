@@ -117,6 +117,28 @@ class Settings(BaseSettings):
         ),
     )
 
+    # Closed-loop monthly model governance. HIVE owns model selection and pushes
+    # ranked defaults into AIMS/RAMS after every AI Council run.
+    model_governance_sync_enabled: bool = Field(
+        True, validation_alias=AliasChoices("MODEL_GOVERNANCE_SYNC_ENABLED")
+    )
+    aims_base_url: str = Field(
+        "https://app.jonathan-harris.online", validation_alias=AliasChoices("AIMS_BASE_URL")
+    )
+    aims_api_key: str = Field("", validation_alias=AliasChoices("AIMS_API_KEY"))
+    rams_base_url: str = Field(
+        "https://mod.jonathan-harris.online", validation_alias=AliasChoices("RAMS_BASE_URL")
+    )
+    rams_api_key: str = Field(
+        "", validation_alias=AliasChoices("RAMS_API_KEY", "RMS_API_KEY")
+    )
+    model_governance_sync_timeout_seconds: float = Field(
+        30.0, ge=5.0, le=120.0, validation_alias=AliasChoices("MODEL_GOVERNANCE_SYNC_TIMEOUT_SECONDS")
+    )
+    model_governance_sync_attempts: int = Field(
+        3, ge=1, le=5, validation_alias=AliasChoices("MODEL_GOVERNANCE_SYNC_ATTEMPTS")
+    )
+
     # RAMS QA-event ingestion into the Optimisation Engine. This is the
     # missing wire-up the deployment-readiness audit flagged as critical:
     # without it, RAMS QA events never reach the optimisation decision
@@ -677,6 +699,8 @@ class Settings(BaseSettings):
         "rams_health_bearer_token",
         "rams_readiness_bearer_token",
         "rams_qa_ingest_token",
+        "aims_api_key",
+        "rams_api_key",
         "openrouter_api_key",
         "cf_r2_access_key_id",
         "cf_r2_secret_access_key",
