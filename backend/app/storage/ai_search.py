@@ -248,24 +248,33 @@ class AiSearchClient:
             paused = [item for item in normalised if item["paused"]]
             primary = str(self.settings.ai_search_instance or "")
             primary_present = any(item["id"] == primary or item["name"] == primary for item in normalised)
-            ok = bool(normalised) and not paused and not indexing_error_count and not degraded_stats_count and not stats_failures and (not primary or primary_present)
+            # Availability is deliberately independent from indexing completeness.
+            # A failed/unindexed file is an indexing-health signal, not a reason to
+            # take semantic search offline while at least one instance can serve.
+            ok = bool(active)
+            indexing_healthy = not indexing_error_count and not degraded_stats_count and not stats_failures
+            degraded = ok and (bool(paused) or not indexing_healthy or (bool(primary) and not primary_present))
             reason = None
             if not normalised:
                 reason = "Cloudflare returned no AI Search instances."
-            elif paused:
-                reason = f"{len(paused)} AI Search instance(s) are paused or disabled."
+            elif not active:
+                reason = "All AI Search instances are paused or disabled."
             elif indexing_error_count:
-                reason = f"{indexing_error_count} AI Search indexing error(s) need attention."
+                reason = f"AI Search remains available; {indexing_error_count} indexing error(s) need attention."
             elif degraded_stats_count:
-                reason = f"{degraded_stats_count} AI Search instance(s) report degraded indexing statistics."
+                reason = f"AI Search remains available; {degraded_stats_count} instance(s) report degraded indexing statistics."
             elif stats_failures:
-                reason = f"Indexing statistics could not be verified for {stats_failures} AI Search instance(s)."
+                reason = f"AI Search remains available; indexing statistics could not be verified for {stats_failures} instance(s)."
+            elif paused:
+                reason = f"AI Search remains available; {len(paused)} instance(s) are paused or disabled."
             elif primary and not primary_present:
-                reason = f"Configured primary AI Search instance '{primary}' was not returned by Cloudflare."
+                reason = f"AI Search remains available; configured primary instance '{primary}' was not returned by Cloudflare."
             return {
                 "ok": ok,
                 "configured": True,
-                "status": "ok" if ok else "degraded",
+                "status": "unavailable" if not ok else ("degraded" if degraded else "ok"),
+                "availability_status": "available" if ok else "unavailable",
+                "indexing_healthy": indexing_healthy,
                 **self.safe_config,
                 "instance_count": len(normalised),
                 "active_instance_count": len(active),
