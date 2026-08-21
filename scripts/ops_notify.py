@@ -64,7 +64,7 @@ def main() -> int:
     parser.add_argument("--url", default="")
     args = parser.parse_args()
     event_id = args.event_id or f"{args.source}:{args.service}:{os.getenv('GITHUB_RUN_ID', datetime.now(UTC).isoformat())}"
-    send_event(
+    delivered = send_event(
         {
             "event_id": event_id,
             "source": args.source,
@@ -83,6 +83,10 @@ def main() -> int:
             },
         }
     )
+    if not delivered:
+        if os.getenv("GITHUB_ACTIONS", "").lower() == "true":
+            print("::error::Operational alert was not delivered.", file=sys.stderr)
+        return 2
     return 0
 
 
