@@ -26,6 +26,7 @@ def test_koyeb_secrets_file_is_secrets_only() -> None:
     keys = {line.split("=", 1)[0] for line in lines}
     assert keys == {
         "ADMIN_BEARER_TOKEN",
+        "AIMS_API_KEY",
         "CF_WORKERS_AI_API",
         "D1_API_KEY",
         "D1_DATABASE_ID",
