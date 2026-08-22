@@ -230,10 +230,14 @@ def _extract_matches(payload: Any) -> list[dict[str, Any]]:
         match_id = item.get("id") or item.get("vectorId") or item.get("vector_id")
         if not match_id:
             continue
+        score = next(
+            (item[key] for key in ("score", "similarity", "distance") if item.get(key) is not None),
+            None,
+        )
         parsed.append(
             {
                 "id": str(match_id),
-                "score": item.get("score") or item.get("similarity") or item.get("distance"),
+                "score": score,
                 "metadata": item.get("metadata") or {},
             }
         )
