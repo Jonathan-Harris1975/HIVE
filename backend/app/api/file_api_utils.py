@@ -182,7 +182,7 @@ def _reply_text(content: object) -> str:
     return str(content)
 
 def _decode_base64_upload(
-    content_base64: str, content_type: str | None
+    content_base64: str, content_type: str | None, *, max_decoded_bytes: int | None = None
 ) -> tuple[str | None, bytes]:
     raw = content_base64.strip()
     detected_content_type = content_type
@@ -190,7 +190,17 @@ def _decode_base64_upload(
         header, raw = raw.split(",", 1)
         if ";base64" in header and not detected_content_type:
             detected_content_type = header.removeprefix("data:").split(";", 1)[0] or None
-    return detected_content_type, base64.b64decode(raw, validate=True)
+
+    if max_decoded_bytes is not None:
+        maximum = max(0, int(max_decoded_bytes))
+        max_encoded_chars = 4 * ((maximum + 2) // 3)
+        if len(raw) > max_encoded_chars:
+            raise ValueError(f"Upload exceeds max size of {maximum} bytes")
+
+    decoded = base64.b64decode(raw, validate=True)
+    if max_decoded_bytes is not None and len(decoded) > max(0, int(max_decoded_bytes)):
+        raise ValueError(f"Upload exceeds max size of {max(0, int(max_decoded_bytes))} bytes")
+    return detected_content_type, decoded
 
 def _decode_text(content: bytes) -> tuple[str, bool]:
     decoded = content.decode("utf-8", errors="replace")

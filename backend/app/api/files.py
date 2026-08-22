@@ -285,7 +285,11 @@ async def upload_base64(
     """
 
     try:
-        content_type, data = _decode_base64_upload(payload.content_base64, payload.content_type)
+        content_type, data = _decode_base64_upload(
+            payload.content_base64,
+            payload.content_type,
+            max_decoded_bytes=settings.max_upload_bytes,
+        )
         result = ingest_bytes_content(
             filename=payload.filename,
             data=data,
