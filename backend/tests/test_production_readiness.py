@@ -20,7 +20,7 @@ def _production_settings(**overrides: object) -> Settings:
         "PRODUCTION_REQUIRE_R2": False,
         "PRODUCTION_REQUIRE_DATABASE": False,
         "MAX_UPLOAD_BYTES": 1024,
-        "MAX_REQUEST_BODY_BYTES": 2048,
+        "MAX_REQUEST_BODY_BYTES": 32768,
         "REPO_HEALTH_ENABLED": False,
     }
     values.update(overrides)
@@ -180,3 +180,27 @@ def test_unhandled_errors_return_safe_request_id_response() -> None:
     assert response.json() == {"detail": "Internal server error", "request_id": "error-case-1"}
     assert response.headers["x-request-id"] == "error-case-1"
     assert "sensitive internal detail" not in response.text
+
+
+def test_production_readiness_rejects_body_limit_that_cannot_carry_max_base64_upload() -> None:
+    settings = _production_settings(
+        MAX_UPLOAD_BYTES=100 * 1024 * 1024,
+        MAX_REQUEST_BODY_BYTES=110 * 1024 * 1024,
+    )
+
+    report = build_readiness_report(settings)
+
+    assert report.ready is False
+    check = next(item for item in report.errors if item.name == "request_body_limit")
+    assert "Base64 JSON endpoint" in check.message
+
+
+def test_production_readiness_accepts_140_mib_body_limit_for_100_mib_base64_upload() -> None:
+    settings = _production_settings(
+        MAX_UPLOAD_BYTES=100 * 1024 * 1024,
+        MAX_REQUEST_BODY_BYTES=140 * 1024 * 1024,
+    )
+
+    report = build_readiness_report(settings)
+
+    assert report.ready is True

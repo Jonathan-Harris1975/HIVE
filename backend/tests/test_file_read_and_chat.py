@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -554,3 +556,24 @@ def test_chat_with_zip_auto_chunk_strips_nul_before_sql_persistence(monkeypatch,
         assert any("�" in chunk.get("content", "") for chunk in chunks)
     finally:
         app.dependency_overrides.clear()
+
+
+def test_base64_decoder_rejects_encoded_payload_above_decoded_limit_before_ingestion() -> None:
+    import base64
+
+    from app.api.file_api_utils import _decode_base64_upload
+
+    encoded = base64.b64encode(b"123456789").decode("ascii")
+    with pytest.raises(ValueError, match="Upload exceeds max size of 8 bytes"):
+        _decode_base64_upload(encoded, "text/plain", max_decoded_bytes=8)
+
+
+def test_base64_decoder_accepts_payload_at_exact_decoded_limit() -> None:
+    import base64
+
+    from app.api.file_api_utils import _decode_base64_upload
+
+    encoded = base64.b64encode(b"12345678").decode("ascii")
+    content_type, decoded = _decode_base64_upload(encoded, "text/plain", max_decoded_bytes=8)
+    assert content_type == "text/plain"
+    assert decoded == b"12345678"
