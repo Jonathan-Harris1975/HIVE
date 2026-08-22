@@ -40,7 +40,7 @@ class Settings(BaseSettings):
         True, validation_alias=AliasChoices("TRUSTED_HOSTS_ENABLED")
     )
     max_request_body_bytes: int = Field(
-        110 * 1024 * 1024, validation_alias=AliasChoices("MAX_REQUEST_BODY_BYTES")
+        140 * 1024 * 1024, validation_alias=AliasChoices("MAX_REQUEST_BODY_BYTES")
     )
     production_require_openrouter: bool = Field(
         True, validation_alias=AliasChoices("PRODUCTION_REQUIRE_OPENROUTER")

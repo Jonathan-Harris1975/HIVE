@@ -48,6 +48,16 @@ class ProductionConfigurationError(RuntimeError):
     pass
 
 
+_BASE64_JSON_OVERHEAD_BYTES = 16 * 1024
+
+
+def minimum_base64_request_body_bytes(max_upload_bytes: int) -> int:
+    """Minimum JSON body ceiling required to carry the maximum Base64 upload."""
+    upload_bytes = max(0, int(max_upload_bytes))
+    encoded_bytes = 4 * ((upload_bytes + 2) // 3)
+    return encoded_bytes + _BASE64_JSON_OVERHEAD_BYTES
+
+
 def _check(
     name: str, ok: bool, success: str, failure: str, *, required: bool = False
 ) -> ReadinessCheck:
@@ -340,12 +350,16 @@ def build_readiness_report(settings: Settings) -> ReadinessReport:
         )
     )
 
+    minimum_request_body_bytes = minimum_base64_request_body_bytes(settings.max_upload_bytes)
     checks.append(
         _check(
             "request_body_limit",
-            settings.max_request_body_bytes >= settings.max_upload_bytes,
-            "Request body limit accommodates the configured upload limit.",
-            "MAX_REQUEST_BODY_BYTES must be greater than or equal to MAX_UPLOAD_BYTES.",
+            settings.max_request_body_bytes >= minimum_request_body_bytes,
+            "Request body limit accommodates the configured Base64 upload limit and JSON framing.",
+            (
+                "MAX_REQUEST_BODY_BYTES is too small for MAX_UPLOAD_BYTES over the Base64 JSON endpoint; "
+                f"configure at least {minimum_request_body_bytes} bytes."
+            ),
             required=production,
         )
     )
