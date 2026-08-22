@@ -137,3 +137,33 @@ jobs:
           --event-id "github:${{ github.repository }}:${{ github.run_id }}:${{ github.run_attempt }}"
           --release-id "${{ github.sha }}"
           --url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+  release_gate:
+    name: Release gate (exact SHA)
+    needs: [test, lint, docker]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Require all release checks to be green
+        env:
+          RESULT_TEST: ${{ needs.test.result }}
+          RESULT_LINT: ${{ needs.lint.result }}
+          RESULT_DOCKER: ${{ needs.docker.result }}
+        run: |
+          test "$RESULT_TEST" = "success"
+          test "$RESULT_LINT" = "success"
+          test "$RESULT_DOCKER" = "success"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Assert checked-out commit is the workflow SHA
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          printf '{"repository":"%s","sha":"%s","workflow_run":"%s","status":"green"}\n' "$GITHUB_REPOSITORY" "$GITHUB_SHA" "$GITHUB_RUN_ID" > release-attestation.json
+      - name: Retain exact-SHA release attestation
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-attestation-${{ github.sha }}
+          path: release-attestation.json
+          retention-days: 90
+
