@@ -83,10 +83,8 @@ def main() -> int:
             },
         }
     )
-    if not delivered:
-        if os.getenv("GITHUB_ACTIONS", "").lower() == "true":
-            print("::error::Operational alert was not delivered.", file=sys.stderr)
-        return 2
+    if not delivered and os.getenv("GITHUB_ACTIONS", "").lower() == "true":
+        print("::warning::Operational alert was not delivered; the primary CI result remains authoritative.", file=sys.stderr)
     return 0
 
 
