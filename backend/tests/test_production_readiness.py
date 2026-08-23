@@ -1,3 +1,4 @@
+from pathlib import Path
 import pytest
 from app.core.config import Settings
 from app.core.production import (
@@ -204,3 +205,13 @@ def test_production_readiness_accepts_140_mib_body_limit_for_100_mib_base64_uplo
     report = build_readiness_report(settings)
 
     assert report.ready is True
+
+
+def test_committed_production_database_requirement_matches_documentation() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    shared_env = (repo_root / "HIVE-PRODUCTION-SHARED.env").read_text(encoding="utf-8")
+    production_docs = (repo_root / "docs" / "production-readiness.md").read_text(encoding="utf-8")
+
+    assert "PRODUCTION_REQUIRE_DATABASE=true" in shared_env
+    assert "PRODUCTION_REQUIRE_DATABASE=true" in production_docs
+    assert "PRODUCTION_REQUIRE_DATABASE=false" not in production_docs
