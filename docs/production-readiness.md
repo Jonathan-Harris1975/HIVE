@@ -1,5 +1,5 @@
 > **Document status:** Production reference  
-> **Last reviewed:** 18 August 2026  
+> **Last reviewed:** 23 August 2026  
 > **Operational authority:** Current repository README, SECURITY policy and operations guide.
 
 # HIVE backend production readiness
@@ -22,7 +22,7 @@ REQUEST_LOGGING_ENABLED=true
 TRUSTED_HOSTS_ENABLED=true
 PRODUCTION_REQUIRE_OPENROUTER=true
 PRODUCTION_REQUIRE_R2=true
-PRODUCTION_REQUIRE_DATABASE=false
+PRODUCTION_REQUIRE_DATABASE=true
 MAX_REQUEST_BODY_BYTES=146800640
 WEB_CONCURRENCY=1
 UVICORN_LIMIT_CONCURRENCY=32
@@ -32,7 +32,7 @@ UVICORN_TIMEOUT_GRACEFUL_SHUTDOWN=30
 FORWARDED_ALLOW_IPS=127.0.0.1
 ```
 
-Add the existing OpenRouter and R2 secrets. Set `PRODUCTION_REQUIRE_DATABASE=true` once PostgreSQL persistence is provisioned and verified.
+Add the existing OpenRouter, R2 and production database secrets. Production now requires durable database persistence: `PRODUCTION_REQUIRE_DATABASE=true` is authoritative and deployment readiness must fail closed if the configured database cannot be verified. The development example may keep this flag disabled for local work, but production must not override it to `false`.
 
 `FORWARDED_ALLOW_IPS` deliberately uses Uvicorn's loopback-only trust boundary. HIVE's authentication limiter handles Koyeb separately: when `KOYEB_PUBLIC_DOMAIN` is present, it validates and uses only the final `X-Forwarded-For` address, which Koyeb documents as the certified connecting client IP.
 
