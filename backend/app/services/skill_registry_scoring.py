@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from typing import Any
+from typing import Any, cast
 
 SCORE_WEIGHTS = {
     "exact_title": 50,
@@ -23,6 +23,13 @@ SKILL_SYNONYMS = {
     "social": ["social", "facebook", "instagram", "tiktok", "youtube", "content"],
 }
 
+
+def _metadata(item: dict[str, Any]) -> dict[str, Any]:
+    raw = item.get("metadata")
+    if isinstance(raw, dict):
+        return cast(dict[str, Any], raw)
+    return {}
+
 def _catalogue_category(metadata: dict[str, Any], tags: list[str]) -> str:
     lane = str(metadata.get("hive_lane") or "").lower()
     joined = " ".join(tags).lower()
@@ -40,7 +47,7 @@ def _catalogue_category(metadata: dict[str, Any], tags: list[str]) -> str:
 
 
 def _score_skill_item(item: dict[str, Any], query: str) -> dict[str, object]:
-    meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    meta = _metadata(item)
     terms = _query_terms(query)
     fields = {
         "title": str(item.get("title") or ""),
@@ -166,7 +173,7 @@ def _filter_skill_items(
     clean_risk = (risk_level or "").strip().lower()
     filtered: list[dict[str, Any]] = []
     for item in items:
-        meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+        meta = _metadata(item)
         if clean_repo and clean_repo not in [str(repo).lower() for repo in meta.get("repos") or []]:
             continue
         if clean_lane and clean_lane not in str(meta.get("hive_lane") or "").lower():
@@ -186,7 +193,7 @@ def _group_skill_items(items: list[dict[str, Any]]) -> dict[str, dict[str, int]]
         "risk_level": Counter(),
     }
     for item in items:
-        meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+        meta = _metadata(item)
         for field, counter in counters.items():
             value = str(meta.get(field) or "").strip()
             if value:
