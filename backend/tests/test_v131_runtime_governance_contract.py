@@ -15,7 +15,17 @@ def test_v131_runtime_version_markers_are_aligned() -> None:
 
 def test_governance_and_model_optimisation_routes_are_shipped() -> None:
     app = create_app(Settings(_env_file=None))
-    routes = {(route.path, method) for route in app.routes for method in getattr(route, "methods", set())}
+    # FastAPI 0.141+ keeps included routers as nested route contexts instead of
+    # flattening them into ``app.routes``.  Validate the generated API contract
+    # rather than relying on that internal representation.
+    schema = app.openapi()
+    http_methods = {"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD", "TRACE"}
+    routes = {
+        (path, method.upper())
+        for path, operations in schema.get("paths", {}).items()
+        for method in operations
+        if method.upper() in http_methods
+    }
     required = {
         ("/v1/runtime/readiness", "GET"),
         ("/v1/system/repo-health", "GET"),
