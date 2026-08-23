@@ -52,41 +52,6 @@ from app.storage.vectorize import VectorizeClient
 
 logger = logging.getLogger("uvicorn.error.hive.files")
 
-# Allow-list of MIME type prefixes accepted at the upload endpoints.
-# Any Content-Type not matching one of these prefixes is rejected with 415.
-# Executable/binary MIME types (application/x-executable, application/octet-stream
-# for arbitrary binary, etc.) are intentionally excluded. ZIP files are accepted here
-# and further validated by UnsafeZipError / zip_extract_supported_suffixes.
-_ALLOWED_UPLOAD_MIME_PREFIXES: frozenset[str] = frozenset({
-    "text/",
-    "application/json",
-    "application/pdf",
-    "application/vnd.openxmlformats-officedocument",  # docx, xlsx, pptx
-    "application/vnd.ms-excel",
-    "application/vnd.ms-powerpoint",
-    "application/vnd.ms-word",
-    "application/msword",
-    "application/zip",
-    "application/x-zip-compressed",
-    "multipart/x-zip",
-    "application/xml",
-    "application/csv",
-    "application/x-yaml",
-    "image/png",
-    "image/jpeg",
-    "image/gif",
-    "image/webp",
-    "image/svg+xml",
-    "application/x-tar",
-    "application/gzip",
-    "application/x-gzip",
-})
-# Content types with these exact values are also permitted (for edge-case sniff mismatches)
-_ALLOWED_UPLOAD_MIME_EXACT: frozenset[str] = frozenset({
-    "application/octet-stream",  # Some browsers send this for known-safe files
-})
-
-
 router = APIRouter(tags=["files"], dependencies=[Depends(require_admin)])
 
 

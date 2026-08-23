@@ -5,6 +5,35 @@ from pathlib import Path
 
 from fastapi import HTTPException, status
 
+# Upload media allow-list shared by multipart and base64 upload paths.
+# application/octet-stream is retained for browsers/clients that cannot provide a more
+# specific type; extension and archive inspection still provide defence in depth.
+_ALLOWED_UPLOAD_MIME_PREFIXES: frozenset[str] = frozenset({
+    "text/",
+    "application/json",
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument",
+    "application/vnd.ms-excel",
+    "application/vnd.ms-powerpoint",
+    "application/vnd.ms-word",
+    "application/msword",
+    "application/zip",
+    "application/x-zip-compressed",
+    "multipart/x-zip",
+    "application/xml",
+    "application/csv",
+    "application/x-yaml",
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+    "image/svg+xml",
+    "application/x-tar",
+    "application/gzip",
+    "application/x-gzip",
+})
+_ALLOWED_UPLOAD_MIME_EXACT: frozenset[str] = frozenset({"application/octet-stream"})
+
 def _validate_upload_content_type(content_type: str | None) -> None:
     """Raise HTTP 415 if the upload Content-Type is not in the allow-list.
 
