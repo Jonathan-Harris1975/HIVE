@@ -68,8 +68,6 @@ def _json_or_none(value: Any) -> Any:
 
 
 def _query_terms(query: str, *, max_terms: int = 8) -> list[str]:
-    import re
-
     terms = [term.lower() for term in re.findall(r"[A-Za-z0-9][A-Za-z0-9_-]{1,}", query or "")]
     seen: set[str] = set()
     unique: list[str] = []

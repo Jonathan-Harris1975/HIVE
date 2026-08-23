@@ -10,7 +10,6 @@ from typing import Any, Iterator
 
 from app.core.config import Settings
 from app.storage.sql_store_utils import (
-    DatabaseUrlBuilder,
     _default_conversation_title,
     _float_or_none,
     _int_or_none,
