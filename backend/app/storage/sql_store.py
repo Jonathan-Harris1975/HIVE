@@ -109,14 +109,13 @@ class SqlStore:
 
         probe_id = f"probe-{uuid.uuid4()}"
         now = _now()
-        p = self._param()
         try:
             with self._transaction() as cur:
                 cur.execute(
-                    f"INSERT INTO hive_conversations (id, mode, model, title, created_at, updated_at) VALUES ({p}, {p}, {p}, {p}, {p}, {p})",
+                    self._sql("INSERT INTO hive_conversations (id, mode, model, title, created_at, updated_at) VALUES (__PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__)"),
                     (probe_id, "diagnostic", "probe", "SQL write probe", now, now),
                 )
-                cur.execute(f"DELETE FROM hive_conversations WHERE id={p}", (probe_id,))
+                cur.execute(self._sql("DELETE FROM hive_conversations WHERE id=__PARAM__"), (probe_id,))
             return {"ok": True, "enabled": True, "dialect": self.dialect, "probe_id": probe_id}
         except Exception as exc:  # pragma: no cover
             return {"ok": False, "enabled": True, "dialect": self.dialect, "probe_id": probe_id, "error": str(exc)}
@@ -236,11 +235,10 @@ class SqlStore:
         object_key = _strip_nul_text(object_key)
 
         now = _now()
-        p = self._param()
         try:
             with self._transaction() as cur:
                 if replace_existing:
-                    cur.execute(f"DELETE FROM hive_file_chunks WHERE object_key={p}", (object_key,))
+                    cur.execute(self._sql("DELETE FROM hive_file_chunks WHERE object_key=__PARAM__"), (object_key,))
                 for chunk in chunks:
                     metadata = dict(source_metadata or {})
                     metadata.update(chunk.get("metadata") or {})
@@ -259,20 +257,21 @@ class SqlStore:
     ) -> dict[str, object]:
         if not self.enabled:
             return {"ok": False, "enabled": False}
-        p = self._param()
         content_column = "content" if include_content else "SUBSTR(content, 1, 360) AS content_preview"
         try:
             with self._connect() as conn:
                 cur = conn.cursor()
                 cur.execute(
-                    f"""
-                    SELECT id, object_key, chunk_index, {content_column}, char_start, char_end,
+                    self._sql(
+                        """
+                    SELECT id, object_key, chunk_index, __CONTENT_COLUMN__, char_start, char_end,
                            token_estimate, content_sha256, metadata_json, created_at, updated_at
                     FROM hive_file_chunks
-                    WHERE object_key={p}
+                    WHERE object_key=__PARAM__
                     ORDER BY chunk_index ASC
-                    LIMIT {p} OFFSET {p}
-                    """,
+                    LIMIT __PARAM__ OFFSET __PARAM__
+                    """
+                    ).replace("__CONTENT_COLUMN__", content_column),
                     (object_key, _int_or_none(limit) or 50, _int_or_none(offset) or 0),
                 )
                 rows = self._fetch_dicts(cur)
@@ -314,14 +313,16 @@ class SqlStore:
             with self._connect() as conn:
                 cur = conn.cursor()
                 cur.execute(
-                    f"""
+                    self._sql(
+                        """
                     SELECT id, object_key, chunk_index, content, char_start, char_end,
                            token_estimate, content_sha256, metadata_json, created_at, updated_at
                     FROM hive_file_chunks
-                    {where_sql}
+                    __WHERE_SQL__
                     ORDER BY object_key ASC, chunk_index ASC
-                    LIMIT {p}
-                    """,
+                    LIMIT __PARAM__
+                    """
+                    ).replace("__WHERE_SQL__", where_sql),
                     tuple(params + [_int_or_none(candidate_limit) or 300]),
                 )
                 rows = self._fetch_dicts(cur)
@@ -378,12 +379,17 @@ class SqlStore:
             with self._connect() as conn:
                 cur = conn.cursor()
                 cur.execute(
-                    f"""
-                    SELECT id, object_key, chunk_index, {content_column}, char_start, char_end,
+                    self._sql(
+                        """
+                    SELECT id, object_key, chunk_index, __CONTENT_COLUMN__, char_start, char_end,
                            token_estimate, content_sha256, metadata_json, created_at, updated_at
                     FROM hive_file_chunks
-                    WHERE id IN ({placeholders}){where_object}
-                    """,
+                    WHERE id IN (__PLACEHOLDERS__)__WHERE_OBJECT__
+                    """
+                    )
+                    .replace("__CONTENT_COLUMN__", content_column)
+                    .replace("__PLACEHOLDERS__", placeholders)
+                    .replace("__WHERE_OBJECT__", where_object),
                     tuple(params),
                 )
                 rows = self._fetch_dicts(cur)
@@ -409,7 +415,9 @@ class SqlStore:
             try:
                 with self._connect() as conn:
                     cur = conn.cursor()
-                    cur.execute(f"SELECT COUNT(*) FROM {table}")
+                    safe_table = self._sql_table(table)
+                    statement = self._sql("SELECT COUNT(*) FROM __TABLE__").replace("__TABLE__", safe_table)
+                    cur.execute(statement)
                     row = cur.fetchone()
                     counts[table] = int(row[0]) if row else 0
             except Exception as exc:  # table may not exist before /db/init
@@ -419,13 +427,12 @@ class SqlStore:
     def list_conversations(self, *, limit: int = 50) -> dict[str, object]:
         if not self.enabled:
             return {"ok": False, "enabled": False}
-        p = self._param()
-        sql = f"""
+        sql = self._sql("""
             WITH recent_conversations AS (
               SELECT id, mode, model, title, auto_titled, created_at, updated_at
               FROM hive_conversations
               ORDER BY updated_at DESC
-              LIMIT {p}
+              LIMIT __PARAM__
             )
             SELECT
               c.id,
@@ -443,7 +450,7 @@ class SqlStore:
             LEFT JOIN hive_messages m ON m.conversation_id = c.id
             GROUP BY c.id, c.mode, c.model, c.title, c.auto_titled, c.created_at, c.updated_at
             ORDER BY c.updated_at DESC
-        """
+        """)
         schema_init_result: dict[str, object] | None = None
         for attempt in range(2):
             try:
@@ -473,11 +480,10 @@ class SqlStore:
         clean_title = " ".join((title or "").split()).strip()
         if not clean_title:
             return {"ok": False, "enabled": True, "error": "title_required"}
-        p = self._param()
         try:
             with self._transaction() as cur:
                 cur.execute(
-                    f"UPDATE hive_conversations SET title={p}, auto_titled=0, updated_at={p} WHERE id={p}",
+                    self._sql("UPDATE hive_conversations SET title=__PARAM__, auto_titled=0, updated_at=__PARAM__ WHERE id=__PARAM__"),
                     (clean_title[:200], _now(), conversation_id),
                 )
                 updated = int(cur.rowcount or 0)
@@ -508,11 +514,10 @@ class SqlStore:
         clean_title = " ".join((title or "").split()).strip()
         if not clean_title:
             return {"ok": False, "enabled": True, "error": "title_required"}
-        p = self._param()
         try:
             with self._transaction() as cur:
                 cur.execute(
-                    f"UPDATE hive_conversations SET title={p}, auto_titled=1, updated_at={p} WHERE id={p}",
+                    self._sql("UPDATE hive_conversations SET title=__PARAM__, auto_titled=1, updated_at=__PARAM__ WHERE id=__PARAM__"),
                     (clean_title[:200], _now(), conversation_id),
                 )
                 updated = int(cur.rowcount or 0)
@@ -525,11 +530,10 @@ class SqlStore:
     def conversation_auto_title_state(self, conversation_id: str) -> dict[str, object]:
         if not self.enabled or not conversation_id:
             return {"ok": False, "enabled": self.enabled, "conversation_id": conversation_id}
-        p = self._param()
         try:
             with self._connect() as conn:
                 cur = conn.cursor()
-                cur.execute(f"SELECT id, title, auto_titled FROM hive_conversations WHERE id={p}", (conversation_id,))
+                cur.execute(self._sql("SELECT id, title, auto_titled FROM hive_conversations WHERE id=__PARAM__"), (conversation_id,))
                 rows = self._fetch_dicts(cur)
             if not rows:
                 return {"ok": False, "enabled": True, "conversation_id": conversation_id, "error": "conversation_not_found"}
@@ -547,10 +551,9 @@ class SqlStore:
     def delete_conversation(self, conversation_id: str) -> dict[str, object]:
         if not self.enabled:
             return {"ok": False, "enabled": False}
-        p = self._param()
         try:
             with self._transaction() as cur:
-                cur.execute(f"SELECT id FROM hive_conversations WHERE id={p}", (conversation_id,))
+                cur.execute(self._sql("SELECT id FROM hive_conversations WHERE id=__PARAM__"), (conversation_id,))
                 exists = cur.fetchone() is not None
                 if not exists:
                     return {
@@ -559,11 +562,11 @@ class SqlStore:
                         "error": "conversation_not_found",
                         "conversation_id": conversation_id,
                     }
-                cur.execute(f"DELETE FROM hive_cost_events WHERE conversation_id={p}", (conversation_id,))
+                cur.execute(self._sql("DELETE FROM hive_cost_events WHERE conversation_id=__PARAM__"), (conversation_id,))
                 cost_events_deleted = int(cur.rowcount or 0)
-                cur.execute(f"DELETE FROM hive_messages WHERE conversation_id={p}", (conversation_id,))
+                cur.execute(self._sql("DELETE FROM hive_messages WHERE conversation_id=__PARAM__"), (conversation_id,))
                 messages_deleted = int(cur.rowcount or 0)
-                cur.execute(f"DELETE FROM hive_conversations WHERE id={p}", (conversation_id,))
+                cur.execute(self._sql("DELETE FROM hive_conversations WHERE id=__PARAM__"), (conversation_id,))
                 conversations_deleted = int(cur.rowcount or 0)
             return {
                 "ok": conversations_deleted == 1,
@@ -584,25 +587,26 @@ class SqlStore:
     def get_conversation(self, conversation_id: str, *, limit: int = 100) -> dict[str, object]:
         if not self.enabled:
             return {"ok": False, "enabled": False}
-        p = self._param()
         try:
             with self._connect() as conn:
                 cur = conn.cursor()
                 cur.execute(
-                    f"SELECT id, mode, model, title, auto_titled, created_at, updated_at FROM hive_conversations WHERE id={p}",
+                    self._sql("SELECT id, mode, model, title, auto_titled, created_at, updated_at FROM hive_conversations WHERE id=__PARAM__"),
                     (conversation_id,),
                 )
                 conversation_rows = self._fetch_dicts(cur)
                 if not conversation_rows:
                     return {"ok": False, "enabled": True, "error": "conversation_not_found", "conversation_id": conversation_id}
                 cur.execute(
-                    f"""
+                    self._sql(
+                        """
                     SELECT id, role, content, model, provider, token_total, cost_usd, metadata_json, created_at
                     FROM hive_messages
-                    WHERE conversation_id={p}
+                    WHERE conversation_id=__PARAM__
                     ORDER BY created_at DESC
-                    LIMIT {p}
-                    """,
+                    LIMIT __PARAM__
+                    """
+                    ),
                     (conversation_id, _int_or_none(limit) or 100),
                 )
                 messages = list(reversed(self._fetch_dicts(cur)))
@@ -626,18 +630,19 @@ class SqlStore:
 
         if not self.enabled or not conversation_id:
             return {"user_message": None, "assistant_reply": None}
-        p = self._param()
         try:
             with self._connect() as conn:
                 cur = conn.cursor()
                 cur.execute(
-                    f"""
+                    self._sql(
+                        """
                     SELECT role, content
                     FROM hive_messages
-                    WHERE conversation_id={p} AND role IN ('user', 'assistant')
+                    WHERE conversation_id=__PARAM__ AND role IN ('user', 'assistant')
                     ORDER BY created_at ASC
                     LIMIT 8
-                    """,
+                    """
+                    ),
                     (conversation_id,),
                 )
                 rows = self._fetch_dicts(cur)
@@ -670,18 +675,19 @@ class SqlStore:
 
         if not self.enabled or not conversation_id:
             return []
-        p = self._param()
         try:
             with self._connect() as conn:
                 cur = conn.cursor()
                 cur.execute(
-                    f"""
+                    self._sql(
+                        """
                     SELECT role, content
                     FROM hive_messages
-                    WHERE conversation_id={p} AND role IN ('user', 'assistant')
+                    WHERE conversation_id=__PARAM__ AND role IN ('user', 'assistant')
                     ORDER BY created_at DESC
-                    LIMIT {p}
-                    """,
+                    LIMIT __PARAM__
+                    """
+                    ),
                     (conversation_id, _int_or_none(limit) or 20),
                 )
                 rows = list(reversed(self._fetch_dicts(cur)))
@@ -702,17 +708,18 @@ class SqlStore:
     def list_files(self, *, limit: int = 50) -> dict[str, object]:
         if not self.enabled:
             return {"ok": False, "enabled": False}
-        p = self._param()
         try:
             with self._connect() as conn:
                 cur = conn.cursor()
                 cur.execute(
-                    f"""
+                    self._sql(
+                        """
                     SELECT id, object_key, filename, storage, bucket, public_url, size_bytes, content_type, sha256, created_at, updated_at
                     FROM hive_files
                     ORDER BY updated_at DESC
-                    LIMIT {p}
-                    """,
+                    LIMIT __PARAM__
+                    """
+                    ),
                     (_int_or_none(limit) or 50,),
                 )
                 rows = self._fetch_dicts(cur)
@@ -743,7 +750,8 @@ class SqlStore:
             with self._connect() as conn:
                 cur = conn.cursor()
                 cur.execute(
-                    f"""
+                    self._sql(
+                        """
                     SELECT
                       COUNT(*) AS event_count,
                       COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
@@ -751,13 +759,15 @@ class SqlStore:
                       COALESCE(SUM(total_tokens), 0) AS total_tokens,
                       COALESCE(SUM(cost_usd), 0) AS cost_usd
                     FROM hive_cost_events
-                    {where_sql}
-                    """,
+                    __WHERE_SQL__
+                    """
+                    ).replace("__WHERE_SQL__", where_sql),
                     tuple(params),
                 )
                 totals = self._fetch_dicts(cur)[0]
                 cur.execute(
-                    f"""
+                    self._sql(
+                        """
                     SELECT
                       model,
                       provider,
@@ -765,11 +775,12 @@ class SqlStore:
                       COALESCE(SUM(total_tokens), 0) AS total_tokens,
                       COALESCE(SUM(cost_usd), 0) AS cost_usd
                     FROM hive_cost_events
-                    {where_sql}
+                    __WHERE_SQL__
                     GROUP BY model, provider
                     ORDER BY cost_usd DESC, total_tokens DESC
-                    LIMIT {p}
-                    """,
+                    LIMIT __PARAM__
+                    """
+                    ).replace("__WHERE_SQL__", where_sql),
                     (*params, _int_or_none(by_model_limit) or 20),
                 )
                 by_model = self._fetch_dicts(cur)
@@ -800,7 +811,6 @@ class SqlStore:
                 "dry_run": dry_run,
             }
 
-        p = self._param()
         metadata_like = f"%{test_run_id}%" if test_run_id else None
         prefix_like = f"{object_key_prefix}%" if object_key_prefix else None
 
@@ -811,27 +821,27 @@ class SqlStore:
 
                 if metadata_like:
                     cur.execute(
-                        f"SELECT DISTINCT conversation_id FROM hive_messages WHERE metadata_json LIKE {p}",
+                        self._sql("SELECT DISTINCT conversation_id FROM hive_messages WHERE metadata_json LIKE __PARAM__"),
                         (metadata_like,),
                     )
                     conversation_ids = [str(row[0]) for row in cur.fetchall() if row and row[0]]
 
                     cur.execute(
-                        f"SELECT DISTINCT object_key FROM hive_files WHERE metadata_json LIKE {p}",
+                        self._sql("SELECT DISTINCT object_key FROM hive_files WHERE metadata_json LIKE __PARAM__"),
                         (metadata_like,),
                     )
                     object_keys.extend(str(row[0]) for row in cur.fetchall() if row and row[0])
 
                     cur.execute(
-                        f"SELECT DISTINCT object_key FROM hive_file_chunks WHERE metadata_json LIKE {p}",
+                        self._sql("SELECT DISTINCT object_key FROM hive_file_chunks WHERE metadata_json LIKE __PARAM__"),
                         (metadata_like,),
                     )
                     object_keys.extend(str(row[0]) for row in cur.fetchall() if row and row[0])
 
                 if prefix_like:
-                    cur.execute(f"SELECT DISTINCT object_key FROM hive_files WHERE object_key LIKE {p}", (prefix_like,))
+                    cur.execute(self._sql("SELECT DISTINCT object_key FROM hive_files WHERE object_key LIKE __PARAM__"), (prefix_like,))
                     object_keys.extend(str(row[0]) for row in cur.fetchall() if row and row[0])
-                    cur.execute(f"SELECT DISTINCT object_key FROM hive_file_chunks WHERE object_key LIKE {p}", (prefix_like,))
+                    cur.execute(self._sql("SELECT DISTINCT object_key FROM hive_file_chunks WHERE object_key LIKE __PARAM__"), (prefix_like,))
                     object_keys.extend(str(row[0]) for row in cur.fetchall() if row and row[0])
 
                 conversation_ids = sorted(set(conversation_ids))
@@ -1106,16 +1116,17 @@ class SqlStore:
         *,
         title: str | None = None,
     ) -> None:
-        p = self._param()
         cur.execute(
-            f"""
+            self._sql(
+                """
             INSERT INTO hive_conversations (id, mode, model, title, auto_titled, created_at, updated_at)
-            VALUES ({p}, {p}, {p}, {p}, 0, {p}, {p})
+            VALUES (__PARAM__, __PARAM__, __PARAM__, __PARAM__, 0, __PARAM__, __PARAM__)
             ON CONFLICT(id) DO UPDATE SET
               mode=excluded.mode,
               model=excluded.model,
               updated_at=excluded.updated_at
-            """,
+            """
+            ),
             (_strip_nul_text(conv_id), _strip_nul_text(mode), _strip_nul_text(model) if model else None, _strip_nul_text(title) if title else None, now, now),
         )
 
@@ -1132,18 +1143,18 @@ class SqlStore:
         metadata_json: str,
         created: str,
     ) -> None:
-        p = self._param()
         cur.execute(
-            f"""
+            self._sql(
+                """
             INSERT INTO hive_messages
             (id, conversation_id, role, content, model, provider, token_total, cost_usd, metadata_json, created_at)
-            VALUES ({p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p})
-            """,
+            VALUES (__PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__)
+            """
+            ),
             (str(uuid.uuid4()), _strip_nul_text(conv_id), _strip_nul_text(role), _strip_nul_text(content or ""), _strip_nul_text(model) if model else None, _strip_nul_text(provider) if provider else None, total_tokens, cost, _strip_nul_text(metadata_json), created),
         )
 
     def _upsert_file(self, cur: Any, data: dict[str, Any], metadata_json: str, now: str) -> None:
-        p = self._param()
         object_key = _strip_nul_text(str(data.get("object_key") or data.get("key") or ""))
         filename = data.get("original_name") or data.get("filename") or Path(str(object_key)).name
         values = (
@@ -1161,10 +1172,11 @@ class SqlStore:
             now,
         )
         cur.execute(
-            f"""
+            self._sql(
+                """
             INSERT INTO hive_files
             (id, object_key, filename, storage, bucket, public_url, size_bytes, content_type, sha256, metadata_json, created_at, updated_at)
-            VALUES ({p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p})
+            VALUES (__PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__)
             ON CONFLICT(object_key) DO UPDATE SET
               filename=excluded.filename,
               storage=excluded.storage,
@@ -1175,7 +1187,8 @@ class SqlStore:
               sha256=excluded.sha256,
               metadata_json=excluded.metadata_json,
               updated_at=excluded.updated_at
-            """,
+            """
+            ),
             values,
         )
 
@@ -1187,7 +1200,6 @@ class SqlStore:
         metadata: dict[str, Any],
         now: str,
     ) -> None:
-        p = self._param()
         safe_metadata_json = _json_dumps_safe(metadata)
         values = (
             str(uuid.uuid4()),
@@ -1203,10 +1215,11 @@ class SqlStore:
             now,
         )
         cur.execute(
-            f"""
+            self._sql(
+                """
             INSERT INTO hive_file_chunks
             (id, object_key, chunk_index, content, char_start, char_end, token_estimate, content_sha256, metadata_json, created_at, updated_at)
-            VALUES ({p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p})
+            VALUES (__PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__)
             ON CONFLICT(object_key, chunk_index) DO UPDATE SET
               content=excluded.content,
               char_start=excluded.char_start,
@@ -1215,7 +1228,8 @@ class SqlStore:
               content_sha256=excluded.content_sha256,
               metadata_json=excluded.metadata_json,
               updated_at=excluded.updated_at
-            """,
+            """
+            ),
             values,
         )
 
@@ -1228,13 +1242,14 @@ class SqlStore:
         usage: dict[str, Any],
         created: str,
     ) -> None:
-        p = self._param()
         cur.execute(
-            f"""
+            self._sql(
+                """
             INSERT INTO hive_cost_events
             (id, conversation_id, model, provider, prompt_tokens, completion_tokens, total_tokens, cost_usd, usage_json, created_at)
-            VALUES ({p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p})
-            """,
+            VALUES (__PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__)
+            """
+            ),
             (
                 str(uuid.uuid4()),
                 _strip_nul_text(conv_id),
@@ -1253,18 +1268,45 @@ class SqlStore:
     def _count_in(self, cur: Any, table: str, column: str, values: list[str]) -> int:
         if not values:
             return 0
-        p = self._param()
-        placeholders = ", ".join([p for _ in values])
-        cur.execute(f"SELECT COUNT(*) FROM {table} WHERE {column} IN ({placeholders})", tuple(values))
+        placeholders = ", ".join([self._param() for _ in values])
+        safe_table = self._sql_table(table)
+        safe_column = self._sql_column(column)
+        statement = self._sql("SELECT COUNT(*) FROM __TABLE__ WHERE __COLUMN__ IN (__PLACEHOLDERS__)")
+        statement = statement.replace("__TABLE__", safe_table).replace("__COLUMN__", safe_column).replace("__PLACEHOLDERS__", placeholders)
+        cur.execute(statement, tuple(values))
         row = cur.fetchone()
         return int(row[0]) if row else 0
 
     def _delete_in(self, cur: Any, table: str, column: str, values: list[str]) -> None:
         if not values:
             return
-        p = self._param()
-        placeholders = ", ".join([p for _ in values])
-        cur.execute(f"DELETE FROM {table} WHERE {column} IN ({placeholders})", tuple(values))
+        placeholders = ", ".join([self._param() for _ in values])
+        safe_table = self._sql_table(table)
+        safe_column = self._sql_column(column)
+        statement = self._sql("DELETE FROM __TABLE__ WHERE __COLUMN__ IN (__PLACEHOLDERS__)")
+        statement = statement.replace("__TABLE__", safe_table).replace("__COLUMN__", safe_column).replace("__PLACEHOLDERS__", placeholders)
+        cur.execute(statement, tuple(values))
+
+
+    def _sql(self, statement: str) -> str:
+        """Render the neutral bind token for the active DB-API driver.
+
+        Query text stays static at call sites. Runtime values are still supplied
+        separately to ``execute`` so they cannot alter the SQL structure.
+        """
+
+        return statement.replace("__PARAM__", self._param())
+
+    def _sql_table(self, table: str) -> str:
+        if table not in self.table_names():
+            raise ValueError(f"Unsupported SQL table: {table}")
+        return table
+
+    @staticmethod
+    def _sql_column(column: str) -> str:
+        if column not in {"id", "conversation_id", "object_key"}:
+            raise ValueError(f"Unsupported SQL column: {column}")
+        return column
 
 
     def _looks_like_missing_schema_error(self, error: str) -> bool:
