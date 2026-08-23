@@ -56,6 +56,19 @@ jobs:
           EXPECTED_DEPLOYMENT_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
           EXPECTED_DEPLOYMENT_AFTER: ${{ github.event.workflow_run.created_at || '' }}
         run: python scripts/watch_koyeb_deployment.py
+      - name: Record exact-SHA production deployment attestation
+        env:
+          DEPLOYED_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          printf '{"repository":"%s","sha":"%s","workflow_run":"%s","service":"HIVE","status":"production-deployment-green"}\n' \
+            "$GITHUB_REPOSITORY" "$DEPLOYED_SHA" "$GITHUB_RUN_ID" > deployment-attestation.json
+      - name: Retain production deployment evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: hive-deployment-attestation-${{ github.event.workflow_run.head_sha || github.sha }}
+          path: deployment-attestation.json
+          if-no-files-found: error
+          retention-days: 90
       - name: Trigger central ecosystem smoke
         env:
           ECOSYSTEM_SMOKE_DISPATCH_TOKEN: ${{ secrets.ECOSYSTEM_SMOKE_DISPATCH_TOKEN }}

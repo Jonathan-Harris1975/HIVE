@@ -38,6 +38,34 @@ jobs:
           python -m compileall -q backend/app backend/tests
           python -m pytest backend/tests -q --tb=short --cov=app --cov-report=term-missing --cov-fail-under=74
 
+  performance:
+    name: API performance regression gate (Python 3.14)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.14"
+          cache: "pip"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+          python -m pip check
+      - name: Enforce API latency SLOs
+        env:
+          PYTHONPATH: backend
+          HIVE_PERF_REPORT_PATH: hive-performance.json
+        run: python scripts/performance_gate.py
+      - name: Retain performance evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: hive-performance-${{ github.sha }}
+          path: hive-performance.json
+          if-no-files-found: error
+          retention-days: 90
+
   lint:
     name: Lint, type and security checks
     runs-on: ubuntu-latest
@@ -118,7 +146,7 @@ jobs:
 
   notify_failure:
     name: Notify central operations on CI failure
-    needs: [test, lint, docker]
+    needs: [test, performance, lint, docker]
     if: ${{ always() && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}
     runs-on: ubuntu-latest
     continue-on-error: true
@@ -140,7 +168,7 @@ jobs:
 
   release_gate:
     name: Release gate (exact SHA)
-    needs: [test, lint, docker]
+    needs: [test, performance, lint, docker]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     permissions:
@@ -149,10 +177,12 @@ jobs:
       - name: Require all release checks to be green
         env:
           RESULT_TEST: ${{ needs.test.result }}
+          RESULT_PERFORMANCE: ${{ needs.performance.result }}
           RESULT_LINT: ${{ needs.lint.result }}
           RESULT_DOCKER: ${{ needs.docker.result }}
         run: |
           test "$RESULT_TEST" = "success"
+          test "$RESULT_PERFORMANCE" = "success"
           test "$RESULT_LINT" = "success"
           test "$RESULT_DOCKER" = "success"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
