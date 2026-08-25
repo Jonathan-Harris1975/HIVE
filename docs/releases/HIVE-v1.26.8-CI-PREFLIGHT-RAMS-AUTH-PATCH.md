@@ -29,8 +29,8 @@ The application now correctly requires a RAMS readiness bearer token whenever RA
 Updated `.github/workflows/ci.yml` so the Production configuration preflight includes explicit RAMS health/readiness URLs and mock CI bearer tokens:
 
 ```yaml
-RAMS_HEALTH_URL: https://mod.jonathan-harris.online/livez
-RAMS_READINESS_URL: https://mod.jonathan-harris.online/readiness
+RAMS_HEALTH_URL: https://static-helaina-jonathanharris-6df5d241.koyeb.app/livez
+RAMS_READINESS_URL: https://static-helaina-jonathanharris-6df5d241.koyeb.app/readiness
 RAMS_HEALTH_BEARER_TOKEN: ci-rams-token-with-sufficient-length
 RAMS_READINESS_BEARER_TOKEN: ci-rams-token-with-sufficient-length
 ```
