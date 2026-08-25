@@ -93,7 +93,7 @@ def test_production_readiness_accepts_koyeb_worker_monitoring_and_wake_control()
 def test_production_readiness_requires_rams_readiness_auth_when_enabled() -> None:
     settings = _production_settings(
         REPO_HEALTH_ENABLED=True,
-        RAMS_READINESS_URL="https://mod.jonathan-harris.online/readiness",
+        RAMS_READINESS_URL="https://static-helaina-jonathanharris-6df5d241.koyeb.app/readiness",
         RAMS_READINESS_BEARER_TOKEN="{{ secret.RMS_API_KEY }}",
     )
 
