@@ -94,17 +94,17 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("HIVE_UI_HEALTH_URL"),
     )
     aims_health_url: str = Field(
-        "https://app.jonathan-harris.online/livez", validation_alias=AliasChoices("AIMS_HEALTH_URL")
+        "https://zeroth-kara-jonathanharris-3296ed37.koyeb.app/livez", validation_alias=AliasChoices("AIMS_HEALTH_URL")
     )
     aims_operational_health_url: str = Field(
-        "https://app.jonathan-harris.online/ops/health",
+        "https://zeroth-kara-jonathanharris-3296ed37.koyeb.app/ops/health",
         validation_alias=AliasChoices("AIMS_OPERATIONAL_HEALTH_URL"),
     )
     rams_health_url: str = Field(
-        "https://mod.jonathan-harris.online/livez", validation_alias=AliasChoices("RAMS_HEALTH_URL")
+        "https://static-helaina-jonathanharris-6df5d241.koyeb.app/livez", validation_alias=AliasChoices("RAMS_HEALTH_URL")
     )
     rams_readiness_url: str = Field(
-        "https://mod.jonathan-harris.online/readiness",
+        "https://static-helaina-jonathanharris-6df5d241.koyeb.app/readiness",
         validation_alias=AliasChoices("RAMS_READINESS_URL"),
     )
     rams_health_bearer_token: str = Field(
@@ -123,11 +123,11 @@ class Settings(BaseSettings):
         True, validation_alias=AliasChoices("MODEL_GOVERNANCE_SYNC_ENABLED")
     )
     aims_base_url: str = Field(
-        "https://app.jonathan-harris.online", validation_alias=AliasChoices("AIMS_BASE_URL")
+        "https://zeroth-kara-jonathanharris-3296ed37.koyeb.app", validation_alias=AliasChoices("AIMS_BASE_URL")
     )
     aims_api_key: str = Field("", validation_alias=AliasChoices("AIMS_API_KEY"))
     rams_base_url: str = Field(
-        "https://mod.jonathan-harris.online", validation_alias=AliasChoices("RAMS_BASE_URL")
+        "https://static-helaina-jonathanharris-6df5d241.koyeb.app", validation_alias=AliasChoices("RAMS_BASE_URL")
     )
     rams_api_key: str = Field(
         "", validation_alias=AliasChoices("RAMS_API_KEY", "RMS_API_KEY")
