@@ -31,6 +31,7 @@ from app.api.monthly_review import router as monthly_review_router
 from app.api.repository_council import router as repository_council_router
 from app.api.repository_learning import router as repository_learning_router
 from app.api.repository_intelligence import router as repository_intelligence_router
+from app.api.repository_improvements import router as repository_improvements_router
 from app.api.repository_memory import router as repository_memory_router
 from app.api.repository_qa import router as repository_qa_router
 from app.api.runtime import router as runtime_router
@@ -187,6 +188,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(optimisation_qa_ingest_router, prefix="/v1")
     application.include_router(repository_learning_router, prefix="/v1")
     application.include_router(repository_intelligence_router, prefix="/v1")
+    application.include_router(repository_improvements_router, prefix="/v1")
     application.include_router(env_audit_router, prefix="/v1")
     return application
 
