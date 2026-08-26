@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from fastapi.testclient import TestClient
 
 from app.core.config import Settings
 from app.main import create_app
@@ -88,12 +89,19 @@ async def test_refresh_job_replaces_each_snapshot_and_waits_for_intelligence(mon
 
 
 def test_repository_refresh_routes_exist_and_do_not_fall_through_dynamic_repository_route() -> None:
-    paths = {(route.path, next(iter(route.methods or []), None)) for route in create_app().routes}
-    route_paths = {path for path, _method in paths}
+    # FastAPI >= 0.137 keeps included routers as lazy _IncludedRouter objects,
+    # which intentionally do not expose ``.path``.  Use public contracts rather
+    # than depending on FastAPI's private route-container representation.
+    application = create_app(_settings())
+    route_paths = set(application.openapi().get("paths", {}))
     assert "/v1/repositories/refresh-config" in route_paths
     assert "/v1/repositories/refresh-all" in route_paths
     assert "/v1/repositories/refresh-jobs/{job_id}" in route_paths
     assert "/v1/repositories/{repository_id}/intelligence/run" in route_paths
+
+    response = TestClient(application).get("/v1/repositories/refresh-config")
+    assert response.status_code == 200
+    assert response.json()["enabled"] is True
 
 
 def test_stored_inflight_refresh_is_failed_cleanly_after_restart(monkeypatch) -> None:
