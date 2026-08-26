@@ -174,14 +174,19 @@ def _recommendations_for(dimensions: list[CouncilDimensionScore]) -> list[str]:
 
 
 def run_repository_council(
-    settings: Settings, repository_id: str, *, weights: dict[str, float] | None = None
+    settings: Settings,
+    repository_id: str,
+    *,
+    weights: dict[str, float] | None = None,
+    qa_payload: dict[str, Any] | None = None,
 ) -> CouncilReport:
     record = get_repository(repository_id)
     if record is None:
         raise RepositoryManagerError(f"Unknown repository_id: {repository_id}")
 
-    qa_report = run_repository_qa(repository_id)
-    qa_payload = qa_report.public_payload()
+    if qa_payload is None:
+        qa_report = run_repository_qa(repository_id)
+        qa_payload = qa_report.public_payload()
     root = record.workdir
 
     documentation_score, documentation_rationale = _documentation_score(root)
@@ -238,9 +243,15 @@ def run_repository_council(
 
 
 def run_and_record_council(
-    settings: Settings, repository_id: str, *, weights: dict[str, float] | None = None
+    settings: Settings,
+    repository_id: str,
+    *,
+    weights: dict[str, float] | None = None,
+    qa_payload: dict[str, Any] | None = None,
 ) -> CouncilReport:
-    report = run_repository_council(settings, repository_id, weights=weights)
+    report = run_repository_council(
+        settings, repository_id, weights=weights, qa_payload=qa_payload
+    )
     store = D1MetadataStore(settings)
     append_history_entry(
         store,

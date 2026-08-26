@@ -41,6 +41,7 @@ _GOVERNED_REPOSITORY_IDS = {
     "mast": "MAST",
     "irs": "IRS",
     "website": "Website",
+    "jonathan-harris-website": "Website",
     "shared": "Shared",
 }
 
@@ -206,13 +207,16 @@ def repository_id_from_filename(source_filename: str) -> str:
 
 
 def _collapse_single_root_directory(workdir: Path) -> str | None:
-    """Flatten GitHub's single wrapper directory and return its name."""
+    """Flatten a single archive wrapper directory and return its name.
+
+    Browser-generated GitHub archives normally use ``<repo>-main`` while the
+    GitHub zipball API uses an owner/repository/commit-derived wrapper. Both
+    shapes must expose the repository root to QA and profile detection.
+    """
     children = list(workdir.iterdir())
     if len(children) != 1 or not children[0].is_dir():
         return None
     wrapper = children[0]
-    if not wrapper.name.lower().endswith(("-main", "-master")):
-        return None
     wrapper_name = wrapper.name
     for child in list(wrapper.iterdir()):
         shutil.move(str(child), str(workdir / child.name))
@@ -413,7 +417,10 @@ def register_repository(
 
     # Prefer the repository name embedded by GitHub in the archive itself.
     # This keeps identity stable even if a browser or operator renames the ZIP.
-    identity_filename = f"{wrapper_name}.zip" if wrapper_name else source_filename
+    use_wrapper_identity = bool(
+        wrapper_name and wrapper_name.lower().endswith(("-main", "-master"))
+    )
+    identity_filename = f"{wrapper_name}.zip" if use_wrapper_identity else source_filename
     repository_id = repository_id_from_filename(identity_filename)
 
     files_index = _build_file_index(staging_dir)

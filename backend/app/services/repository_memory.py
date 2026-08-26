@@ -43,6 +43,7 @@ HISTORY_FIELDS = (
     "optimisation_history",
     "qa_history",
     "repository_council_history",
+    "repository_intelligence_history",
 )
 
 ALL_FIELDS = SCALAR_FIELDS + HISTORY_FIELDS
@@ -167,12 +168,13 @@ def get_memory_field(
     result = _require_store_result(store.list_metadata(lane=LANE, limit=500), "read")
     for row in _metadata_rows(result):
         if row.get("source_type") == field_name and row.get("source_id") == repository_id:
-            metadata = row.get("metadata") or {}
+            raw_metadata = row.get("metadata")
+            metadata = cast(dict[str, Any], raw_metadata) if isinstance(raw_metadata, dict) else {}
             return RepositoryMemoryField(
                 repository_id=repository_id,
                 field_name=field_name,
                 content=metadata.get("value"),
-                updated_at=row.get("updated_at"),
+                updated_at=str(row.get("updated_at")) if row.get("updated_at") is not None else None,
             )
     return None
 
@@ -188,7 +190,8 @@ def get_repository_memory(store: D1MetadataStore, *, repository_id: str) -> dict
             continue
         field_name = row.get("source_type")
         if field_name in ALL_FIELDS:
-            metadata = row.get("metadata") or {}
+            raw_metadata = row.get("metadata")
+            metadata = cast(dict[str, Any], raw_metadata) if isinstance(raw_metadata, dict) else {}
             memory[field_name] = metadata.get("value")
     return memory
 
@@ -234,7 +237,11 @@ def migrate_repository_memory_id(
             source_id=new_repository_id,
             title=f"{field_name} for {new_repository_id}",
             url=row.get("url"),
-            metadata=row.get("metadata") or {},
+            metadata=(
+                cast(dict[str, Any], row.get("metadata"))
+                if isinstance(row.get("metadata"), dict)
+                else {}
+            ),
         )
         _require_store_result(write, "migration write")
         migrated_ids.append(field_name)
