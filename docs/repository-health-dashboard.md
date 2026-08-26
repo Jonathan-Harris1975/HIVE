@@ -1,5 +1,5 @@
 > **Document status:** Production reference  
-> **Last reviewed:** 22 June 2026  
+> **Last reviewed:** 26 August 2026  
 > **Operational authority:** Current repository README, SECURITY policy and operations guide.
 
 # Repository and Service Health Dashboard
@@ -18,7 +18,8 @@ The endpoint is read-only, uses only operator-configured URLs, never accepts an 
 | Repository | Liveness | Operational/readiness |
 |---|---|---|
 | HIVE | Local process check | Local production-readiness report |
-| HIVE-UI | Configured public Pages URL | Not applicable |
+| HIVE-UI | Public Cloudflare Worker `/health` | Not applicable |
+| AIMS-UI | `https://chat.jonathan-harris.online/health` | Not applicable |
 | AIMS | `/health` | `/ops/health` |
 | RAMS | `/health` | Authenticated `/readiness` |
 | MAST | Durable R2 scheduler heartbeat | Heartbeat freshness and bounded recent-result summary |
@@ -41,7 +42,8 @@ AIMS and RAMS deliberately receive deeper checks because a background API can be
 REPO_HEALTH_ENABLED=true
 REPO_HEALTH_TIMEOUT_SECONDS=6
 REPO_HEALTH_CACHE_SECONDS=30
-HIVE_UI_HEALTH_URL=https://your-hive-ui-domain.example
+HIVE_UI_HEALTH_URL=https://hive.jonathan-harris.online/health
+AIMS_UI_HEALTH_URL=https://chat.jonathan-harris.online/health
 AIMS_HEALTH_URL=https://zeroth-kara-jonathanharris-3296ed37.koyeb.app/livez
 AIMS_OPERATIONAL_HEALTH_URL=https://zeroth-kara-jonathanharris-3296ed37.koyeb.app/readyz
 RAMS_HEALTH_URL=https://static-helaina-jonathanharris-6df5d241.koyeb.app/livez
@@ -69,6 +71,6 @@ and down only after the down threshold is exceeded.
 ## Deployment order
 
 1. Deploy HIVE and verify the backend tests and `/readyz`.
-2. Set the production HIVE-UI URL and MAST R2 heartbeat variables in Koyeb.
+2. Set the production HIVE-UI and AIMS-UI health URLs plus the MAST R2 heartbeat variables in Koyeb.
 3. Call `/v1/system/repo-health?force_refresh=true` with the HIVE admin bearer token.
 4. Deploy HIVE-UI and verify the compact Ops cards and inspector payload.
