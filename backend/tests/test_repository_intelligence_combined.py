@@ -79,6 +79,18 @@ def test_combined_repository_intelligence_runs_qa_once_and_preserves_evidence(mo
         "update_project_dna",
         lambda *_args, **_kwargs: {"latest_qa_score": 0.72, "latest_council_score": 0.58},
     )
+    monkeypatch.setattr(
+        repository_intelligence,
+        "_repository_context",
+        lambda *_args, **_kwargs: {
+            "source_filename": "HIVE-main.zip",
+            "fingerprint": "abc123",
+            "languages": {"Python": 42},
+            "dependency_manifests": [{"path": "pyproject.toml", "ecosystem": "python", "declared_count": 12}],
+            "top_level_entries": ["backend", "pyproject.toml"],
+            "implicated_files": ["backend/app.py"],
+        },
+    )
 
     report = repository_intelligence.run_repository_intelligence(_settings(), "HIVE")
 
@@ -91,6 +103,9 @@ def test_combined_repository_intelligence_runs_qa_once_and_preserves_evidence(mo
     qa_finding = next(item for item in report["findings"] if item["id"] == "qa:security_scanning")
     assert qa_finding["details"]["matches"][0]["path"] == "backend/app.py"
     assert "Address every finding" in report["improvement_prompt"]
+    assert "HIVE-main.zip" in report["improvement_prompt"]
+    assert "backend/app.py" in report["improvement_prompt"]
+    assert report["repository_context"]["fingerprint"] == "abc123"
     assert "qa_history" in history_fields
     assert "known_issues" in history_fields
     assert "repository_intelligence_history" in history_fields
