@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import json
 from urllib.parse import urlparse
 
 from app.core.config import Settings
@@ -317,6 +318,50 @@ def build_readiness_report(settings: Settings) -> ReadinessReport:
             "D1 configuration is coherent.",
             "D1_ENABLED=true but account, token, or database ID is missing.",
             required=production and settings.d1_enabled,
+        )
+    )
+
+    refresh_sources_valid = False
+    refresh_source_count = 0
+    try:
+        refresh_sources = json.loads(settings.repository_github_sources_json or "{}")
+        refresh_sources_valid = bool(
+            isinstance(refresh_sources, dict)
+            and refresh_sources
+            and all(
+                isinstance(repository_id, str)
+                and repository_id.strip()
+                and isinstance(github_slug, str)
+                and github_slug.count("/") == 1
+                and all(part.strip() for part in github_slug.split("/", 1))
+                for repository_id, github_slug in refresh_sources.items()
+            )
+        )
+        refresh_source_count = len(refresh_sources) if isinstance(refresh_sources, dict) else 0
+    except json.JSONDecodeError:
+        refresh_sources_valid = False
+    refresh_ready = bool(
+        not settings.repository_github_refresh_enabled
+        or (
+            refresh_sources_valid
+            and settings.github_token.strip()
+            and settings.repository_github_branch.strip()
+        )
+    )
+    checks.append(
+        _check(
+            "repository_github_refresh",
+            refresh_ready,
+            (
+                f"Monthly governed repository refresh is configured for {refresh_source_count} GitHub repositories."
+                if settings.repository_github_refresh_enabled
+                else "Monthly governed repository refresh is disabled."
+            ),
+            (
+                "REPOSITORY_GITHUB_REFRESH_ENABLED=true requires a valid non-empty "
+                "REPOSITORY_GITHUB_SOURCES_JSON, GITHUB_TOKEN and REPOSITORY_GITHUB_BRANCH."
+            ),
+            required=production and settings.repository_github_refresh_enabled,
         )
     )
 

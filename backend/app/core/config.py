@@ -591,6 +591,28 @@ class Settings(BaseSettings):
     github_repository: str = Field(
         "", validation_alias=AliasChoices("GITHUB_REPOSITORY")
     )
+    # Monthly governed-repository refresh. MAST triggers HIVE after the
+    # second RAMS audit; HIVE downloads fresh GitHub snapshots and runs the
+    # canonical Repository Intelligence pipeline for each repository.
+    repository_github_refresh_enabled: bool = Field(
+        False, validation_alias=AliasChoices("REPOSITORY_GITHUB_REFRESH_ENABLED")
+    )
+    repository_github_sources_json: str = Field(
+        '{"HIVE":"Jonathan-Harris1975/HIVE","HIVE-UI":"Jonathan-Harris1975/HIVE-UI",'
+        '"AIMS":"Jonathan-Harris1975/AIMS","AIMS-UI":"Jonathan-Harris1975/AIMS-UI",'
+        '"RAMS":"Jonathan-Harris1975/RAMS","MAST":"Jonathan-Harris1975/MAST",'
+        '"IRS":"Jonathan-Harris1975/IRS","Website":"Jonathan-Harris1975/jonathan-harris-website"}',
+        validation_alias=AliasChoices("REPOSITORY_GITHUB_SOURCES_JSON"),
+    )
+    repository_github_branch: str = Field(
+        "main", validation_alias=AliasChoices("REPOSITORY_GITHUB_BRANCH")
+    )
+    repository_github_download_timeout_seconds: float = Field(
+        90.0,
+        ge=5.0,
+        le=600.0,
+        validation_alias=AliasChoices("REPOSITORY_GITHUB_DOWNLOAD_TIMEOUT_SECONDS"),
+    )
 
     # Backwards-compatible aliases for older adapter references.
     @property
