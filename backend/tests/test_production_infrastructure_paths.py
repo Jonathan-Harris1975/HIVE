@@ -102,9 +102,7 @@ def test_service_lifecycle_rejects_unknown_service() -> None:
 @pytest.mark.asyncio
 async def test_repository_pipeline_reports_ready_when_optional_stage_is_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(repository_pipeline, "_seed_repository_memory", lambda *_: {"ok": True})
-    monkeypatch.setattr(repository_pipeline, "_run_qa", lambda *_: {"ok": True})
-    monkeypatch.setattr(repository_pipeline, "_run_council", lambda *_: {"ok": True})
-    monkeypatch.setattr(repository_pipeline, "_run_learning", lambda *_: {"ok": True})
+    monkeypatch.setattr(repository_pipeline, "_run_intelligence", lambda *_: {"ok": True, "qa_score": 1.0, "council_score": 1.0})
 
     async def skipped_search(*_args: object) -> dict[str, object]:
         return {"ok": False, "skipped": True, "reason": "not_configured"}
@@ -122,9 +120,7 @@ async def test_repository_pipeline_reports_ready_when_optional_stage_is_skipped(
 @pytest.mark.asyncio
 async def test_repository_pipeline_surfaces_failed_stage_without_losing_upload(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(repository_pipeline, "_seed_repository_memory", lambda *_: {"ok": True})
-    monkeypatch.setattr(repository_pipeline, "_run_qa", lambda *_: {"ok": False, "error": "qa failed"})
-    monkeypatch.setattr(repository_pipeline, "_run_council", lambda *_: {"ok": True})
-    monkeypatch.setattr(repository_pipeline, "_run_learning", lambda *_: {"ok": True})
+    monkeypatch.setattr(repository_pipeline, "_run_intelligence", lambda *_: {"ok": False, "error": "intelligence failed"})
 
     async def indexed(*_args: object) -> dict[str, object]:
         return {"ok": True}
@@ -136,16 +132,14 @@ async def test_repository_pipeline_surfaces_failed_stage_without_losing_upload(m
 
     assert result["status"] == "setup_incomplete"
     assert result["required_stages_ready"] is False
-    assert result["failed_stages"] == ["qa"]
+    assert result["failed_stages"] == ["intelligence"]
     assert result["repository_id"] == "repo-1"
 
 
 @pytest.mark.asyncio
 async def test_repository_pipeline_treats_ai_search_failure_as_optional_warning(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(repository_pipeline, "_seed_repository_memory", lambda *_: {"ok": True})
-    monkeypatch.setattr(repository_pipeline, "_run_qa", lambda *_: {"ok": True})
-    monkeypatch.setattr(repository_pipeline, "_run_council", lambda *_: {"ok": True})
-    monkeypatch.setattr(repository_pipeline, "_run_learning", lambda *_: {"ok": True})
+    monkeypatch.setattr(repository_pipeline, "_run_intelligence", lambda *_: {"ok": True, "qa_score": 1.0, "council_score": 1.0})
 
     async def unavailable_search(*_args: object) -> dict[str, object]:
         return {"ok": False, "error": "AI Search temporarily unavailable"}
@@ -425,15 +419,7 @@ def test_r2_read_and_stream_reject_oversized_objects() -> None:
 
 
 def test_repository_pipeline_stage_helpers_capture_success_and_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    from app.services import (
-        repository_council,
-        repository_learning,
-        repository_manager,
-        repository_memory,
-        repository_profile,
-        repository_qa,
-    )
-    from app.storage import ai_search
+    from app.services import repository_intelligence, repository_manager, repository_memory, repository_profile
 
     captured: dict[str, object] = {}
     monkeypatch.setattr(d1, "D1MetadataStore", lambda _settings: "store")
@@ -441,11 +427,6 @@ def test_repository_pipeline_stage_helpers_capture_success_and_failure(monkeypat
         repository_memory,
         "set_memory_field",
         lambda store, **kwargs: captured.update({"memory_store": store, "memory": kwargs}),
-    )
-    monkeypatch.setattr(
-        repository_memory,
-        "append_history_entry",
-        lambda store, **kwargs: {"ok": store == "store" and kwargs["field_name"] == "qa_history"},
     )
     monkeypatch.setattr(repository_manager, "get_repository", lambda _repo: SimpleNamespace())
     monkeypatch.setattr(
@@ -459,22 +440,21 @@ def test_repository_pipeline_stage_helpers_capture_success_and_failure(monkeypat
             "environment_schema": {"status": "detected"},
         },
     )
-    qa_report = SimpleNamespace(
-        score=91,
-        warning_count=2,
-        checks=[SimpleNamespace(name="lint", status="warning", summary="lint warning", details={})],
-        public_payload=lambda: {"score": 91},
-    )
-    monkeypatch.setattr(repository_qa, "run_repository_qa", lambda _repo: qa_report)
     monkeypatch.setattr(
-        repository_council,
-        "run_and_record_council",
-        lambda *_args: SimpleNamespace(overall_score=94),
-    )
-    monkeypatch.setattr(
-        repository_learning,
-        "update_project_dna",
-        lambda *_args, **_kwargs: {"latest_qa_score": 91},
+        repository_intelligence,
+        "run_repository_intelligence",
+        lambda *_args, **_kwargs: {
+            "summary": {
+                "status": "review_recommended",
+                "finding_count": 2,
+                "blocking_finding_count": 0,
+                "qa_score": 0.91,
+                "council_score": 0.94,
+            },
+            "qa": {"score": 0.91},
+            "council": {"overall_score": 0.94},
+            "project_dna": {"latest_qa_score": 0.91},
+        },
     )
 
     seed = repository_pipeline._seed_repository_memory(_settings(), _manifest())
@@ -487,20 +467,11 @@ def test_repository_pipeline_stage_helpers_capture_success_and_failure(monkeypat
         "deployment_profile",
         "environment_schema",
     }
-    assert repository_pipeline._run_qa(_settings(), "repo-1") == {
-        "ok": True, "score": 91, "warning_count": 2, "history_persisted": True
-    }
-    assert repository_pipeline._run_council(_settings(), "repo-1") == {"ok": True, "overall_score": 94}
-    assert repository_pipeline._run_learning(_settings(), "repo-1") == {"ok": True, "latest_qa_score": 91}
-
-    class FakeSearch:
-        enabled = True
-        def __init__(self, _settings: Settings) -> None:
-            pass
-        async def diagnostics(self) -> dict[str, object]:
-            return {"ok": True, "provider": "cloudflare"}
-
-    monkeypatch.setattr(ai_search, "AiSearchClient", FakeSearch)
+    intelligence = repository_pipeline._run_intelligence(_settings(), "repo-1")
+    assert intelligence["ok"] is True
+    assert intelligence["qa_score"] == 0.91
+    assert intelligence["council_score"] == 0.94
+    assert intelligence["finding_count"] == 2
 
 
 @pytest.mark.asyncio

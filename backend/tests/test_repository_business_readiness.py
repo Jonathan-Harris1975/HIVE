@@ -111,7 +111,7 @@ async def test_upload_pipeline_populates_memory_and_intelligence_end_to_end(
     from fastapi import UploadFile
 
     from app.api import repository_memory as repository_memory_api
-    from app.services import repository_council, repository_learning, repository_manager
+    from app.services import repository_council, repository_intelligence, repository_learning, repository_manager
     from app.storage import ai_search, d1 as d1_storage
 
     repository_manager._REGISTRY.clear()
@@ -186,6 +186,7 @@ async def test_upload_pipeline_populates_memory_and_intelligence_end_to_end(
     monkeypatch.setattr(repositories, "D1MetadataStore", FakeD1)
     monkeypatch.setattr(repository_memory_api, "D1MetadataStore", FakeD1)
     monkeypatch.setattr(repository_council, "D1MetadataStore", FakeD1)
+    monkeypatch.setattr(repository_intelligence, "D1MetadataStore", FakeD1)
     monkeypatch.setattr(repository_learning, "D1MetadataStore", FakeD1)
     monkeypatch.setattr(ai_search, "AiSearchClient", DisabledSearch)
 

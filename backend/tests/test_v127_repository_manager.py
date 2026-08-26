@@ -124,6 +124,32 @@ def test_repository_id_is_stable_for_governed_github_archives(settings):
     assert not (record.workdir / "HIVE-main").exists()
 
 
+
+
+def test_github_api_zipball_wrapper_is_flattened_without_changing_expected_identity(settings):
+    manifest = rm.register_repository(
+        _build_zip({"Jonathan-Harris1975-HIVE-a1b2c3d/backend/app.py": "print('hi')\n"}),
+        settings=settings,
+        source_filename="HIVE-main.zip",
+    )
+
+    assert manifest.repository_id == "HIVE"
+    record = rm.get_repository("HIVE")
+    assert record is not None
+    assert (record.workdir / "backend" / "app.py").exists()
+    assert not (record.workdir / "Jonathan-Harris1975-HIVE-a1b2c3d").exists()
+
+
+def test_website_archive_uses_governed_website_identity(settings):
+    manifest = rm.register_repository(
+        _build_zip({"jonathan-harris-website-main/package.json": '{"name":"website"}'}),
+        settings=settings,
+        source_filename="jonathan-harris-website-main.zip",
+    )
+
+    assert manifest.repository_id == "Website"
+
+
 def test_monthly_upload_replaces_same_repository_and_increments_version(settings):
     first = rm.register_repository(
         _build_zip({"HIVE-main/main.py": "x = 1\n"}),
