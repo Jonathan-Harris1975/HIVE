@@ -48,14 +48,19 @@ class D1MetadataStore:
     def diagnostics(self) -> dict[str, object]:
         payload: dict[str, object] = {"ok": True, **self.safe_config()}
         if not self.enabled:
+            payload["ok"] = False
+            payload["schema_ready"] = False
             payload["probe"] = {"ok": False, "message": "D1 metadata store disabled or not configured."}
             return payload
         result = self.query("SELECT 1 AS ok", [])
         payload["probe"] = result
         payload["ok"] = bool(result.get("ok"))
+        payload["schema_ready"] = False
         if payload["ok"]:
             counts = self.table_counts()
             payload["table_counts"] = counts
+            payload["schema_ready"] = bool(counts.get("ok"))
+            payload["ok"] = bool(payload["ok"] and payload["schema_ready"])
         return payload
 
     def init_schema(self) -> dict[str, object]:
