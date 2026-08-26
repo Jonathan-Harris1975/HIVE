@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from app.storage.d1 import D1MetadataStore
 
@@ -68,6 +68,14 @@ def _require_store_result(result: dict[str, object], action: str) -> dict[str, o
         return result
     detail = result.get("message") or result.get("error") or "Cloudflare D1 request failed."
     raise RepositoryMemoryUnavailableError(f"Repository Memory {action} failed: {detail}")
+
+
+def _metadata_rows(result: dict[str, object]) -> list[dict[str, Any]]:
+    """Return D1 metadata rows with a concrete type after runtime validation."""
+    raw_items = result.get("items")
+    if not isinstance(raw_items, list):
+        return []
+    return [cast(dict[str, Any], row) for row in raw_items if isinstance(row, dict)]
 
 
 def _require_known_field(field_name: str) -> None:
@@ -157,7 +165,7 @@ def get_memory_field(
     _require_known_field(field_name)
     _require_store_enabled(store)
     result = _require_store_result(store.list_metadata(lane=LANE, limit=500), "read")
-    for row in result.get("items", []):
+    for row in _metadata_rows(result):
         if row.get("source_type") == field_name and row.get("source_id") == repository_id:
             metadata = row.get("metadata") or {}
             return RepositoryMemoryField(
@@ -175,7 +183,7 @@ def get_repository_memory(store: D1MetadataStore, *, repository_id: str) -> dict
     _require_store_enabled(store)
     memory: dict[str, Any] = {field_name: None for field_name in ALL_FIELDS}
     result = _require_store_result(store.list_metadata(lane=LANE, limit=500), "read")
-    for row in result.get("items", []):
+    for row in _metadata_rows(result):
         if row.get("source_id") != repository_id:
             continue
         field_name = row.get("source_type")
@@ -196,7 +204,7 @@ def search_repository_memory(
     )
     if repository_id is None:
         return result
-    filtered = [item for item in result.get("items", []) if item.get("source_id") == repository_id]
+    filtered = [item for item in _metadata_rows(result) if item.get("source_id") == repository_id]
     return {**result, "items": filtered, "count": len(filtered)}
 
 
@@ -213,7 +221,7 @@ def migrate_repository_memory_id(
     result = _require_store_result(store.list_metadata(lane=LANE, limit=500), "migration read")
     migrated_ids: list[str] = []
     old_ids: list[str] = []
-    for row in result.get("items", []):
+    for row in _metadata_rows(result):
         if row.get("source_id") != old_repository_id:
             continue
         field_name = str(row.get("source_type") or "")
