@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any, cast
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 
@@ -102,6 +103,14 @@ def _persist_snapshot_to_r2(
         return False
 
 
+def _metadata_rows(result: dict[str, object]) -> list[dict[str, Any]]:
+    """Return D1 metadata rows with a concrete type after runtime validation."""
+    raw_items = result.get("items")
+    if not isinstance(raw_items, list):
+        return []
+    return [cast(dict[str, Any], row) for row in raw_items if isinstance(row, dict)]
+
+
 def _repository_memory_readiness(
     settings: Settings,
     repository_ids: list[str],
@@ -131,7 +140,7 @@ def _repository_memory_readiness(
         return readiness
 
     values_by_repository: dict[str, dict[str, object]] = {repository_id: {} for repository_id in repository_ids}
-    for row in result.get("items", []):
+    for row in _metadata_rows(result):
         source_id = str(row.get("source_id") or "")
         source_type = str(row.get("source_type") or "")
         if source_id not in values_by_repository or source_type not in ALL_FIELDS:
@@ -303,7 +312,7 @@ async def get_repository_manifest(repository_id: str) -> dict[str, object]:
 
 
 @router.get("/repositories/{repository_id}/diff")
-async def get_repository_diff(repository_id: str) -> dict[str, object]:
+async def get_repository_diff(repository_id: str) -> dict[str, list[str]]:
     try:
         diff = repository_diff(repository_id)
     except RepositoryWorkdirUnavailableError as error:
