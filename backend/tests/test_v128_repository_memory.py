@@ -158,3 +158,24 @@ def test_repository_memory_surfaces_d1_read_write_and_search_failures():
         )
     with pytest.raises(rmem.RepositoryMemoryUnavailableError, match="search failed"):
         rmem.search_repository_memory(store, query="x", repository_id="repo-1")
+
+
+def test_migrate_repository_memory_id_copies_legacy_rows_to_stable_id(store):
+    rmem.set_memory_field(
+        store,
+        repository_id="0123456789abcdef0123456789abcdef",
+        field_name="project_manifest",
+        content={"source_filename": "HIVE-main.zip"},
+    )
+
+    result = rmem.migrate_repository_memory_id(
+        store,
+        old_repository_id="0123456789abcdef0123456789abcdef",
+        new_repository_id="HIVE",
+    )
+
+    assert result["ok"] is True
+    assert result["migrated_count"] == 1
+    migrated = rmem.get_memory_field(store, repository_id="HIVE", field_name="project_manifest")
+    assert migrated is not None
+    assert migrated.content["source_filename"] == "HIVE-main.zip"

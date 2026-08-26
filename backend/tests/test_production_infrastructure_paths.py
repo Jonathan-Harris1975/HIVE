@@ -134,9 +134,30 @@ async def test_repository_pipeline_surfaces_failed_stage_without_losing_upload(m
         _settings(), _manifest(), r2_persisted=True
     )
 
-    assert result["status"] == "ready_with_warnings"
+    assert result["status"] == "setup_incomplete"
+    assert result["required_stages_ready"] is False
     assert result["failed_stages"] == ["qa"]
     assert result["repository_id"] == "repo-1"
+
+
+@pytest.mark.asyncio
+async def test_repository_pipeline_treats_ai_search_failure_as_optional_warning(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(repository_pipeline, "_seed_repository_memory", lambda *_: {"ok": True})
+    monkeypatch.setattr(repository_pipeline, "_run_qa", lambda *_: {"ok": True})
+    monkeypatch.setattr(repository_pipeline, "_run_council", lambda *_: {"ok": True})
+    monkeypatch.setattr(repository_pipeline, "_run_learning", lambda *_: {"ok": True})
+
+    async def unavailable_search(*_args: object) -> dict[str, object]:
+        return {"ok": False, "error": "AI Search temporarily unavailable"}
+
+    monkeypatch.setattr(repository_pipeline, "_index_in_ai_search", unavailable_search)
+    result = await repository_pipeline.run_repository_pipeline(
+        _settings(), _manifest(), r2_persisted=True
+    )
+
+    assert result["status"] == "ready_with_warnings"
+    assert result["required_stages_ready"] is True
+    assert result["failed_stages"] == ["ai_search"]
 
 
 def test_d1_query_retries_transient_http_failure(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -404,7 +425,14 @@ def test_r2_read_and_stream_reject_oversized_objects() -> None:
 
 
 def test_repository_pipeline_stage_helpers_capture_success_and_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    from app.services import repository_council, repository_learning, repository_memory, repository_qa
+    from app.services import (
+        repository_council,
+        repository_learning,
+        repository_manager,
+        repository_memory,
+        repository_profile,
+        repository_qa,
+    )
     from app.storage import ai_search
 
     captured: dict[str, object] = {}
@@ -419,7 +447,24 @@ def test_repository_pipeline_stage_helpers_capture_success_and_failure(monkeypat
         "append_history_entry",
         lambda store, **kwargs: {"ok": store == "store" and kwargs["field_name"] == "qa_history"},
     )
-    qa_report = SimpleNamespace(score=91, warning_count=2, public_payload=lambda: {"score": 91})
+    monkeypatch.setattr(repository_manager, "get_repository", lambda _repo: SimpleNamespace())
+    monkeypatch.setattr(
+        repository_profile,
+        "build_repository_memory_profile",
+        lambda _record: {
+            "architecture_summary": {"status": "detected"},
+            "coding_standards": {"status": "detected"},
+            "build_profile": {"status": "detected"},
+            "deployment_profile": {"status": "detected"},
+            "environment_schema": {"status": "detected"},
+        },
+    )
+    qa_report = SimpleNamespace(
+        score=91,
+        warning_count=2,
+        checks=[SimpleNamespace(name="lint", status="warning", summary="lint warning", details={})],
+        public_payload=lambda: {"score": 91},
+    )
     monkeypatch.setattr(repository_qa, "run_repository_qa", lambda _repo: qa_report)
     monkeypatch.setattr(
         repository_council,
@@ -432,8 +477,16 @@ def test_repository_pipeline_stage_helpers_capture_success_and_failure(monkeypat
         lambda *_args, **_kwargs: {"latest_qa_score": 91},
     )
 
-    assert repository_pipeline._seed_repository_memory(_settings(), _manifest()) == {"ok": True}
-    assert captured["memory"]["field_name"] == "project_manifest"
+    seed = repository_pipeline._seed_repository_memory(_settings(), _manifest())
+    assert seed["ok"] is True
+    assert set(seed["fields_populated"]) == {
+        "project_manifest",
+        "architecture_summary",
+        "coding_standards",
+        "build_profile",
+        "deployment_profile",
+        "environment_schema",
+    }
     assert repository_pipeline._run_qa(_settings(), "repo-1") == {
         "ok": True, "score": 91, "warning_count": 2, "history_persisted": True
     }

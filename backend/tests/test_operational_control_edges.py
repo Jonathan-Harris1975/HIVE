@@ -203,8 +203,22 @@ def test_monthly_review_history_and_missing_period(monkeypatch) -> None:
 async def test_repository_api_listing_manifest_diff_reindex_and_cleanup(monkeypatch) -> None:
     summary = SimpleNamespace(repository_id="repo-1", status="ready")
     monkeypatch.setattr(repositories, "list_repositories", lambda: [summary])
-    listed = await repositories.get_repositories()
-    assert listed["repositories"] == [{"repository_id": "repo-1", "status": "ready"}]
+    monkeypatch.setattr(
+        repositories,
+        "_repository_memory_readiness",
+        lambda settings, repository_ids: {
+            "repo-1": {"memory_status": "ready", "memory_ready": True}
+        },
+    )
+    listed = await repositories.get_repositories(settings=SimpleNamespace())
+    assert listed["repositories"] == [
+        {
+            "repository_id": "repo-1",
+            "status": "ready",
+            "memory_status": "ready",
+            "memory_ready": True,
+        }
+    ]
 
     manifest = SimpleNamespace(public_payload=lambda: {"repository_id": "repo-1"})
     record = SimpleNamespace(manifest=manifest)
@@ -229,9 +243,15 @@ async def test_repository_api_listing_manifest_diff_reindex_and_cleanup(monkeypa
     assert reindexed["r2_persisted"] is True
 
     monkeypatch.setattr(repositories, "cleanup_repository", lambda repository_id: repository_id == "repo-1")
-    assert (await repositories.delete_repository("repo-1"))["removed"] is True
+    monkeypatch.setattr(
+        repositories,
+        "_delete_repository_artifacts",
+        lambda repository_id, settings: {"r2_deleted": True, "memory_deleted": True},
+    )
+    delete_settings = SimpleNamespace()
+    assert (await repositories.delete_repository("repo-1", settings=delete_settings))["removed"] is True
     with pytest.raises(HTTPException) as exc:
-        await repositories.delete_repository("missing")
+        await repositories.delete_repository("missing", settings=delete_settings)
     assert exc.value.status_code == 404
 
     monkeypatch.setattr(repositories, "cleanup_expired_repositories", lambda ttl_seconds: ["old-1", "old-2"])
@@ -410,3 +430,40 @@ def test_monthly_review_fetches_archive_and_maps_archive_errors(monkeypatch) -> 
 
     monkeypatch.setattr(monthly_review, "list_monthly_reviews", lambda settings, limit=200: {"ok": False, "error": "d1 unavailable"})
     assert monthly_review.get_monthly_review_by_period("2026-07", settings=SimpleNamespace())["ok"] is False
+
+
+def test_repository_memory_readiness_requires_profile_and_persisted_intelligence(monkeypatch) -> None:
+    class FakeStore:
+        enabled = True
+
+        def __init__(self, _settings):
+            pass
+
+        def list_metadata(self, *, lane, limit):
+            assert lane == repositories.LANE
+            values = {
+                **{field: {"generated": True} for field in repositories.SCALAR_FIELDS},
+                "qa_history": [{"score": 1.0}],
+                "repository_council_history": [{"overall_score": 1.0}],
+            }
+            return {
+                "ok": True,
+                "items": [
+                    {
+                        "source_id": "HIVE",
+                        "source_type": field,
+                        "metadata": {"value": value},
+                    }
+                    for field, value in values.items()
+                ],
+            }
+
+    monkeypatch.setattr(repositories, "D1MetadataStore", FakeStore)
+    result = repositories._repository_memory_readiness(SimpleNamespace(), ["HIVE", "AIMS"])
+
+    assert result["HIVE"]["memory_status"] == "ready"
+    assert result["HIVE"]["profile_ready"] is True
+    assert result["HIVE"]["intelligence_ready"] is True
+    assert result["HIVE"]["memory_ready"] is True
+    assert result["AIMS"]["memory_status"] == "empty"
+    assert result["AIMS"]["memory_ready"] is False
