@@ -1100,4 +1100,9 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    # BaseSettings resolves these values from defaults/environment at runtime.
+    # MyPy treats validation_alias-backed Pydantic fields as constructor-required,
+    # which is a false positive for Settings(). Keep the suppression at this single
+    # framework boundary so adding a new environment-backed setting does not create
+    # a spurious regression fingerprint.
+    return Settings()  # type: ignore[call-arg]
