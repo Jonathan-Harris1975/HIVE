@@ -27,6 +27,7 @@ async def test_repo_health_reports_all_governed_repositories() -> None:
         app_env="test",
         repo_health_cache_seconds=0,
         hive_ui_health_url="https://ui.example/",
+        aims_ui_health_url="https://chat.example/health",
         aims_health_url="https://aims.example/health",
         aims_operational_health_url="https://aims.example/readyz",
         rams_health_url="https://rams.example/health",
@@ -43,8 +44,8 @@ async def test_repo_health_reports_all_governed_repositories() -> None:
     assert report["ok"] is True
     assert report["overall_status"] == "healthy"
     assert report["summary"] == {
-        "total": 7,
-        "healthy": 7,
+        "total": 8,
+        "healthy": 8,
         "degraded": 0,
         "down": 0,
         "not_configured": 0,
@@ -54,6 +55,7 @@ async def test_repo_health_reports_all_governed_repositories() -> None:
     assert [item["repo"] for item in report["repos"]] == [
         "HIVE",
         "HIVE-UI",
+        "AIMS-UI",
         "AIMS",
         "RAMS",
         "MAST",

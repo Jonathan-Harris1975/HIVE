@@ -12,12 +12,15 @@ from app.main import app
 
 
 def test_large_text_upload_chunks_successfully(monkeypatch, tmp_path) -> None:
-    from app.core.config import get_settings
+    from app.core.config import Settings, get_settings
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("DATABASE_ENABLED", "true")
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'hive.sqlite3'}")
-    get_settings.cache_clear()
+    settings = Settings(
+        APP_ENV="test",
+        DATABASE_ENABLED=True,
+        DATABASE_URL=f"sqlite:///{tmp_path / 'hive.sqlite3'}",
+    )
+    monkeypatch.setitem(app.dependency_overrides, get_settings, lambda: settings)
     client = TestClient(app)
     assert client.post("/v1/db/init").json()["ok"] is True
     content = "\n\n".join(f"Large document paragraph {i}: deployment diagnostics and Vectorize fallback." for i in range(350))

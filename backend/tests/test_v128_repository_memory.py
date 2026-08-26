@@ -112,3 +112,49 @@ def test_search_repository_memory_filters_by_repository(store):
     result = rmem.search_repository_memory(store, query="fastapi", repository_id="repo-1")
     assert result["ok"] is True
     assert all(item["source_id"] == "repo-1" for item in result["items"])
+
+
+class DisabledD1Store(FakeD1Store):
+    enabled = False
+
+
+class FailingD1Store(FakeD1Store):
+    enabled = True
+
+    def list_metadata(self, *, lane=None, limit=50):
+        return {"ok": False, "enabled": True, "message": "D1 table unavailable"}
+
+    def upsert_metadata(self, **_kwargs):
+        return {"ok": False, "enabled": True, "message": "D1 write failed"}
+
+    def search_metadata(self, *, query, lane=None, limit=50):
+        return {"ok": False, "enabled": True, "message": "D1 search failed"}
+
+
+def test_project_manifest_is_a_supported_scalar_field(store):
+    result = rmem.set_memory_field(
+        store,
+        repository_id="repo-1",
+        field_name="project_manifest",
+        content={"source_filename": "repo.zip", "file_count": 12},
+    )
+    assert result["ok"] is True
+    memory = rmem.get_repository_memory(store, repository_id="repo-1")
+    assert memory["project_manifest"]["file_count"] == 12
+
+
+def test_repository_memory_fails_closed_when_d1_is_disabled():
+    with pytest.raises(rmem.RepositoryMemoryUnavailableError):
+        rmem.get_repository_memory(DisabledD1Store(), repository_id="repo-1")
+
+
+def test_repository_memory_surfaces_d1_read_write_and_search_failures():
+    store = FailingD1Store()
+    with pytest.raises(rmem.RepositoryMemoryUnavailableError, match="read failed"):
+        rmem.get_repository_memory(store, repository_id="repo-1")
+    with pytest.raises(rmem.RepositoryMemoryUnavailableError, match="write failed"):
+        rmem.set_memory_field(
+            store, repository_id="repo-1", field_name="project_dna", content={"summary": "x"}
+        )
+    with pytest.raises(rmem.RepositoryMemoryUnavailableError, match="search failed"):
+        rmem.search_repository_memory(store, query="x", repository_id="repo-1")

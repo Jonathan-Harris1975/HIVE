@@ -302,7 +302,18 @@ def test_d1_schema_and_diagnostics_fail_closed_and_count_rows(monkeypatch: pytes
     assert store.ping_write()["ok"] is True
     diagnostics = store.diagnostics()
     assert diagnostics["ok"] is True
+    assert diagnostics["schema_ready"] is True
     assert diagnostics["table_counts"]["counts"]["hive_ecosystem_metadata"] == 12
+
+    broken = d1.D1MetadataStore(settings)
+    broken_responses = iter([
+        {"ok": True},
+        {"ok": False, "message": "no such table: hive_ecosystem_metadata"},
+    ])
+    monkeypatch.setattr(broken, "query", lambda *_args, **_kwargs: next(broken_responses))
+    broken_diagnostics = broken.diagnostics()
+    assert broken_diagnostics["ok"] is False
+    assert broken_diagnostics["schema_ready"] is False
 
 
 def test_r2_list_page_searches_across_pages_and_preserves_cursor() -> None:

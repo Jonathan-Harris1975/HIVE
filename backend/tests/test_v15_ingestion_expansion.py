@@ -12,13 +12,15 @@ from app.main import app
 
 
 def _reset_settings(monkeypatch, tmp_path):
-    from app.core.config import get_settings
+    from app.core.config import Settings, get_settings
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("DATABASE_ENABLED", "true")
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'hive.sqlite3'}")
-    monkeypatch.setenv("APP_ENV", "test")
-    get_settings.cache_clear()
+    settings = Settings(
+        APP_ENV="test",
+        DATABASE_ENABLED=True,
+        DATABASE_URL=f"sqlite:///{tmp_path / 'hive.sqlite3'}",
+    )
+    monkeypatch.setitem(app.dependency_overrides, get_settings, lambda: settings)
 
 
 def test_health_reports_v15_free_tier_limits(monkeypatch, tmp_path) -> None:
