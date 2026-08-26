@@ -8,7 +8,9 @@ from app.services.repository_council import (
     run_and_record_council,
     get_council_history as get_council_history_service,
 )
-from app.services.repository_manager import RepositoryManagerError
+from app.services.repository_learning import update_project_dna
+from app.services.repository_manager import RepositoryManagerError, get_repository
+from app.services.repository_memory import RepositoryMemoryUnavailableError
 
 router = APIRouter(tags=["repository-council"], dependencies=[Depends(require_admin)])
 
@@ -19,8 +21,11 @@ async def post_run_council_review(
 ) -> dict[str, object]:
     try:
         report = run_and_record_council(settings, repository_id)
+        update_project_dna(settings, repository_id=repository_id)
     except RepositoryManagerError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+    except RepositoryMemoryUnavailableError as error:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from error
     return report.public_payload()
 
 
@@ -28,4 +33,13 @@ async def post_run_council_review(
 async def get_council_review_history(
     repository_id: str, settings: Settings = Depends(get_settings)
 ) -> dict[str, object]:
-    return {"repository_id": repository_id, "runs": get_council_history_service(settings, repository_id)}
+    if get_repository(repository_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Unknown repository_id: {repository_id}",
+        )
+    try:
+        runs = get_council_history_service(settings, repository_id)
+    except RepositoryMemoryUnavailableError as error:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from error
+    return {"repository_id": repository_id, "runs": runs}

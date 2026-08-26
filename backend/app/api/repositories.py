@@ -18,7 +18,9 @@ from app.services.repository_manager import (
     reindex_repository,
     repository_diff,
 )
+from app.services.repository_memory import ALL_FIELDS, LANE, SCALAR_FIELDS, repository_memory_item_id
 from app.storage.r2 import R2Storage
+from app.storage.d1 import D1MetadataStore
 from app.services.repository_pipeline import run_repository_pipeline
 
 router = APIRouter(tags=["repositories"], dependencies=[Depends(require_admin)])
@@ -40,13 +42,7 @@ def _workdir_unavailable(error: RepositoryWorkdirUnavailableError) -> HTTPExcept
 
 
 def _persist_manifest_to_r2(manifest_payload: dict, settings: Settings) -> bool:
-    """Best-effort persistence of a repository manifest to R2.
-
-    Writes to the configured repositories bucket (`settings.r2_bucket_repositories`,
-    overridable via R2_BUCKET_REPOSITORIES) under the key
-    `manifests/{repository_id}.json`. Failures are swallowed and logged
-    as False so an R2 outage never breaks repository registration.
-    """
+    """Persist a repository manifest to the governed repositories R2 bucket."""
     r2 = R2Storage(settings)
     if not r2.write_enabled:
         return False
@@ -66,13 +62,131 @@ def _persist_manifest_to_r2(manifest_payload: dict, settings: Settings) -> bool:
                 key,
                 content_type="application/json",
                 bucket=settings.r2_bucket_repositories,
-                public_base_url=None,  # manifests are not publicly exposed
+                public_base_url=None,
             )
         finally:
             tmp_path.unlink(missing_ok=True)
         return True
-    except Exception:  # noqa: BLE001 - persistence must never break registration
+    except Exception:  # noqa: BLE001 - caller decides whether durability is mandatory
         return False
+
+
+def _persist_snapshot_to_r2(
+    content: bytes,
+    repository_id: str,
+    settings: Settings,
+) -> bool:
+    """Persist the source ZIP used by QA/Council so restarts are recoverable."""
+    r2 = R2Storage(settings)
+    if not r2.write_enabled:
+        return False
+    try:
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
+            tmp.write(content)
+            tmp_path = Path(tmp.name)
+        try:
+            r2.put_file(
+                tmp_path,
+                f"snapshots/{repository_id}.zip",
+                content_type="application/zip",
+                bucket=settings.r2_bucket_repositories,
+                public_base_url=None,
+            )
+        finally:
+            tmp_path.unlink(missing_ok=True)
+        return True
+    except Exception:  # noqa: BLE001 - caller decides whether durability is mandatory
+        return False
+
+
+def _repository_memory_readiness(
+    settings: Settings,
+    repository_ids: list[str],
+) -> dict[str, dict[str, object]]:
+    """Return fail-visible Memory/Intelligence readiness for repository cards."""
+    readiness = {
+        repository_id: {
+            "memory_status": "unavailable",
+            "profile_ready": False,
+            "intelligence_ready": False,
+            "memory_ready": False,
+            "memory_populated_fields": [],
+        }
+        for repository_id in repository_ids
+    }
+    if not repository_ids:
+        return readiness
+
+    store = D1MetadataStore(settings)
+    if not store.enabled:
+        return readiness
+    try:
+        result = store.list_metadata(lane=LANE, limit=500)
+    except Exception:  # noqa: BLE001 - readiness must not hide repository listing
+        return readiness
+    if not result.get("ok"):
+        return readiness
+
+    values_by_repository: dict[str, dict[str, object]] = {repository_id: {} for repository_id in repository_ids}
+    for row in result.get("items", []):
+        source_id = str(row.get("source_id") or "")
+        source_type = str(row.get("source_type") or "")
+        if source_id not in values_by_repository or source_type not in ALL_FIELDS:
+            continue
+        metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+        values_by_repository[source_id][source_type] = metadata.get("value")
+
+    for repository_id, values in values_by_repository.items():
+        populated = sorted(
+            field_name
+            for field_name, value in values.items()
+            if value is not None and value != "" and value != [] and value != {}
+        )
+        profile_ready = all(field_name in populated for field_name in SCALAR_FIELDS)
+        qa_history = values.get("qa_history")
+        council_history = values.get("repository_council_history")
+        intelligence_ready = bool(
+            isinstance(qa_history, list)
+            and qa_history
+            and isinstance(council_history, list)
+            and council_history
+        )
+        readiness[repository_id] = {
+            "memory_status": "ready" if profile_ready else ("partial" if populated else "empty"),
+            "profile_ready": profile_ready,
+            "intelligence_ready": intelligence_ready,
+            "memory_ready": profile_ready and intelligence_ready,
+            "memory_populated_fields": populated,
+        }
+    return readiness
+
+
+def _delete_repository_artifacts(repository_id: str, settings: Settings) -> dict[str, object]:
+    """Delete durable repository state from R2 and Repository Memory."""
+    result: dict[str, object] = {"r2_deleted": False, "memory_deleted": False}
+    r2 = R2Storage(settings)
+    if r2.write_enabled:
+        try:
+            deletion = r2.delete_objects(
+                [f"manifests/{repository_id}.json", f"snapshots/{repository_id}.zip"],
+                bucket=settings.r2_bucket_repositories,
+            )
+            result["r2_deleted"] = bool(deletion.get("ok"))
+        except Exception as exc:  # noqa: BLE001
+            result["r2_error"] = str(exc)
+
+    store = D1MetadataStore(settings)
+    if store.enabled:
+        memory_result = store.delete_metadata_ids(
+            [repository_memory_item_id(repository_id, field) for field in ALL_FIELDS]
+        )
+        result["memory_deleted"] = bool(memory_result.get("ok"))
+        if not memory_result.get("ok"):
+            result["memory_error"] = memory_result.get("message") or memory_result.get("failed")
+    return result
 
 
 @router.post("/repositories")
@@ -97,8 +211,21 @@ async def upload_repository(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
 
     payload = manifest.public_payload()
+    snapshot_persisted = _persist_snapshot_to_r2(content, manifest.repository_id, settings)
     r2_persisted = _persist_manifest_to_r2(payload, settings)
     payload["r2_persisted"] = r2_persisted
+    payload["snapshot_persisted"] = snapshot_persisted
+
+    if settings.production_require_r2 and (not r2_persisted or not snapshot_persisted):
+        cleanup_repository(manifest.repository_id)
+        _delete_repository_artifacts(manifest.repository_id, settings)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Repository upload was rejected because its durable R2 manifest/snapshot could not be stored. "
+                "No temporary-only repository was accepted."
+            ),
+        )
 
     # Execute the downstream pipeline (non-blocking stages, graceful degradation).
     pipeline_result = await run_repository_pipeline(settings, manifest, r2_persisted=r2_persisted)
@@ -107,9 +234,62 @@ async def upload_repository(
     return payload
 
 
+@router.post("/repositories/{repository_id}/setup")
+async def post_repository_setup(
+    repository_id: str,
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    """Re-run the governed Memory/QA/Council/Learning setup for an existing snapshot.
+
+    This is the recovery path for transient D1, AI Search, or downstream setup
+    failures.  It deliberately requires a real local/restored source snapshot;
+    legacy manifest-only registrations must be uploaded once before repair can
+    run.
+    """
+    record = get_repository(repository_id)
+    if record is None:
+        raise _not_found(repository_id)
+    if is_rehydrated(record):
+        raise _workdir_unavailable(
+            RepositoryWorkdirUnavailableError(
+                f"Repository {repository_id} has no restorable source snapshot. "
+                "Re-upload it once before running setup."
+            )
+        )
+
+    manifest_payload = record.manifest.public_payload()
+    r2_persisted = _persist_manifest_to_r2(manifest_payload, settings)
+    if settings.production_require_r2 and not r2_persisted:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Repository setup could not refresh its durable R2 manifest.",
+        )
+
+    pipeline = await run_repository_pipeline(
+        settings,
+        record.manifest,
+        r2_persisted=r2_persisted,
+    )
+    return {
+        "repository_id": repository_id,
+        "pipeline": pipeline,
+        "ready": pipeline.get("required_stages_ready") is True,
+    }
+
+
 @router.get("/repositories")
-async def get_repositories() -> dict[str, object]:
-    return {"repositories": [summary.__dict__ for summary in list_repositories()]}
+async def get_repositories(settings: Settings = Depends(get_settings)) -> dict[str, object]:
+    summaries = list_repositories()
+    readiness = _repository_memory_readiness(
+        settings,
+        [summary.repository_id for summary in summaries],
+    )
+    return {
+        "repositories": [
+            {**summary.__dict__, **readiness.get(summary.repository_id, {})}
+            for summary in summaries
+        ]
+    }
 
 
 @router.get("/repositories/{repository_id}")
@@ -152,11 +332,15 @@ async def post_repository_reindex(
 
 
 @router.delete("/repositories/{repository_id}")
-async def delete_repository(repository_id: str) -> dict[str, object]:
+async def delete_repository(
+    repository_id: str,
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
     removed = cleanup_repository(repository_id)
     if not removed:
         raise _not_found(repository_id)
-    return {"repository_id": repository_id, "removed": True}
+    durable = _delete_repository_artifacts(repository_id, settings)
+    return {"repository_id": repository_id, "removed": True, **durable}
 
 
 @router.post("/repositories/cleanup")

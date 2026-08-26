@@ -7,7 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from app.core.config import Settings, get_settings
 from app.core.security import require_admin
 from app.services.repository_manager import RepositoryManagerError
-from app.services.repository_memory import append_history_entry
+from app.services.repository_learning import update_project_dna
+from app.services.repository_memory import RepositoryMemoryUnavailableError, append_history_entry
 from app.services.repository_qa import run_repository_qa
 from app.storage.d1 import D1MetadataStore
 
@@ -23,10 +24,14 @@ async def post_run_qa(repository_id: str, settings: Settings = Depends(get_setti
 
     payload = report.public_payload()
     store = D1MetadataStore(settings)
-    append_history_entry(
-        store,
-        repository_id=repository_id,
-        field_name="qa_history",
-        entry={**payload, "occurred_at": datetime.now(UTC).isoformat()},
-    )
+    try:
+        append_history_entry(
+            store,
+            repository_id=repository_id,
+            field_name="qa_history",
+            entry={**payload, "occurred_at": datetime.now(UTC).isoformat()},
+        )
+        update_project_dna(settings, repository_id=repository_id)
+    except RepositoryMemoryUnavailableError as error:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from error
     return payload

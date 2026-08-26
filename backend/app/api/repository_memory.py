@@ -18,6 +18,7 @@ from app.services.repository_memory import (
     search_repository_memory,
     set_memory_field,
 )
+from app.services.repository_manager import get_repository
 from app.storage.ai_search import AiSearchClient
 from app.storage.d1 import D1MetadataStore
 
@@ -32,10 +33,19 @@ class AppendHistoryEntryRequest(BaseModel):
     entry: dict[str, Any]
 
 
+def _require_registered_repository(repository_id: str) -> None:
+    if get_repository(repository_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Unknown repository_id: {repository_id}",
+        )
+
+
 @router.get("/repositories/{repository_id}/memory")
 async def get_memory(
     repository_id: str, settings: Settings = Depends(get_settings)
 ) -> dict[str, object]:
+    _require_registered_repository(repository_id)
     store = D1MetadataStore(settings)
     try:
         memory = get_repository_memory(store, repository_id=repository_id)
@@ -55,6 +65,7 @@ async def get_memory(
 async def get_memory_field_endpoint(
     repository_id: str, field_name: str, settings: Settings = Depends(get_settings)
 ) -> dict[str, object]:
+    _require_registered_repository(repository_id)
     store = D1MetadataStore(settings)
     try:
         result = get_memory_field(store, repository_id=repository_id, field_name=field_name)
@@ -79,6 +90,7 @@ async def put_memory_field(
     body: SetMemoryFieldRequest,
     settings: Settings = Depends(get_settings),
 ) -> dict[str, object]:
+    _require_registered_repository(repository_id)
     store = D1MetadataStore(settings)
     try:
         result = set_memory_field(
@@ -98,6 +110,7 @@ async def post_memory_history_append(
     body: AppendHistoryEntryRequest,
     settings: Settings = Depends(get_settings),
 ) -> dict[str, object]:
+    _require_registered_repository(repository_id)
     store = D1MetadataStore(settings)
     try:
         result = append_history_entry(
@@ -117,6 +130,7 @@ async def get_memory_search(
     limit: int = Query(20, ge=1, le=200),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, object]:
+    _require_registered_repository(repository_id)
     store = D1MetadataStore(settings)
     try:
         return search_repository_memory(store, query=q, repository_id=repository_id, limit=limit)
