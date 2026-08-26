@@ -62,7 +62,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             report.app_version,
             len(report.warnings),
         )
-        loaded_count = model_registry.load_registry_from_store(D1MetadataStore(active_settings))
+        d1_store = D1MetadataStore(active_settings)
+        if d1_store.enabled and active_settings.d1_auto_init:
+            d1_schema = d1_store.init_schema()
+            logger.info(
+                "HIVE D1 schema auto-init ok=%s enabled=%s error=%s",
+                d1_schema.get("ok"),
+                d1_schema.get("enabled"),
+                d1_schema.get("error") or d1_schema.get("message"),
+            )
+            if not d1_schema.get("ok") and not active_settings.is_dev:
+                raise RuntimeError(
+                    f"HIVE D1 schema auto-init failed: {d1_schema.get('error') or d1_schema.get('message')}"
+                )
+        loaded_count = model_registry.load_registry_from_store(d1_store)
         if loaded_count:
             logger.info("HIVE Model Registry restored from D1 entries=%s", loaded_count)
         seeded_count = model_registry.seed_from_json(active_settings.model_registry_seed_json)
