@@ -23,6 +23,11 @@ from app.services.repository_memory import ALL_FIELDS, LANE, SCALAR_FIELDS, repo
 from app.storage.r2 import R2Storage
 from app.storage.d1 import D1MetadataStore
 from app.services.repository_pipeline import run_repository_pipeline
+from app.services.repository_refresh import (
+    get_refresh_job,
+    refresh_configuration,
+    start_refresh_job,
+)
 
 router = APIRouter(tags=["repositories"], dependencies=[Depends(require_admin)])
 
@@ -199,6 +204,52 @@ def _delete_repository_artifacts(repository_id: str, settings: Settings) -> dict
     return result
 
 
+async def _ingest_repository_content(
+    content: bytes,
+    source_filename: str,
+    settings: Settings,
+    *,
+    expected_repository_id: str | None = None,
+) -> dict[str, Any]:
+    """Register, durably persist and fully analyse one repository archive."""
+    try:
+        manifest = register_repository(
+            content,
+            settings=settings,
+            source_filename=source_filename,
+            max_files=settings.repository_max_files,
+            max_uncompressed_bytes=settings.repository_max_uncompressed_bytes,
+        )
+    except RepositoryManagerError:
+        raise
+
+    if expected_repository_id and manifest.repository_id != expected_repository_id:
+        cleanup_repository(manifest.repository_id)
+        raise RepositoryManagerError(
+            f"GitHub source identity mismatch: expected {expected_repository_id}, "
+            f"archive resolved to {manifest.repository_id}"
+        )
+
+    payload: dict[str, Any] = manifest.public_payload()
+    snapshot_persisted = _persist_snapshot_to_r2(content, manifest.repository_id, settings)
+    r2_persisted = _persist_manifest_to_r2(payload, settings)
+    payload["r2_persisted"] = r2_persisted
+    payload["snapshot_persisted"] = snapshot_persisted
+
+    if settings.production_require_r2 and (not r2_persisted or not snapshot_persisted):
+        cleanup_repository(manifest.repository_id)
+        _delete_repository_artifacts(manifest.repository_id, settings)
+        raise RuntimeError(
+            "Repository archive was rejected because its durable R2 manifest/snapshot could not be stored. "
+            "No temporary-only repository was accepted."
+        )
+
+    payload["pipeline"] = await run_repository_pipeline(
+        settings, manifest, r2_persisted=r2_persisted
+    )
+    return payload
+
+
 @router.post("/repositories")
 async def upload_repository(
     upload: UploadFile = File(...),
@@ -209,39 +260,22 @@ async def upload_repository(
     if not settings.repository_manager_enabled:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Repository Manager disabled")
     content = await upload.read()
+    upload_limit = int(getattr(settings, "max_upload_bytes", 100 * 1024 * 1024))
+    if len(content) > upload_limit:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"Repository upload exceeds MAX_UPLOAD_BYTES ({upload_limit} bytes)",
+        )
     try:
-        manifest = register_repository(
+        return await _ingest_repository_content(
             content,
-            settings=settings,
-            source_filename=upload.filename or "repository.zip",
-            max_files=settings.repository_max_files,
-            max_uncompressed_bytes=settings.repository_max_uncompressed_bytes,
+            upload.filename or "repository.zip",
+            settings,
         )
     except RepositoryManagerError as error:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
-
-    payload = manifest.public_payload()
-    snapshot_persisted = _persist_snapshot_to_r2(content, manifest.repository_id, settings)
-    r2_persisted = _persist_manifest_to_r2(payload, settings)
-    payload["r2_persisted"] = r2_persisted
-    payload["snapshot_persisted"] = snapshot_persisted
-
-    if settings.production_require_r2 and (not r2_persisted or not snapshot_persisted):
-        cleanup_repository(manifest.repository_id)
-        _delete_repository_artifacts(manifest.repository_id, settings)
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=(
-                "Repository upload was rejected because its durable R2 manifest/snapshot could not be stored. "
-                "No temporary-only repository was accepted."
-            ),
-        )
-
-    # Execute the downstream pipeline (non-blocking stages, graceful degradation).
-    pipeline_result = await run_repository_pipeline(settings, manifest, r2_persisted=r2_persisted)
-    payload["pipeline"] = pipeline_result
-
-    return payload
+    except RuntimeError as error:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from error
 
 
 @router.post("/repositories/{repository_id}/setup")
@@ -285,6 +319,46 @@ async def post_repository_setup(
         "pipeline": pipeline,
         "ready": pipeline.get("required_stages_ready") is True,
     }
+
+
+@router.get("/repositories/refresh-config")
+async def get_repository_refresh_configuration(
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    """Return non-secret monthly refresh readiness for operators/MAST."""
+    return refresh_configuration(settings)
+
+
+@router.post("/repositories/refresh-all", status_code=status.HTTP_202_ACCEPTED)
+async def post_repository_refresh_all(
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    """Start the monthly GitHub snapshot refresh and Intelligence run."""
+
+    async def ingest(content: bytes, filename: str, expected_id: str) -> dict[str, Any]:
+        return await _ingest_repository_content(
+            content, filename, settings, expected_repository_id=expected_id
+        )
+
+    try:
+        return start_refresh_job(settings, ingest)
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from error
+    except RuntimeError as error:
+        message = str(error)
+        code = status.HTTP_409_CONFLICT if "already running" in message.lower() else status.HTTP_503_SERVICE_UNAVAILABLE
+        raise HTTPException(status_code=code, detail=message) from error
+
+
+@router.get("/repositories/refresh-jobs/{job_id}")
+async def get_repository_refresh_job(
+    job_id: str,
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    payload = get_refresh_job(settings, job_id)
+    if payload is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown repository refresh job: {job_id}")
+    return payload
 
 
 @router.get("/repositories")
