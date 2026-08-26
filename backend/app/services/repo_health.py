@@ -48,8 +48,15 @@ def _targets(settings: Settings) -> list[ProbeTarget]:
             repo="HIVE-UI",
             label="HIVE-UI",
             category="frontend",
-            description="Cloudflare Pages operator interface",
+            description="Cloudflare Worker operator interface",
             health_url=_clean_url(settings.hive_ui_health_url),
+        ),
+        ProbeTarget(
+            repo="AIMS-UI",
+            label="AIMS-UI",
+            category="frontend",
+            description="Cloudflare Worker AIMS communications interface",
+            health_url=_clean_url(settings.aims_ui_health_url),
         ),
         ProbeTarget(
             repo="AIMS",

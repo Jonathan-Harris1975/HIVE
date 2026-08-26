@@ -27,6 +27,7 @@ from app.storage.d1 import D1MetadataStore
 LANE = "repository_memory"
 
 SCALAR_FIELDS = (
+    "project_manifest",
     "project_dna",
     "architecture_summary",
     "coding_standards",
@@ -49,6 +50,24 @@ ALL_FIELDS = SCALAR_FIELDS + HISTORY_FIELDS
 
 class RepositoryMemoryError(ValueError):
     pass
+
+
+class RepositoryMemoryUnavailableError(RuntimeError):
+    """Raised when the D1 persistence layer cannot serve Repository Memory."""
+
+
+def _require_store_enabled(store: D1MetadataStore) -> None:
+    if getattr(store, "enabled", True) is False:
+        raise RepositoryMemoryUnavailableError(
+            "Repository Memory persistence is unavailable because Cloudflare D1 is disabled or incomplete."
+        )
+
+
+def _require_store_result(result: dict[str, object], action: str) -> dict[str, object]:
+    if result.get("ok"):
+        return result
+    detail = result.get("message") or result.get("error") or "Cloudflare D1 request failed."
+    raise RepositoryMemoryUnavailableError(f"Repository Memory {action} failed: {detail}")
 
 
 def _require_known_field(field_name: str) -> None:
@@ -77,11 +96,12 @@ def set_memory_field(
 ) -> dict[str, object]:
     """Set (overwrite) a scalar Repository Memory field."""
     _require_known_field(field_name)
+    _require_store_enabled(store)
     if field_name in HISTORY_FIELDS:
         raise RepositoryMemoryError(
             f"'{field_name}' is a history field; use append_history_entry instead"
         )
-    return store.upsert_metadata(
+    result = store.upsert_metadata(
         item_id=_item_id(repository_id, field_name),
         lane=LANE,
         source_type=field_name,
@@ -90,6 +110,7 @@ def set_memory_field(
         url=None,
         metadata={"value": content},
     )
+    return _require_store_result(result, "write")
 
 
 def append_history_entry(
@@ -107,6 +128,7 @@ def append_history_entry(
     """
     if field_name not in HISTORY_FIELDS:
         raise RepositoryMemoryError(f"'{field_name}' is not a history field")
+    _require_store_enabled(store)
 
     existing = get_memory_field(store, repository_id=repository_id, field_name=field_name)
     items: list[dict[str, Any]] = list(existing.content) if existing and existing.content else []
@@ -114,7 +136,7 @@ def append_history_entry(
     if len(items) > max_entries:
         items = items[-max_entries:]
 
-    return store.upsert_metadata(
+    result = store.upsert_metadata(
         item_id=_item_id(repository_id, field_name),
         lane=LANE,
         source_type=field_name,
@@ -123,6 +145,7 @@ def append_history_entry(
         url=None,
         metadata={"value": items},
     )
+    return _require_store_result(result, "history append")
 
 
 def get_memory_field(
@@ -132,9 +155,8 @@ def get_memory_field(
     field_name: str,
 ) -> RepositoryMemoryField | None:
     _require_known_field(field_name)
-    result = store.list_metadata(lane=LANE, limit=500)
-    if not result.get("ok"):
-        return None
+    _require_store_enabled(store)
+    result = _require_store_result(store.list_metadata(lane=LANE, limit=500), "read")
     for row in result.get("items", []):
         if row.get("source_type") == field_name and row.get("source_id") == repository_id:
             metadata = row.get("metadata") or {}
@@ -150,10 +172,9 @@ def get_memory_field(
 def get_repository_memory(store: D1MetadataStore, *, repository_id: str) -> dict[str, Any]:
     """Return every stored Repository Memory field for a repository without
     requiring the repository's working copy to be loaded (Phase 1)."""
+    _require_store_enabled(store)
     memory: dict[str, Any] = {field_name: None for field_name in ALL_FIELDS}
-    result = store.list_metadata(lane=LANE, limit=500)
-    if not result.get("ok"):
-        return memory
+    result = _require_store_result(store.list_metadata(lane=LANE, limit=500), "read")
     for row in result.get("items", []):
         if row.get("source_id") != repository_id:
             continue
@@ -168,8 +189,12 @@ def search_repository_memory(
     store: D1MetadataStore, *, query: str, repository_id: str | None = None, limit: int = 50
 ) -> dict[str, object]:
     """Queryable Repository Memory search without loading the full repository."""
-    result = store.search_metadata(query=query, lane=LANE, limit=limit)
-    if not result.get("ok") or repository_id is None:
+    _require_store_enabled(store)
+    result = _require_store_result(
+        store.search_metadata(query=query, lane=LANE, limit=limit),
+        "search",
+    )
+    if repository_id is None:
         return result
     filtered = [item for item in result.get("items", []) if item.get("source_id") == repository_id]
     return {**result, "items": filtered, "count": len(filtered)}
