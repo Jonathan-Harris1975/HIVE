@@ -2,7 +2,7 @@
 
 HIVE (Harris Intelligent Virtual Entity) is the private operations backend for chat, file analysis, repository intelligence, model/provider governance, skills, workflow planning and ecosystem health. It is a Python/FastAPI service deployed on Koyeb and consumed by HIVE-UI through an authenticated Cloudflare proxy.
 
-This README describes the current capabilities and operating contract. Runtime version values are governed by the package and configuration files.
+This README describes the current capabilities and operating contract. Runtime version values are governed by the package and configuration files..
 
 ## Architecture
 
