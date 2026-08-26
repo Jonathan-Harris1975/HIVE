@@ -17,7 +17,10 @@ def _allow_local_development_bypass(request: Request, settings: Settings) -> boo
     if not settings.is_dev or settings.admin_bearer_token != _LOCAL_DEVELOPMENT_SENTINEL:
         return False
     peer = request.client.host if request.client else ""
-    if settings.app_env.lower() == "test" and peer == "testclient":
+    # Starlette's TestClient uses the synthetic peer name "testclient".
+    # It is only trusted while HIVE is already in a local/dev/test environment
+    # and the deliberately unsafe local sentinel token is still in use.
+    if peer == "testclient":
         return True
     try:
         return ipaddress.ip_address(peer).is_loopback
