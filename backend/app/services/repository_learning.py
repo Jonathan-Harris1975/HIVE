@@ -93,8 +93,21 @@ def update_project_dna(settings: Settings, *, repository_id: str) -> dict[str, A
     patterns = memory.get("learned_patterns") or []
     qa_history = memory.get("qa_history") or []
     council_history = memory.get("repository_council_history") or []
+    manifest = memory.get("project_manifest") or {}
+    architecture = memory.get("architecture_summary") or {}
+    build_profile = memory.get("build_profile") or {}
+    deployment_profile = memory.get("deployment_profile") or {}
+    environment_schema = memory.get("environment_schema") or {}
 
     dna = {
+        "repository_id": repository_id,
+        "source_filename": manifest.get("source_filename") if isinstance(manifest, dict) else None,
+        "file_count": manifest.get("file_count") if isinstance(manifest, dict) else None,
+        "languages": manifest.get("languages") if isinstance(manifest, dict) else None,
+        "architecture_signals": architecture.get("architecture_signals") if isinstance(architecture, dict) else None,
+        "build_commands": build_profile.get("package_scripts") if isinstance(build_profile, dict) else None,
+        "deployment_targets": deployment_profile.get("targets") if isinstance(deployment_profile, dict) else None,
+        "environment_variable_count": environment_schema.get("variable_count") if isinstance(environment_schema, dict) else None,
         "patch_summary": _summarise_patches(patches),
         "pattern_summary": _summarise_patterns(patterns),
         "latest_qa_score": (qa_history[-1].get("score") if qa_history else None),

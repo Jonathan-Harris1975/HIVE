@@ -75,7 +75,7 @@ def _require_known_field(field_name: str) -> None:
         raise RepositoryMemoryError(f"Unknown Repository Memory field: {field_name}")
 
 
-def _item_id(repository_id: str, field_name: str) -> str:
+def repository_memory_item_id(repository_id: str, field_name: str) -> str:
     return f"repo-memory:{repository_id}:{field_name}"
 
 
@@ -102,7 +102,7 @@ def set_memory_field(
             f"'{field_name}' is a history field; use append_history_entry instead"
         )
     result = store.upsert_metadata(
-        item_id=_item_id(repository_id, field_name),
+        item_id=repository_memory_item_id(repository_id, field_name),
         lane=LANE,
         source_type=field_name,
         source_id=repository_id,
@@ -137,7 +137,7 @@ def append_history_entry(
         items = items[-max_entries:]
 
     result = store.upsert_metadata(
-        item_id=_item_id(repository_id, field_name),
+        item_id=repository_memory_item_id(repository_id, field_name),
         lane=LANE,
         source_type=field_name,
         source_id=repository_id,
@@ -198,3 +198,41 @@ def search_repository_memory(
         return result
     filtered = [item for item in result.get("items", []) if item.get("source_id") == repository_id]
     return {**result, "items": filtered, "count": len(filtered)}
+
+
+def migrate_repository_memory_id(
+    store: D1MetadataStore,
+    *,
+    old_repository_id: str,
+    new_repository_id: str,
+) -> dict[str, object]:
+    """Move Repository Memory rows from a legacy id to a stable repository id."""
+    if old_repository_id == new_repository_id:
+        return {"ok": True, "migrated_count": 0}
+    _require_store_enabled(store)
+    result = _require_store_result(store.list_metadata(lane=LANE, limit=500), "migration read")
+    migrated_ids: list[str] = []
+    old_ids: list[str] = []
+    for row in result.get("items", []):
+        if row.get("source_id") != old_repository_id:
+            continue
+        field_name = str(row.get("source_type") or "")
+        if field_name not in ALL_FIELDS:
+            continue
+        write = store.upsert_metadata(
+            item_id=repository_memory_item_id(new_repository_id, field_name),
+            lane=LANE,
+            source_type=field_name,
+            source_id=new_repository_id,
+            title=f"{field_name} for {new_repository_id}",
+            url=row.get("url"),
+            metadata=row.get("metadata") or {},
+        )
+        _require_store_result(write, "migration write")
+        migrated_ids.append(field_name)
+        old_ids.append(repository_memory_item_id(old_repository_id, field_name))
+
+    if old_ids and hasattr(store, "delete_metadata_ids"):
+        delete_result = store.delete_metadata_ids(old_ids)
+        _require_store_result(delete_result, "migration cleanup")
+    return {"ok": True, "migrated_count": len(migrated_ids), "fields": migrated_ids}

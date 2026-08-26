@@ -7,6 +7,7 @@ import shutil
 import tempfile
 import threading
 import time
+import tomllib
 import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -22,14 +23,26 @@ from app.ingestion.zip_ingestion import UnsafeZipError, extract_zip_safely
 # re-indexing on subsequent uploads of the same repository, an in-process
 # registry, and automatic cleanup of temporary extraction directories.
 #
-# Extracted repositories are never permanent: they live under a per-process
-# temp root and are removed by TTL-based cleanup or explicit deletion. Any
-# durable artefact (manifest, fingerprint, registry metadata) is small JSON
-# that can be persisted separately (SQL/D1) by callers; this module only
-# manages the working copy on local disk.
+# Extracted working copies live under a per-process temp root. The repository
+# API persists both the source ZIP and its manifest in R2, so startup can
+# restore a validated local working copy after a process restart. This module
+# owns local extraction, stable repository identity and registry lifecycle;
+# durable object storage remains the API/storage layer's responsibility.
 
 _REGISTRY_LOCK = threading.Lock()
 _REGISTRY: dict[str, "RepositoryRecord"] = {}
+
+_GOVERNED_REPOSITORY_IDS = {
+    "hive": "HIVE",
+    "hive-ui": "HIVE-UI",
+    "aims": "AIMS",
+    "aims-ui": "AIMS-UI",
+    "rams": "RAMS",
+    "mast": "MAST",
+    "irs": "IRS",
+    "website": "Website",
+    "shared": "Shared",
+}
 
 _LANGUAGE_BY_SUFFIX: dict[str, str] = {
     ".py": "Python",
@@ -175,6 +188,54 @@ def _repository_temp_root(settings: Settings) -> Path:
     return root
 
 
+def repository_id_from_filename(source_filename: str) -> str:
+    """Return a stable repository id from an uploaded archive filename.
+
+    GitHub archives are normally named ``<repo>-main.zip`` or
+    ``<repo>-master.zip``.  Repository Intelligence and Repository Memory need
+    a stable identifier across monthly uploads and process restarts, so random
+    UUIDs are not suitable here.
+    """
+    filename = Path(source_filename or "repository.zip").name
+    stem = re.sub(r"(?i)\.zip$", "", filename).strip()
+    stem = re.sub(r"(?i)-(?:main|master)$", "", stem).strip()
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", stem).strip("-._")
+    if not slug:
+        raise RepositoryManagerError("Repository filename does not contain a usable repository id")
+    return _GOVERNED_REPOSITORY_IDS.get(slug.lower(), slug)
+
+
+def _collapse_single_root_directory(workdir: Path) -> str | None:
+    """Flatten GitHub's single wrapper directory and return its name."""
+    children = list(workdir.iterdir())
+    if len(children) != 1 or not children[0].is_dir():
+        return None
+    wrapper = children[0]
+    if not wrapper.name.lower().endswith(("-main", "-master")):
+        return None
+    wrapper_name = wrapper.name
+    for child in list(wrapper.iterdir()):
+        shutil.move(str(child), str(workdir / child.name))
+    wrapper.rmdir()
+    return wrapper_name
+
+
+def _extract_repository_archive(
+    archive_path: Path,
+    workdir: Path,
+    *,
+    max_files: int,
+    max_uncompressed_bytes: int,
+) -> str | None:
+    extract_zip_safely(
+        archive_path,
+        workdir,
+        max_files=max_files,
+        max_uncompressed_bytes=max_uncompressed_bytes,
+    )
+    return _collapse_single_root_directory(workdir)
+
+
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -219,6 +280,49 @@ def _parse_package_json(text: str) -> list[str]:
     return declared
 
 
+def _normalise_python_dependency(requirement: str) -> str:
+    name = re.split(r"[<>=!~\[; ]", requirement.strip(), maxsplit=1)[0].strip()
+    return name
+
+
+def _parse_pyproject_toml(text: str) -> list[str]:
+    try:
+        data = tomllib.loads(text)
+    except (tomllib.TOMLDecodeError, ValueError):
+        return []
+
+    declared: set[str] = set()
+    project = data.get("project")
+    if isinstance(project, dict):
+        dependencies = project.get("dependencies")
+        if isinstance(dependencies, list):
+            for requirement in dependencies:
+                if isinstance(requirement, str):
+                    name = _normalise_python_dependency(requirement)
+                    if name:
+                        declared.add(name)
+        optional = project.get("optional-dependencies")
+        if isinstance(optional, dict):
+            for requirements in optional.values():
+                if not isinstance(requirements, list):
+                    continue
+                for requirement in requirements:
+                    if isinstance(requirement, str):
+                        name = _normalise_python_dependency(requirement)
+                        if name:
+                            declared.add(name)
+
+    tool = data.get("tool")
+    poetry = tool.get("poetry") if isinstance(tool, dict) else None
+    poetry_dependencies = poetry.get("dependencies") if isinstance(poetry, dict) else None
+    if isinstance(poetry_dependencies, dict):
+        for name in poetry_dependencies:
+            if str(name).lower() != "python":
+                declared.add(str(name))
+
+    return sorted(declared, key=str.lower)
+
+
 def _scan_dependencies(workdir: Path) -> list[DependencyFinding]:
     findings: list[DependencyFinding] = []
     for candidate in _iter_repository_files(workdir):
@@ -236,9 +340,11 @@ def _scan_dependencies(workdir: Path) -> list[DependencyFinding]:
             declared = _parse_requirements_txt(text)
         elif manifest_name == "package.json":
             declared = _parse_package_json(text)
+        elif manifest_name == "pyproject.toml":
+            declared = _parse_pyproject_toml(text)
         else:
             # Presence-only detection for manifests not worth parsing here
-            # (pyproject.toml, Cargo.toml, go.mod, composer.json, Gemfile, Pipfile).
+            # (Cargo.toml, go.mod, composer.json, Gemfile, Pipfile).
             declared = []
         findings.append(DependencyFinding(manifest_path=relative, ecosystem=ecosystem, declared=declared))
     return findings
@@ -284,32 +390,45 @@ def register_repository(
     Extraction is always into a fresh temporary directory scoped to this
     repository_id; nothing is written permanently to local disk.
     """
-    repository_id = uuid.uuid4().hex
     root = _repository_temp_root(settings)
-    workdir = root / repository_id
-    workdir.mkdir(parents=True, exist_ok=False)
+    staging_dir = root / f".upload-{uuid.uuid4().hex}.staging"
+    staging_dir.mkdir(parents=True, exist_ok=False)
 
     with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp_zip:
         tmp_zip.write(zip_bytes)
         tmp_zip_path = Path(tmp_zip.name)
 
     try:
-        extract_zip_safely(
+        wrapper_name = _extract_repository_archive(
             tmp_zip_path,
-            workdir,
+            staging_dir,
             max_files=max_files,
             max_uncompressed_bytes=max_uncompressed_bytes,
         )
     except UnsafeZipError as error:
-        shutil.rmtree(workdir, ignore_errors=True)
+        shutil.rmtree(staging_dir, ignore_errors=True)
         raise RepositoryManagerError(str(error)) from error
     finally:
         tmp_zip_path.unlink(missing_ok=True)
 
-    files_index = _build_file_index(workdir)
+    # Prefer the repository name embedded by GitHub in the archive itself.
+    # This keeps identity stable even if a browser or operator renames the ZIP.
+    identity_filename = f"{wrapper_name}.zip" if wrapper_name else source_filename
+    repository_id = repository_id_from_filename(identity_filename)
+
+    files_index = _build_file_index(staging_dir)
     fingerprint = _fingerprint_from_index(files_index)
-    total_bytes = sum(path.stat().st_size for path in _iter_repository_files(workdir))
+    total_bytes = sum(path.stat().st_size for path in _iter_repository_files(staging_dir))
     now = time.time()
+
+    with _REGISTRY_LOCK:
+        previous = _REGISTRY.get(repository_id)
+
+    created_at = previous.manifest.created_at if previous is not None else now
+    previous_version = previous.manifest.indexed_version if previous is not None else 0
+    previous_fingerprint = previous.manifest.fingerprint if previous is not None else None
+    indexed_version = previous_version if previous_fingerprint == fingerprint else previous_version + 1
+    indexed_version = max(1, indexed_version)
 
     manifest = RepositoryManifest(
         repository_id=repository_id,
@@ -317,12 +436,18 @@ def register_repository(
         fingerprint=fingerprint,
         file_count=len(files_index),
         total_bytes=total_bytes,
-        languages=_language_counts(workdir),
-        dependencies=_scan_dependencies(workdir),
-        created_at=now,
+        languages=_language_counts(staging_dir),
+        dependencies=_scan_dependencies(staging_dir),
+        created_at=created_at,
         updated_at=now,
-        indexed_version=1,
+        indexed_version=indexed_version,
     )
+
+    workdir = root / repository_id
+    if previous is not None and not is_rehydrated(previous):
+        shutil.rmtree(previous.workdir, ignore_errors=True)
+    shutil.rmtree(workdir, ignore_errors=True)
+    staging_dir.replace(workdir)
 
     record = RepositoryRecord(
         repository_id=repository_id,
@@ -334,6 +459,50 @@ def register_repository(
     with _REGISTRY_LOCK:
         _REGISTRY[repository_id] = record
     return manifest
+
+
+def restore_repository_snapshot(
+    archive_path: Path,
+    *,
+    settings: Settings,
+    manifest: RepositoryManifest,
+) -> RepositoryRecord:
+    """Restore a persisted repository ZIP into a usable local working copy.
+
+    The archive is validated against the persisted manifest fingerprint before
+    it becomes active.  A corrupt or stale R2 snapshot is therefore never
+    silently treated as the registered repository.
+    """
+    root = _repository_temp_root(settings)
+    staging_dir = root / f".{manifest.repository_id}-{uuid.uuid4().hex}.restore"
+    staging_dir.mkdir(parents=True, exist_ok=False)
+    try:
+        _extract_repository_archive(
+            archive_path,
+            staging_dir,
+            max_files=settings.repository_max_files,
+            max_uncompressed_bytes=settings.repository_max_uncompressed_bytes,
+        )
+        files_index = _build_file_index(staging_dir)
+        fingerprint = _fingerprint_from_index(files_index)
+        if fingerprint != manifest.fingerprint:
+            raise RepositoryManagerError(
+                f"Persisted snapshot fingerprint mismatch for {manifest.repository_id}"
+            )
+
+        workdir = root / manifest.repository_id
+        shutil.rmtree(workdir, ignore_errors=True)
+        staging_dir.replace(workdir)
+        return RepositoryRecord(
+            repository_id=manifest.repository_id,
+            workdir=workdir,
+            manifest=manifest,
+            files_index=files_index,
+            last_accessed_at=time.time(),
+        )
+    except Exception:
+        shutil.rmtree(staging_dir, ignore_errors=True)
+        raise
 
 
 def get_repository(repository_id: str) -> RepositoryRecord | None:
@@ -466,18 +635,11 @@ def registry_size() -> int:
 # ---------------------------------------------------------------------------
 # Startup rehydration (RC1 fix — Audit Finding #1)
 # ---------------------------------------------------------------------------
-# On process startup the in-memory _REGISTRY is empty even though manifest
-# JSON objects persist in R2 under `manifests/{repository_id}.json`.  This
-# function is called from main.py's lifespan (mirrors model_registry's
-# load_registry_from_store pattern) and rebuilds lightweight RepositoryRecord
-# stubs from every manifest found in R2.
-#
-# Because extracted working directories (workdir) are ephemeral temp files
-# that do NOT survive restarts, rehydrated records have no valid workdir.
-# Operations that require the workdir (reindex, QA, Council) will detect the
-# missing directory and return a clear RepositoryManagerError rather than
-# crashing silently.  The manifest metadata (fingerprint, languages, file
-# count, etc.) is immediately available for listing and dashboard display.
+# On process startup the in-memory _REGISTRY is empty even though repository
+# manifests and source snapshots persist in R2. This function is called from
+# main.py's lifespan and rebuilds the registry, restoring each validated ZIP
+# into a local working copy. Historical manifest-only registrations remain as
+# explicit tombstones until they are uploaded once under the durable model.
 
 _TOMBSTONE_DIR = Path("/dev/null")  # sentinel — workdir absent after rehydration
 
@@ -503,45 +665,102 @@ def rehydrate_registry_from_r2(settings: "Settings") -> int:  # noqa: F821 (forw
         from app.storage.r2 import R2Storage
 
         r2 = R2Storage(settings)
-        if not r2.enabled:
+        if not settings.r2_bucket_repositories or not (r2.write_enabled or r2.read_enabled):
             logger.info("Repository rehydration skipped — R2 not configured")
             return 0
 
-        keys = r2.list_objects(
-            prefix="manifests/",
-            limit=5_000,
-            bucket=settings.r2_bucket_repositories,
-            read_only=True,
-        )
+        credential_modes: list[bool] = []
+        if r2.read_enabled:
+            credential_modes.append(True)
+        if r2.write_enabled:
+            credential_modes.append(False)
+
+        keys = None
+        list_errors: list[str] = []
+        for read_only in credential_modes:
+            try:
+                keys = r2.list_objects(
+                    prefix="manifests/",
+                    limit=5_000,
+                    bucket=settings.r2_bucket_repositories,
+                    read_only=read_only,
+                )
+                break
+            except Exception as exc:  # noqa: BLE001
+                list_errors.append(f"{'read' if read_only else 'write'} credentials: {exc}")
+        if keys is None:
+            raise RuntimeError("; ".join(list_errors) or "no usable R2 credentials")
     except Exception as exc:  # noqa: BLE001
         logger.warning("Repository rehydration aborted — R2 list failed: %s", exc)
         return 0
+
+    # Historical builds created a new UUID manifest on every upload. Process
+    # newest objects first so the latest snapshot wins when several legacy
+    # manifests resolve to the same stable governed repository id.
+    keys = sorted(keys, key=lambda item: getattr(item, "last_modified", None) or "", reverse=True)
 
     rehydrated = 0
     for obj in keys:
         key = obj.key
         if not key.endswith(".json"):
             continue
-        try:
-            raw = r2.read_object(
+        raw = None
+        read_errors: list[str] = []
+        for read_only in credential_modes:
+            try:
+                raw = r2.read_object(
+                    key,
+                    max_bytes=2 * 1024 * 1024,  # 2 MB cap per manifest
+                    bucket=settings.r2_bucket_repositories,
+                    read_only=read_only,
+                )
+                break
+            except Exception as exc:  # noqa: BLE001
+                read_errors.append(f"{'read' if read_only else 'write'} credentials: {exc}")
+        if raw is None:
+            logger.warning(
+                "Repository rehydration skipped key=%s error=%s",
                 key,
-                max_bytes=2 * 1024 * 1024,  # 2 MB cap per manifest
-                bucket=settings.r2_bucket_repositories,
-                read_only=True,
+                "; ".join(read_errors) or "manifest unavailable",
             )
+            continue
+        try:
             data: dict = json.loads(raw.content)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Repository rehydration skipped key=%s error=%s", key, exc)
             continue
 
-        repository_id = data.get("repository_id")
-        if not repository_id:
+        stored_repository_id = str(data.get("repository_id") or "").strip()
+        if not stored_repository_id:
             continue
 
+        source_filename = str(data.get("source_filename") or "unknown")
+        derived_repository_id = repository_id_from_filename(source_filename)
+        repository_id = (
+            derived_repository_id
+            if re.fullmatch(r"[0-9a-f]{32}", stored_repository_id, flags=re.IGNORECASE)
+            else stored_repository_id
+        )
+
         with _REGISTRY_LOCK:
-            if repository_id in _REGISTRY:
-                # Already registered (e.g. uploaded in this process run) — skip.
-                continue
+            already_registered = repository_id in _REGISTRY
+        if already_registered:
+            # The newest manifest for this stable id has already won. Remove
+            # obsolete UUID-era objects when write credentials are available.
+            if stored_repository_id != repository_id and r2.write_enabled:
+                try:
+                    r2.delete_objects(
+                        [key, f"snapshots/{stored_repository_id}.zip"],
+                        bucket=settings.r2_bucket_repositories,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "Stale repository object cleanup failed repository_id=%s key=%s error=%s",
+                        repository_id,
+                        key,
+                        exc,
+                    )
+            continue
 
         try:
             deps = [
@@ -554,7 +773,7 @@ def rehydrate_registry_from_r2(settings: "Settings") -> int:  # noqa: F821 (forw
             ]
             manifest = RepositoryManifest(
                 repository_id=repository_id,
-                source_filename=data.get("source_filename", "unknown"),
+                source_filename=source_filename,
                 fingerprint=data.get("fingerprint", ""),
                 file_count=int(data.get("file_count", 0)),
                 total_bytes=int(data.get("total_bytes", 0)),
@@ -570,13 +789,124 @@ def rehydrate_registry_from_r2(settings: "Settings") -> int:  # noqa: F821 (forw
             )
             continue
 
-        record = RepositoryRecord(
-            repository_id=repository_id,
-            workdir=_TOMBSTONE_DIR,
-            manifest=manifest,
-            files_index={},
-            last_accessed_at=float(data.get("updated_at", time.time())),
-        )
+        if stored_repository_id != repository_id:
+            # One-time migration from the historical random UUID id scheme to
+            # stable governed repository ids (HIVE, HIVE-UI, AIMS, ...).
+            try:
+                from app.services.repository_memory import migrate_repository_memory_id
+                from app.storage.d1 import D1MetadataStore
+
+                d1_store = D1MetadataStore(settings)
+                if d1_store.enabled:
+                    migrate_repository_memory_id(
+                        d1_store,
+                        old_repository_id=stored_repository_id,
+                        new_repository_id=repository_id,
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "Repository Memory id migration failed old=%s new=%s error=%s",
+                    stored_repository_id,
+                    repository_id,
+                    exc,
+                )
+
+            if r2.write_enabled:
+                try:
+                    with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tmp:
+                        tmp.write(json.dumps(manifest.public_payload()).encode("utf-8"))
+                        canonical_manifest_path = Path(tmp.name)
+                    try:
+                        r2.put_file(
+                            canonical_manifest_path,
+                            f"manifests/{repository_id}.json",
+                            content_type="application/json",
+                            bucket=settings.r2_bucket_repositories,
+                            public_base_url=None,
+                        )
+                        r2.delete_objects([key], bucket=settings.r2_bucket_repositories)
+                    finally:
+                        canonical_manifest_path.unlink(missing_ok=True)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "Repository manifest id migration failed old=%s new=%s error=%s",
+                        stored_repository_id,
+                        repository_id,
+                        exc,
+                    )
+
+        record: RepositoryRecord | None = None
+        snapshot_ids = [repository_id]
+        if stored_repository_id != repository_id:
+            snapshot_ids.append(stored_repository_id)
+
+        for snapshot_id in snapshot_ids:
+            snapshot_key = f"snapshots/{snapshot_id}.zip"
+            snapshot_errors: list[str] = []
+            for read_only in credential_modes:
+                archive_path: Path | None = None
+                try:
+                    stream = r2.open_object(
+                        snapshot_key,
+                        bucket=settings.r2_bucket_repositories,
+                        max_bytes=settings.repository_max_uncompressed_bytes,
+                        read_only=read_only,
+                    )
+                    try:
+                        with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
+                            while True:
+                                chunk = stream.body.read(1024 * 1024)
+                                if not chunk:
+                                    break
+                                tmp.write(chunk)
+                            archive_path = Path(tmp.name)
+                    finally:
+                        stream.body.close()
+                    record = restore_repository_snapshot(
+                        archive_path,
+                        settings=settings,
+                        manifest=manifest,
+                    )
+                    if snapshot_id != repository_id and r2.write_enabled:
+                        r2.put_file(
+                            archive_path,
+                            f"snapshots/{repository_id}.zip",
+                            content_type="application/zip",
+                            bucket=settings.r2_bucket_repositories,
+                            public_base_url=None,
+                        )
+                        r2.delete_objects(
+                            [snapshot_key],
+                            bucket=settings.r2_bucket_repositories,
+                        )
+                    logger.debug(
+                        "Repository working copy restored repository_id=%s snapshot=%s",
+                        repository_id,
+                        snapshot_key,
+                    )
+                    break
+                except Exception as exc:  # noqa: BLE001
+                    snapshot_errors.append(f"{'read' if read_only else 'write'} credentials: {exc}")
+                finally:
+                    if archive_path is not None:
+                        archive_path.unlink(missing_ok=True)
+            if record is not None:
+                break
+            logger.debug(
+                "Repository snapshot restore unavailable repository_id=%s snapshot=%s error=%s",
+                repository_id,
+                snapshot_key,
+                "; ".join(snapshot_errors) or "snapshot unavailable",
+            )
+
+        if record is None:
+            record = RepositoryRecord(
+                repository_id=repository_id,
+                workdir=_TOMBSTONE_DIR,
+                manifest=manifest,
+                files_index={},
+                last_accessed_at=float(data.get("updated_at", time.time())),
+            )
         with _REGISTRY_LOCK:
             _REGISTRY[repository_id] = record
         rehydrated += 1

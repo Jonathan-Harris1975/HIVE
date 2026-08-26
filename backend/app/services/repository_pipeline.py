@@ -14,18 +14,15 @@ from __future__ import annotations
 #       → Repository Memory seed → QA → Council → Learning / DNA
 #       → AI Search index → Repository Ready
 #
-# Each stage degrades gracefully: a failure in any downstream stage
-# (Memory / QA / Council / AI Search) is logged but does NOT fail the
-# upload response — the manifest is always returned.  Stage results are
-# included in the response payload under `pipeline` so operators can see
-# exactly what happened.
+# Every stage reports an explicit outcome. Core stages (Memory, QA, Council
+# and Learning) are expected to succeed for a production-ready repository;
+# optional AI Search may be skipped when it is not configured. Stage results
+# are included in the upload response so operators can see exactly what ran.
 #
 # The pipeline is intentionally *async* so it can be awaited inside a
 # FastAPI async route handler without blocking the event loop.  Sync
 # service functions (run_repository_qa, run_repository_council,
 # update_project_dna) are wrapped with asyncio.to_thread().
-
-from __future__ import annotations
 
 import asyncio
 import logging
@@ -43,28 +40,48 @@ logger = logging.getLogger("uvicorn.error.hive.repository_pipeline")
 
 
 def _seed_repository_memory(settings: Settings, manifest: RepositoryManifest) -> dict[str, Any]:
-    """Write the manifest summary into Repository Memory so downstream
-    services (QA, Council, Learning) have a stable source of truth."""
+    """Populate every scalar Repository Memory field from the uploaded snapshot."""
     try:
+        from app.services.repository_manager import get_repository
         from app.services.repository_memory import set_memory_field
+        from app.services.repository_profile import build_repository_memory_profile
         from app.storage.d1 import D1MetadataStore
 
         store = D1MetadataStore(settings)
-        set_memory_field(
-            store,
-            repository_id=manifest.repository_id,
-            field_name="project_manifest",
-            content={
+        record = get_repository(manifest.repository_id)
+        if record is None:
+            raise RuntimeError(f"Repository {manifest.repository_id} disappeared before Memory seeding")
+
+        fields: dict[str, Any] = {
+            "project_manifest": {
+                "repository_id": manifest.repository_id,
                 "source_filename": manifest.source_filename,
                 "fingerprint": manifest.fingerprint,
                 "file_count": manifest.file_count,
                 "total_bytes": manifest.total_bytes,
                 "languages": manifest.languages,
+                "dependencies": [
+                    {
+                        "manifest_path": dep.manifest_path,
+                        "ecosystem": dep.ecosystem,
+                        "declared": dep.declared,
+                    }
+                    for dep in manifest.dependencies
+                ],
                 "created_at": manifest.created_at,
+                "updated_at": manifest.updated_at,
                 "indexed_version": manifest.indexed_version,
             },
-        )
-        return {"ok": True}
+            **build_repository_memory_profile(record),
+        }
+        for field_name, content in fields.items():
+            set_memory_field(
+                store,
+                repository_id=manifest.repository_id,
+                field_name=field_name,
+                content=content,
+            )
+        return {"ok": True, "fields_populated": sorted(fields)}
     except Exception as exc:  # noqa: BLE001
         logger.warning(
             "Repository pipeline memory seed failed repository_id=%s error=%s",
@@ -103,6 +120,28 @@ def _run_qa(settings: Settings, repository_id: str) -> dict[str, Any]:
             field_name="qa_history",
             entry={**payload, "occurred_at": datetime.now(UTC).isoformat()},
         )
+        warning_checks = [
+            {
+                "name": check.name,
+                "status": check.status,
+                "summary": check.summary,
+                "details": check.details,
+            }
+            for check in report.checks
+            if check.status == "warning"
+        ]
+        if warning_checks:
+            append_history_entry(
+                store,
+                repository_id=repository_id,
+                field_name="known_issues",
+                entry={
+                    "title": "Repository QA warnings",
+                    "summary": f"{len(warning_checks)} warning(s) detected during repository upload QA.",
+                    "checks": warning_checks,
+                    "occurred_at": datetime.now(UTC).isoformat(),
+                },
+            )
         return {
             "ok": True,
             "score": report.score,
@@ -225,22 +264,45 @@ async def run_repository_pipeline(
     pipeline["ai_search"] = await _index_in_ai_search(settings, manifest)
 
     pipeline["elapsed_ms"] = round((time.monotonic() - t_start) * 1000, 1)
-    pipeline["status"] = "ready"
 
-    stages_failed = [k for k, v in pipeline.items() if isinstance(v, dict) and v.get("ok") is False and not v.get("skipped")]
-    if stages_failed:
-        pipeline["status"] = "ready_with_warnings"
-        pipeline["failed_stages"] = stages_failed
-        logger.warning(
-            "Repository pipeline completed with warnings repository_id=%s failed=%s",
+    required_stages = ("memory_seed", "qa", "council", "learning")
+    required_failed = [
+        stage
+        for stage in required_stages
+        if isinstance(pipeline.get(stage), dict) and pipeline[stage].get("ok") is not True
+    ]
+    optional_failed = [
+        stage
+        for stage in ("ai_search",)
+        if isinstance(pipeline.get(stage), dict)
+        and pipeline[stage].get("ok") is False
+        and not pipeline[stage].get("skipped")
+    ]
+
+    if required_failed:
+        pipeline["status"] = "setup_incomplete"
+        pipeline["failed_stages"] = required_failed + optional_failed
+        logger.error(
+            "Repository pipeline incomplete repository_id=%s required_failed=%s optional_failed=%s",
             repository_id,
-            stages_failed,
+            required_failed,
+            optional_failed,
+        )
+    elif optional_failed:
+        pipeline["status"] = "ready_with_warnings"
+        pipeline["failed_stages"] = optional_failed
+        logger.warning(
+            "Repository pipeline ready with optional warnings repository_id=%s failed=%s",
+            repository_id,
+            optional_failed,
         )
     else:
+        pipeline["status"] = "ready"
         logger.info(
             "Repository pipeline complete repository_id=%s elapsed_ms=%s",
             repository_id,
             pipeline["elapsed_ms"],
         )
 
+    pipeline["required_stages_ready"] = not required_failed
     return pipeline
