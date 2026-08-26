@@ -106,10 +106,19 @@ def _run_intelligence(settings: Settings, repository_id: str) -> dict[str, Any]:
         from app.services.repository_intelligence import run_repository_intelligence
 
         report = run_repository_intelligence(settings, repository_id)
-        summary = report.get("summary") if isinstance(report.get("summary"), dict) else {}
-        qa = report.get("qa") if isinstance(report.get("qa"), dict) else {}
-        council = report.get("council") if isinstance(report.get("council"), dict) else {}
-        dna = report.get("project_dna") if isinstance(report.get("project_dna"), dict) else {}
+
+        raw_summary = report.get("summary")
+        summary: dict[str, Any] = raw_summary if isinstance(raw_summary, dict) else {}
+
+        raw_qa = report.get("qa")
+        qa: dict[str, Any] = raw_qa if isinstance(raw_qa, dict) else {}
+
+        raw_council = report.get("council")
+        council: dict[str, Any] = raw_council if isinstance(raw_council, dict) else {}
+
+        raw_dna = report.get("project_dna")
+        dna: dict[str, Any] = raw_dna if isinstance(raw_dna, dict) else {}
+
         return {
             "ok": True,
             "status": summary.get("status"),
