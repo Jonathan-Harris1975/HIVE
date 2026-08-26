@@ -145,7 +145,8 @@ def _repository_memory_readiness(
         source_type = str(row.get("source_type") or "")
         if source_id not in values_by_repository or source_type not in ALL_FIELDS:
             continue
-        metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+        raw_metadata = row.get("metadata")
+        metadata = cast(dict[str, Any], raw_metadata) if isinstance(raw_metadata, dict) else {}
         values_by_repository[source_id][source_type] = metadata.get("value")
 
     for repository_id, values in values_by_repository.items():
