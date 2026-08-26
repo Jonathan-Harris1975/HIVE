@@ -18,28 +18,24 @@ WORKFLOW_GRAPH_TEMPLATES: dict[str, dict[str, object]] = {
         "description": "Review RAMS/AIMS audit bundles, collect evidence, propose future-facing fixes, and queue review.",
         "recommended_presets": ["audit_report_review", "ci_log_analysis"],
         "default_repo": "RAMS",
-        "free_tier_safe": True,
     },
     "repo_debug": {
         "label": "Repo/debug workflow",
         "description": "Classify repo/log issues, identify candidate skills, and produce a review-gated patch plan.",
         "recommended_presets": ["repo_debug_bundle", "ci_log_analysis"],
         "default_repo": "HIVE",
-        "free_tier_safe": True,
     },
     "content_qa": {
         "label": "Content QA workflow",
         "description": "Review social, blog, RSS, podcast or eBook content against brand and QA gates.",
         "recommended_presets": ["social_content_qa", "podcast_episode_review", "ebook_keyword_review"],
         "default_repo": "AIMS",
-        "free_tier_safe": True,
     },
     "skills_registry": {
         "label": "Skills registry workflow",
         "description": "Search, recommend, route and review shared skills without installing or executing them.",
         "recommended_presets": [],
         "default_repo": "HIVE",
-        "free_tier_safe": True,
     },
 }
 
@@ -202,7 +198,6 @@ def build_workflow_graph(
         "risk_summary": risk_summary,
         "candidate_skills": candidate_skills,
         "source_plan": plan,
-        "free_tier_note": "Graph building is synchronous and bounded; no background execution starts on Koyeb Free.",
         "safety_note": _safety_note(),
     }
 

@@ -184,7 +184,17 @@ async def _probe(
 
     started = time.perf_counter()
     try:
+        # Health endpoints can briefly return a gateway/rate-limit response during
+        # a deploy or instance wake-up even though the service is already able to
+        # answer its readiness endpoint. Retry one transient HTTP response before
+        # reporting degradation so a single edge blip does not poison the whole
+        # ecosystem snapshot. Persistent failures still surface unchanged.
+        transient_statuses = {408, 409, 425, 429, 500, 502, 503, 504}
         response = await client.get(url, headers=headers, follow_redirects=True)
+        if response.status_code in transient_statuses:
+            await asyncio.sleep(0.15)
+            response = await client.get(url, headers=headers, follow_redirects=True)
+
         latency_ms = round((time.perf_counter() - started) * 1000)
         payload = _safe_payload(response)
         payload_status = _payload_status(payload)
@@ -340,7 +350,13 @@ async def _probe_target(
     status = _combine_status(liveness, operational)
     detail = liveness.get("detail") or ""
     if status == "degraded" and operational:
-        detail = f"Liveness passed; operational check: {operational.get('detail', 'not ready')}"
+        if liveness.get("status") == "healthy":
+            detail = f"Liveness passed; operational check: {operational.get('detail', 'not ready')}"
+        else:
+            detail = (
+                f"Liveness check: {liveness.get('detail', 'not healthy')} "
+                f"Operational check: {operational.get('detail', 'not ready')}"
+            )
 
     # If MAST believes it just told this service to resume, a still-failing network
     # probe means "starting up", not "down" - avoid flapping the dashboard to a fault
