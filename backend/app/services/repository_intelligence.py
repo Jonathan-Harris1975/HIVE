@@ -7,6 +7,7 @@ from typing import Any
 from app.core.config import Settings
 from app.services.repository_council import run_and_record_council
 from app.services.repository_learning import update_project_dna
+from app.services.repository_manager import RepositoryManagerError, get_repository
 from app.services.repository_memory import append_history_entry
 from app.services.repository_qa import run_repository_qa
 from app.storage.d1 import D1MetadataStore
@@ -146,6 +147,50 @@ def _summarise(
     }
 
 
+
+
+def _repository_context(repository_id: str, findings: list[dict[str, Any]]) -> dict[str, Any]:
+    record = get_repository(repository_id)
+    if record is None:
+        raise RepositoryManagerError(f"Unknown repository_id: {repository_id}")
+    root = record.workdir
+    relevant_paths: set[str] = set()
+
+    def visit(value: object) -> None:
+        if isinstance(value, str):
+            clean = value.replace("\\", "/").strip().lstrip("/")
+            if clean and (root / clean).is_file():
+                relevant_paths.add(clean)
+        elif isinstance(value, dict):
+            for nested in value.values():
+                visit(nested)
+        elif isinstance(value, list):
+            for nested in value:
+                visit(nested)
+
+    visit(findings)
+    top_level = sorted(path.name for path in root.iterdir())[:40]
+    return {
+        "repository_id": repository_id,
+        "source_filename": record.manifest.source_filename,
+        "fingerprint": record.manifest.fingerprint,
+        "indexed_version": record.manifest.indexed_version,
+        "file_count": record.manifest.file_count,
+        "total_bytes": record.manifest.total_bytes,
+        "languages": record.manifest.languages,
+        "dependency_manifests": [
+            {
+                "path": dependency.manifest_path,
+                "ecosystem": dependency.ecosystem,
+                "declared_count": len(dependency.declared),
+            }
+            for dependency in record.manifest.dependencies
+        ],
+        "top_level_entries": top_level,
+        "implicated_files": sorted(relevant_paths),
+    }
+
+
 def _prompt_details(details: object, *, max_chars: int = 3200) -> str:
     try:
         rendered = json.dumps(details, ensure_ascii=False, sort_keys=True)
@@ -160,6 +205,7 @@ def build_improvement_prompt(
     repository_id: str,
     summary: dict[str, Any],
     findings: list[dict[str, Any]],
+    repository_context: dict[str, Any],
 ) -> str:
     lines = [
         f"Improve the {repository_id} repository using this HIVE Repository Intelligence report as the source of truth.",
@@ -177,6 +223,13 @@ def build_improvement_prompt(
         "7. Return only the changed files plus a concise validation summary, remaining risks and any deployment/environment changes required.",
         "",
         f"Current status: {summary.get('headline', '')}",
+        "",
+        "Repository-specific context:",
+        f"- Snapshot: {repository_context.get('source_filename')} · fingerprint {repository_context.get('fingerprint')}",
+        f"- Languages: {_prompt_details(repository_context.get('languages', {}), max_chars=900)}",
+        f"- Dependency manifests: {_prompt_details(repository_context.get('dependency_manifests', []), max_chars=1400)}",
+        f"- Top-level entries: {_prompt_details(repository_context.get('top_level_entries', []), max_chars=1200)}",
+        f"- Files directly implicated by evidence: {_prompt_details(repository_context.get('implicated_files', []), max_chars=1400)}",
         "",
         "Consolidated findings:",
     ]
@@ -237,13 +290,17 @@ def run_repository_intelligence(settings: Settings, repository_id: str) -> dict[
 
     findings = _build_findings(qa_payload, council_payload)
     summary = _summarise(repository_id, qa_payload, council_payload, findings)
-    improvement_prompt = build_improvement_prompt(repository_id, summary, findings)
+    repository_context = _repository_context(repository_id, findings)
+    improvement_prompt = build_improvement_prompt(
+        repository_id, summary, findings, repository_context
+    )
     dna = update_project_dna(settings, repository_id=repository_id)
 
     consolidated = {
         "repository_id": repository_id,
         "occurred_at": occurred_at,
         "summary": summary,
+        "repository_context": repository_context,
         "findings": findings,
         "improvement_prompt": improvement_prompt,
         "qa": qa_payload,
@@ -261,6 +318,7 @@ def run_repository_intelligence(settings: Settings, repository_id: str) -> dict[
             "repository_id": repository_id,
             "occurred_at": occurred_at,
             "summary": summary,
+            "repository_context": repository_context,
             "findings": findings,
             "improvement_prompt": improvement_prompt,
         },

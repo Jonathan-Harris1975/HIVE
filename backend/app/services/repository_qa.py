@@ -292,6 +292,55 @@ def _check_architecture_validation(root: Path) -> QaCheckResult:
     )
 
 
+def run_repository_qa_for_workdir(
+    repository_id: str,
+    root: Path,
+    *,
+    manifest_dependencies: list[dict[str, Any]],
+    registered_fingerprint: str | None = None,
+    current_fingerprint: str | None = None,
+) -> QaReport:
+    """Run HIVE's non-executing static QA checks against an explicit working tree.
+
+    This is used by the automated improvement service to validate an isolated
+    staging copy without mutating the registered repository. Patch-drift is only
+    evaluated when both fingerprints are supplied; otherwise it is explicitly
+    skipped because staging changes are intentional.
+    """
+    checks = [
+        _check_build_verification(root),
+        _check_lint(root),
+        _check_type_checking(root),
+        _check_dependency_validation(manifest_dependencies),
+        _check_import_validation(root),
+        _check_dead_code(root),
+        _check_security_scan(root),
+        _check_regression_testing(root),
+    ]
+    if registered_fingerprint is not None and current_fingerprint is not None:
+        checks.append(
+            _check_patch_verification(repository_id, current_fingerprint, registered_fingerprint)
+        )
+    else:
+        checks.append(
+            QaCheckResult(
+                name="patch_verification",
+                status="skipped",
+                summary="Patch drift comparison skipped for isolated improvement workspace",
+                details={},
+            )
+        )
+    checks.append(_check_architecture_validation(root))
+    warning_count = sum(1 for check in checks if check.status == "warning")
+    score = max(0.0, 1.0 - (warning_count / len(checks)))
+    return QaReport(
+        repository_id=repository_id,
+        checks=checks,
+        warning_count=warning_count,
+        score=round(score, 3),
+    )
+
+
 def run_repository_qa(repository_id: str) -> QaReport:
     record = get_repository(repository_id)
     if record is None:
@@ -299,23 +348,10 @@ def run_repository_qa(repository_id: str) -> QaReport:
 
     registered_fingerprint = record.manifest.fingerprint
     current_manifest = reindex_repository(repository_id)
-    root = record.workdir
-
-    checks = [
-        _check_build_verification(root),
-        _check_lint(root),
-        _check_type_checking(root),
-        _check_dependency_validation(
-            [asdict(dep) for dep in current_manifest.dependencies]
-        ),
-        _check_import_validation(root),
-        _check_dead_code(root),
-        _check_security_scan(root),
-        _check_regression_testing(root),
-        _check_patch_verification(repository_id, current_manifest.fingerprint, registered_fingerprint),
-        _check_architecture_validation(root),
-    ]
-    warning_count = sum(1 for check in checks if check.status == "warning")
-    score = max(0.0, 1.0 - (warning_count / len(checks)))
-
-    return QaReport(repository_id=repository_id, checks=checks, warning_count=warning_count, score=round(score, 3))
+    return run_repository_qa_for_workdir(
+        repository_id,
+        record.workdir,
+        manifest_dependencies=[asdict(dep) for dep in current_manifest.dependencies],
+        registered_fingerprint=registered_fingerprint,
+        current_fingerprint=current_manifest.fingerprint,
+    )
