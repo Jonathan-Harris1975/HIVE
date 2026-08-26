@@ -97,7 +97,7 @@ class Settings(BaseSettings):
         "https://zeroth-kara-jonathanharris-3296ed37.koyeb.app/livez", validation_alias=AliasChoices("AIMS_HEALTH_URL")
     )
     aims_operational_health_url: str = Field(
-        "https://zeroth-kara-jonathanharris-3296ed37.koyeb.app/ops/health",
+        "https://zeroth-kara-jonathanharris-3296ed37.koyeb.app/readyz",
         validation_alias=AliasChoices("AIMS_OPERATIONAL_HEALTH_URL"),
     )
     rams_health_url: str = Field(
