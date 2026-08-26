@@ -17,7 +17,7 @@ async def test_repo_health_reports_all_governed_repositories() -> None:
         if request.url.path == "/readiness":
             assert request.headers.get("authorization") == "Bearer rams-secret"
             return httpx.Response(200, json={"status": "ready"})
-        if request.url.path == "/ops/health":
+        if request.url.path == "/readyz":
             return httpx.Response(200, json={"readiness": "ready"})
         if request.url.path == "/status":
             return httpx.Response(200, json={"status": "ok", "running": False})
@@ -28,7 +28,7 @@ async def test_repo_health_reports_all_governed_repositories() -> None:
         repo_health_cache_seconds=0,
         hive_ui_health_url="https://ui.example/",
         aims_health_url="https://aims.example/health",
-        aims_operational_health_url="https://aims.example/ops/health",
+        aims_operational_health_url="https://aims.example/readyz",
         rams_health_url="https://rams.example/health",
         rams_readiness_url="https://rams.example/readiness",
         rams_health_bearer_token="rams-secret",
@@ -68,7 +68,7 @@ async def test_repo_health_distinguishes_down_degraded_and_not_configured() -> N
     clear_repo_health_cache()
 
     def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.host == "aims.example" and request.url.path == "/ops/health":
+        if request.url.host == "aims.example" and request.url.path == "/readyz":
             return httpx.Response(503, json={"readiness": "degraded"})
         if request.url.host == "rams.example":
             raise httpx.ConnectError("offline", request=request)
@@ -79,7 +79,7 @@ async def test_repo_health_distinguishes_down_degraded_and_not_configured() -> N
         repo_health_cache_seconds=0,
         hive_ui_health_url="",
         aims_health_url="https://aims.example/health",
-        aims_operational_health_url="https://aims.example/ops/health",
+        aims_operational_health_url="https://aims.example/readyz",
         rams_health_url="https://rams.example/health",
         rams_readiness_url="",
         mast_health_url="",
@@ -204,7 +204,7 @@ async def test_repo_health_uses_json_payload_state_not_just_http_status() -> Non
     clear_repo_health_cache()
 
     def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.host == "aims.example" and request.url.path == "/ops/health":
+        if request.url.host == "aims.example" and request.url.path == "/readyz":
             return httpx.Response(200, json={"ok": False, "readiness": "not_ready"})
         return httpx.Response(200, json={"ok": True, "status": "ok"})
 
@@ -212,7 +212,7 @@ async def test_repo_health_uses_json_payload_state_not_just_http_status() -> Non
         app_env="test",
         repo_health_cache_seconds=0,
         aims_health_url="https://aims.example/health",
-        aims_operational_health_url="https://aims.example/ops/health",
+        aims_operational_health_url="https://aims.example/readyz",
         hive_ui_health_url="",
         rams_health_url="",
         mast_health_url="",
@@ -227,6 +227,43 @@ async def test_repo_health_uses_json_payload_state_not_just_http_status() -> Non
     assert aims["status"] == "degraded"
     assert aims["operational"]["status"] == "degraded"
     assert aims["readiness"]["status"] == "partial"
+
+
+@pytest.mark.asyncio
+async def test_repo_health_retries_one_transient_http_probe_before_degrading() -> None:
+    clear_repo_health_cache()
+    attempts = {"aims_livez": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "aims.example" and request.url.path == "/livez":
+            attempts["aims_livez"] += 1
+            if attempts["aims_livez"] == 1:
+                return httpx.Response(503, json={"ok": False, "status": "starting"})
+            return httpx.Response(200, json={"ok": True, "status": "alive"})
+        if request.url.host == "aims.example" and request.url.path == "/readyz":
+            return httpx.Response(200, json={"ok": True, "status": "ready"})
+        return httpx.Response(200, json={"ok": True, "status": "ok"})
+
+    settings = Settings(
+        app_env="test",
+        repo_health_cache_seconds=0,
+        aims_health_url="https://aims.example/livez",
+        aims_operational_health_url="https://aims.example/readyz",
+        hive_ui_health_url="",
+        rams_health_url="",
+        mast_health_url="",
+        mast_status_url="",
+        irs_health_url="",
+        website_health_url="",
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        report = await build_repo_health_report(settings, client=client, force_refresh=True)
+
+    aims = next(item for item in report["repos"] if item["repo"] == "AIMS")
+    assert attempts["aims_livez"] == 2
+    assert aims["status"] == "healthy"
+    assert aims["liveness"]["status"] == "healthy"
+    assert aims["operational"]["status"] == "healthy"
 
 
 @pytest.mark.asyncio
@@ -291,7 +328,7 @@ async def test_repo_health_degrades_gracefully_when_aims_is_down_and_rams_is_up(
         repo_health_cache_seconds=0,
         hive_ui_health_url="",
         aims_health_url="https://aims.example/health",
-        aims_operational_health_url="https://aims.example/ops/health",
+        aims_operational_health_url="https://aims.example/readyz",
         rams_health_url="https://rams.example/livez",
         rams_readiness_url="https://rams.example/readiness",
         mast_health_url="",
@@ -326,7 +363,7 @@ async def test_repo_health_degrades_gracefully_when_rams_is_down_and_aims_is_up(
         repo_health_cache_seconds=0,
         hive_ui_health_url="",
         aims_health_url="https://aims.example/health",
-        aims_operational_health_url="https://aims.example/ops/health",
+        aims_operational_health_url="https://aims.example/readyz",
         rams_health_url="https://rams.example/livez",
         rams_readiness_url="https://rams.example/readiness",
         mast_health_url="",
@@ -360,7 +397,7 @@ async def test_repo_health_degrades_gracefully_when_both_aims_and_rams_are_down(
         repo_health_cache_seconds=0,
         hive_ui_health_url="",
         aims_health_url="https://aims.example/health",
-        aims_operational_health_url="https://aims.example/ops/health",
+        aims_operational_health_url="https://aims.example/readyz",
         rams_health_url="https://rams.example/livez",
         rams_readiness_url="https://rams.example/readiness",
         mast_health_url="",

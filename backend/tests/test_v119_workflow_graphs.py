@@ -41,7 +41,7 @@ def test_v118_workflow_templates_are_plan_only() -> None:
     assert result["ok"] is True
     assert result["build_stage_hint"] == BUILD_STAGE
     assert result["count"] >= 3
-    assert result["templates"]["repo_debug"]["free_tier_safe"] is True
+    assert "free_tier_safe" not in result["templates"]["repo_debug"]
 
 
 def test_v118_workflow_graph_builds_nodes_and_edges(monkeypatch) -> None:
