@@ -9,6 +9,7 @@ from app.services.repository_council import run_and_record_council
 from app.services.repository_learning import update_project_dna
 from app.services.repository_manager import RepositoryManagerError, get_repository
 from app.services.repository_memory import append_history_entry
+from app.services.repository_profile import build_repository_memory_profile
 from app.services.repository_qa import run_repository_qa
 from app.storage.d1 import D1MetadataStore
 
@@ -170,6 +171,12 @@ def _repository_context(repository_id: str, findings: list[dict[str, Any]]) -> d
 
     visit(findings)
     top_level = sorted(path.name for path in root.iterdir())[:40]
+    profile = build_repository_memory_profile(record)
+
+    # The prompt/report context is built from the selected repository's live
+    # working tree every time Intelligence runs. Do not source these fields from
+    # another repository's persisted Memory record: repository identity must be
+    # impossible to leak across tabs/selections.
     return {
         "repository_id": repository_id,
         "source_filename": record.manifest.source_filename,
@@ -186,6 +193,11 @@ def _repository_context(repository_id: str, findings: list[dict[str, Any]]) -> d
             }
             for dependency in record.manifest.dependencies
         ],
+        "architecture": profile.get("architecture_summary", {}),
+        "coding_standards": profile.get("coding_standards", {}),
+        "build_profile": profile.get("build_profile", {}),
+        "deployment_profile": profile.get("deployment_profile", {}),
+        "environment_schema": profile.get("environment_schema", {}),
         "top_level_entries": top_level,
         "implicated_files": sorted(relevant_paths),
     }
@@ -208,7 +220,13 @@ def build_improvement_prompt(
     repository_context: dict[str, Any],
 ) -> str:
     lines = [
-        f"Improve the {repository_id} repository using this HIVE Repository Intelligence report as the source of truth.",
+        f"Repository-specific improvement plan: {repository_id}",
+        f"Target snapshot: {repository_context.get('source_filename')} · fingerprint {repository_context.get('fingerprint')}",
+        f"Detected language profile: {_prompt_details(repository_context.get('languages', {}), max_chars=900)}",
+        f"Detected dependency manifests: {_prompt_details(repository_context.get('dependency_manifests', []), max_chars=1400)}",
+        f"Detected deployment profile: {_prompt_details(repository_context.get('deployment_profile', {}), max_chars=1200)}",
+        "",
+        "Use the consolidated Repository Intelligence evidence below as the source of truth for this repository only.",
         "",
         "Business objective:",
         "Make the repository production-ready, reliable and maintainable without hiding failures or weakening existing safety, security or release gates.",
@@ -225,9 +243,15 @@ def build_improvement_prompt(
         f"Current status: {summary.get('headline', '')}",
         "",
         "Repository-specific context:",
+        f"- Repository ID: {repository_context.get('repository_id')}",
         f"- Snapshot: {repository_context.get('source_filename')} · fingerprint {repository_context.get('fingerprint')}",
         f"- Languages: {_prompt_details(repository_context.get('languages', {}), max_chars=900)}",
         f"- Dependency manifests: {_prompt_details(repository_context.get('dependency_manifests', []), max_chars=1400)}",
+        f"- Architecture: {_prompt_details(repository_context.get('architecture', {}), max_chars=1800)}",
+        f"- Coding standards: {_prompt_details(repository_context.get('coding_standards', {}), max_chars=1500)}",
+        f"- Build profile: {_prompt_details(repository_context.get('build_profile', {}), max_chars=1600)}",
+        f"- Deployment profile: {_prompt_details(repository_context.get('deployment_profile', {}), max_chars=1600)}",
+        f"- Environment schema: {_prompt_details(repository_context.get('environment_schema', {}), max_chars=1600)}",
         f"- Top-level entries: {_prompt_details(repository_context.get('top_level_entries', []), max_chars=1200)}",
         f"- Files directly implicated by evidence: {_prompt_details(repository_context.get('implicated_files', []), max_chars=1400)}",
         "",
@@ -249,6 +273,14 @@ def build_improvement_prompt(
     return "\n".join(lines)
 
 
+def _require_repository_payload(payload: dict[str, Any], repository_id: str, source: str) -> None:
+    payload_repository_id = payload.get("repository_id")
+    if payload_repository_id != repository_id:
+        raise RepositoryManagerError(
+            f"{source} returned repository_id {payload_repository_id!r} while {repository_id!r} was requested"
+        )
+
+
 def run_repository_intelligence(settings: Settings, repository_id: str) -> dict[str, Any]:
     """Run QA + Council once, merge their evidence and persist the report."""
     occurred_at = _now_iso()
@@ -256,6 +288,7 @@ def run_repository_intelligence(settings: Settings, repository_id: str) -> dict[
 
     qa_report = run_repository_qa(repository_id)
     qa_payload = qa_report.public_payload()
+    _require_repository_payload(qa_payload, repository_id, "Repository QA")
     append_history_entry(
         store,
         repository_id=repository_id,
@@ -287,6 +320,7 @@ def run_repository_intelligence(settings: Settings, repository_id: str) -> dict[
         qa_payload=qa_payload,
     )
     council_payload = council_report.public_payload()
+    _require_repository_payload(council_payload, repository_id, "Repository Council")
 
     findings = _build_findings(qa_payload, council_payload)
     summary = _summarise(repository_id, qa_payload, council_payload, findings)

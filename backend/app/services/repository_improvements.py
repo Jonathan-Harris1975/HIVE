@@ -152,6 +152,13 @@ def _current_intelligence(
     intelligence = _extract_latest_intelligence(settings, record.repository_id)
     raw_context = intelligence.get("repository_context")
     context = cast(dict[str, Any], raw_context) if isinstance(raw_context, dict) else {}
+    report_repository_id = str(intelligence.get("repository_id") or "")
+    context_repository_id = str(context.get("repository_id") or "")
+    if report_repository_id != record.repository_id or context_repository_id != record.repository_id:
+        raise RepositoryImprovementError(
+            "Repository Intelligence belongs to a different repository. "
+            "Run Repository Intelligence again for the selected repository before applying improvements."
+        )
     report_fingerprint = str(context.get("fingerprint") or "")
     if not report_fingerprint or report_fingerprint != record.manifest.fingerprint:
         raise RepositoryImprovementError(
@@ -303,6 +310,7 @@ def _model_request(
             "repository_context": context,
             "summary": summary,
             "findings": findings,
+            "repository_improvement_prompt": intelligence.get("improvement_prompt"),
             "files": files,
             "required_output": {
                 "summary": "Short repository-specific description of the improvements made.",
@@ -692,10 +700,17 @@ async def _run_job(settings: Settings, job_id: str, repository_id: str) -> None:
             raise RepositoryImprovementError(
                 "Generated improvement failed HIVE static build verification; no downloadable artifact was published."
             )
-        if isinstance(security_check, dict) and security_check.get("status") == "warning":
-            raise RepositoryImprovementError(
-                "Generated improvement introduced or retained a secret-pattern warning; no downloadable artifact was published."
-            )
+
+        # Repository QA secret scanning is intentionally heuristic. A warning that
+        # already existed on the source snapshot must not make the improvement
+        # service unusable, and recognised fixtures/examples are filtered by QA.
+        # A *new* security_scanning warning is still blocked above via
+        # new_warning_checks, so generated code cannot introduce a new candidate.
+        security_validation = {
+            "status": str(security_check.get("status") or "unknown") if isinstance(security_check, dict) else "unknown",
+            "details": security_check.get("details", {}) if isinstance(security_check, dict) else {},
+            "blocking_policy": "new_warning_only",
+        }
 
         summary = str(model_payload.get("summary") or f"Automated improvements for {repository_id}")
         raw_risks = model_payload.get("remaining_risks")
@@ -720,6 +735,7 @@ async def _run_job(settings: Settings, job_id: str, repository_id: str) -> None:
             "deleted_files": deleted,
             "remaining_risks": remaining_risks,
             "static_validation": qa_after,
+            "security_validation": security_validation,
             "generated_at": _now_iso(),
         }
 

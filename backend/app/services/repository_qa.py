@@ -55,8 +55,59 @@ from app.services.repository_manager import RepositoryManagerError, get_reposito
 _SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("aws_access_key_id", re.compile(r"AKIA[0-9A-Z]{16}")),
     ("private_key_header", re.compile(r"-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----")),
-    ("generic_api_key_assignment", re.compile(r"(?i)(api[_-]?key|secret)\s*=\s*['\"][A-Za-z0-9_\-]{16,}['\"]")),
+    (
+        "generic_api_key_assignment",
+        re.compile(r"(?i)(?:api[_-]?key|secret)\s*=\s*['\"]([A-Za-z0-9_\-]{16,})['\"]"),
+    ),
 )
+
+_PLACEHOLDER_SECRET_MARKERS = (
+    "example",
+    "dummy",
+    "fake",
+    "placeholder",
+    "changeme",
+    "replace_me",
+    "replace-me",
+    "your_key",
+    "your-key",
+    "your_secret",
+    "your-secret",
+    "sample",
+)
+
+
+def _secret_match_value(label: str, match: re.Match[str]) -> str:
+    if label == "generic_api_key_assignment" and match.lastindex:
+        return str(match.group(1))
+    return str(match.group(0))
+
+
+def _looks_like_placeholder_secret(value: str) -> bool:
+    lowered = value.lower()
+    if any(marker in lowered for marker in _PLACEHOLDER_SECRET_MARKERS):
+        return True
+    # Common deterministic fixtures used by secret scanners/tests. These have
+    # token-like lengths but are deliberately non-random demonstration values.
+    if "abcdefghijklmnop" in lowered or "1234567890abcdef" in lowered:
+        return True
+    if value == "AKIAABCDEFGHIJKLMNOP":
+        return True
+    return False
+
+
+def _non_actionable_secret_match(path: Path, line: str, label: str, match: re.Match[str]) -> tuple[bool, str]:
+    value = _secret_match_value(label, match)
+    if _looks_like_placeholder_secret(value):
+        return True, "recognised placeholder/test fixture"
+
+    lowered_line = line.lower()
+    scanner_names = {"secret_scan.py", "secret_scanner.py", "secrets_scan.py"}
+    if path.name.lower() in scanner_names and any(
+        marker in lowered_line for marker in ("re.compile", "known_fixture", "token_patterns", "secret_patterns")
+    ):
+        return True, "secret-scanner rule/fixture definition"
+    return False, ""
 
 _TEST_FILE_PATTERN = re.compile(r"(^|/)(tests?/|test_[^/]+\.py$|[^/]+\.test\.[jt]sx?$|[^/]+_test\.py$)")
 
@@ -235,20 +286,37 @@ def _check_dead_code(root: Path) -> QaCheckResult:
 
 
 def _check_security_scan(root: Path) -> QaCheckResult:
-    findings: list[dict[str, str]] = []
+    findings: list[dict[str, Any]] = []
+    ignored_examples: list[dict[str, Any]] = []
     for path in _iter_source_files(root, (".py", ".js", ".ts", ".env", ".json", ".yaml", ".yml", ".txt")):
         try:
-            text = path.read_text(encoding="utf-8", errors="ignore")
+            lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
         except OSError:
             continue
-        for label, pattern in _SECRET_PATTERNS:
-            if pattern.search(text):
-                findings.append({"path": str(path.relative_to(root)), "pattern": label})
+        relative = str(path.relative_to(root))
+        for line_number, line in enumerate(lines, start=1):
+            for label, pattern in _SECRET_PATTERNS:
+                for match in pattern.finditer(line):
+                    ignored, reason = _non_actionable_secret_match(path, line, label, match)
+                    item: dict[str, Any] = {
+                        "path": relative,
+                        "line": line_number,
+                        "pattern": label,
+                        "confidence": "high" if not ignored else "fixture",
+                    }
+                    if ignored:
+                        item["reason"] = reason
+                        ignored_examples.append(item)
+                    else:
+                        findings.append(item)
     return QaCheckResult(
         name="security_scanning",
         status="warning" if findings else "ok",
-        summary=f"{len(findings)} possible secret pattern match(es) (heuristic, review before trusting)",
-        details={"findings": findings},
+        summary=(
+            f"{len(findings)} actionable secret-pattern candidate(s); "
+            f"{len(ignored_examples)} recognised placeholder/test fixture match(es) ignored"
+        ),
+        details={"findings": findings, "ignored_examples": ignored_examples},
     )
 
 
