@@ -323,11 +323,12 @@ def build_readiness_report(settings: Settings) -> ReadinessReport:
 
     refresh_sources_valid = False
     refresh_source_count = 0
+    required_refresh_ids = {"HIVE", "HIVE-UI", "AIMS", "AIMS-UI", "RAMS", "MAST", "IRS", "Website"}
     try:
         refresh_sources = json.loads(settings.repository_github_sources_json or "{}")
         refresh_sources_valid = bool(
             isinstance(refresh_sources, dict)
-            and refresh_sources
+            and set(refresh_sources) == required_refresh_ids
             and all(
                 isinstance(repository_id, str)
                 and repository_id.strip()
@@ -353,13 +354,13 @@ def build_readiness_report(settings: Settings) -> ReadinessReport:
             "repository_github_refresh",
             refresh_ready,
             (
-                f"Monthly governed repository refresh is configured for {refresh_source_count} GitHub repositories."
+                f"Monthly governed repository refresh is configured for all {refresh_source_count} governed GitHub repositories."
                 if settings.repository_github_refresh_enabled
                 else "Monthly governed repository refresh is disabled."
             ),
             (
-                "REPOSITORY_GITHUB_REFRESH_ENABLED=true requires a valid non-empty "
-                "REPOSITORY_GITHUB_SOURCES_JSON, GITHUB_TOKEN and REPOSITORY_GITHUB_BRANCH."
+                "REPOSITORY_GITHUB_REFRESH_ENABLED=true requires the complete eight-repository "
+                "REPOSITORY_GITHUB_SOURCES_JSON catalogue, GITHUB_TOKEN and REPOSITORY_GITHUB_BRANCH."
             ),
             required=production and settings.repository_github_refresh_enabled,
         )

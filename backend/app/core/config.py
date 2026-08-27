@@ -94,8 +94,12 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("HIVE_UI_HEALTH_URL"),
     )
     aims_ui_health_url: str = Field(
-        "https://chat.jonathan-harris.online/health",
+        "https://chat.jonathan-harris.online/",
         validation_alias=AliasChoices("AIMS_UI_HEALTH_URL"),
+    )
+    aims_ui_readiness_url: str = Field(
+        "https://chat.jonathan-harris.online/health",
+        validation_alias=AliasChoices("AIMS_UI_READINESS_URL"),
     )
     aims_health_url: str = Field(
         "https://zeroth-kara-jonathanharris-3296ed37.koyeb.app/livez", validation_alias=AliasChoices("AIMS_HEALTH_URL")
