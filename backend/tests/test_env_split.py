@@ -67,6 +67,10 @@ def test_settings_loads_repo_shared_env_file() -> None:
     assert settings.r2_lane("meta_system") is None
     assert "hive.jonathan-harris.online" in settings.effective_allowed_hosts
     assert settings.aims_operational_health_url == "https://zeroth-kara-jonathanharris-3296ed37.koyeb.app/readyz"
+    assert settings.aims_ui_health_url == "https://chat.jonathan-harris.online/"
+    assert settings.aims_ui_readiness_url == "https://chat.jonathan-harris.online/health"
+    assert settings.mast_monitor_mode == "r2"
+    assert settings.repository_github_refresh_enabled is True
 
 
 def test_start_script_does_not_trust_all_forwarded_headers_by_default() -> None:

@@ -42,11 +42,22 @@ def test_refresh_configuration_fails_closed_without_token() -> None:
     assert config["github_token_configured"] is False
 
 
-@pytest.mark.asyncio
-async def test_refresh_job_replaces_each_snapshot_and_waits_for_intelligence(monkeypatch) -> None:
+def test_refresh_configuration_requires_complete_governed_catalogue() -> None:
     settings = _settings(
         repository_github_sources_json='{"HIVE":"Jonathan-Harris1975/HIVE","HIVE-UI":"Jonathan-Harris1975/HIVE-UI"}'
     )
+    config = repository_refresh.refresh_configuration(settings)
+    assert config["configured"] is False
+    assert config["complete_catalogue"] is False
+    assert config["expected_repository_count"] == 8
+    assert set(config["missing_repository_ids"]) == {"AIMS", "AIMS-UI", "RAMS", "MAST", "IRS", "Website"}
+    with pytest.raises(RuntimeError, match="catalogue is incomplete"):
+        repository_refresh.start_refresh_job(settings, lambda *_args: None)  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_refresh_job_replaces_each_snapshot_and_waits_for_intelligence(monkeypatch) -> None:
+    settings = _settings()
     repository_refresh._JOBS.clear()
     repository_refresh._TASKS.clear()
 
@@ -82,8 +93,13 @@ async def test_refresh_job_replaces_each_snapshot_and_waits_for_intelligence(mon
     assert current is not None
     assert current["status"] == "completed"
     assert current["failed_count"] == 0
-    assert [item[0] for item in ingested] == ["HIVE", "HIVE-UI"]
-    assert [item[1] for item in ingested] == ["HIVE-main.zip", "HIVE-UI-main.zip"]
+    assert [item[0] for item in ingested] == [
+        "HIVE", "HIVE-UI", "AIMS", "AIMS-UI", "RAMS", "MAST", "IRS", "Website"
+    ]
+    assert [item[1] for item in ingested] == [
+        "HIVE-main.zip", "HIVE-UI-main.zip", "AIMS-main.zip", "AIMS-UI-main.zip",
+        "RAMS-main.zip", "MAST-main.zip", "IRS-main.zip", "Website-main.zip",
+    ]
     assert all(result["pipeline_status"] == "ready" for result in current["results"])
     assert all(result["finding_count"] == 3 for result in current["results"])
 

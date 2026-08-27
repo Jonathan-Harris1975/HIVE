@@ -428,3 +428,49 @@ async def test_repo_health_degrades_gracefully_when_both_aims_and_rams_are_down(
     # confirm the payload is JSON-serialisable and carries no exception state.
     assert isinstance(report["summary"], dict)
     assert all(isinstance(item["status"], str) for item in report["repos"])
+
+@pytest.mark.asyncio
+async def test_aims_ui_reports_liveness_and_readiness_separately() -> None:
+    clear_repo_health_cache()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "chat.example" and request.url.path == "/livez":
+            return httpx.Response(200, json={"ok": True, "healthy": True, "status": "healthy"})
+        if request.url.host == "chat.example" and request.url.path == "/readyz":
+            return httpx.Response(
+                503,
+                json={
+                    "ok": False,
+                    "ready": False,
+                    "status": "not_ready",
+                    "configuration": {"assets": True, "d1": True, "aimsApiKey": False},
+                    "missing": ["aimsApiKey"],
+                },
+            )
+        return httpx.Response(200, json={"ok": True, "status": "ok"})
+
+    settings = Settings(
+        app_env="test",
+        repo_health_cache_seconds=0,
+        aims_ui_health_url="https://chat.example/livez",
+        aims_ui_readiness_url="https://chat.example/readyz",
+        hive_ui_health_url="",
+        aims_health_url="",
+        rams_health_url="",
+        mast_health_url="",
+        mast_status_url="",
+        irs_health_url="",
+        website_health_url="",
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        report = await build_repo_health_report(settings, client=client, force_refresh=True)
+
+    aims_ui = next(item for item in report["repos"] if item["repo"] == "AIMS-UI")
+    assert aims_ui["liveness"]["status"] == "healthy"
+    assert aims_ui["readiness"]["status"] == "partial"
+    assert aims_ui["operational"]["payload"]["configuration"] == {
+        "assets": True,
+        "d1": True,
+        "aimsApiKey": False,
+    }
+    assert aims_ui["operational"]["payload"]["missing"] == ["aimsApiKey"]
