@@ -19,7 +19,7 @@ The endpoint is read-only, uses only operator-configured URLs, never accepts an 
 |---|---|---|
 | HIVE | Local process check | Local production-readiness report |
 | HIVE-UI | Public Cloudflare Worker `/health` | Not applicable |
-| AIMS-UI | Public console root `https://chat.jonathan-harris.online/` | Fail-closed gateway readiness `https://chat.jonathan-harris.online/health` |
+| AIMS-UI | Gateway liveness `https://chat.jonathan-harris.online/livez` | Operator-console readiness `https://chat.jonathan-harris.online/readyz` |
 | AIMS | `/health` | `/ops/health` |
 | RAMS | `/health` | Authenticated `/readiness` |
 | MAST | Durable R2 scheduler heartbeat | Heartbeat freshness and bounded recent-result summary |
@@ -43,8 +43,8 @@ REPO_HEALTH_ENABLED=true
 REPO_HEALTH_TIMEOUT_SECONDS=6
 REPO_HEALTH_CACHE_SECONDS=30
 HIVE_UI_HEALTH_URL=https://hive.jonathan-harris.online/health
-AIMS_UI_HEALTH_URL=https://chat.jonathan-harris.online/
-AIMS_UI_READINESS_URL=https://chat.jonathan-harris.online/health
+AIMS_UI_HEALTH_URL=https://chat.jonathan-harris.online/livez
+AIMS_UI_READINESS_URL=https://chat.jonathan-harris.online/readyz
 AIMS_HEALTH_URL=https://zeroth-kara-jonathanharris-3296ed37.koyeb.app/livez
 AIMS_OPERATIONAL_HEALTH_URL=https://zeroth-kara-jonathanharris-3296ed37.koyeb.app/readyz
 RAMS_HEALTH_URL=https://static-helaina-jonathanharris-6df5d241.koyeb.app/livez
