@@ -163,11 +163,38 @@ def _repository_memory_readiness(
         profile_ready = all(field_name in populated for field_name in SCALAR_FIELDS)
         qa_history = values.get("qa_history")
         council_history = values.get("repository_council_history")
+        intelligence_history = values.get("repository_intelligence_history")
+        record = get_repository(repository_id)
+        current_fingerprint = record.manifest.fingerprint if record is not None else ""
+
+        latest_qa = next(
+            (entry for entry in reversed(qa_history) if isinstance(entry, dict)),
+            None,
+        ) if isinstance(qa_history, list) else None
+        latest_council = next(
+            (entry for entry in reversed(council_history) if isinstance(entry, dict)),
+            None,
+        ) if isinstance(council_history, list) else None
+        latest_intelligence = next(
+            (entry for entry in reversed(intelligence_history) if isinstance(entry, dict)),
+            None,
+        ) if isinstance(intelligence_history, list) else None
+        intelligence_context = (
+            latest_intelligence.get("repository_context")
+            if isinstance(latest_intelligence, dict)
+            and isinstance(latest_intelligence.get("repository_context"), dict)
+            else {}
+        )
         intelligence_ready = bool(
-            isinstance(qa_history, list)
-            and qa_history
-            and isinstance(council_history, list)
-            and council_history
+            isinstance(latest_qa, dict)
+            and latest_qa.get("repository_id") == repository_id
+            and isinstance(latest_council, dict)
+            and latest_council.get("repository_id") == repository_id
+            and isinstance(latest_intelligence, dict)
+            and latest_intelligence.get("repository_id") == repository_id
+            and intelligence_context.get("repository_id") == repository_id
+            and current_fingerprint
+            and intelligence_context.get("fingerprint") == current_fingerprint
         )
         readiness[repository_id] = {
             "memory_status": "ready" if profile_ready else ("partial" if populated else "empty"),
