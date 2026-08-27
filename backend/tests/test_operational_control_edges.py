@@ -443,8 +443,14 @@ def test_repository_memory_readiness_requires_profile_and_persisted_intelligence
             assert lane == repositories.LANE
             values = {
                 **{field: {"generated": True} for field in repositories.SCALAR_FIELDS},
-                "qa_history": [{"score": 1.0}],
-                "repository_council_history": [{"overall_score": 1.0}],
+                "qa_history": [{"repository_id": "HIVE", "score": 1.0}],
+                "repository_council_history": [{"repository_id": "HIVE", "overall_score": 1.0}],
+                "repository_intelligence_history": [
+                    {
+                        "repository_id": "HIVE",
+                        "repository_context": {"repository_id": "HIVE", "fingerprint": "hive-fingerprint"},
+                    }
+                ],
             }
             return {
                 "ok": True,
@@ -459,6 +465,8 @@ def test_repository_memory_readiness_requires_profile_and_persisted_intelligence
             }
 
     monkeypatch.setattr(repositories, "D1MetadataStore", FakeStore)
+    hive_record = SimpleNamespace(manifest=SimpleNamespace(fingerprint="hive-fingerprint"))
+    monkeypatch.setattr(repositories, "get_repository", lambda repository_id: hive_record if repository_id == "HIVE" else None)
     result = repositories._repository_memory_readiness(SimpleNamespace(), ["HIVE", "AIMS"])
 
     assert result["HIVE"]["memory_status"] == "ready"

@@ -67,7 +67,9 @@ def test_coding_request_contains_repository_specific_evidence(tmp_path: Path) ->
     (root / "pyproject.toml").write_text("[project]\nname='hive'\n", encoding="utf-8")
     record = _record(root)
     intelligence = {
+        "repository_id": "HIVE",
         "repository_context": {
+            "repository_id": "HIVE",
             "fingerprint": "fingerprint-1",
             "languages": {"Python": 2},
             "dependency_manifests": [{"path": "pyproject.toml", "ecosystem": "python"}],
@@ -98,7 +100,8 @@ async def test_improvement_job_edits_isolated_copy_and_packages_downloads(monkey
     record = _record(root)
     settings = _settings(tmp_path)
     intelligence = {
-        "repository_context": {"fingerprint": "fingerprint-1"},
+        "repository_id": "HIVE",
+        "repository_context": {"repository_id": "HIVE", "fingerprint": "fingerprint-1"},
         "summary": {"headline": "HIVE needs a small repair", "finding_count": 1, "qa_score": 0.9},
         "findings": [{"title": "Improve app", "details": {"path": "app.py"}}],
     }
@@ -163,6 +166,26 @@ async def test_improvement_job_edits_isolated_copy_and_packages_downloads(monkey
         assert "HIVE-IMPROVEMENT-REPORT.json" in archive.namelist()
     with zipfile.ZipFile(full_zip) as archive:
         assert archive.read("app.py").decode() == "VALUE = 2\n"
+
+
+def test_current_intelligence_rejects_cross_repository_report(monkeypatch, tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    record = _record(root)
+    settings = _settings(tmp_path)
+    monkeypatch.setattr(
+        repository_improvements,
+        "_extract_latest_intelligence",
+        lambda *_args: {
+            "repository_id": "AIMS",
+            "repository_context": {"repository_id": "AIMS", "fingerprint": "fingerprint-1"},
+            "summary": {"finding_count": 1},
+            "findings": [{"title": "Wrong repository"}],
+        },
+    )
+
+    with pytest.raises(repository_improvements.RepositoryImprovementError, match="different repository"):
+        repository_improvements._current_intelligence(settings, record)
 
 
 def test_improvement_routes_are_registered() -> None:

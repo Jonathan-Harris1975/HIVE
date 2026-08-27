@@ -109,3 +109,66 @@ def test_combined_repository_intelligence_runs_qa_once_and_preserves_evidence(mo
     assert "qa_history" in history_fields
     assert "known_issues" in history_fields
     assert "repository_intelligence_history" in history_fields
+
+
+def test_improvement_prompt_contains_repository_specific_operational_profile() -> None:
+    prompt = repository_intelligence.build_improvement_prompt(
+        "AIMS-UI",
+        {"headline": "AIMS-UI: 1 consolidated finding(s); QA 90%, Council 80%."},
+        [{
+            "severity": "high",
+            "source": "repository_qa",
+            "title": "Build Verification needs attention",
+            "category": "build_verification",
+            "confidence": "measured",
+            "summary": "Build script detected but needs verification",
+            "details": {"path": "package.json"},
+        }],
+        {
+            "repository_id": "AIMS-UI",
+            "source_filename": "AIMS-UI-main.zip",
+            "fingerprint": "aims-ui-fingerprint",
+            "languages": {"TypeScript": 42},
+            "dependency_manifests": [{"path": "package.json", "ecosystem": "node", "declared_count": 12}],
+            "architecture": {"architecture_signals": ["frontend", "React"]},
+            "coding_standards": {"configuration_files": ["tsconfig.json"]},
+            "build_profile": {"package_scripts": {"build": "vite build"}},
+            "deployment_profile": {"targets": ["Cloudflare Workers"]},
+            "environment_schema": {"variables": ["AIMS_API_URL"]},
+            "top_level_entries": ["src", "package.json"],
+            "implicated_files": ["package.json"],
+        },
+    )
+
+    assert prompt.startswith("Repository-specific improvement plan: AIMS-UI")
+    assert "Use the consolidated Repository Intelligence evidence below" in prompt
+    assert "Repository ID: AIMS-UI" in prompt
+    assert "AIMS-UI-main.zip" in prompt
+    assert "TypeScript" in prompt
+    assert "React" in prompt
+    assert "vite build" in prompt
+    assert "Cloudflare Workers" in prompt
+    assert "AIMS_API_URL" in prompt
+    assert "HIVE-main.zip" not in prompt
+
+
+def test_repository_intelligence_rejects_cross_repository_qa_payload(monkeypatch) -> None:
+    monkeypatch.setattr(
+        repository_intelligence,
+        "run_repository_qa",
+        lambda _repository_id: SimpleNamespace(
+            public_payload=lambda: {
+                "repository_id": "HIVE",
+                "score": 1.0,
+                "warning_count": 0,
+                "checks": [],
+            }
+        ),
+    )
+    monkeypatch.setattr(repository_intelligence, "D1MetadataStore", lambda _settings: object())
+
+    import pytest
+    from app.services.repository_manager import RepositoryManagerError
+
+    with pytest.raises(RepositoryManagerError, match="Repository QA returned repository_id"):
+        repository_intelligence.run_repository_intelligence(_settings(), "AIMS-UI")

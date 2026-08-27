@@ -214,3 +214,94 @@ async def test_upload_pipeline_populates_memory_and_intelligence_end_to_end(
     assert memory["memory"]["project_dna"]["latest_council_score"] is not None
 
     repository_manager.cleanup_repository("HIVE")
+
+
+def test_repository_readiness_rejects_cross_repository_or_stale_intelligence(monkeypatch: pytest.MonkeyPatch) -> None:
+    rows = []
+
+    def row(field: str, value: object) -> dict[str, object]:
+        return {
+            "source_id": "AIMS-UI",
+            "source_type": field,
+            "metadata": {"value": value},
+        }
+
+    for field in repositories.SCALAR_FIELDS:
+        rows.append(row(field, {"configured": True}))
+    rows.extend(
+        [
+            row("qa_history", [{"repository_id": "AIMS-UI", "score": 1.0}]),
+            row("repository_council_history", [{"repository_id": "AIMS-UI", "overall_score": 1.0}]),
+            row(
+                "repository_intelligence_history",
+                [
+                    {
+                        "repository_id": "HIVE",
+                        "repository_context": {"repository_id": "HIVE", "fingerprint": "hive-fingerprint"},
+                    }
+                ],
+            ),
+        ]
+    )
+
+    class FakeD1:
+        enabled = True
+
+        def __init__(self, _settings) -> None:
+            pass
+
+        def list_metadata(self, *, lane=None, limit=500):
+            return {"ok": True, "items": rows}
+
+    record = SimpleNamespace(manifest=SimpleNamespace(fingerprint="aims-ui-fingerprint"))
+    monkeypatch.setattr(repositories, "D1MetadataStore", FakeD1)
+    monkeypatch.setattr(repositories, "get_repository", lambda repository_id: record if repository_id == "AIMS-UI" else None)
+
+    readiness = repositories._repository_memory_readiness(SimpleNamespace(), ["AIMS-UI"])["AIMS-UI"]
+
+    assert readiness["profile_ready"] is True
+    assert readiness["intelligence_ready"] is False
+    assert readiness["memory_ready"] is False
+
+
+def test_repository_readiness_requires_current_snapshot_fingerprint(monkeypatch: pytest.MonkeyPatch) -> None:
+    rows = []
+
+    def row(field: str, value: object) -> dict[str, object]:
+        return {"source_id": "HIVE-UI", "source_type": field, "metadata": {"value": value}}
+
+    for field in repositories.SCALAR_FIELDS:
+        rows.append(row(field, {"configured": True}))
+    rows.extend(
+        [
+            row("qa_history", [{"repository_id": "HIVE-UI", "score": 1.0}]),
+            row("repository_council_history", [{"repository_id": "HIVE-UI", "overall_score": 1.0}]),
+            row(
+                "repository_intelligence_history",
+                [
+                    {
+                        "repository_id": "HIVE-UI",
+                        "repository_context": {"repository_id": "HIVE-UI", "fingerprint": "old-fingerprint"},
+                    }
+                ],
+            ),
+        ]
+    )
+
+    class FakeD1:
+        enabled = True
+
+        def __init__(self, _settings) -> None:
+            pass
+
+        def list_metadata(self, *, lane=None, limit=500):
+            return {"ok": True, "items": rows}
+
+    record = SimpleNamespace(manifest=SimpleNamespace(fingerprint="new-fingerprint"))
+    monkeypatch.setattr(repositories, "D1MetadataStore", FakeD1)
+    monkeypatch.setattr(repositories, "get_repository", lambda repository_id: record if repository_id == "HIVE-UI" else None)
+
+    readiness = repositories._repository_memory_readiness(SimpleNamespace(), ["HIVE-UI"])["HIVE-UI"]
+
+    assert readiness["intelligence_ready"] is False
+    assert readiness["memory_ready"] is False

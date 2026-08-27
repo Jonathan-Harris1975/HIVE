@@ -70,8 +70,9 @@ def test_build_verification_flags_python_syntax_errors(settings):
 
 
 def test_security_scanning_flags_committed_secrets(settings):
+    synthetic_key = "AKIA" + "7Q9W2E4R6T8Y0U1I"
     manifest = rm.register_repository(
-        _build_zip({"config.py": "AWS_KEY = 'AKIAABCDEFGHIJKLMNOP'\n"}),
+        _build_zip({"config.py": f"AWS_KEY = '{synthetic_key}'\n"}),
         settings=settings,
         source_filename="demo.zip",
     )
@@ -82,6 +83,27 @@ def test_security_scanning_flags_committed_secrets(settings):
     assert security_check.status == "warning"
     assert security_check.details["findings"]
 
+
+
+def test_security_scanning_ignores_recognised_placeholder_fixtures(settings):
+    manifest = rm.register_repository(
+        _build_zip(
+            {
+                "scripts/secret_scan.py": 'known_fixture = "AKIAABCDEFGHIJKLMNOP"\n',
+                "tests/test_config.py": 'api_key = "abcdefghijklmnop1234"\n',
+            }
+        ),
+        settings=settings,
+        source_filename="demo.zip",
+    )
+
+    report = run_repository_qa(manifest.repository_id)
+
+    security_check = next(c for c in report.checks if c.name == "security_scanning")
+    assert security_check.status == "ok"
+    assert security_check.details["findings"] == []
+    assert len(security_check.details["ignored_examples"]) == 2
+    assert "placeholder/test fixture" in security_check.summary
 
 def test_regression_testing_detects_test_files(settings):
     manifest = rm.register_repository(
