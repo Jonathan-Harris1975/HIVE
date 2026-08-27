@@ -179,12 +179,11 @@ def _repository_memory_readiness(
             (entry for entry in reversed(intelligence_history) if isinstance(entry, dict)),
             None,
         ) if isinstance(intelligence_history, list) else None
-        intelligence_context = (
-            latest_intelligence.get("repository_context")
-            if isinstance(latest_intelligence, dict)
-            and isinstance(latest_intelligence.get("repository_context"), dict)
-            else {}
-        )
+        intelligence_context: dict[str, object] = {}
+        if isinstance(latest_intelligence, dict):
+            raw_context = latest_intelligence.get("repository_context")
+            if isinstance(raw_context, dict):
+                intelligence_context = {str(key): value for key, value in raw_context.items()}
         intelligence_ready = bool(
             isinstance(latest_qa, dict)
             and latest_qa.get("repository_id") == repository_id
