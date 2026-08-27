@@ -57,6 +57,7 @@ def _targets(settings: Settings) -> list[ProbeTarget]:
             category="frontend",
             description="Cloudflare Worker AIMS communications interface",
             health_url=_clean_url(settings.aims_ui_health_url),
+            operational_url=_clean_url(settings.aims_ui_readiness_url),
         ),
         ProbeTarget(
             repo="AIMS",
@@ -136,7 +137,16 @@ def _safe_payload(response: httpx.Response) -> dict[str, Any] | None:
         "lastTickAt",
         "last_tick_at",
     }
-    return {key: value for key, value in raw.items() if key in allowed}
+    payload = {key: value for key, value in raw.items() if key in allowed}
+    raw_configuration = raw.get("configuration")
+    if isinstance(raw_configuration, dict):
+        payload["configuration"] = {
+            str(key): value for key, value in raw_configuration.items() if isinstance(value, bool)
+        }
+    raw_missing = raw.get("missing")
+    if isinstance(raw_missing, list):
+        payload["missing"] = [str(value)[:80] for value in raw_missing if isinstance(value, str)][:32]
+    return payload
 
 
 def _normalise_probe_value(value: object) -> str:

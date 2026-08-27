@@ -20,6 +20,16 @@ _JOB_LOCK = threading.RLock()
 _JOBS: dict[str, dict[str, Any]] = {}
 _TASKS: dict[str, asyncio.Task[None]] = {}
 _MAX_JOBS = 20
+_REQUIRED_GOVERNED_REPOSITORIES = frozenset({
+    "HIVE",
+    "HIVE-UI",
+    "AIMS",
+    "AIMS-UI",
+    "RAMS",
+    "MAST",
+    "IRS",
+    "Website",
+})
 
 IngestCallback = Callable[[bytes, str, str], Awaitable[dict[str, Any]]]
 
@@ -59,14 +69,29 @@ def refresh_configuration(settings: Settings) -> dict[str, object]:
         source_error = str(exc)
     token_configured = bool(settings.github_token.strip())
     enabled = bool(settings.repository_github_refresh_enabled)
-    configured = bool(enabled and sources and token_configured and settings.repository_github_branch.strip())
+    repository_ids = set(sources)
+    missing_repository_ids = sorted(_REQUIRED_GOVERNED_REPOSITORIES - repository_ids)
+    unexpected_repository_ids = sorted(repository_ids - _REQUIRED_GOVERNED_REPOSITORIES)
+    complete_catalogue = not missing_repository_ids and not unexpected_repository_ids
+    configured = bool(
+        enabled
+        and sources
+        and complete_catalogue
+        and token_configured
+        and settings.repository_github_branch.strip()
+    )
     return {
         "enabled": enabled,
         "configured": configured,
         "repository_count": len(sources),
+        "expected_repository_count": len(_REQUIRED_GOVERNED_REPOSITORIES),
         "repository_ids": sorted(sources),
+        "complete_catalogue": complete_catalogue,
+        "missing_repository_ids": missing_repository_ids,
+        "unexpected_repository_ids": unexpected_repository_ids,
         "branch": settings.repository_github_branch.strip() or "main",
         "github_token_configured": token_configured,
+        "trigger": "MAST post-audit job aims-audit-pipeline +15 minutes",
         "source_error": source_error,
     }
 
@@ -280,11 +305,21 @@ async def _run_refresh_job(
 
 
 def start_refresh_job(settings: Settings, ingest: IngestCallback) -> dict[str, Any]:
+    configuration = refresh_configuration(settings)
     if not settings.repository_github_refresh_enabled:
         raise RuntimeError("Monthly repository refresh is disabled")
+    if not configuration.get("configured"):
+        missing = configuration.get("missing_repository_ids") or []
+        unexpected = configuration.get("unexpected_repository_ids") or []
+        if missing or unexpected:
+            raise RuntimeError(
+                "Monthly repository refresh catalogue is incomplete: "
+                f"missing={missing}, unexpected={unexpected}"
+            )
+        if not settings.github_token.strip():
+            raise RuntimeError("GITHUB_TOKEN is required for governed repository refresh")
+        raise RuntimeError("Monthly repository refresh configuration is incomplete")
     sources = github_sources(settings)
-    if not settings.github_token.strip():
-        raise RuntimeError("GITHUB_TOKEN is required for governed repository refresh")
     if active_refresh_job() is not None:
         raise RuntimeError("A governed repository refresh is already running")
 
