@@ -322,7 +322,7 @@ Do not configure `MAST_HEALTH_URL` or `MAST_STATUS_URL` for the Worker deploymen
 ```env
 READINESS_DEPENDENCY_PROBES_ENABLED=true
 READINESS_DEPENDENCY_PROBE_CACHE_SECONDS=30
-R2_REQUIRED_READ_LANES=uploads,audits,art,blog,blog_images,blog_rss,brand_assets,meta,meta_system,podcast,podcast_rss,rss,transcripts,transcript_html,hive_skills
+R2_REQUIRED_READ_LANES=uploads,audits,blog,blog_rss,meta_system,podcast,podcast_rss,rss,transcripts,hive_skills
 ```
 
 If `R2_REQUIRED_READ_LANES` is omitted while `PRODUCTION_REQUIRE_R2=true`, every configured bucket lane is required. The authenticated `/v1/runtime/readiness` response shows redacted per-lane evidence; credentials and provider signing material are never returned.

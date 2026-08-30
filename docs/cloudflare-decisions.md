@@ -100,9 +100,7 @@ The following non-secret R2 lane envs are recognised by HIVE. Bucket names are a
 
 - `R2_BUCKET_AUDITS` / `R2_PUBLIC_BASE_URL_AUDITS`
 - `R2_BUCKET_BLOG` / `R2_PUBLIC_BASE_URL_BLOG`
-- `R2_BUCKET_BLOG_IMAGES` / `R2_PUBLIC_BASE_URL_BLOG_IMAGES`
 - `R2_BUCKET_BLOG_RSS` / `R2_PUBLIC_BASE_URL_BLOG_RSS`
-- `R2_BUCKET_BRAND_ASSETS` / `R2_PUBLIC_BASE_URL_BRAND_ASSETS`
 - `R2_BUCKET_META` / `R2_PUBLIC_BASE_URL_META`
 - `R2_BUCKET_META_SYSTEM` / `R2_PUBLIC_BASE_URL_META_SYSTEM`
 - `R2_BUCKET_PODCAST` / `R2_PUBLIC_BASE_URL_PODCAST`
@@ -111,7 +109,7 @@ The following non-secret R2 lane envs are recognised by HIVE. Bucket names are a
 - `R2_BUCKET_TRANSCRIPTS` / `R2_PUBLIC_BASE_URL_TRANSCRIPT`
 - `R2_BUCKET_HIVE_SKILLS` / `R2_PUBLIC_BASE_URL_HIVE_SKILLS`
 
-Use `GET /v1/files/r2-lanes` to inspect the configured registry. Public-URL helpers return `null` for the private `uploads`, `repositories` and hidden `meta_system` lanes even if a stale public-base environment value is present. Public URL construction remains available only for explicitly public/temporary lanes such as published media or audits while their migration is still pending.
+Use `GET /v1/files/r2-lanes` to inspect the configured registry. `brand-assets`, `podcastart` and `blog-images` are static-delivery buckets and are deliberately outside HIVE's R2 registry and AI Search scope. HIVE must not list, read, write, delete, chat over or semantically search those buckets. Public-URL helpers return `null` for the private `uploads`, `repositories` and hidden `meta_system` lanes even if a stale public-base environment value is present.
 
 
 ## v1.12 Cloudflare role
