@@ -15,6 +15,7 @@ from app.core.config import Settings
 
 
 _DEFAULT_PUBLIC_BASE = object()
+_BLOCKED_BUCKETS = frozenset({"brand-assets", "podcastart", "blog-images"})
 
 
 @dataclass(frozen=True)
@@ -101,6 +102,14 @@ class R2Storage:
         self._client = None
         self._read_client = None
 
+    @staticmethod
+    def _assert_bucket_allowed(bucket_name: str) -> None:
+        clean = str(bucket_name or "").strip().lower()
+        if clean in _BLOCKED_BUCKETS:
+            raise RuntimeError(
+                f"R2 bucket {bucket_name!r} is outside HIVE's governed storage scope"
+            )
+
     def client(self, *, read_only: bool = False):
         if read_only:
             if not self.read_enabled:
@@ -168,6 +177,7 @@ class R2Storage:
         bucket_name = bucket or self.settings.cf_r2_bucket
         if not bucket_name:
             raise RuntimeError("R2 upload bucket is not configured")
+        self._assert_bucket_allowed(bucket_name)
         try:
             self.client().upload_file(
                 str(path),
@@ -222,6 +232,7 @@ class R2Storage:
     ) -> ObjectListPage:
         safe_limit = max(1, min(int(limit), 1000))
         bucket_name = bucket or self.settings.cf_r2_bucket
+        self._assert_bucket_allowed(bucket_name)
         needle = (search or "").strip().lower()
         max_scan = max(
             safe_limit,
@@ -319,6 +330,7 @@ class R2Storage:
         if not key:
             raise ValueError("Object key is required")
         bucket_name = bucket or self.settings.cf_r2_bucket
+        self._assert_bucket_allowed(bucket_name)
         try:
             head = self.client(read_only=read_only).head_object(Bucket=bucket_name, Key=key)
         except ClientError as exc:
@@ -351,6 +363,7 @@ class R2Storage:
         if not key:
             raise ValueError("Object key is required")
         bucket_name = bucket or self.settings.cf_r2_bucket
+        self._assert_bucket_allowed(bucket_name)
         try:
             head = self.client(read_only=read_only).head_object(Bucket=bucket_name, Key=key)
             size_bytes = int(head.get("ContentLength") or 0)
@@ -391,6 +404,7 @@ class R2Storage:
         if not key:
             raise ValueError("Object key is required")
         bucket_name = bucket or self.settings.cf_r2_bucket
+        self._assert_bucket_allowed(bucket_name)
         try:
             response = self.client(read_only=read_only).get_object(Bucket=bucket_name, Key=key)
         except ClientError as exc:
@@ -429,6 +443,7 @@ class R2Storage:
         bucket_name = bucket or self.settings.cf_r2_bucket
         if not bucket_name:
             raise RuntimeError("R2 bucket is not configured")
+        self._assert_bucket_allowed(bucket_name)
         try:
             response = self.client(read_only=False).delete_objects(
                 Bucket=bucket_name,

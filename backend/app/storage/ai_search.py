@@ -57,15 +57,38 @@ def _instance_paused(instance: dict[str, Any]) -> bool:
     return False
 
 
+def _normalise_policy_name(value: object) -> str:
+    return str(value or "").strip().lower().replace("_", "-")
+
+
+def _source_tokens(value: object) -> set[str]:
+    """Collect simple source/bucket identifiers from Cloudflare instance metadata."""
+    tokens: set[str] = set()
+    if isinstance(value, str):
+        clean = _normalise_policy_name(value)
+        if clean:
+            tokens.add(clean)
+    elif isinstance(value, dict):
+        for key, nested in value.items():
+            if str(key).lower() in {"bucket", "bucket_name", "name", "source", "id"}:
+                tokens.update(_source_tokens(nested))
+            elif isinstance(nested, (dict, list, tuple)):
+                tokens.update(_source_tokens(nested))
+    elif isinstance(value, (list, tuple)):
+        for nested in value:
+            tokens.update(_source_tokens(nested))
+    return tokens
+
+
 class AiSearchClient:
     """Cloudflare AI Search adapter used by HIVE.
 
     The configured ``AI_SEARCH_INSTANCE`` remains the deterministic primary for
     repository indexing and backwards-compatible single-index calls. Discovery,
-    diagnostics and HIVE-wide semantic search use the account instance list so
-    every available AI Search index participates without a hard-coded bucket
-    list. Failures are isolated per instance and never make healthy instances
-    disappear from the result.
+    diagnostics and HIVE-wide semantic search use the account instance list, then
+    apply an explicit source exclusion policy before querying indexes. Static media
+    buckets are therefore not treated as knowledge sources. Failures are isolated
+    per allowed instance and never make healthy instances disappear from the result.
     """
 
     def __init__(self, settings: Settings) -> None:
@@ -75,6 +98,24 @@ class AiSearchClient:
             and settings.ai_search_account_id
             and settings.ai_search_api_token
         )
+
+    @property
+    def excluded_sources(self) -> set[str]:
+        return {
+            _normalise_policy_name(value)
+            for value in self.settings.ai_search_excluded_sources
+            if _normalise_policy_name(value)
+        }
+
+    def _instance_excluded(self, instance: dict[str, Any] | str) -> bool:
+        if isinstance(instance, str):
+            return _normalise_policy_name(instance) in self.excluded_sources
+        tokens = {
+            _normalise_policy_name(_instance_id(instance)),
+            _normalise_policy_name(instance.get("name")),
+        }
+        tokens.update(_source_tokens(instance.get("source") or instance.get("data_source")))
+        return bool(tokens & self.excluded_sources)
 
     @property
     def instances_url(self) -> str:
@@ -116,7 +157,8 @@ class AiSearchClient:
             "account_configured": bool(self.settings.ai_search_account_id),
             "api_token_configured": bool(self.settings.ai_search_api_token),
             "primary_instance": self.settings.ai_search_instance or None,
-            "search_scope": "all_available_instances",
+            "search_scope": "allowed_available_instances",
+            "excluded_sources": sorted(self.excluded_sources),
             "timeout_seconds": self.settings.ai_search_timeout_seconds,
             "top_k": self.settings.ai_search_top_k,
             "missing": self.missing_configuration,
@@ -168,9 +210,18 @@ class AiSearchClient:
         }
 
     async def instance_stats(self, instance_id: str) -> dict[str, Any]:
-        """Return indexing statistics for one AI Search instance."""
+        """Return indexing statistics for one allowed AI Search instance."""
         if not self.enabled:
             return {"ok": False, "enabled": False, "reason": "AI Search disabled or not configured."}
+        if self._instance_excluded(instance_id):
+            return {
+                "ok": False,
+                "enabled": True,
+                "instance": instance_id,
+                "reason": "AI Search source is excluded by HIVE policy.",
+                "error_code": "ai_search_source_excluded",
+                "stats": {},
+            }
         result = await self._request("GET", f"{self.instance_url(instance_id)}/stats")
         raw = result.get("raw")
         stats = raw.get("result") if isinstance(raw, dict) and isinstance(raw.get("result"), dict) else {}
@@ -195,9 +246,15 @@ class AiSearchClient:
         listing = await self.list_instances()
         if listing.get("ok"):
             instances = listing.get("instances", [])
+            raw_instances = [
+                value for value in instances if isinstance(value, dict)
+            ] if isinstance(instances, list) else []
+            excluded_instances = [
+                _instance_id(value) for value in raw_instances if self._instance_excluded(value)
+            ]
             normalised = []
-            for value in instances if isinstance(instances, list) else []:
-                if not isinstance(value, dict):
+            for value in raw_instances:
+                if self._instance_excluded(value):
                     continue
                 instance_id = _instance_id(value)
                 if not instance_id:
@@ -256,7 +313,7 @@ class AiSearchClient:
             degraded = ok and (bool(paused) or not indexing_healthy or (bool(primary) and not primary_present))
             reason = None
             if not normalised:
-                reason = "Cloudflare returned no AI Search instances."
+                reason = "Cloudflare returned no allowed AI Search instances."
             elif not active:
                 reason = "All AI Search instances are paused or disabled."
             elif indexing_error_count:
@@ -276,6 +333,9 @@ class AiSearchClient:
                 "availability_status": "available" if ok else "unavailable",
                 "indexing_healthy": indexing_healthy,
                 **self.safe_config,
+                "discovered_instance_count": len(raw_instances),
+                "excluded_instance_count": len(excluded_instances),
+                "excluded_instances": excluded_instances,
                 "instance_count": len(normalised),
                 "active_instance_count": len(active),
                 "paused_instance_count": len(paused),
@@ -316,6 +376,15 @@ class AiSearchClient:
         target = str(instance_id or self.settings.ai_search_instance or "").strip()
         if not target:
             return {"ok": False, "enabled": True, "reason": "AI Search instance is not set.", "matches": []}
+        if self._instance_excluded(target):
+            return {
+                "ok": False,
+                "enabled": True,
+                "instance": target,
+                "reason": "AI Search source is excluded by HIVE policy.",
+                "error_code": "ai_search_source_excluded",
+                "matches": [],
+            }
         # Current Cloudflare AI Search places retrieval controls under
         # ai_search_options.retrieval. Keep the simple text `query` form so the
         # call stays compact while matching the current REST schema.
@@ -350,13 +419,18 @@ class AiSearchClient:
         instance_ids = [
             _instance_id(item)
             for item in discovered
-            if isinstance(item, dict) and _instance_id(item) and not _instance_paused(item)
+            if (
+                isinstance(item, dict)
+                and _instance_id(item)
+                and not _instance_paused(item)
+                and not self._instance_excluded(item)
+            )
         ]
         # Preserve a deterministic fallback for accounts whose token can run an
         # instance but does not have list permission. Diagnostics still reports
         # that discovery problem; search remains useful rather than going dark.
         fallback = str(self.settings.ai_search_instance or "").strip()
-        if not instance_ids and fallback:
+        if not instance_ids and fallback and not self._instance_excluded(fallback):
             instance_ids = [fallback]
 
         instance_ids = list(dict.fromkeys(instance_ids))
@@ -416,7 +490,7 @@ class AiSearchClient:
         return {
             "ok": successful > 0,
             "enabled": True,
-            "scope": "all_available_instances",
+            "scope": "allowed_available_instances",
             "instance_count": len(instance_ids),
             "successful_instances": successful,
             "failed_instances": failures,
