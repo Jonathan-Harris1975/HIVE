@@ -339,16 +339,12 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("R2_REQUIRED_READ_LANES"),
     )
 
-    # v1.6 ecosystem R2 lane registry. These envs let HIVE understand where
-    # AIMS/RAMS/website/podcast artefacts live. Production now supports
-    # controlled read/write operations across every configured lane when the
-    # shared R2 write credentials and R2_MULTI_BUCKET_WRITE_ENABLED are enabled.
-    r2_bucket_art: str = Field("", validation_alias=AliasChoices("R2_BUCKET_ART"))
+    # v1.6 ecosystem R2 lane registry. Only operational/evidence lanes that
+    # HIVE actively needs are registered. Static delivery buckets such as
+    # brand-assets, podcastart and blog-images deliberately stay outside HIVE.
     r2_bucket_audits: str = Field("audits", validation_alias=AliasChoices("R2_BUCKET_AUDITS"))
     r2_bucket_blog: str = Field("", validation_alias=AliasChoices("R2_BUCKET_BLOG"))
-    r2_bucket_blog_images: str = Field("", validation_alias=AliasChoices("R2_BUCKET_BLOG_IMAGES"))
     r2_bucket_blog_rss: str = Field("", validation_alias=AliasChoices("R2_BUCKET_BLOG_RSS"))
-    r2_bucket_brand_assets: str = Field("", validation_alias=AliasChoices("R2_BUCKET_BRAND_ASSETS"))
     r2_bucket_meta_system: str = Field("", validation_alias=AliasChoices("R2_BUCKET_META_SYSTEM"))
     r2_bucket_podcast: str = Field("", validation_alias=AliasChoices("R2_BUCKET_PODCAST"))
     r2_bucket_podcast_rss_feeds: str = Field(
@@ -364,21 +360,14 @@ class Settings(BaseSettings):
         "",
         validation_alias=AliasChoices("R2_PUBLIC_BASE_URL_REPOSITORIES"),
     )
-    r2_public_base_url_art: str = Field("", validation_alias=AliasChoices("R2_PUBLIC_BASE_URL_ART"))
     r2_public_base_url_audits: str = Field(
         "", validation_alias=AliasChoices("R2_PUBLIC_BASE_URL_AUDITS")
     )
     r2_public_base_url_blog: str = Field(
         "", validation_alias=AliasChoices("R2_PUBLIC_BASE_URL_BLOG")
     )
-    r2_public_base_url_blog_images: str = Field(
-        "", validation_alias=AliasChoices("R2_PUBLIC_BASE_URL_BLOG_IMAGES")
-    )
     r2_public_base_url_blog_rss: str = Field(
         "", validation_alias=AliasChoices("R2_PUBLIC_BASE_URL_BLOG_RSS")
-    )
-    r2_public_base_url_brand_assets: str = Field(
-        "", validation_alias=AliasChoices("R2_PUBLIC_BASE_URL_BRAND_ASSETS")
     )
     r2_public_base_url_meta_system: str = Field(
         "", validation_alias=AliasChoices("R2_PUBLIC_BASE_URL_META_SYSTEM")
@@ -532,6 +521,13 @@ class Settings(BaseSettings):
     )
     ai_search_instance: str = Field(
         "hive-repositories", validation_alias=AliasChoices("AI_SEARCH_INSTANCE")
+    )
+    # Static-media sources are intentionally outside HIVE knowledge retrieval.
+    # Keep the policy configurable for deployments whose Cloudflare AI Search
+    # instance names or source-bucket metadata differ from the defaults.
+    ai_search_excluded_sources: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["brand-assets", "podcastart", "blog-images"],
+        validation_alias=AliasChoices("AI_SEARCH_EXCLUDED_SOURCES"),
     )
     ai_search_timeout_seconds: int = Field(
         15, validation_alias=AliasChoices("AI_SEARCH_TIMEOUT_SECONDS")
@@ -768,7 +764,13 @@ class Settings(BaseSettings):
             return f"@{model}"
         return model
 
-    @field_validator("cors_origins", "allowed_hosts", "r2_required_read_lanes", mode="before")
+    @field_validator(
+        "cors_origins",
+        "allowed_hosts",
+        "r2_required_read_lanes",
+        "ai_search_excluded_sources",
+        mode="before",
+    )
     @classmethod
     def parse_comma_separated_list(cls, value: str | list[str]) -> list[str]:
         if isinstance(value, str):
@@ -852,25 +854,12 @@ class Settings(BaseSettings):
                 self.r2_public_base_url_audits,
                 "RAMS/AIMS audit reports",
             ),
-            ("art", self.r2_bucket_art, self.r2_public_base_url_art, "Podcast cover art"),
             ("blog", self.r2_bucket_blog, self.r2_public_base_url_blog, "Published blog artefacts"),
-            (
-                "blog_images",
-                self.r2_bucket_blog_images,
-                self.r2_public_base_url_blog_images,
-                "Blog imagery",
-            ),
             (
                 "blog_rss",
                 self.r2_bucket_blog_rss,
                 self.r2_public_base_url_blog_rss,
                 "Blog RSS feed",
-            ),
-            (
-                "brand_assets",
-                self.r2_bucket_brand_assets,
-                self.r2_public_base_url_brand_assets,
-                "Shared brand assets",
             ),
             (
                 "meta_system",
