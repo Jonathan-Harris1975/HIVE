@@ -20,7 +20,7 @@ def _settings() -> Settings:
 
 
 @pytest.mark.asyncio
-async def test_diagnostics_discovers_every_instance_and_flags_paused(monkeypatch):
+async def test_diagnostics_excludes_static_media_ai_search_sources(monkeypatch):
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
         if path.endswith('/ai-search/instances'):
@@ -30,16 +30,15 @@ async def test_diagnostics_discovers_every_instance_and_flags_paused(monkeypatch
                     {"id": "hive-repositories", "paused": False},
                     {"id": "hive-skills", "paused": False},
                     {"id": "brand-assets", "paused": True},
+                    {"id": "media-index", "paused": False, "source": {"bucket_name": "blog-images"}},
                 ],
-                "result_info": {"count": 3, "page": 1, "per_page": 100, "total_count": 3},
+                "result_info": {"count": 4, "page": 1, "per_page": 100, "total_count": 4},
             })
         if path.endswith('/hive-repositories/stats'):
             return httpx.Response(200, json={"success": True, "result": {"completed": 20, "error": 0}})
         if path.endswith('/hive-skills/stats'):
             return httpx.Response(200, json={"success": True, "result": {"completed": 227, "error": 1}})
-        if path.endswith('/brand-assets/stats'):
-            return httpx.Response(200, json={"success": True, "result": {"completed": 3, "error": 1}})
-        raise AssertionError(path)
+        raise AssertionError(f"excluded AI Search source was queried: {path}")
 
     original = httpx.AsyncClient
     class PatchedAsyncClient(original):
@@ -50,10 +49,13 @@ async def test_diagnostics_discovers_every_instance_and_flags_paused(monkeypatch
     monkeypatch.setattr("app.storage.ai_search.httpx.AsyncClient", PatchedAsyncClient)
     result = await AiSearchClient(_settings()).diagnostics()
 
-    assert result["instance_count"] == 3
+    assert result["discovered_instance_count"] == 4
+    assert result["excluded_instance_count"] == 2
+    assert result["excluded_instances"] == ["brand-assets", "media-index"]
+    assert result["instance_count"] == 2
     assert result["active_instance_count"] == 2
-    assert result["paused_instance_count"] == 1
-    assert result["indexing_error_count"] == 2
+    assert result["paused_instance_count"] == 0
+    assert result["indexing_error_count"] == 1
     assert result["ok"] is True
     assert result["availability_status"] == "available"
     assert result["indexing_healthy"] is False
@@ -70,6 +72,8 @@ async def test_search_all_fans_out_and_tags_source_instance(monkeypatch):
                 "result": [
                     {"id": "hive-repositories", "paused": False},
                     {"id": "hive-skills", "paused": False},
+                    {"id": "podcastart", "paused": False},
+                    {"id": "media-index", "paused": False, "data_source": {"bucket": "blog-images"}},
                 ],
             })
         if path.endswith('/hive-repositories/search'):
@@ -95,6 +99,23 @@ async def test_search_all_fans_out_and_tags_source_instance(monkeypatch):
     assert result["instance_count"] == 2
     assert [item["id"] for item in result["matches"]] == ["b", "a"]
     assert result["matches"][0]["_ai_search_instance"] == "hive-skills"
+
+
+@pytest.mark.asyncio
+async def test_direct_ai_search_access_to_static_media_is_rejected_without_network(monkeypatch):
+    async def fail_request(*_args, **_kwargs):
+        raise AssertionError("excluded AI Search source must not be queried")
+
+    client = AiSearchClient(_settings())
+    monkeypatch.setattr(client, "_request", fail_request)
+
+    searched = await client.search("logo", instance_id="brand-assets")
+    stats = await client.instance_stats("podcastart")
+
+    assert searched["ok"] is False
+    assert searched["error_code"] == "ai_search_source_excluded"
+    assert stats["ok"] is False
+    assert stats["error_code"] == "ai_search_source_excluded"
 
 
 @pytest.mark.asyncio

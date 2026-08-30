@@ -55,6 +55,34 @@ def test_matrix_private_hive_lanes_never_advertise_public_urls() -> None:
     assert R2Storage(settings).public_url_for_key("uploads/example.txt") is None
 
 
+def test_static_delivery_buckets_are_outside_hive_r2_scope() -> None:
+    settings = _settings(
+        R2_BUCKET_ART="podcastart",
+        R2_BUCKET_BLOG_IMAGES="blog-images",
+        R2_BUCKET_BRAND_ASSETS="brand-assets",
+        R2_PUBLIC_BASE_URL_ART="https://podcast-coverart.example.test",
+        R2_PUBLIC_BASE_URL_BLOG_IMAGES="https://blog-images.example.test",
+        R2_PUBLIC_BASE_URL_BRAND_ASSETS="https://assets.example.test",
+    )
+    client = TestClient(create_app(settings))
+
+    lanes = {item["lane"] for item in settings.r2_all_lanes}
+    assert {"art", "blog_images", "brand_assets"}.isdisjoint(lanes)
+
+    for lane in ("art", "blog_images", "brand_assets"):
+        response = client.get(f"/v1/files/r2/{lane}/objects")
+        assert response.status_code == 404
+
+    storage = R2Storage(settings)
+    for bucket in ("brand-assets", "podcastart", "blog-images"):
+        try:
+            storage.list_objects(bucket=bucket, limit=1)
+        except RuntimeError as error:
+            assert "outside HIVE's governed storage scope" in str(error)
+        else:
+            raise AssertionError(f"blocked bucket {bucket} unexpectedly remained accessible")
+
+
 def test_meta_system_lane_is_never_exposed_even_when_configured() -> None:
     # Regression test: the internal `metasystem` R2 bucket must never be
     # reachable as a user/UI-selectable lane, matching its HIDDEN_BUCKETS
