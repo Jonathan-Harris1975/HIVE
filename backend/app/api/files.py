@@ -335,9 +335,9 @@ def public_url(
 def r2_lanes(settings: Settings = Depends(get_settings)) -> dict[str, object]:
     """Return configured R2 ecosystem lanes without exposing credentials.
 
-    HIVE uses this as a registry so it can reason about AIMS/RAMS/website/
-    podcast artefact locations. Configured lanes are read/write when the shared
-    server-side R2 write credentials allow it.
+    HIVE uses this as a registry for operational and evidence storage only.
+    Static delivery buckets are intentionally excluded. Configured HIVE lanes
+    are read/write when the server-side credentials allow it.
     """
 
     lanes = settings.r2_ecosystem_lanes
@@ -351,7 +351,7 @@ def r2_lanes(settings: Settings = Depends(get_settings)) -> dict[str, object]:
         "multi_bucket_write_enabled": settings.r2_multi_bucket_write_enabled,
         "read_credentials_configured": settings.r2_read_credentials_configured,
         "write_credentials_configured": settings.r2_write_credentials_configured,
-        "note": "Every configured bucket can be read/write when shared R2 write credentials are configured.",
+        "note": "Every configured HIVE lane can be read/write when shared R2 write credentials are configured.",
     }
 
 
