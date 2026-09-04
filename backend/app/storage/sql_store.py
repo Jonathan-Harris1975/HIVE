@@ -1151,7 +1151,18 @@ class SqlStore:
             VALUES (__PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__)
             """
             ),
-            (str(uuid.uuid4()), _strip_nul_text(conv_id), _strip_nul_text(role), _strip_nul_text(content or ""), _strip_nul_text(model) if model else None, _strip_nul_text(provider) if provider else None, total_tokens, cost, _strip_nul_text(metadata_json), created),
+            (
+                str(uuid.uuid4()),
+                _strip_nul_text(conv_id),
+                _strip_nul_text(role),
+                _strip_nul_text(content or ""),
+                _strip_nul_text(model) if model else None,
+                _strip_nul_text(provider) if provider else None,
+                total_tokens,
+                cost,
+                _strip_nul_text(metadata_json),
+                created,
+            ),
         )
 
     def _upsert_file(self, cur: Any, data: dict[str, Any], metadata_json: str, now: str) -> None:
