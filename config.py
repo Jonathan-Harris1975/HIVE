@@ -654,11 +654,26 @@ class Settings(BaseSettings):
     )
     zip_extract_max_depth: int = Field(2, validation_alias=AliasChoices("ZIP_EXTRACT_MAX_DEPTH"))
     zip_extract_supported_suffixes: str = Field(
-        ".txt,.md,.mdx,.rst,.adoc,.log,.json,.jsonl,.jsonc,.csv,.tsv,.html,.htm,.xml,.rss,.svg,.yaml,.yml,.toml,.ini,.cfg,.conf,.properties,.lock,.lockb,.env,.py,.pyi,.js,.mjs,.cjs,.ts,.tsx,.jsx,.mts,.cts,.css,.scss,.sass,.less,.vue,.svelte,.astro,.sh,.bash,.zsh,.fish,.ps1,.bat,.cmd,.sql,.graphql,.gql,.proto,.tf,.tfvars,.hcl,.go,.mod,.sum,.rs,.rb,.php,.java,.kt,.kts,.swift,.c,.h,.cpp,.cxx,.hpp,.cs,.fs,.fsx,.r,.lua,.pl,.pm,.scala,.sbt,.gradle,.prisma,.ipynb,.pdf,.docx,.xlsx",
+        (
+            ".txt,.md,.mdx,.rst,.adoc,.log,.json,.jsonl,.jsonc,.csv,.tsv,.html,.htm,.xml,.rss,"
+            ".svg,.yaml,.yml,.toml,.ini,.cfg,.conf,.properties,.lock,.lockb,.env,.py,.pyi,.js,"
+            ".mjs,.cjs,.ts,.tsx,.jsx,.mts,.cts,.css,.scss,.sass,.less,.vue,.svelte,.astro,.sh,"
+            ".bash,.zsh,.fish,.ps1,.bat,.cmd,.sql,.graphql,.gql,.proto,.tf,.tfvars,.hcl,.go,"
+            ".mod,.sum,.rs,.rb,.php,.java,.kt,.kts,.swift,.c,.h,.cpp,.cxx,.hpp,.cs,.fs,.fsx,"
+            ".r,.lua,.pl,.pm,.scala,.sbt,.gradle,.prisma,.ipynb,.pdf,.docx,.xlsx"
+        ),
         validation_alias=AliasChoices("ZIP_EXTRACT_SUPPORTED_SUFFIXES"),
     )
     zip_extract_supported_filenames: str = Field(
-        ".gitignore,.gitattributes,.gitmodules,.dockerignore,.editorconfig,.npmrc,.nvmrc,.prettierrc,.prettierignore,.eslintrc,.eslintignore,.python-version,.ruby-version,.tool-versions,.env,.env.example,.env.local,.env.production,.env.development,.env.staging,.env.test,Dockerfile,Dockerfile.dev,Dockerfile.prod,Dockerfile.production,Makefile,Procfile,README,LICENSE,NOTICE,COPYING,CHANGELOG,CONTRIBUTING,SECURITY,CODEOWNERS,OWNERS,AUTHORS,requirements,Pipfile,Gemfile,Rakefile,Brewfile,Caddyfile,Jenkinsfile,justfile",
+        (
+            ".gitignore,.gitattributes,.gitmodules,.dockerignore,.editorconfig,.npmrc,.nvmrc,"
+            ".prettierrc,.prettierignore,.eslintrc,.eslintignore,.python-version,.ruby-version,"
+            ".tool-versions,.env,.env.example,.env.local,.env.production,.env.development,"
+            ".env.staging,.env.test,Dockerfile,Dockerfile.dev,Dockerfile.prod,Dockerfile.production,"
+            "Makefile,Procfile,README,LICENSE,NOTICE,COPYING,CHANGELOG,CONTRIBUTING,SECURITY,"
+            "CODEOWNERS,OWNERS,AUTHORS,requirements,Pipfile,Gemfile,Rakefile,Brewfile,Caddyfile,"
+            "Jenkinsfile,justfile"
+        ),
         validation_alias=AliasChoices("ZIP_EXTRACT_SUPPORTED_FILENAMES"),
     )
 
