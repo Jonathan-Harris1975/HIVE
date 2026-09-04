@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from app.core.version import BUILD_STAGE
 from app.services.repo_hygiene import repo_hygiene_report
 
@@ -34,3 +36,11 @@ def test_repo_hygiene_report_is_read_only(tmp_path):
 
     assert report["deletion_manifest"]["recommended_delete_count"] == 1
     assert target.exists()
+
+
+def test_checked_in_repository_has_no_duplicate_content():
+    repo_root = Path(__file__).resolve().parents[2]
+
+    report = repo_hygiene_report(repo_root=repo_root, include_hashes=True)
+
+    assert report["duplicate_content_group_count"] == 0
