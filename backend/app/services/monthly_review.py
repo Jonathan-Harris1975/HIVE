@@ -96,15 +96,26 @@ def _ai_council_status(settings: Settings, *, limit: int = 5) -> dict[str, Any]:
 
     latest = runs[-1] if isinstance(runs[-1], dict) else {}
     completion_status = str(latest.get("completion_status") or "unknown")
-    downstream_sync = latest.get("downstream_sync") if isinstance(latest.get("downstream_sync"), dict) else None
-    degraded = completion_status == "degraded" or bool(downstream_sync and downstream_sync.get("ok") is False)
+    raw_downstream_sync = latest.get("downstream_sync")
+    downstream_sync = raw_downstream_sync if isinstance(raw_downstream_sync, dict) else None
+    verified_complete = bool(
+        completion_status == "completed"
+        and downstream_sync is not None
+        and downstream_sync.get("ok") is True
+    )
+    if completion_status == "degraded" or bool(downstream_sync and downstream_sync.get("ok") is False):
+        reason = "latest AI Council downstream sync failed"
+    elif not verified_complete:
+        reason = "latest AI Council run has no verified completion state"
+    else:
+        reason = None
     return {
-        "ok": not degraded,
+        "ok": verified_complete,
         "count": len(runs),
         "latest": latest,
         "runs": runs,
         "completion_status": completion_status,
-        "reason": "latest AI Council downstream sync failed" if degraded else None,
+        "reason": reason,
     }
 
 

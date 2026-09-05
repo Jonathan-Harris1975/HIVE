@@ -290,10 +290,16 @@ def record_run_completion(
         return False
 
     history: list[dict[str, Any]] = []
-    for row in result.get("items", []):
+    raw_rows = result.get("items")
+    rows = raw_rows if isinstance(raw_rows, list) else []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
         if row.get("source_type") == "run_history" and row.get("source_id") == "runs":
             metadata = row.get("metadata") or {}
-            history = [dict(item) for item in (metadata.get("items") or []) if isinstance(item, dict)]
+            if isinstance(metadata, dict):
+                raw_history = metadata.get("items")
+                history = [dict(item) for item in raw_history if isinstance(item, dict)] if isinstance(raw_history, list) else []
             break
 
     updated = False
