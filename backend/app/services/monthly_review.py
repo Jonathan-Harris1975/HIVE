@@ -59,21 +59,53 @@ def _period_bounds(period: str | None) -> tuple[str, str, str]:
     return f"{year:04d}-{month:02d}", since.isoformat(), until.isoformat()
 
 
+def _normalise_section_result(data: Any) -> dict[str, Any]:
+    """Wrap a section result without converting an explicit ``ok=False`` into success."""
+    if isinstance(data, dict) and data.get("ok") is False:
+        error = str(data.get("error") or data.get("reason") or "subsystem reported ok=false")
+        return {"ok": False, "data": data, "error": error}
+    return {"ok": True, "data": data}
+
+
 def _section(fn, *args, **kwargs) -> dict[str, Any]:
     """Run one report section defensively. A failure in any single subsystem
     (e.g. D1 unreachable, skills index empty) must not blank the rest of the
     monthly review -- it should show up as a flagged section instead."""
     try:
-        return {"ok": True, "data": fn(*args, **kwargs)}
+        return _normalise_section_result(fn(*args, **kwargs))
     except Exception as exc:  # noqa: BLE001 - deliberately broad: isolate section failures
         return {"ok": False, "error": str(exc), "error_type": type(exc).__name__}
 
 
 async def _async_section(coro) -> dict[str, Any]:
     try:
-        return {"ok": True, "data": await coro}
+        return _normalise_section_result(await coro)
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": str(exc), "error_type": type(exc).__name__}
+
+
+def _ai_council_status(settings: Settings, *, limit: int = 5) -> dict[str, Any]:
+    """Return Council history and fail the section when the latest run degraded.
+
+    Older history entries created before completion tracking was introduced are
+    retained as ``unknown`` rather than retroactively marked failed.
+    """
+    runs = get_run_history(settings, limit=limit)
+    if not runs:
+        return {"ok": False, "count": 0, "runs": [], "reason": "no AI Council run history available"}
+
+    latest = runs[-1] if isinstance(runs[-1], dict) else {}
+    completion_status = str(latest.get("completion_status") or "unknown")
+    downstream_sync = latest.get("downstream_sync") if isinstance(latest.get("downstream_sync"), dict) else None
+    degraded = completion_status == "degraded" or bool(downstream_sync and downstream_sync.get("ok") is False)
+    return {
+        "ok": not degraded,
+        "count": len(runs),
+        "latest": latest,
+        "runs": runs,
+        "completion_status": completion_status,
+        "reason": "latest AI Council downstream sync failed" if degraded else None,
+    }
 
 
 async def generate_monthly_review(settings: Settings, *, period: str | None = None) -> dict[str, Any]:
@@ -89,7 +121,7 @@ async def generate_monthly_review(settings: Settings, *, period: str | None = No
         "cost_and_tokens": _section(
             lambda: SqlStore(settings).cost_summary(by_model_limit=20, since=since, until=until)
         ),
-        "ai_council_history": _section(lambda: get_run_history(settings, limit=5)),
+        "ai_council_history": _section(_ai_council_status, settings, limit=5),
         "model_registry": _section(list_categories),
         "skills_duplicates": _section(skill_registry_duplicates, settings=settings, limit=500),
         "skills_missing": _section(skill_registry_missing, settings=settings, limit=500),
@@ -106,7 +138,7 @@ async def generate_monthly_review(settings: Settings, *, period: str | None = No
 
     ok_sections = sum(1 for value in sections.values() if value.get("ok"))
     report: dict[str, Any] = {
-        "ok": True,
+        "ok": ok_sections == len(sections),
         "report_id": f"monthly-review-{period_label}-{uuid.uuid4().hex[:8]}",
         "period": period_label,
         "period_since": since,
@@ -182,6 +214,12 @@ async def generate_and_archive_monthly_review(settings: Settings, *, period: str
     index_result = _index_report_in_d1(settings, report, r2_object)
     report["r2_object"] = r2_object
     report["d1_index"] = index_result
+    report["ok"] = bool(
+        report.get("ok")
+        and r2_object
+        and r2_object.get("ok")
+        and index_result.get("ok")
+    )
     return report
 
 

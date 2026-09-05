@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
+import uuid
 from typing import Any
 
 from app.core.config import Settings
@@ -268,6 +269,58 @@ def _record_run_history(store: D1MetadataStore, report: CouncilRunReport, max_en
     )
 
 
+def record_run_completion(
+    settings: Settings,
+    *,
+    run_id: str,
+    completion_status: str,
+    downstream_sync: dict[str, Any],
+    max_entries: int = 200,
+) -> bool:
+    """Attach downstream completion state to an already-recorded Council run.
+
+    ``run_council`` deliberately records its evidence/promotion result before
+    downstream propagation.  The API layer calls this helper after the AIMS/RAMS
+    sync attempt so Monthly Review can distinguish a completed Council cycle from
+    a Council run whose propagation failed.
+    """
+    store = D1MetadataStore(settings)
+    result = store.list_metadata(lane=LANE, limit=500)
+    if not result.get("ok"):
+        return False
+
+    history: list[dict[str, Any]] = []
+    for row in result.get("items", []):
+        if row.get("source_type") == "run_history" and row.get("source_id") == "runs":
+            metadata = row.get("metadata") or {}
+            history = [dict(item) for item in (metadata.get("items") or []) if isinstance(item, dict)]
+            break
+
+    updated = False
+    for item in reversed(history):
+        if str(item.get("run_id") or "") == run_id:
+            item["completion_status"] = completion_status
+            item["downstream_sync"] = dict(downstream_sync)
+            item["completed_at"] = datetime.now(UTC).isoformat()
+            updated = True
+            break
+    if not updated:
+        return False
+
+    if len(history) > max_entries:
+        history = history[-max_entries:]
+    store.upsert_metadata(
+        item_id="ai-council:run-history",
+        lane=LANE,
+        source_type="run_history",
+        source_id="runs",
+        title="AI Council run history",
+        url=None,
+        metadata={"items": history},
+    )
+    return True
+
+
 async def run_council(settings: Settings, *, run_id: str | None = None) -> CouncilRunReport:
     store = D1MetadataStore(settings)
     weights = benchmark_engine.load_weights(settings.benchmark_weights_json)
@@ -362,7 +415,7 @@ async def run_council(settings: Settings, *, run_id: str | None = None) -> Counc
                     )
 
     report = CouncilRunReport(
-        run_id=run_id or datetime.now(UTC).strftime("council-%Y%m%dT%H%M%S"),
+        run_id=run_id or f"council-{datetime.now(UTC).strftime('%Y%m%dT%H%M%S%f')}-{uuid.uuid4().hex[:6]}",
         occurred_at=datetime.now(UTC).isoformat(),
         providers_discovered=len(providers),
         models_seen=models_seen,
