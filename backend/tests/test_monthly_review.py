@@ -86,7 +86,15 @@ def test_period_bounds_rejects_malformed_period():
 async def test_generate_monthly_review_assembles_all_sections(monkeypatch):
     settings = _settings()
 
-    monkeypatch.setattr(monthly_review, "get_run_history", lambda settings, limit=5: [{"run_id": "r1"}])
+    monkeypatch.setattr(
+        monthly_review,
+        "get_run_history",
+        lambda settings, limit=5: [{
+            "run_id": "r1",
+            "completion_status": "completed",
+            "downstream_sync": {"ok": True},
+        }],
+    )
     monkeypatch.setattr(monthly_review, "list_categories", lambda: {"coding": []})
     monkeypatch.setattr(monthly_review, "skill_registry_duplicates", lambda **kw: {"ok": True, "count": 0})
     monkeypatch.setattr(monthly_review, "skill_registry_missing", lambda **kw: {"ok": True, "count": 0})
@@ -131,7 +139,15 @@ async def test_generate_monthly_review_isolates_a_failing_section(monkeypatch):
     def boom(*_args, **_kwargs):
         raise RuntimeError("skills index unavailable")
 
-    monkeypatch.setattr(monthly_review, "get_run_history", lambda settings, limit=5: [])
+    monkeypatch.setattr(
+        monthly_review,
+        "get_run_history",
+        lambda settings, limit=5: [{
+            "run_id": "r1",
+            "completion_status": "completed",
+            "downstream_sync": {"ok": True},
+        }],
+    )
     monkeypatch.setattr(monthly_review, "list_categories", lambda: {})
     monkeypatch.setattr(monthly_review, "skill_registry_duplicates", boom)
     monkeypatch.setattr(monthly_review, "skill_registry_missing", lambda **kw: {"ok": True})
@@ -162,6 +178,54 @@ async def test_generate_monthly_review_isolates_a_failing_section(monkeypatch):
     assert "skills index unavailable" in report["sections"]["skills_duplicates"]["error"]
     # every other section still generated successfully
     assert report["sections_ok"] == report["sections_total"] - 1
+
+
+def test_ai_council_status_fails_closed_for_unverified_or_degraded_history(monkeypatch):
+    settings = _settings()
+
+    monkeypatch.setattr(monthly_review, "get_run_history", lambda settings, limit=5: [])
+    empty = monthly_review._ai_council_status(settings)
+    assert empty["ok"] is False
+    assert "no AI Council run history" in empty["reason"]
+
+    monkeypatch.setattr(
+        monthly_review,
+        "get_run_history",
+        lambda settings, limit=5: [{"run_id": "legacy-run"}],
+    )
+    legacy = monthly_review._ai_council_status(settings)
+    assert legacy["ok"] is False
+    assert legacy["completion_status"] == "unknown"
+    assert "no verified completion state" in legacy["reason"]
+
+    monkeypatch.setattr(
+        monthly_review,
+        "get_run_history",
+        lambda settings, limit=5: [{
+            "run_id": "failed-run",
+            "completion_status": "degraded",
+            "downstream_sync": {"ok": False, "error": "AIMS sync failed"},
+        }],
+    )
+    degraded = monthly_review._ai_council_status(settings)
+    assert degraded["ok"] is False
+    assert "downstream sync failed" in degraded["reason"]
+
+
+def test_ai_council_status_accepts_verified_completed_history(monkeypatch):
+    settings = _settings()
+    monkeypatch.setattr(
+        monthly_review,
+        "get_run_history",
+        lambda settings, limit=5: [{
+            "run_id": "good-run",
+            "completion_status": "completed",
+            "downstream_sync": {"ok": True, "enabled": True},
+        }],
+    )
+    result = monthly_review._ai_council_status(settings)
+    assert result["ok"] is True
+    assert result["reason"] is None
 
 
 @pytest.mark.asyncio
