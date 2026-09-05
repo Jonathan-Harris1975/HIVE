@@ -45,6 +45,11 @@ RUN groupadd --system hive \
 COPY --from=builder /opt/venv /opt/venv
 COPY --chown=hive:hive backend /app/backend
 COPY --chown=hive:hive scripts /app/scripts
+# Runtime catalogue metadata is loaded from /app/skills and /app/tasks.
+# Keep these files in the production image so monthly governance and catalogue
+# enrichment do not silently degrade to empty fallback metadata.
+COPY --chown=hive:hive skills /app/skills
+COPY --chown=hive:hive tasks /app/tasks
 COPY --chown=hive:hive .env.example /app/.env.example
 COPY --chown=hive:hive HIVE-PRODUCTION-SHARED.env /app/HIVE-PRODUCTION-SHARED.env
 
