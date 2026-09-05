@@ -27,6 +27,14 @@ async def generate_monthly_review_endpoint(
         report = await generate_and_archive_monthly_review(settings, period=period)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    if not report.get("ok"):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "error": "Monthly governance review completed with failed prerequisites or archive/index steps",
+                "report": report,
+            },
+        )
     return report
 
 
