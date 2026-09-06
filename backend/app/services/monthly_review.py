@@ -114,9 +114,12 @@ def _model_registry_status(settings: Settings) -> dict[str, Any]:
             if not isinstance(item, dict):
                 continue
             total_count += 1
+            raw_score = item.get("score")
             try:
-                score = float(item.get("score") or 0.0)
-            except (TypeError, ValueError):
+                score = (
+                    float(raw_score) if isinstance(raw_score, (int, float, str)) else 0.0
+                )
+            except ValueError:
                 score = 0.0
             if score >= settings.model_registry_min_visible_score:
                 visible.append(item)

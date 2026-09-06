@@ -33,9 +33,12 @@ def _qualified_registry(settings: Settings) -> tuple[dict[str, list[dict[str, ob
         for item in items:
             if not isinstance(item, dict):
                 continue
+            raw_score = item.get("score")
             try:
-                score = float(item.get("score") or 0.0)
-            except (TypeError, ValueError):
+                score = (
+                    float(raw_score) if isinstance(raw_score, (int, float, str)) else 0.0
+                )
+            except ValueError:
                 score = 0.0
             if score >= settings.model_registry_min_visible_score:
                 qualified_count += 1
