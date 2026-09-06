@@ -168,46 +168,102 @@ def _metrics_for_model(
     metrics["structured_output"] = 1.0 if model.supports_structured_output else 0.0
 
     # OpenRouter's unified benchmark endpoint exposes Artificial Analysis
-    # coding/intelligence/agentic indices on a 0-100 scale. These are measured
-    # external quality signals rather than name/cost heuristics, and therefore
-    # are the primary evidence used by the monthly model review.
+    # coding/intelligence/agentic composite indices. These are measured external
+    # quality signals, not percentages of a theoretical 100-point ceiling.
+    # _benchmark_map therefore population-normalises them before scoring.
     if benchmark:
         coding_index = benchmark.get("coding_index")
         intelligence_index = benchmark.get("intelligence_index")
         agentic_index = benchmark.get("agentic_index")
         try:
             if coding_index is not None:
-                metrics["coding_benchmark"] = float(coding_index) / 100.0
+                metrics["coding_benchmark"] = float(
+                    benchmark.get("_coding_normalised", float(coding_index) / 100.0)
+                )
             if intelligence_index is not None:
-                metrics["reasoning_benchmark"] = float(intelligence_index) / 100.0
+                metrics["reasoning_benchmark"] = float(
+                    benchmark.get("_reasoning_normalised", float(intelligence_index) / 100.0)
+                )
             if agentic_index is not None:
                 # Agentic performance is the best externally measured proxy
                 # available for real tool/workflow execution. It is recorded
                 # as reliability evidence rather than pretending it is an
                 # internal HIVE benchmark.
-                metrics["reliability"] = float(agentic_index) / 100.0
+                metrics["reliability"] = float(
+                    benchmark.get("_agentic_normalised", float(agentic_index) / 100.0)
+                )
         except (TypeError, ValueError):
             pass
     return metrics
 
 
+def _percentile_scores(items: list[dict[str, Any]], key: str) -> dict[str, float]:
+    """Return 0..1 empirical percentile scores for one benchmark index.
+
+    Artificial Analysis exposes composite indices, not percentages.  Treating an
+    index such as 74.9 as ``0.749 of a theoretical 100`` makes HIVE's 0.72
+    promotion floor effectively unreachable once the other neutral/missing axes
+    are included.  The Council instead normalises each current benchmark feed
+    relative to the population returned by OpenRouter, preserving measured
+    ordering without inventing an absolute scale.
+    """
+    values: list[tuple[str, float]] = []
+    for item in items:
+        model_id = str(item.get("model_permaslug") or "").strip()
+        if not model_id:
+            continue
+        try:
+            raw = item.get(key)
+            if raw is None:
+                continue
+            values.append((model_id, float(raw)))
+        except (TypeError, ValueError):
+            continue
+    # A tiny partial feed is not enough evidence for population normalisation.
+    # Fall back to the conservative raw-index path in _metrics_for_model instead
+    # of turning a lone response into an artificial perfect score.
+    if len(values) < 5:
+        return {}
+    ordered = sorted(value for _, value in values)
+    scores: dict[str, float] = {}
+    denominator = len(ordered) - 1
+    for model_id, value in values:
+        # Average the first/last rank for ties so equal benchmark values remain equal.
+        first = ordered.index(value)
+        last = len(ordered) - 1 - ordered[::-1].index(value)
+        scores[model_id] = ((first + last) / 2.0) / denominator
+    return scores
+
+
 def _benchmark_map(items: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    """Index benchmark rows by OpenRouter permanent model slug."""
+    """Index benchmark rows and attach population-normalised quality signals."""
+    coding = _percentile_scores(items, "coding_index")
+    reasoning = _percentile_scores(items, "intelligence_index")
+    agentic = _percentile_scores(items, "agentic_index")
     result: dict[str, dict[str, Any]] = {}
     for item in items:
         model_id = str(item.get("model_permaslug") or "").strip()
-        if model_id:
-            result[model_id] = item
+        if not model_id:
+            continue
+        enriched = dict(item)
+        if model_id in coding:
+            enriched["_coding_normalised"] = coding[model_id]
+        if model_id in reasoning:
+            enriched["_reasoning_normalised"] = reasoning[model_id]
+        if model_id in agentic:
+            enriched["_agentic_normalised"] = agentic[model_id]
+        result[model_id] = enriched
     return result
 
 
 def _confidence_label(confidence_fraction: float) -> str:
-    """Map benchmark_engine's supplied-axes fraction (0.0-1.0) onto the
-    Model Registry's CONFIDENCE_LEVELS. Most axes today are unset pending a
-    real benchmark data source (see _metrics_for_model), so this will
-    typically land on "heuristic" or "unverified" rather than "measured" -
-    that's accurate, not a bug: the promotion score is real and reproducible,
-    but it isn't yet backed by measured coding/reasoning benchmarks."""
+    """Map benchmark coverage onto the Model Registry confidence vocabulary.
+
+    OpenRouter/Artificial Analysis supplies measured coding, intelligence and
+    agentic evidence when available. The remaining optional axes may still be
+    neutral, so the label describes coverage rather than pretending every
+    dimension was independently benchmarked.
+    """
     if confidence_fraction >= 0.7:
         return "measured"
     if confidence_fraction >= 0.3:
@@ -370,7 +426,15 @@ async def run_council(settings: Settings, *, run_id: str | None = None) -> Counc
         # Classify each model into all applicable categories (coding + 8 others).
         # A single model may be promoted to multiple categories if it qualifies.
         category_candidates: dict[str, list[ProviderModelInfo]] = {
-            "coding": [m for m in models if _is_coding_candidate(m, coding_keywords)],
+            # A measured coding index is stronger evidence of coding capability
+            # than a model name containing "code". Keep keyword classification
+            # as a fallback for providers without benchmark coverage.
+            "coding": [
+                m
+                for m in models
+                if _is_coding_candidate(m, coding_keywords)
+                or benchmark_by_model.get(m.model_id, {}).get("coding_index") is not None
+            ],
         }
         for cat, classifier in _CATEGORY_CLASSIFIERS.items():
             category_candidates[cat] = [m for m in models if classifier(m)]  # type: ignore[operator]

@@ -3,12 +3,13 @@ from __future__ import annotations
 import json
 import tempfile
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from app.core.config import Settings
 from app.services.ai_council import get_run_history
+from app.services.council_cycle import execute_council_cycle
 from app.services.execution_reviews import list_execution_review_plans
 from app.services.model_registry import list_categories
 from app.services.optimisation_engine import list_decisions, list_experiments, success_rate_report
@@ -84,12 +85,60 @@ async def _async_section(coro) -> dict[str, Any]:
         return {"ok": False, "error": str(exc), "error_type": type(exc).__name__}
 
 
-def _ai_council_status(settings: Settings, *, limit: int = 5) -> dict[str, Any]:
-    """Return Council history and fail the section when the latest run degraded.
+def _monthly_cycle_start() -> datetime:
+    now = datetime.now(UTC)
+    return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
-    Older history entries created before completion tracking was introduced are
-    retained as ``unknown`` rather than retroactively marked failed.
-    """
+
+def _parse_timestamp(value: object) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _model_registry_status(settings: Settings) -> dict[str, Any]:
+    registry = list_categories()
+    qualified: dict[str, list[dict[str, object]]] = {}
+    qualified_count = 0
+    total_count = 0
+    for category, items in registry.items():
+        visible: list[dict[str, object]] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            total_count += 1
+            try:
+                score = float(item.get("score") or 0.0)
+            except (TypeError, ValueError):
+                score = 0.0
+            if score >= settings.model_registry_min_visible_score:
+                visible.append(item)
+                qualified_count += 1
+        qualified[category] = visible
+    return {
+        "ok": qualified_count > 0,
+        "qualified_count": qualified_count,
+        "total_count": total_count,
+        "quality_floor": settings.model_registry_min_visible_score,
+        "registry": qualified,
+        "reason": None if qualified_count > 0 else "model registry has no qualified models",
+    }
+
+
+def _ai_council_status(
+    settings: Settings,
+    *,
+    limit: int = 5,
+    required_since: datetime | None = None,
+) -> dict[str, Any]:
+    """Return Council history and fail closed for stale or unverified runs."""
     runs = get_run_history(settings, limit=limit)
     if not runs:
         return {"ok": False, "count": 0, "runs": [], "reason": "no AI Council run history available"}
@@ -98,13 +147,18 @@ def _ai_council_status(settings: Settings, *, limit: int = 5) -> dict[str, Any]:
     completion_status = str(latest.get("completion_status") or "unknown")
     raw_downstream_sync = latest.get("downstream_sync")
     downstream_sync = raw_downstream_sync if isinstance(raw_downstream_sync, dict) else None
+    completed_at = _parse_timestamp(latest.get("completed_at") or latest.get("occurred_at"))
+    fresh = required_since is None or bool(completed_at and completed_at >= required_since.astimezone(UTC))
     verified_complete = bool(
         completion_status == "completed"
         and downstream_sync is not None
         and downstream_sync.get("ok") is True
+        and fresh
     )
     if completion_status == "degraded" or bool(downstream_sync and downstream_sync.get("ok") is False):
         reason = "latest AI Council downstream sync failed"
+    elif not fresh:
+        reason = "latest AI Council run is stale for the current monthly governance cycle"
     elif not verified_complete:
         reason = "latest AI Council run has no verified completion state"
     else:
@@ -115,11 +169,18 @@ def _ai_council_status(settings: Settings, *, limit: int = 5) -> dict[str, Any]:
         "latest": latest,
         "runs": runs,
         "completion_status": completion_status,
+        "fresh": fresh,
+        "required_since": required_since.isoformat() if required_since else None,
         "reason": reason,
     }
 
 
-async def generate_monthly_review(settings: Settings, *, period: str | None = None) -> dict[str, Any]:
+async def generate_monthly_review(
+    settings: Settings,
+    *,
+    period: str | None = None,
+    council_required_since: datetime | None = None,
+) -> dict[str, Any]:
     """Aggregate system metrics, AI model performance, token usage/costs, repo
     health, benchmark/council history and execution posture for one calendar
     month into a single report. Individual subsystem failures are captured
@@ -132,8 +193,10 @@ async def generate_monthly_review(settings: Settings, *, period: str | None = No
         "cost_and_tokens": _section(
             lambda: SqlStore(settings).cost_summary(by_model_limit=20, since=since, until=until)
         ),
-        "ai_council_history": _section(_ai_council_status, settings, limit=5),
-        "model_registry": _section(list_categories),
+        "ai_council_history": _section(
+            _ai_council_status, settings, limit=5, required_since=council_required_since
+        ),
+        "model_registry": _section(_model_registry_status, settings),
         "skills_duplicates": _section(skill_registry_duplicates, settings=settings, limit=500),
         "skills_missing": _section(skill_registry_missing, settings=settings, limit=500),
         "skills_orphans": _section(skill_registry_orphans, settings=settings, limit=500),
@@ -157,6 +220,9 @@ async def generate_monthly_review(settings: Settings, *, period: str | None = No
         "generated_at": generated_at,
         "sections_ok": ok_sections,
         "sections_total": len(sections),
+        "qualified_model_count": (
+            sections.get("model_registry", {}).get("data", {}).get("qualified_count", 0)
+        ),
         "sections": sections,
     }
     return report
@@ -199,6 +265,13 @@ def _index_report_in_d1(settings: Settings, report: dict[str, Any], r2_object: d
         "generated_at": report["generated_at"],
         "sections_ok": report["sections_ok"],
         "sections_total": report["sections_total"],
+        "ok": bool(report.get("ok") and r2_object and r2_object.get("ok")),
+        "qualified_model_count": report.get("qualified_model_count", 0),
+        "council_run_id": (
+            report.get("council_cycle", {}).get("run", {}).get("run_id")
+            if isinstance(report.get("council_cycle"), dict)
+            else None
+        ),
         "r2_object": r2_object,
         "cost_usd_total": (
             report["sections"].get("cost_and_tokens", {}).get("data", {}).get("totals", {}).get("cost_usd")
@@ -219,8 +292,23 @@ def _index_report_in_d1(settings: Settings, report: dict[str, Any], r2_object: d
 
 
 async def generate_and_archive_monthly_review(settings: Settings, *, period: str | None = None) -> dict[str, Any]:
-    """Full pipeline: build the report, archive it to R2, index it in D1."""
-    report = await generate_monthly_review(settings, period=period)
+    """Run/reuse this month's Council, then build, archive and index the review.
+
+    This makes the existing MAST ``hive-monthly-review-generate`` call a complete
+    monthly governance operation rather than a report-only step. Repeated calls in
+    the same month reuse the already verified Council run.
+    """
+    cycle_start = _monthly_cycle_start()
+    council_cycle = await execute_council_cycle(settings, reuse_since=cycle_start)
+    report = await generate_monthly_review(
+        settings,
+        period=period,
+        council_required_since=cycle_start,
+    )
+    report["council_cycle"] = council_cycle
+    if not council_cycle.get("ok"):
+        report["ok"] = False
+
     r2_object = _write_report_to_r2(settings, report)
     index_result = _index_report_in_d1(settings, report, r2_object)
     report["r2_object"] = r2_object
