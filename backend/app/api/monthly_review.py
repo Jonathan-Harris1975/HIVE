@@ -19,9 +19,9 @@ async def generate_monthly_review_endpoint(
 ) -> dict[str, object]:
     """Generate, archive (R2) and index (D1) a Monthly Review report.
 
-    Intended to be called by MAST's hive-governance-monthly job group after
-    the individual data-gathering jobs (AI Council run, skills checks,
-    optimisation stats snapshot) have already fired for the month.
+    Intended to be called by MAST's hive-governance-monthly job group. The
+    endpoint now guarantees a verified current-month AI Council run (reusing one
+    when already completed) before it assembles and archives the review.
     """
     try:
         report = await generate_and_archive_monthly_review(settings, period=period)

@@ -1,68 +1,47 @@
 from __future__ import annotations
 
-import logging
-
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.core.config import Settings, get_settings
 from app.core.security import require_admin
-from app.services.ai_council import get_run_history, record_run_completion, run_council
-from app.services.model_registry import list_categories
-from app.services.model_sync import ModelSyncError, sync_model_registry_downstream
+from app.services.ai_council import get_run_history
+from app.services.council_cycle import execute_council_cycle
 
 router = APIRouter(tags=["ai-council"], dependencies=[Depends(require_admin)])
-logger = logging.getLogger("uvicorn.error.hive.ai_council")
 
 
 @router.post("/ai-council/run")
 async def post_run_council(settings: Settings = Depends(get_settings)) -> dict[str, object]:
-    report = await run_council(settings)
-    try:
-        downstream_sync = await sync_model_registry_downstream(
-            settings,
-            source_run_id=report.run_id,
-            registry=list_categories(),
-        )
-    except ModelSyncError as exc:
-        downstream_sync = {
-            "ok": False,
-            "enabled": bool(settings.model_governance_sync_enabled),
-            "sourceRunId": report.run_id,
-            "error": str(exc),
-        }
-        record_run_completion(
-            settings,
-            run_id=report.run_id,
-            completion_status="degraded",
-            downstream_sync=downstream_sync,
-        )
-        logger.error(
-            "AI Council downstream model-governance sync failed run_id=%s reason=%s",
-            report.run_id,
-            exc,
-        )
+    cycle = await execute_council_cycle(settings)
+    run = cycle.get("run") if isinstance(cycle.get("run"), dict) else {}
+    if not cycle.get("ok"):
+        registry_failure = cycle.get("failure_stage") == "model_registry"
         raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
+            status_code=(
+                status.HTTP_503_SERVICE_UNAVAILABLE
+                if registry_failure
+                else status.HTTP_502_BAD_GATEWAY
+            ),
             detail={
-                "error": "AI Council completed but downstream model governance did not",
-                "sourceRunId": report.run_id,
-                "reason": str(exc),
+                "error": (
+                    "AI Council completed but no model qualified for the Model Registry"
+                    if registry_failure
+                    else "AI Council completed but downstream model governance did not"
+                ),
+                "sourceRunId": run.get("run_id"),
+                "reason": cycle.get("error") or "monthly AI Council governance failed",
                 "council_completed": True,
-                "downstream_sync": downstream_sync,
+                "failure_stage": cycle.get("failure_stage"),
+                "qualified_model_count": cycle.get("qualified_model_count"),
+                "downstream_sync": cycle.get("downstream_sync"),
             },
-        ) from exc
-
-    record_run_completion(
-        settings,
-        run_id=report.run_id,
-        completion_status="completed",
-        downstream_sync=downstream_sync,
-    )
+        )
     return {
-        **report.public_payload(),
+        **run,
         "ok": True,
-        "completion_status": "completed",
-        "downstream_sync": downstream_sync,
+        "completion_status": cycle.get("completion_status"),
+        "downstream_sync": cycle.get("downstream_sync"),
+        "reused": bool(cycle.get("reused")),
     }
 
 
