@@ -95,7 +95,7 @@ async def test_generate_monthly_review_assembles_all_sections(monkeypatch):
             "downstream_sync": {"ok": True},
         }],
     )
-    monkeypatch.setattr(monthly_review, "list_categories", lambda: {"coding": []})
+    monkeypatch.setattr(monthly_review, "list_categories", lambda: {"coding": [{"model_id": "acme/coder", "score": 0.91}]})
     monkeypatch.setattr(monthly_review, "skill_registry_duplicates", lambda **kw: {"ok": True, "count": 0})
     monkeypatch.setattr(monthly_review, "skill_registry_missing", lambda **kw: {"ok": True, "count": 0})
     monkeypatch.setattr(monthly_review, "skill_registry_orphans", lambda **kw: {"ok": True, "count": 0})
@@ -148,7 +148,7 @@ async def test_generate_monthly_review_isolates_a_failing_section(monkeypatch):
             "downstream_sync": {"ok": True},
         }],
     )
-    monkeypatch.setattr(monthly_review, "list_categories", lambda: {})
+    monkeypatch.setattr(monthly_review, "list_categories", lambda: {"coding": [{"model_id": "acme/coder", "score": 0.91}]})
     monkeypatch.setattr(monthly_review, "skill_registry_duplicates", boom)
     monkeypatch.setattr(monthly_review, "skill_registry_missing", lambda **kw: {"ok": True})
     monkeypatch.setattr(monthly_review, "skill_registry_orphans", lambda **kw: {"ok": True})
@@ -228,12 +228,52 @@ def test_ai_council_status_accepts_verified_completed_history(monkeypatch):
     assert result["reason"] is None
 
 
+def test_ai_council_status_rejects_stale_completed_run(monkeypatch):
+    settings = _settings()
+    monkeypatch.setattr(
+        monthly_review,
+        "get_run_history",
+        lambda settings, limit=5: [{
+            "run_id": "old-run",
+            "occurred_at": "2026-08-31T23:59:59+00:00",
+            "completion_status": "completed",
+            "downstream_sync": {"ok": True},
+        }],
+    )
+    required_since = monthly_review.datetime(2026, 9, 1, tzinfo=monthly_review.UTC)
+    result = monthly_review._ai_council_status(settings, required_since=required_since)
+    assert result["ok"] is False
+    assert result["fresh"] is False
+    assert "stale" in result["reason"]
+
+
+def test_model_registry_status_requires_a_visible_qualified_model(monkeypatch):
+    settings = _settings()
+    monkeypatch.setattr(
+        monthly_review,
+        "list_categories",
+        lambda: {"coding": [{"model_id": "too-low", "score": 0.71}]},
+    )
+    empty = monthly_review._model_registry_status(settings)
+    assert empty["ok"] is False
+    assert empty["qualified_count"] == 0
+
+    monkeypatch.setattr(
+        monthly_review,
+        "list_categories",
+        lambda: {"coding": [{"model_id": "qualified", "score": 0.9}]},
+    )
+    good = monthly_review._model_registry_status(settings)
+    assert good["ok"] is True
+    assert good["qualified_count"] == 1
+
+
 @pytest.mark.asyncio
 async def test_generate_and_archive_writes_r2_and_indexes_d1(monkeypatch, tmp_path):
     FakeD1Store._rows = {}
     settings = _settings()
 
-    async def fake_generate(settings, *, period=None):
+    async def fake_generate(settings, *, period=None, council_required_since=None):
         return {
             "ok": True,
             "report_id": "monthly-review-2026-06-abc123",
@@ -249,7 +289,17 @@ async def test_generate_and_archive_writes_r2_and_indexes_d1(monkeypatch, tmp_pa
             },
         }
 
+    async def fake_cycle(settings, *, reuse_since=None):
+        return {
+            "ok": True,
+            "reused": False,
+            "run": {"run_id": "council-test"},
+            "completion_status": "completed",
+            "downstream_sync": {"ok": True},
+        }
+
     monkeypatch.setattr(monthly_review, "generate_monthly_review", fake_generate)
+    monkeypatch.setattr(monthly_review, "execute_council_cycle", fake_cycle)
     monkeypatch.setattr(monthly_review, "R2Storage", FakeR2Storage)
     monkeypatch.setattr(monthly_review, "D1MetadataStore", FakeD1Store)
 

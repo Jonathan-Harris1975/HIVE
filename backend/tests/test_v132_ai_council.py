@@ -238,3 +238,68 @@ async def test_run_council_uses_measured_openrouter_benchmarks_for_high_confiden
     promoted = model_registry.get_ranked_models("coding")[0]
     assert promoted.confidence == "heuristic" or promoted.confidence == "measured"
     assert promoted.benchmark_score == 92.0
+
+
+@pytest.mark.asyncio
+async def test_realistic_artificial_analysis_indices_are_population_normalised(monkeypatch):
+    settings = Settings(
+        ai_council_promotion_threshold=0.72,
+        ai_council_auto_promotion_min_confidence=0.6,
+    )
+    top = _model("acme/top-coder", context_length=200_000, price=0.000001)
+    upper_mid = _model("acme/upper-mid", context_length=160_000, price=0.0000015)
+    mid = _model("acme/mid-coder", context_length=128_000, price=0.000002)
+    lower_mid = _model("acme/lower-mid", context_length=96_000, price=0.0000025)
+    low = _model("acme/low-coder", context_length=64_000, price=0.000003)
+
+    class BenchmarkProvider(FakeProvider):
+        async def list_benchmarks(self, *, source="artificial-analysis", task_type=None):
+            return [
+                {
+                    "source": "artificial-analysis",
+                    "model_permaslug": "acme/top-coder",
+                    "coding_index": 76.5,
+                    "intelligence_index": 62.1,
+                    "agentic_index": 56.6,
+                },
+                {
+                    "source": "artificial-analysis",
+                    "model_permaslug": "acme/upper-mid",
+                    "coding_index": 66.0,
+                    "intelligence_index": 52.0,
+                    "agentic_index": 44.0,
+                },
+                {
+                    "source": "artificial-analysis",
+                    "model_permaslug": "acme/mid-coder",
+                    "coding_index": 58.0,
+                    "intelligence_index": 44.0,
+                    "agentic_index": 35.0,
+                },
+                {
+                    "source": "artificial-analysis",
+                    "model_permaslug": "acme/lower-mid",
+                    "coding_index": 45.0,
+                    "intelligence_index": 34.0,
+                    "agentic_index": 24.0,
+                },
+                {
+                    "source": "artificial-analysis",
+                    "model_permaslug": "acme/low-coder",
+                    "coding_index": 30.0,
+                    "intelligence_index": 25.0,
+                    "agentic_index": 15.0,
+                },
+            ]
+
+    monkeypatch.setattr(
+        ai_council,
+        "discover_providers",
+        lambda s: [BenchmarkProvider("openrouter", [top, upper_mid, mid, lower_mid, low])],
+    )
+
+    report = await ai_council.run_council(settings)
+
+    assert any(p.model_id == "acme/top-coder" and p.category == "coding" for p in report.promotions)
+    assert model_registry.get_default_model("coding") == "acme/top-coder"
+    assert model_registry.get_ranked_models("coding")[0].benchmark_score == 76.5
