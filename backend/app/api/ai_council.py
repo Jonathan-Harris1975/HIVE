@@ -13,7 +13,8 @@ router = APIRouter(tags=["ai-council"], dependencies=[Depends(require_admin)])
 @router.post("/ai-council/run")
 async def post_run_council(settings: Settings = Depends(get_settings)) -> dict[str, object]:
     cycle = await execute_council_cycle(settings)
-    run = cycle.get("run") if isinstance(cycle.get("run"), dict) else {}
+    raw_run = cycle.get("run")
+    run: dict[str, object] = raw_run if isinstance(raw_run, dict) else {}
     if not cycle.get("ok"):
         registry_failure = cycle.get("failure_stage") == "model_registry"
         raise HTTPException(
