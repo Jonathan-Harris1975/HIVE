@@ -34,6 +34,7 @@ async def post_run_council(settings: Settings = Depends(get_settings)) -> dict[s
                 "council_completed": True,
                 "failure_stage": cycle.get("failure_stage"),
                 "qualified_model_count": cycle.get("qualified_model_count"),
+                "benchmark_sources": run.get("benchmark_sources") or [],
                 "downstream_sync": cycle.get("downstream_sync"),
             },
         )
