@@ -570,6 +570,39 @@ class Settings(BaseSettings):
         le=1.0,
         validation_alias=AliasChoices("AI_COUNCIL_AUTO_PROMOTION_MIN_CONFIDENCE"),
     )
+    # The OpenRouter benchmark feed is independent from the model-catalogue
+    # request and can legitimately take longer than /models.  Do not couple it
+    # to OPENROUTER_MODEL_LIST_TIMEOUT_SECONDS: a transient benchmark timeout
+    # would otherwise make every model look unmeasured and block the whole
+    # monthly Council promotion cycle.
+    ai_council_benchmark_timeout_seconds: float = Field(
+        30.0,
+        ge=5.0,
+        le=120.0,
+        validation_alias=AliasChoices("AI_COUNCIL_BENCHMARK_TIMEOUT_SECONDS"),
+    )
+    ai_council_benchmark_attempts: int = Field(
+        3,
+        ge=1,
+        le=5,
+        validation_alias=AliasChoices("AI_COUNCIL_BENCHMARK_ATTEMPTS"),
+    )
+    ai_council_benchmark_retry_base_seconds: float = Field(
+        1.0,
+        ge=0.0,
+        le=10.0,
+        validation_alias=AliasChoices("AI_COUNCIL_BENCHMARK_RETRY_BASE_SECONDS"),
+    )
+    # Last-known-good measured benchmark data is safe to reuse for a bounded
+    # period when OpenRouter has a transient 429/5xx/timeout.  It is not a
+    # heuristic fallback: the snapshot contains the exact previously measured
+    # feed and its age/source are recorded in Council history.
+    ai_council_benchmark_cache_max_age_days: int = Field(
+        45,
+        ge=1,
+        le=180,
+        validation_alias=AliasChoices("AI_COUNCIL_BENCHMARK_CACHE_MAX_AGE_DAYS"),
+    )
     ai_council_coding_keywords: str = Field(
         "code,coder,coding,dev,program",
         validation_alias=AliasChoices("AI_COUNCIL_CODING_KEYWORDS"),
