@@ -41,7 +41,9 @@ class OpenRouterProvider:
         if task_type:
             params["task_type"] = task_type
         headers = {"Authorization": f"Bearer {self.settings.openrouter_api_key}"}
-        async with httpx.AsyncClient(timeout=max(5.0, self.settings.openrouter_model_list_timeout_seconds)) as client:
+        async with httpx.AsyncClient(
+            timeout=max(5.0, self.settings.ai_council_benchmark_timeout_seconds)
+        ) as client:
             response = await client.get(
                 f"{self.settings.openrouter_base_url.rstrip('/')}/benchmarks",
                 headers=headers,
