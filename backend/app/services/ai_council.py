@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
+import asyncio
+from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime, timedelta
 import uuid
 from typing import Any
 
@@ -50,6 +51,7 @@ class CouncilRunReport:
     retired_models: list[str]
     promotions: list[CouncilPromotion]
     weights_used: dict[str, float]
+    benchmark_sources: list[dict[str, Any]] = field(default_factory=list)
 
     def public_payload(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -303,6 +305,178 @@ def _store_snapshot(store: D1MetadataStore, provider_name: str, model_ids: list[
     )
 
 
+def _benchmark_snapshot_id(provider_name: str, source: str) -> str:
+    return f"ai-council:benchmark:{provider_name}:{source}"
+
+
+def _store_benchmark_snapshot(
+    store: D1MetadataStore,
+    *,
+    provider_name: str,
+    source: str,
+    items: list[dict[str, Any]],
+) -> bool:
+    """Persist the last-known-good measured benchmark feed in D1.
+
+    The cache is deliberately only written for non-empty successful feeds. An
+    empty/transient provider response must never replace useful measured data.
+    """
+    if not items:
+        return False
+    result = store.upsert_metadata(
+        item_id=_benchmark_snapshot_id(provider_name, source),
+        lane=LANE,
+        source_type="benchmark_snapshot",
+        source_id=f"{provider_name}:{source}",
+        title=f"Benchmark snapshot {provider_name}/{source}",
+        url=None,
+        metadata={
+            "provider": provider_name,
+            "source": source,
+            "fetched_at": datetime.now(UTC).isoformat(),
+            "items": items,
+        },
+    )
+    return bool(result.get("ok"))
+
+
+def _load_benchmark_snapshot(
+    store: D1MetadataStore,
+    *,
+    provider_name: str,
+    source: str,
+    max_age_days: int,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Return a bounded-age measured benchmark snapshot plus diagnostics."""
+    result = store.list_metadata(lane=LANE, limit=500)
+    if not result.get("ok"):
+        return [], {"ok": False, "reason": "benchmark cache unavailable"}
+
+    expected_id = f"{provider_name}:{source}"
+    rows = result.get("items") if isinstance(result.get("items"), list) else []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        if row.get("source_type") != "benchmark_snapshot" or row.get("source_id") != expected_id:
+            continue
+        metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+        raw_items = metadata.get("items")
+        items = [dict(item) for item in raw_items if isinstance(item, dict)] if isinstance(raw_items, list) else []
+        fetched_text = str(metadata.get("fetched_at") or row.get("updated_at") or "").strip()
+        try:
+            fetched_at = datetime.fromisoformat(fetched_text.replace("Z", "+00:00"))
+            if fetched_at.tzinfo is None:
+                fetched_at = fetched_at.replace(tzinfo=UTC)
+            fetched_at = fetched_at.astimezone(UTC)
+        except ValueError:
+            return [], {"ok": False, "reason": "benchmark cache timestamp is invalid"}
+
+        age = datetime.now(UTC) - fetched_at
+        if age < timedelta(0) or age > timedelta(days=max(1, max_age_days)):
+            return [], {
+                "ok": False,
+                "reason": "benchmark cache is stale",
+                "fetched_at": fetched_at.isoformat(),
+                "age_days": round(max(0.0, age.total_seconds()) / 86400.0, 2),
+            }
+        if not items:
+            return [], {"ok": False, "reason": "benchmark cache is empty"}
+        return items, {
+            "ok": True,
+            "fetched_at": fetched_at.isoformat(),
+            "age_days": round(age.total_seconds() / 86400.0, 2),
+            "item_count": len(items),
+        }
+    return [], {"ok": False, "reason": "no benchmark cache exists"}
+
+
+async def _load_provider_benchmarks(
+    settings: Settings,
+    store: D1MetadataStore,
+    provider: Any,
+    *,
+    source: str = "artificial-analysis",
+) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
+    """Load measured benchmarks with bounded retry and last-good fallback.
+
+    Council used to swallow every benchmark exception and silently continue
+    with catalogue-only evidence.  That turned a single OpenRouter timeout into
+    zero qualified models while leaving operators with no useful diagnostic.
+    This helper keeps the fail-closed promotion rule but makes the evidence
+    retrieval itself resilient and observable.
+    """
+    loader = getattr(provider, "list_benchmarks", None)
+    provider_name = str(getattr(provider, "name", "unknown"))
+    if not callable(loader):
+        return {}, {
+            "provider": provider_name,
+            "source": source,
+            "ok": False,
+            "mode": "unsupported",
+            "item_count": 0,
+            "error": "provider does not expose measured benchmarks",
+        }
+
+    attempts = max(1, int(settings.ai_council_benchmark_attempts))
+    last_error: str | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            raw = await loader(source=source)
+            items = [dict(item) for item in raw if isinstance(item, dict)] if isinstance(raw, list) else []
+            if not items:
+                raise RuntimeError("benchmark feed returned no rows")
+            cache_written = _store_benchmark_snapshot(
+                store,
+                provider_name=provider_name,
+                source=source,
+                items=items,
+            )
+            return _benchmark_map(items), {
+                "provider": provider_name,
+                "source": source,
+                "ok": True,
+                "mode": "live",
+                "attempts": attempt,
+                "item_count": len(items),
+                "cache_written": cache_written,
+            }
+        except Exception as exc:  # noqa: BLE001 - fallback is deliberate
+            last_error = f"{type(exc).__name__}: {exc}"
+            if attempt < attempts:
+                delay = max(0.0, float(settings.ai_council_benchmark_retry_base_seconds)) * attempt
+                if delay:
+                    await asyncio.sleep(delay)
+
+    cached, cache_status = _load_benchmark_snapshot(
+        store,
+        provider_name=provider_name,
+        source=source,
+        max_age_days=settings.ai_council_benchmark_cache_max_age_days,
+    )
+    if cached:
+        return _benchmark_map(cached), {
+            "provider": provider_name,
+            "source": source,
+            "ok": True,
+            "mode": "cache",
+            "attempts": attempts,
+            "item_count": len(cached),
+            "live_error": last_error,
+            **cache_status,
+        }
+
+    return {}, {
+        "provider": provider_name,
+        "source": source,
+        "ok": False,
+        "mode": "unavailable",
+        "attempts": attempts,
+        "item_count": 0,
+        "error": last_error or "benchmark feed unavailable",
+        "cache": cache_status,
+    }
+
+
 def _record_run_history(store: D1MetadataStore, report: CouncilRunReport, max_entries: int = 200) -> None:
     result = store.list_metadata(lane=LANE, limit=500)
     history: list[dict[str, Any]] = []
@@ -396,6 +570,7 @@ async def run_council(settings: Settings, *, run_id: str | None = None) -> Counc
     all_new: list[str] = []
     all_retired: list[str] = []
     promotions: list[CouncilPromotion] = []
+    benchmark_sources: list[dict[str, Any]] = []
     models_seen = 0
 
     for provider in providers:
@@ -404,15 +579,13 @@ async def run_council(settings: Settings, *, run_id: str | None = None) -> Counc
         except Exception:  # noqa: BLE001 - one provider failing must not sink the run
             continue
 
-        benchmark_by_model: dict[str, dict[str, Any]] = {}
-        benchmark_loader = getattr(provider, "list_benchmarks", None)
-        if callable(benchmark_loader):
-            try:
-                benchmark_by_model = _benchmark_map(
-                    await benchmark_loader(source="artificial-analysis")
-                )
-            except Exception:  # noqa: BLE001 - discovery must degrade safely
-                benchmark_by_model = {}
+        benchmark_by_model, benchmark_status = await _load_provider_benchmarks(
+            settings,
+            store,
+            provider,
+            source="artificial-analysis",
+        )
+        benchmark_sources.append(benchmark_status)
 
         current_ids = [model.model_id for model in models if model.model_id]
         previous_ids = _previous_snapshot(store, provider.name)
@@ -493,6 +666,7 @@ async def run_council(settings: Settings, *, run_id: str | None = None) -> Counc
         retired_models=all_retired,
         promotions=promotions,
         weights_used=weights,
+        benchmark_sources=benchmark_sources,
     )
     _record_run_history(store, report)
 

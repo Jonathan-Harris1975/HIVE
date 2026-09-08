@@ -148,13 +148,42 @@ def list_experiments(settings: Settings) -> list[dict[str, Any]]:
 
 
 def success_rate_report(settings: Settings) -> dict[str, Any]:
-    decisions = list_decisions(settings)
-    experiments = list_experiments(settings)
+    # Monthly governance must distinguish a genuinely empty optimisation
+    # ledger from an unavailable D1 store.  The older implementation called
+    # list_decisions/list_experiments, both of which intentionally degrade to
+    # [] on storage failure for interactive reads, and therefore reported a
+    # perfectly plausible all-zero snapshot when D1 was actually down.
+    store = D1MetadataStore(settings)
+    result = store.list_metadata(lane=LANE, limit=500)
+    if not result.get("ok"):
+        return {
+            "ok": False,
+            "error": str(result.get("message") or result.get("error") or "optimisation ledger unavailable"),
+            "decision_count": 0,
+            "applied_count": 0,
+            "reverted_count": 0,
+            "rollback_rate": 0.0,
+            "experiment_count": 0,
+            "experiment_success_rate": 0.0,
+        }
+
+    rows = result.get("items") if isinstance(result.get("items"), list) else []
+    decisions = [
+        row.get("metadata") or {}
+        for row in rows
+        if isinstance(row, dict) and row.get("source_type") == "decision"
+    ]
+    experiments = [
+        row.get("metadata") or {}
+        for row in rows
+        if isinstance(row, dict) and row.get("source_type") == "experiment"
+    ]
     applied = [d for d in decisions if d.get("status") == "applied"]
     reverted = [d for d in decisions if d.get("status") == "reverted"]
     successful_experiments = [e for e in experiments if e.get("success")]
 
     return {
+        "ok": True,
         "decision_count": len(decisions),
         "applied_count": len(applied),
         "reverted_count": len(reverted),
