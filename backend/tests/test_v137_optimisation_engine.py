@@ -95,10 +95,26 @@ def test_success_rate_report_reflects_rollbacks_and_experiments(settings):
     oe.record_experiment(settings, name="exp2", hypothesis="h", outcome="o", success=False)
 
     stats = oe.success_rate_report(settings)
+    assert stats["ok"] is True
     assert stats["decision_count"] == 2
     assert stats["reverted_count"] == 1
     assert stats["experiment_count"] == 2
     assert stats["experiment_success_rate"] == pytest.approx(0.5)
+
+
+def test_success_rate_report_fails_closed_when_d1_is_unavailable(monkeypatch, settings):
+    class BrokenD1Store:
+        def __init__(self, _settings=None) -> None:
+            pass
+
+        def list_metadata(self, *, lane=None, limit=50):
+            return {"ok": False, "message": "D1 unavailable"}
+
+    monkeypatch.setattr(oe, "D1MetadataStore", BrokenD1Store)
+    stats = oe.success_rate_report(settings)
+
+    assert stats["ok"] is False
+    assert "D1 unavailable" in stats["error"]
 
 
 # ---------------------------------------------------------------------------

@@ -303,3 +303,111 @@ async def test_realistic_artificial_analysis_indices_are_population_normalised(m
     assert any(p.model_id == "acme/top-coder" and p.category == "coding" for p in report.promotions)
     assert model_registry.get_default_model("coding") == "acme/top-coder"
     assert model_registry.get_ranked_models("coding")[0].benchmark_score == 76.5
+
+@pytest.mark.asyncio
+async def test_benchmark_feed_retries_then_records_live_diagnostics(monkeypatch):
+    settings = Settings(
+        ai_council_promotion_threshold=0.5,
+        ai_council_auto_promotion_min_confidence=0.6,
+        ai_council_benchmark_attempts=2,
+        ai_council_benchmark_retry_base_seconds=0,
+    )
+    model = _model("openai/retry-coder", context_length=200_000, price=0.000001)
+
+    class FlakyBenchmarkProvider(FakeProvider):
+        attempts = 0
+
+        async def list_benchmarks(self, *, source="artificial-analysis", task_type=None):
+            self.attempts += 1
+            if self.attempts == 1:
+                raise RuntimeError("temporary benchmark outage")
+            return [{
+                "source": source,
+                "model_permaslug": "openai/retry-coder",
+                "coding_index": 92.0,
+                "intelligence_index": 89.0,
+                "agentic_index": 86.0,
+            }]
+
+    provider = FlakyBenchmarkProvider("openrouter", [model])
+    monkeypatch.setattr(ai_council, "discover_providers", lambda s: [provider])
+
+    report = await ai_council.run_council(settings)
+
+    assert provider.attempts == 2
+    assert report.benchmark_sources[0]["ok"] is True
+    assert report.benchmark_sources[0]["mode"] == "live"
+    assert report.benchmark_sources[0]["attempts"] == 2
+
+
+@pytest.mark.asyncio
+async def test_benchmark_feed_uses_recent_measured_cache_after_live_failure(monkeypatch):
+    settings = Settings(
+        ai_council_promotion_threshold=0.5,
+        ai_council_auto_promotion_min_confidence=0.6,
+        ai_council_benchmark_attempts=1,
+        ai_council_benchmark_retry_base_seconds=0,
+        ai_council_benchmark_cache_max_age_days=45,
+    )
+    model = _model("openai/cached-coder", context_length=200_000, price=0.000001)
+
+    class LiveBenchmarkProvider(FakeProvider):
+        async def list_benchmarks(self, *, source="artificial-analysis", task_type=None):
+            return [{
+                "source": source,
+                "model_permaslug": "openai/cached-coder",
+                "coding_index": 92.0,
+                "intelligence_index": 89.0,
+                "agentic_index": 86.0,
+            }]
+
+    monkeypatch.setattr(
+        ai_council,
+        "discover_providers",
+        lambda s: [LiveBenchmarkProvider("openrouter", [model])],
+    )
+    first = await ai_council.run_council(settings)
+    assert first.benchmark_sources[0]["mode"] == "live"
+
+    class BrokenBenchmarkProvider(FakeProvider):
+        async def list_benchmarks(self, *, source="artificial-analysis", task_type=None):
+            raise RuntimeError("OpenRouter 500")
+
+    model_registry.clear_registry()
+    monkeypatch.setattr(
+        ai_council,
+        "discover_providers",
+        lambda s: [BrokenBenchmarkProvider("openrouter", [model])],
+    )
+    second = await ai_council.run_council(settings)
+
+    assert second.benchmark_sources[0]["ok"] is True
+    assert second.benchmark_sources[0]["mode"] == "cache"
+    assert "OpenRouter 500" in second.benchmark_sources[0]["live_error"]
+    assert any(p.model_id == "openai/cached-coder" for p in second.promotions)
+
+
+@pytest.mark.asyncio
+async def test_benchmark_failure_is_visible_in_run_history(monkeypatch):
+    settings = Settings(
+        ai_council_benchmark_attempts=1,
+        ai_council_benchmark_retry_base_seconds=0,
+    )
+    model = _model("openai/no-benchmarks", context_length=200_000, price=0.000001)
+
+    class BrokenBenchmarkProvider(FakeProvider):
+        async def list_benchmarks(self, *, source="artificial-analysis", task_type=None):
+            raise RuntimeError("benchmark timeout")
+
+    monkeypatch.setattr(
+        ai_council,
+        "discover_providers",
+        lambda s: [BrokenBenchmarkProvider("openrouter", [model])],
+    )
+    await ai_council.run_council(settings)
+
+    latest = ai_council.get_run_history(settings)[-1]
+    status = latest["benchmark_sources"][0]
+    assert status["ok"] is False
+    assert status["mode"] == "unavailable"
+    assert "benchmark timeout" in status["error"]
