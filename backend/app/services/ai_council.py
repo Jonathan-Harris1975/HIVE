@@ -353,13 +353,15 @@ def _load_benchmark_snapshot(
         return [], {"ok": False, "reason": "benchmark cache unavailable"}
 
     expected_id = f"{provider_name}:{source}"
-    rows = result.get("items") if isinstance(result.get("items"), list) else []
+    raw_rows = result.get("items")
+    rows = raw_rows if isinstance(raw_rows, list) else []
     for row in rows:
         if not isinstance(row, dict):
             continue
         if row.get("source_type") != "benchmark_snapshot" or row.get("source_id") != expected_id:
             continue
-        metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+        raw_metadata = row.get("metadata")
+        metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
         raw_items = metadata.get("items")
         items = [dict(item) for item in raw_items if isinstance(item, dict)] if isinstance(raw_items, list) else []
         fetched_text = str(metadata.get("fetched_at") or row.get("updated_at") or "").strip()

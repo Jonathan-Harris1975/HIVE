@@ -167,7 +167,8 @@ def success_rate_report(settings: Settings) -> dict[str, Any]:
             "experiment_success_rate": 0.0,
         }
 
-    rows = result.get("items") if isinstance(result.get("items"), list) else []
+    raw_rows = result.get("items")
+    rows = raw_rows if isinstance(raw_rows, list) else []
     decisions = [
         row.get("metadata") or {}
         for row in rows
