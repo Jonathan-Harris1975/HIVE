@@ -128,7 +128,9 @@ class _FakeD1Store:
 
 def test_registered_model_survives_simulated_restart_via_d1_store():
     store = _FakeD1Store()
-    registry.register_model("coding", "persisted-model", score=0.8, provider="openrouter", store=store)
+    registry.register_model(
+        "coding", "persisted-model", score=0.8, provider="openrouter", store=store
+    )
 
     # Simulate a process restart: the in-memory registry is wiped, then
     # rehydrated from the (fake) D1 store, exactly as app/main.py does at
@@ -259,6 +261,42 @@ def test_new_fields_survive_simulated_restart_via_d1_store():
     assert ranked.confidence == "heuristic"
     assert ranked.latency_ms == 500.0
     assert ranked.cost_per_1k_tokens == 0.01
+
+
+def test_non_routable_lifecycle_is_skipped_without_deleting_history():
+    registry.register_model("coding", "retiring-model", score=0.99)
+    registry.register_model("coding", "active-model", score=0.90)
+
+    updated = registry.set_model_lifecycle(
+        "retiring-model",
+        lifecycle_status="quarantined",
+        expiration_date="2026-09-15T00:00:00Z",
+    )
+
+    assert updated == 1
+    assert registry.get_default_model("coding") == "active-model"
+    assert registry.get_ranked_models("coding")[0].lifecycle_status == "quarantined"
+
+
+def test_lifecycle_fields_survive_registry_persistence():
+    store = _FakeD1Store()
+    registry.register_model(
+        "reasoning",
+        "acme/model-202609",
+        score=0.9,
+        canonical_slug="acme/model-202609",
+        expiration_date="2026-12-01T00:00:00Z",
+        lifecycle_status="watch",
+        store=store,
+    )
+
+    registry.clear_registry()
+    registry.load_registry_from_store(store)
+    restored = registry.get_ranked_models("reasoning")[0]
+
+    assert restored.canonical_slug == "acme/model-202609"
+    assert restored.expiration_date == "2026-12-01T00:00:00Z"
+    assert restored.lifecycle_status == "watch"
 
 
 def test_model_router_ignores_registry_model_below_quality_floor():

@@ -32,7 +32,15 @@ class FakeD1Store:
         return {"ok": True, "count": len(items), "items": items}
 
 
-def _model(model_id: str, *, tools: bool = True, context_length: int = 128_000, price: float = 0.000001) -> ProviderModelInfo:
+def _model(
+    model_id: str,
+    *,
+    tools: bool = True,
+    context_length: int = 128_000,
+    price: float = 0.000001,
+    canonical_slug: str | None = None,
+    expiration_date: str | None = None,
+) -> ProviderModelInfo:
     return ProviderModelInfo(
         model_id=model_id,
         name=model_id,
@@ -44,6 +52,8 @@ def _model(model_id: str, *, tools: bool = True, context_length: int = 128_000, 
         input_modalities=("text",),
         output_modalities=("text",),
         raw={},
+        canonical_slug=canonical_slug,
+        expiration_date=expiration_date,
     )
 
 
@@ -72,7 +82,9 @@ def _isolated_state(monkeypatch):
 
 @pytest.fixture
 def settings():
-    return Settings(ai_council_promotion_threshold=0.5, ai_council_auto_promotion_min_confidence=0.3)
+    return Settings(
+        ai_council_promotion_threshold=0.5, ai_council_auto_promotion_min_confidence=0.3
+    )
 
 
 @pytest.mark.asyncio
@@ -124,8 +136,8 @@ async def test_run_council_promotion_populates_registry_context_fields(monkeypat
     assert promoted.confidence == "heuristic"
     assert promoted.benchmark_score is not None
     assert 0.0 <= promoted.benchmark_score <= 100.0
-    # price=0.0000001/token -> $0.0001 per 1k tokens
-    assert promoted.cost_per_1k_tokens == pytest.approx(0.0001, abs=1e-6)
+    # Representative 80:20 input/output blend, where output is 4x input.
+    assert promoted.cost_per_1k_tokens == pytest.approx(0.00016, abs=1e-6)
 
 
 @pytest.mark.asyncio
@@ -160,6 +172,25 @@ async def test_run_council_detects_new_and_retired_models_across_runs(monkeypatc
 
     assert "acme:acme/model-b" in second.new_models
     assert "acme:acme/model-a" in second.retired_models
+
+
+@pytest.mark.asyncio
+async def test_run_council_excludes_expired_model_from_promotion(monkeypatch, settings):
+    expiring = _model(
+        "acme/expiring-coder",
+        canonical_slug="acme/expiring-coder-2020",
+        expiration_date="2000-01-01T00:00:00Z",
+    )
+    monkeypatch.setattr(
+        ai_council,
+        "discover_providers",
+        lambda s: [FakeProvider("acme", [expiring])],
+    )
+
+    report = await ai_council.run_council(settings)
+
+    assert not any(p.model_id == "acme/expiring-coder-2020" for p in report.promotions)
+    assert report.retirement_watch[0]["lifecycle_status"] == "retired"
 
 
 @pytest.mark.asyncio
@@ -210,7 +241,9 @@ async def test_run_council_survives_a_failing_provider(monkeypatch, settings):
 
 
 @pytest.mark.asyncio
-async def test_run_council_uses_measured_openrouter_benchmarks_for_high_confidence_promotion(monkeypatch):
+async def test_run_council_uses_measured_openrouter_benchmarks_for_high_confidence_promotion(
+    monkeypatch,
+):
     settings = Settings(
         ai_council_promotion_threshold=0.5,
         ai_council_auto_promotion_min_confidence=0.6,
@@ -220,13 +253,15 @@ async def test_run_council_uses_measured_openrouter_benchmarks_for_high_confiden
     class BenchmarkProvider(FakeProvider):
         async def list_benchmarks(self, *, source="artificial-analysis", task_type=None):
             assert source == "artificial-analysis"
-            return [{
-                "source": "artificial-analysis",
-                "model_permaslug": "openai/measured-coder",
-                "coding_index": 92.0,
-                "intelligence_index": 89.0,
-                "agentic_index": 86.0,
-            }]
+            return [
+                {
+                    "source": "artificial-analysis",
+                    "model_permaslug": "openai/measured-coder",
+                    "coding_index": 92.0,
+                    "intelligence_index": 89.0,
+                    "agentic_index": 86.0,
+                }
+            ]
 
     monkeypatch.setattr(
         ai_council, "discover_providers", lambda s: [BenchmarkProvider("openrouter", [good_coder])]
@@ -234,7 +269,9 @@ async def test_run_council_uses_measured_openrouter_benchmarks_for_high_confiden
 
     report = await ai_council.run_council(settings)
 
-    assert any(p.model_id == "openai/measured-coder" and p.category == "coding" for p in report.promotions)
+    assert any(
+        p.model_id == "openai/measured-coder" and p.category == "coding" for p in report.promotions
+    )
     promoted = model_registry.get_ranked_models("coding")[0]
     assert promoted.confidence == "heuristic" or promoted.confidence == "measured"
     assert promoted.benchmark_score == 92.0
@@ -304,6 +341,7 @@ async def test_realistic_artificial_analysis_indices_are_population_normalised(m
     assert model_registry.get_default_model("coding") == "acme/top-coder"
     assert model_registry.get_ranked_models("coding")[0].benchmark_score == 76.5
 
+
 @pytest.mark.asyncio
 async def test_benchmark_feed_retries_then_records_live_diagnostics(monkeypatch):
     settings = Settings(
@@ -321,13 +359,15 @@ async def test_benchmark_feed_retries_then_records_live_diagnostics(monkeypatch)
             self.attempts += 1
             if self.attempts == 1:
                 raise RuntimeError("temporary benchmark outage")
-            return [{
-                "source": source,
-                "model_permaslug": "openai/retry-coder",
-                "coding_index": 92.0,
-                "intelligence_index": 89.0,
-                "agentic_index": 86.0,
-            }]
+            return [
+                {
+                    "source": source,
+                    "model_permaslug": "openai/retry-coder",
+                    "coding_index": 92.0,
+                    "intelligence_index": 89.0,
+                    "agentic_index": 86.0,
+                }
+            ]
 
     provider = FlakyBenchmarkProvider("openrouter", [model])
     monkeypatch.setattr(ai_council, "discover_providers", lambda s: [provider])
@@ -353,13 +393,15 @@ async def test_benchmark_feed_uses_recent_measured_cache_after_live_failure(monk
 
     class LiveBenchmarkProvider(FakeProvider):
         async def list_benchmarks(self, *, source="artificial-analysis", task_type=None):
-            return [{
-                "source": source,
-                "model_permaslug": "openai/cached-coder",
-                "coding_index": 92.0,
-                "intelligence_index": 89.0,
-                "agentic_index": 86.0,
-            }]
+            return [
+                {
+                    "source": source,
+                    "model_permaslug": "openai/cached-coder",
+                    "coding_index": 92.0,
+                    "intelligence_index": 89.0,
+                    "agentic_index": 86.0,
+                }
+            ]
 
     monkeypatch.setattr(
         ai_council,

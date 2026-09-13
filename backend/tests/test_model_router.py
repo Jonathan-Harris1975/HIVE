@@ -57,10 +57,10 @@ def test_paid_fallbacks_can_be_enabled() -> None:
     )
     router = ModelRouter(settings)
     assert router.fallback_models_for_task(TaskType.GENERAL, "dead-model") == [
-        "free-fallback:free",
-        "free-cheap:free",
         "paid-default",
         "paid-balanced",
+        "free-fallback:free",
+        "free-cheap:free",
     ]
 
 
@@ -69,3 +69,8 @@ def test_auto_mode_resolves_aims_rams_to_audit_prompt_mode() -> None:
     task = router.classify_task("Check RAMS audit wording for AIMS", Mode.AUTO)
     assert task == TaskType.AUDIT
     assert router.resolve_mode(task, Mode.AUTO) == Mode.AUDIT
+
+
+def test_audit_signal_takes_precedence_over_repo_signal() -> None:
+    router = ModelRouter(Settings())
+    assert router.classify_task("Audit this repo governance gate", Mode.AUTO) == TaskType.AUDIT

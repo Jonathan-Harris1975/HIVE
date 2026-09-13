@@ -89,21 +89,39 @@ async def test_generate_monthly_review_assembles_all_sections(monkeypatch):
     monkeypatch.setattr(
         monthly_review,
         "get_run_history",
-        lambda settings, limit=5: [{
-            "run_id": "r1",
-            "completion_status": "completed",
-            "downstream_sync": {"ok": True},
-        }],
+        lambda settings, limit=5: [
+            {
+                "run_id": "r1",
+                "completion_status": "completed",
+                "downstream_sync": {"ok": True},
+            }
+        ],
     )
-    monkeypatch.setattr(monthly_review, "list_categories", lambda: {"coding": [{"model_id": "acme/coder", "score": 0.91}]})
-    monkeypatch.setattr(monthly_review, "skill_registry_duplicates", lambda **kw: {"ok": True, "count": 0})
-    monkeypatch.setattr(monthly_review, "skill_registry_missing", lambda **kw: {"ok": True, "count": 0})
-    monkeypatch.setattr(monthly_review, "skill_registry_orphans", lambda **kw: {"ok": True, "count": 0})
-    monkeypatch.setattr(monthly_review, "skill_registry_integrity_report", lambda **kw: {"ok": True})
-    monkeypatch.setattr(monthly_review, "success_rate_report", lambda settings: {"ok": True, "rate": 0.9})
+    monkeypatch.setattr(
+        monthly_review,
+        "list_categories",
+        lambda: {"coding": [{"model_id": "acme/coder", "score": 0.91}]},
+    )
+    monkeypatch.setattr(
+        monthly_review, "skill_registry_duplicates", lambda **kw: {"ok": True, "count": 0}
+    )
+    monkeypatch.setattr(
+        monthly_review, "skill_registry_missing", lambda **kw: {"ok": True, "count": 0}
+    )
+    monkeypatch.setattr(
+        monthly_review, "skill_registry_orphans", lambda **kw: {"ok": True, "count": 0}
+    )
+    monkeypatch.setattr(
+        monthly_review, "skill_registry_integrity_report", lambda **kw: {"ok": True}
+    )
+    monkeypatch.setattr(
+        monthly_review, "success_rate_report", lambda settings: {"ok": True, "rate": 0.9}
+    )
     monkeypatch.setattr(monthly_review, "list_experiments", lambda settings: [])
     monkeypatch.setattr(monthly_review, "list_decisions", lambda settings: [])
-    monkeypatch.setattr(monthly_review, "list_execution_review_plans", lambda **kw: {"ok": True, "open_count": 2})
+    monkeypatch.setattr(
+        monthly_review, "list_execution_review_plans", lambda **kw: {"ok": True, "open_count": 2}
+    )
 
     async def fake_repo_health(settings):
         return {"ok": True, "status": "healthy"}
@@ -117,14 +135,17 @@ async def test_generate_monthly_review_assembles_all_sections(monkeypatch):
         def cost_summary(self, *, by_model_limit, since, until):
             return {"ok": True, "totals": {"cost_usd": 4.5}, "by_model": []}
 
+        def model_governance_audit(self, *, since, until):
+            return {"ok": True, "governed_request_count": 3, "budget_control": "advisory_only"}
+
     monkeypatch.setattr(monthly_review, "SqlStore", FakeSqlStore)
 
     report = await monthly_review.generate_monthly_review(settings, period="2026-06")
 
     assert report["ok"] is True
     assert report["period"] == "2026-06"
-    assert report["sections_total"] == 12
-    assert report["sections_ok"] == 12
+    assert report["sections_total"] == 13
+    assert report["sections_ok"] == 13
     assert report["sections"]["cost_and_tokens"]["data"]["totals"]["cost_usd"] == 4.5
     assert report["sections"]["repo_health"]["data"]["status"] == "healthy"
     assert report["report_id"].startswith("monthly-review-2026-06-")
@@ -142,17 +163,25 @@ async def test_generate_monthly_review_isolates_a_failing_section(monkeypatch):
     monkeypatch.setattr(
         monthly_review,
         "get_run_history",
-        lambda settings, limit=5: [{
-            "run_id": "r1",
-            "completion_status": "completed",
-            "downstream_sync": {"ok": True},
-        }],
+        lambda settings, limit=5: [
+            {
+                "run_id": "r1",
+                "completion_status": "completed",
+                "downstream_sync": {"ok": True},
+            }
+        ],
     )
-    monkeypatch.setattr(monthly_review, "list_categories", lambda: {"coding": [{"model_id": "acme/coder", "score": 0.91}]})
+    monkeypatch.setattr(
+        monthly_review,
+        "list_categories",
+        lambda: {"coding": [{"model_id": "acme/coder", "score": 0.91}]},
+    )
     monkeypatch.setattr(monthly_review, "skill_registry_duplicates", boom)
     monkeypatch.setattr(monthly_review, "skill_registry_missing", lambda **kw: {"ok": True})
     monkeypatch.setattr(monthly_review, "skill_registry_orphans", lambda **kw: {"ok": True})
-    monkeypatch.setattr(monthly_review, "skill_registry_integrity_report", lambda **kw: {"ok": True})
+    monkeypatch.setattr(
+        monthly_review, "skill_registry_integrity_report", lambda **kw: {"ok": True}
+    )
     monkeypatch.setattr(monthly_review, "success_rate_report", lambda settings: {"ok": True})
     monkeypatch.setattr(monthly_review, "list_experiments", lambda settings: [])
     monkeypatch.setattr(monthly_review, "list_decisions", lambda settings: [])
@@ -169,6 +198,9 @@ async def test_generate_monthly_review_isolates_a_failing_section(monkeypatch):
 
         def cost_summary(self, *, by_model_limit, since, until):
             return {"ok": True, "totals": {}, "by_model": []}
+
+        def model_governance_audit(self, *, since, until):
+            return {"ok": True, "governed_request_count": 0, "budget_control": "advisory_only"}
 
     monkeypatch.setattr(monthly_review, "SqlStore", FakeSqlStore)
 
@@ -201,11 +233,13 @@ def test_ai_council_status_fails_closed_for_unverified_or_degraded_history(monke
     monkeypatch.setattr(
         monthly_review,
         "get_run_history",
-        lambda settings, limit=5: [{
-            "run_id": "failed-run",
-            "completion_status": "degraded",
-            "downstream_sync": {"ok": False, "error": "AIMS sync failed"},
-        }],
+        lambda settings, limit=5: [
+            {
+                "run_id": "failed-run",
+                "completion_status": "degraded",
+                "downstream_sync": {"ok": False, "error": "AIMS sync failed"},
+            }
+        ],
     )
     degraded = monthly_review._ai_council_status(settings)
     assert degraded["ok"] is False
@@ -217,11 +251,13 @@ def test_ai_council_status_accepts_verified_completed_history(monkeypatch):
     monkeypatch.setattr(
         monthly_review,
         "get_run_history",
-        lambda settings, limit=5: [{
-            "run_id": "good-run",
-            "completion_status": "completed",
-            "downstream_sync": {"ok": True, "enabled": True},
-        }],
+        lambda settings, limit=5: [
+            {
+                "run_id": "good-run",
+                "completion_status": "completed",
+                "downstream_sync": {"ok": True, "enabled": True},
+            }
+        ],
     )
     result = monthly_review._ai_council_status(settings)
     assert result["ok"] is True
@@ -233,12 +269,14 @@ def test_ai_council_status_rejects_stale_completed_run(monkeypatch):
     monkeypatch.setattr(
         monthly_review,
         "get_run_history",
-        lambda settings, limit=5: [{
-            "run_id": "old-run",
-            "occurred_at": "2026-08-31T23:59:59+00:00",
-            "completion_status": "completed",
-            "downstream_sync": {"ok": True},
-        }],
+        lambda settings, limit=5: [
+            {
+                "run_id": "old-run",
+                "occurred_at": "2026-08-31T23:59:59+00:00",
+                "completion_status": "completed",
+                "downstream_sync": {"ok": True},
+            }
+        ],
     )
     required_since = monthly_review.datetime(2026, 9, 1, tzinfo=monthly_review.UTC)
     result = monthly_review._ai_council_status(settings, required_since=required_since)
@@ -307,7 +345,9 @@ async def test_generate_and_archive_writes_r2_and_indexes_d1(monkeypatch, tmp_pa
 
     assert result["r2_object"]["ok"] is True
     assert result["r2_object"]["bucket"] == "audits"
-    assert result["r2_object"]["key"] == "monthly-reviews/2026-06/monthly-review-2026-06-abc123.json"
+    assert (
+        result["r2_object"]["key"] == "monthly-reviews/2026-06/monthly-review-2026-06-abc123.json"
+    )
     assert result["d1_index"]["ok"] is True
     assert FakeR2Storage.last_written["report_id"] == "monthly-review-2026-06-abc123"
 
