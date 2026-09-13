@@ -15,7 +15,8 @@ from app.core.security import require_admin
 from app.core.sse import heartbeat_stream
 from app.services.brand_modes import build_system_prompt
 from app.services.context_manager import ContextWindow
-from app.services.model_router import Mode, ModelRouter
+from app.services.model_governance import ModelUseJustification
+from app.services.model_router import Mode, ModelRouter, TaskType
 from app.services.openrouter import OpenRouterClient
 from app.services.skill_registry import build_skill_context
 from app.storage.sql_store import SqlStore, _default_conversation_title
@@ -33,6 +34,8 @@ class ChatRequest(BaseModel):
     history: list[ChatTurn] = Field(default_factory=list)
     mode: Mode = Mode.AUTO
     model: str | None = None
+    data_classification: Literal["public", "internal", "confidential", "restricted"] = "internal"
+    model_justification: ModelUseJustification | None = None
     temperature: float = 0.4
     max_tokens: int = 2600
     conversation_id: str | None = None
@@ -93,8 +96,19 @@ def build_payload_with_context(
     router_service = ModelRouter(settings)
     task = router_service.classify_task(request.message, request.mode)
     effective_mode = router_service.resolve_mode(task, request.mode)
-    selected_model = router_service.select_model(task, request.model)
-    fallback_models = router_service.fallback_models_for_task(task, selected_model)
+    decision = router_service.select_model_decision(
+        task,
+        request.model,
+        data_classification=request.data_classification,
+        justification=request.model_justification,
+    )
+    selected_model = decision.selected_model
+    fallback_models = router_service.fallback_models_for_task(
+        task,
+        selected_model,
+        allow_free=decision.free_fallback_allowed,
+        allow_premium=decision.justification_valid,
+    )
 
     window = ContextWindow()
     window.add("system", build_system_prompt(effective_mode))
@@ -110,16 +124,17 @@ def build_payload_with_context(
         if request.use_skills
         else {"ok": True, "enabled": False, "prompt": "", "skills": []}
     )
+    skill_context = {**skill_context, "model_governance": decision.public_payload()}
     skill_prompt = skill_context.get("prompt")
     if isinstance(skill_prompt, str) and skill_prompt:
         window.add("system", skill_prompt)
 
     if request.conversation_id and request.use_persisted_history and request.db_history_limit > 0:
-        for turn in SqlStore(settings).recent_chat_turns(
+        for persisted_turn in SqlStore(settings).recent_chat_turns(
             request.conversation_id,
             limit=request.db_history_limit,
         ):
-            window.add(turn["role"], turn["content"])
+            window.add(persisted_turn["role"], persisted_turn["content"])
 
     for turn in request.history:
         window.add(turn.role, turn.content)
@@ -139,7 +154,6 @@ def build_payload_with_context(
     return payload, fallback_models, skill_context
 
 
-
 @router.get("/chat/conversations", response_model=ConversationListResponse)
 def list_chat_conversations(
     limit: int = Query(50, ge=1, le=200),
@@ -154,8 +168,14 @@ def list_chat_conversations(
             enabled=bool(result.get("enabled")),
             error=str(result.get("error") or "conversation_storage_unavailable"),
         )
-    conversations = [ConversationSummary(**item) for item in result.get("conversations", []) if isinstance(item, dict)]
-    return ConversationListResponse(ok=True, enabled=True, count=len(conversations), conversations=conversations)
+    conversations = [
+        ConversationSummary(**item)
+        for item in result.get("conversations", [])
+        if isinstance(item, dict)
+    ]
+    return ConversationListResponse(
+        ok=True, enabled=True, count=len(conversations), conversations=conversations
+    )
 
 
 @router.post("/chat/conversations/{conversation_id}/auto-title", response_model=AutoTitleResponse)
@@ -180,14 +200,34 @@ async def auto_title_conversation(
         default_title = _default_conversation_title(user_message) or ""
         force = bool(request.force) if request else False
         if current_auto_titled and current_title and not force:
-            return AutoTitleResponse(ok=True, conversation_id=conversation_id, title=current_title, auto_titled=True, skipped=True)
-        if current_title and not current_auto_titled and current_title != default_title and not force:
-            return AutoTitleResponse(ok=True, conversation_id=conversation_id, title=current_title, auto_titled=False, skipped=True)
+            return AutoTitleResponse(
+                ok=True,
+                conversation_id=conversation_id,
+                title=current_title,
+                auto_titled=True,
+                skipped=True,
+            )
+        if (
+            current_title
+            and not current_auto_titled
+            and current_title != default_title
+            and not force
+        ):
+            return AutoTitleResponse(
+                ok=True,
+                conversation_id=conversation_id,
+                title=current_title,
+                auto_titled=False,
+                skipped=True,
+            )
 
     payload: dict[str, object] = {
-        "model": settings.default_model,
+        "model": settings.cheap_model,
         "messages": [
-            {"role": "system", "content": "Generate a concise 4–6 word title for this conversation. Return only the title, no punctuation."},
+            {
+                "role": "system",
+                "content": "Generate a concise 4–6 word title for this conversation. Return only the title, no punctuation.",
+            },
             {
                 "role": "user",
                 "content": f"User: {user_message[:1200]}\nAssistant: {assistant_reply[:1200]}",
@@ -195,21 +235,45 @@ async def auto_title_conversation(
         ],
         "temperature": 0.2,
         "max_tokens": 24,
+        "usage": {"include": True},
     }
     completion = await OpenRouterClient(settings).chat_completion(
         payload,
-        fallback_models=[settings.openrouter_free_fallback_model],
+        fallback_models=ModelRouter(settings).fallback_models_for_task(
+            TaskType.SUMMARY,
+            settings.cheap_model,
+            allow_free=False,
+        ),
     )
+    usage = completion.get("usage")
+    if isinstance(usage, dict):
+        await asyncio.to_thread(
+            store.record_usage_event,
+            conversation_id=conversation_id,
+            model_used=str(completion.get("model") or settings.cheap_model),
+            provider=(str(completion.get("provider")) if completion.get("provider") else None),
+            usage=usage,
+            metadata={"operation": "conversation_auto_title"},
+        )
     choice = (completion.get("choices") or [{}])[0]
     message = choice.get("message") or {}
     title = _clean_auto_title(_reply_text(message.get("content")))
     if not title:
-        return AutoTitleResponse(ok=True, conversation_id=conversation_id, skipped=True, error="empty_title")
+        return AutoTitleResponse(
+            ok=True, conversation_id=conversation_id, skipped=True, error="empty_title"
+        )
 
     result = store.set_auto_title(conversation_id, title)
     if not result.get("ok"):
-        return AutoTitleResponse(ok=False, conversation_id=conversation_id, title=title, error=str(result.get("error") or "title_not_saved"))
-    return AutoTitleResponse(ok=True, conversation_id=conversation_id, title=title, auto_titled=True)
+        return AutoTitleResponse(
+            ok=False,
+            conversation_id=conversation_id,
+            title=title,
+            error=str(result.get("error") or "title_not_saved"),
+        )
+    return AutoTitleResponse(
+        ok=True, conversation_id=conversation_id, title=title, auto_titled=True
+    )
 
 
 @router.post("/chat/stream")
@@ -265,6 +329,7 @@ async def _stream_and_record_chat(
     if skill_context is not None:
         meta_event["skills_used"] = _skill_summaries(skill_context)
         meta_event["skill_context_status"] = _skill_context_status(skill_context)
+        meta_event["model_governance"] = skill_context.get("model_governance")
     yield meta_event
 
     try:
@@ -300,6 +365,7 @@ async def _stream_and_record_chat(
                     "db_error": result.get("error"),
                     "skills_used": _skill_summaries(skill_context),
                     "skill_context_status": _skill_context_status(skill_context),
+                    "model_governance": _model_governance_context(skill_context),
                     "timings": {
                         **(request_timings or {}),
                         "stream_total_seconds": round(time.perf_counter() - stream_started, 3),
@@ -357,6 +423,7 @@ def _record_streamed_turn(
             "test_run_id": request.test_run_id,
             "skills_used": _skill_summaries(skill_context),
             "skill_context_status": _skill_context_status(skill_context),
+            "model_governance": _model_governance_context(skill_context),
             "timings": timings or {},
             "finish_reason": event.get("finish_reason"),
             "completion_truncated": bool(event.get("completion_truncated")),
@@ -399,6 +466,7 @@ async def chat(
             "finish_reason": finish_reason,
             "empty_reply": empty_reply,
             "test_run_id": request.test_run_id,
+            "model_governance": _model_governance_context(skill_context),
         },
     )
     return {
@@ -417,8 +485,8 @@ async def chat(
         "db_error": db_record.get("error"),
         "skills_used": _skill_summaries(skill_context),
         "skill_context_status": _skill_context_status(skill_context),
+        "model_governance": _model_governance_context(skill_context),
     }
-
 
 
 def _clean_auto_title(value: object) -> str:
@@ -428,6 +496,13 @@ def _clean_auto_title(value: object) -> str:
         return ""
     words = title.split()[:8]
     return " ".join(words)[:80].strip()
+
+
+def _model_governance_context(
+    skill_context: dict[str, object] | None,
+) -> dict[str, object] | None:
+    raw = (skill_context or {}).get("model_governance")
+    return raw if isinstance(raw, dict) else None
 
 
 def _skill_summaries(skill_context: dict[str, object] | None) -> list[dict[str, object]]:

@@ -6,8 +6,8 @@ import logging
 import tempfile
 import time
 import zipfile
-from dataclasses import asdict
 from collections.abc import Iterator
+from dataclasses import asdict
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Literal
@@ -17,8 +17,6 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, 
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from app.core.config import Settings, get_settings
-from app.core.security import require_admin
 from app.api.file_api_utils import (
     _batches,
     _decode_base64_upload,
@@ -30,6 +28,8 @@ from app.api.file_api_utils import (
     _validate_object_key,
     _validate_upload_content_type,
 )
+from app.core.config import Settings, get_settings
+from app.core.security import require_admin
 from app.ingestion.chunking import chunks_to_dicts, split_text_into_chunks
 from app.ingestion.file_ingestion import ingest_bytes_content, ingest_text_content, ingest_upload
 from app.ingestion.text_extractors import extract_text_with_metadata
@@ -37,6 +37,7 @@ from app.ingestion.zip_ingestion import UnsafeZipError, extract_text_from_zip, i
 from app.services.brand_modes import build_system_prompt
 from app.services.context_manager import ContextWindow
 from app.services.embeddings import CloudflareEmbeddingsClient
+from app.services.model_governance import ModelUseJustification
 from app.services.model_router import Mode, ModelRouter
 from app.services.openrouter import OpenRouterClient
 from app.services.skill_registry import get_skill_catalogue_item
@@ -127,6 +128,8 @@ class ChatWithFileRequest(BaseModel):
     history: list[ChatTurn] = Field(default_factory=list)
     mode: Mode = Mode.FILE_ANALYSIS
     model: str | None = None
+    data_classification: Literal["public", "internal", "confidential", "restricted"] = "internal"
+    model_justification: ModelUseJustification | None = None
     temperature: float = 0.3
     max_tokens: int = 1200
     max_file_chars: int | None = None
@@ -197,9 +200,7 @@ async def upload_file(
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)
         ) from exc
-    db_record = SqlStore(settings).record_file(
-        result, extra_metadata=_upload_metadata(lane_config)
-    )
+    db_record = SqlStore(settings).record_file(result, extra_metadata=_upload_metadata(lane_config))
     return {
         "ok": True,
         "file": result.__dict__,
@@ -542,7 +543,10 @@ def download_r2_lane_object(
         ) from exc
     except RuntimeError as exc:
         logger.warning(
-            "R2 object download failed lane=%s key=%s error=%s", lane_config.get("lane"), clean_key, exc
+            "R2 object download failed lane=%s key=%s error=%s",
+            lane_config.get("lane"),
+            clean_key,
+            exc,
         )
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
@@ -1173,7 +1177,9 @@ async def chat_with_file(
                 fallback_sql=request.vectorize_fallback_sql,
             )
         else:
-            retrieval = store.search_file_chunks(query=query, object_key=clean_key, limit=chunk_limit)
+            retrieval = store.search_file_chunks(
+                query=query, object_key=clean_key, limit=chunk_limit
+            )
             if isinstance(retrieval, dict):
                 retrieval["retrieval_mode"] = "sql"
         timings["chunk_retrieval_seconds"] = round(time.perf_counter() - retrieval_started, 3)
@@ -1210,7 +1216,8 @@ async def chat_with_file(
                     "ok": False,
                     "stage": stage,
                     "error_code": "chunk_index_failed",
-                    "message": chunk_index_result.get("db_error") or "File chunks could not be recorded.",
+                    "message": chunk_index_result.get("db_error")
+                    or "File chunks could not be recorded.",
                     "chunk_index": chunk_index_result,
                     "timings": _finalise_timings(timings, total_started),
                 }
@@ -1225,7 +1232,9 @@ async def chat_with_file(
                     fallback_sql=request.vectorize_fallback_sql,
                 )
             else:
-                retrieval = store.search_file_chunks(query=query, object_key=clean_key, limit=chunk_limit)
+                retrieval = store.search_file_chunks(
+                    query=query, object_key=clean_key, limit=chunk_limit
+                )
                 if isinstance(retrieval, dict):
                     retrieval["retrieval_mode"] = "sql"
             timings["chunk_retrieval_seconds"] = round(time.perf_counter() - retrieval_started, 3)
@@ -1236,7 +1245,9 @@ async def chat_with_file(
                 "ok": False,
                 "stage": stage,
                 "error_code": "chunk_retrieval_failed",
-                "message": (retrieval or {}).get("error") if isinstance(retrieval, dict) else "Chunk retrieval failed.",
+                "message": (retrieval or {}).get("error")
+                if isinstance(retrieval, dict)
+                else "Chunk retrieval failed.",
                 "retrieval": retrieval if isinstance(retrieval, dict) else None,
                 "timings": _finalise_timings(timings, total_started),
                 "hint": "Run POST /v1/files/chunk first, retry with use_chunks=false for small files, or enable SQL fallback for Vectorize.",
@@ -1343,6 +1354,7 @@ async def chat_with_file(
             "message": "File read and prompt build completed; model call was skipped.",
             "selected_model": selected_model,
             "fallback_models": fallback_models,
+            "model_governance": prompt_context.get("model_governance"),
             "effective_mode": str(effective_mode),
             "workflow_preset": workflow_metadata,
             "selected_skill": prompt_context.get("selected_skill"),
@@ -1439,6 +1451,7 @@ async def chat_with_file(
             "retrieval_metadata": retrieval_metadata,
             "workflow_preset": workflow_metadata,
             "selected_skill": prompt_context.get("selected_skill"),
+            "model_governance": prompt_context.get("model_governance"),
             "timings": timings,
             "test_run_id": request.test_run_id,
         },
@@ -1459,6 +1472,7 @@ async def chat_with_file(
         "stage": "complete",
         "workflow_preset": workflow_metadata,
         "selected_skill": prompt_context.get("selected_skill"),
+        "model_governance": prompt_context.get("model_governance"),
         "timings": _finalise_timings(timings, total_started),
         "conversation_id": db_record.get("conversation_id") or request.conversation_id,
         "db_recorded": bool(db_record.get("ok")),
@@ -1512,7 +1526,9 @@ def files_diagnostics(
             "files": [asdict(item) for item in objects],
         }
     except RuntimeError as exc:
-        logger.warning("Storage diagnostics list probe failed prefix=%s error=%s", clean_prefix, exc)
+        logger.warning(
+            "Storage diagnostics list probe failed prefix=%s error=%s", clean_prefix, exc
+        )
         diagnostics["ok"] = False
         diagnostics["list_probe"] = {
             "ok": False,
@@ -1742,7 +1758,9 @@ def _finalise_timings(
     return final
 
 
-def _selected_skill_context(request: ChatWithFileRequest, settings: Settings) -> dict[str, object] | None:
+def _selected_skill_context(
+    request: ChatWithFileRequest, settings: Settings
+) -> dict[str, object] | None:
     skill_id = (request.skill_id or "").strip()
     fallback_title = (request.skill_title or skill_id).strip()
     if not skill_id:
@@ -1957,9 +1975,7 @@ def _read_file_sources_for_chat(
         raise ValueError("At least one file is required")
 
     source_label = (
-        str(citations[0]["label"])
-        if len(citations) == 1
-        else f"{len(citations)} selected files"
+        str(citations[0]["label"]) if len(citations) == 1 else f"{len(citations)} selected files"
     )
     return {
         "obj": primary_obj,
@@ -1986,8 +2002,19 @@ def _build_file_chat_payload(
     router_service = ModelRouter(settings)
     task = router_service.classify_task(request.message, request.mode)
     effective_mode = router_service.resolve_mode(task, request.mode)
-    selected_model = router_service.select_model(task, request.model)
-    fallback_models = router_service.fallback_models_for_task(task, selected_model)
+    decision = router_service.select_model_decision(
+        task,
+        request.model,
+        data_classification=request.data_classification,
+        justification=request.model_justification,
+    )
+    selected_model = decision.selected_model
+    fallback_models = router_service.fallback_models_for_task(
+        task,
+        selected_model,
+        allow_free=decision.free_fallback_allowed,
+        allow_premium=decision.justification_valid,
+    )
 
     source_items = sources or []
     multiple_sources = len(source_items) > 1
@@ -2056,6 +2083,7 @@ def _build_file_chat_payload(
         "messages": window.trimmed_messages(),
         "temperature": request.temperature,
         "max_tokens": max(request.max_tokens, settings.openrouter_min_response_tokens),
+        "usage": {"include": True},
     }
     return {
         "payload": payload,
@@ -2063,6 +2091,7 @@ def _build_file_chat_payload(
         "selected_model": selected_model,
         "effective_mode": effective_mode,
         "selected_skill": selected_skill,
+        "model_governance": decision.public_payload(),
     }
 
 
@@ -2355,7 +2384,9 @@ def _target_upload_lane(settings: Settings, lane: str) -> dict[str, Any]:
     return _require_r2_lane(settings, lane, require_read=False, require_write=True)
 
 
-def _upload_metadata(lane_config: dict[str, Any], test_run_id: str | None = None) -> dict[str, object]:
+def _upload_metadata(
+    lane_config: dict[str, Any], test_run_id: str | None = None
+) -> dict[str, object]:
     metadata: dict[str, object] = {
         "lane": lane_config.get("lane"),
         "bucket": lane_config.get("bucket"),
@@ -2537,5 +2568,3 @@ def _storage_error_response(
             "addressing_style": settings.r2_addressing_style,
         },
     }
-
-

@@ -78,7 +78,8 @@ def init_database(settings: Settings = Depends(get_settings)) -> dict[str, objec
     sql_result = sql.init_schema()
     d1_result = d1.init_schema()
     return {
-        "ok": bool(sql_result.get("ok") or not sql.enabled) and bool(d1_result.get("ok") or not d1.enabled),
+        "ok": bool(sql_result.get("ok") or not sql.enabled)
+        and bool(d1_result.get("ok") or not d1.enabled),
         "sql": sql_result,
         "d1": d1_result,
     }
@@ -97,7 +98,8 @@ def database_ping_write(settings: Settings = Depends(get_settings)) -> dict[str,
     sql_result = sql.ping_write()
     d1_result = d1.ping_write()
     return {
-        "ok": bool(sql_result.get("ok") or not sql.enabled) and bool(d1_result.get("ok") or not d1.enabled),
+        "ok": bool(sql_result.get("ok") or not sql.enabled)
+        and bool(d1_result.get("ok") or not d1.enabled),
         "sql": sql_result,
         "d1": d1_result,
     }
@@ -180,6 +182,17 @@ def cost_summary(
     """Summarise token/cost records captured in SQL storage."""
 
     return SqlStore(settings).cost_summary(by_model_limit=by_model_limit)
+
+
+@router.get("/db/model-governance-audit")
+def model_governance_audit(
+    since: str | None = Query(None, max_length=64),
+    until: str | None = Query(None, max_length=64),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    """Summarise premium decisions and policy substitutions for review."""
+
+    return SqlStore(settings).model_governance_audit(since=since, until=until)
 
 
 @router.get("/db/ecosystem-metadata")

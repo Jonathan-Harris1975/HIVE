@@ -8,6 +8,7 @@ from app.core.security import require_admin
 from app.services.model_registry import (
     CATEGORIES,
     CONFIDENCE_LEVELS,
+    LIFECYCLE_STATUSES,
     ModelRegistryError,
     get_default_model,
     get_ranked_models,
@@ -29,6 +30,9 @@ class RegisterModelRequest(BaseModel):
     confidence: str = Field("unverified", description=f"One of {CONFIDENCE_LEVELS}")
     latency_ms: float | None = Field(None, ge=0.0)
     cost_per_1k_tokens: float | None = Field(None, ge=0.0)
+    canonical_slug: str | None = Field(None, max_length=240)
+    expiration_date: str | None = Field(None, max_length=80)
+    lifecycle_status: str = Field("active", description=f"One of {LIFECYCLE_STATUSES}")
 
 
 @router.get("/model-registry/categories")
@@ -50,8 +54,10 @@ async def get_category_models(
     except ModelRegistryError as error:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
     ranked = [
-        model for model in all_ranked
+        model
+        for model in all_ranked
         if model.score >= settings.model_registry_min_visible_score
+        and model.lifecycle_status in {"active", "watch"}
     ]
     return {
         "category": category,
@@ -69,6 +75,9 @@ async def get_category_models(
                 "confidence": model.confidence,
                 "latency_ms": model.latency_ms,
                 "cost_per_1k_tokens": model.cost_per_1k_tokens,
+                "canonical_slug": model.canonical_slug,
+                "expiration_date": model.expiration_date,
+                "lifecycle_status": model.lifecycle_status,
             }
             for model in ranked
         ],
@@ -102,6 +111,9 @@ async def post_register_model(
             confidence=body.confidence,
             latency_ms=body.latency_ms,
             cost_per_1k_tokens=body.cost_per_1k_tokens,
+            canonical_slug=body.canonical_slug,
+            expiration_date=body.expiration_date,
+            lifecycle_status=body.lifecycle_status,
             store=store,
         )
     except ModelRegistryError as error:
