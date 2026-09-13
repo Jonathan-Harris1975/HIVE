@@ -28,6 +28,9 @@ class ProviderModelInfo:
     input_modalities: tuple[str, ...]
     output_modalities: tuple[str, ...]
     raw: dict[str, Any]
+    canonical_slug: str | None = None
+    expiration_date: str | None = None
+    supported_parameters: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -73,9 +76,11 @@ def parse_provider_model(raw: dict[str, Any]) -> ProviderModelInfo:
     """
     model_id = str(raw.get("id") or "")
     name = str(raw.get("name") or model_id)
-    pricing = raw.get("pricing") if isinstance(raw.get("pricing"), dict) else {}
+    raw_pricing = raw.get("pricing")
+    pricing: dict[str, Any] = raw_pricing if isinstance(raw_pricing, dict) else {}
     supported_parameters = _string_tuple(raw.get("supported_parameters"))
-    architecture = raw.get("architecture") if isinstance(raw.get("architecture"), dict) else {}
+    raw_architecture = raw.get("architecture")
+    architecture: dict[str, Any] = raw_architecture if isinstance(raw_architecture, dict) else {}
 
     return ProviderModelInfo(
         model_id=model_id,
@@ -83,15 +88,16 @@ def parse_provider_model(raw: dict[str, Any]) -> ProviderModelInfo:
         context_length=_safe_int(raw.get("context_length")),
         pricing_prompt=_parse_price(pricing.get("prompt")),
         pricing_completion=_parse_price(pricing.get("completion")),
-        supports_tools=any(
-            token in supported_parameters for token in ("tools", "tool_choice")
-        ),
+        supports_tools=any(token in supported_parameters for token in ("tools", "tool_choice")),
         supports_structured_output=any(
             token in supported_parameters for token in ("response_format", "structured_outputs")
         ),
         input_modalities=_string_tuple(architecture.get("input_modalities")),
         output_modalities=_string_tuple(architecture.get("output_modalities")),
         raw=raw,
+        canonical_slug=(str(raw.get("canonical_slug")) if raw.get("canonical_slug") else None),
+        expiration_date=(str(raw.get("expiration_date")) if raw.get("expiration_date") else None),
+        supported_parameters=supported_parameters,
     )
 
 
