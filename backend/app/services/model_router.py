@@ -1,10 +1,19 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from enum import StrEnum
 from typing import Any
 
 from app.core.config import Settings
 from app.services import model_registry
+from app.services.model_governance import (
+    ModelSelectionDecision,
+    ModelUseJustification,
+    is_premium_model,
+    lifecycle_is_routable,
+    lifecycle_status,
+    select_with_governance,
+)
 
 
 class TaskType(StrEnum):
@@ -64,14 +73,15 @@ class ModelRouter:
 
     def classify_task(self, user_message: str, requested_mode: Mode = Mode.AUTO) -> TaskType:
         text = user_message.lower()
-        if requested_mode == Mode.CODE or any(
-            word in text for word in ["repo", "python", "javascript", "bug", "traceback", "ci error"]
-        ):
-            return TaskType.CODE
         if requested_mode in {Mode.AUDIT, Mode.BRAND} or any(
             word in text for word in ["aims", "rams", "audit", "quarantine", "koyeb", "gate"]
         ):
             return TaskType.AUDIT
+        if requested_mode == Mode.CODE or any(
+            word in text
+            for word in ["repo", "python", "javascript", "bug", "traceback", "ci error"]
+        ):
+            return TaskType.CODE
         if requested_mode == Mode.FILE_ANALYSIS or any(
             word in text for word in ["upload", "zip", "spreadsheet", "pdf", "file"]
         ):
@@ -101,19 +111,17 @@ class ModelRouter:
         ranked = model_registry.get_ranked_models(category)
         if not ranked:
             return None
-        candidate = ranked[0]
-        if candidate.score < self.settings.model_registry_min_visible_score:
-            return None
-        return candidate.model_id
+        return next(
+            (
+                candidate.model_id
+                for candidate in ranked
+                if candidate.score >= self.settings.model_registry_min_visible_score
+                and lifecycle_is_routable(candidate.lifecycle_status)
+            ),
+            None,
+        )
 
-    def select_model(self, task: TaskType, requested_model: str | None = None) -> str:
-        if requested_model:
-            return requested_model
-
-        # Category defaults are reviewed by the monthly AI Council and stored
-        # in D1. Each task prefers the best high-quality registry model for the
-        # appropriate capability, while retaining the existing static setting
-        # as a standalone-safe fallback when the registry is empty/unavailable.
+    def _baseline_model(self, task: TaskType) -> str:
         category_by_task = {
             TaskType.SUMMARY: "cheap",
             TaskType.FILE_TRIAGE: "long_context",
@@ -132,7 +140,56 @@ class ModelRouter:
         }
         return self._registry_default(category_by_task[task]) or static_by_task[task]
 
-    def fallback_models_for_task(self, task: TaskType, selected_model: str) -> list[str]:
+    def select_model(self, task: TaskType, requested_model: str | None = None) -> str:
+        if requested_model:
+            return requested_model
+
+        return self._baseline_model(task)
+
+    def select_model_decision(
+        self,
+        task: TaskType,
+        requested_model: str | None = None,
+        *,
+        data_classification: str = "internal",
+        justification: ModelUseJustification | None = None,
+    ) -> ModelSelectionDecision:
+        """Return the selected model together with persistent audit evidence."""
+
+        baseline = self._baseline_model(task)
+        decision = select_with_governance(
+            task=str(task),
+            requested_model=requested_model,
+            baseline_model=baseline,
+            data_classification=data_classification,
+            justification=justification,
+            settings=self.settings,
+        )
+        status = self._registered_lifecycle_status(decision.selected_model)
+        if status is not None and not lifecycle_is_routable(status):
+            return replace(
+                decision,
+                selected_model=baseline,
+                selection_source="lifecycle_override_replaced_with_baseline",
+                policy_issues=(*decision.policy_issues, f"model_lifecycle_{status}"),
+            )
+        return decision
+
+    def _registered_lifecycle_status(self, model_id: str) -> str | None:
+        for category in model_registry.CATEGORIES:
+            for item in model_registry.get_ranked_models(category):
+                if model_id in {item.model_id, item.canonical_slug}:
+                    return item.lifecycle_status
+        return None
+
+    def fallback_models_for_task(
+        self,
+        task: TaskType,
+        selected_model: str,
+        *,
+        allow_free: bool = True,
+        allow_premium: bool = False,
+    ) -> list[str]:
         by_task = {
             TaskType.SUMMARY: [
                 self.settings.openrouter_free_fallback_model,
@@ -173,9 +230,21 @@ class ModelRouter:
                 self.settings.balanced_model,
             ],
         }[task]
-        return self._dedupe_and_filter_fallbacks(by_task, selected_model)
+        return self._dedupe_and_filter_fallbacks(
+            by_task,
+            selected_model,
+            allow_free=allow_free,
+            allow_premium=allow_premium,
+        )
 
-    def _dedupe_and_filter_fallbacks(self, candidates: list[str], selected_model: str) -> list[str]:
+    def _dedupe_and_filter_fallbacks(
+        self,
+        candidates: list[str],
+        selected_model: str,
+        *,
+        allow_free: bool,
+        allow_premium: bool,
+    ) -> list[str]:
         seen: set[str] = {selected_model}
         free_fallbacks: list[str] = []
         paid_fallbacks: list[str] = []
@@ -185,11 +254,19 @@ class ModelRouter:
                 continue
             seen.add(model)
             if self._is_free_model_id(model):
-                free_fallbacks.append(model)
-            elif self.settings.allow_paid_fallback:
+                if allow_free:
+                    free_fallbacks.append(model)
+            elif self.settings.allow_paid_fallback and (
+                allow_premium or not is_premium_model(model, self.settings)
+            ):
                 paid_fallbacks.append(model)
 
-        return free_fallbacks + paid_fallbacks
+        # When paid fallbacks are enabled, try the governed stable ladder
+        # before the best-effort free endpoint. In free-only development mode,
+        # preserve the free-only behaviour.
+        return (
+            paid_fallbacks + free_fallbacks if self.settings.allow_paid_fallback else free_fallbacks
+        )
 
     def _is_free_model_id(self, model: str) -> bool:
         return model == self.settings.openrouter_free_fallback_model or model.endswith(":free")
@@ -210,7 +287,10 @@ class ModelRouter:
         model_id = str(model.get("id") or "")
         name = str(model.get("name") or model_id)
         description = str(model.get("description") or "")
-        architecture = model.get("architecture") if isinstance(model.get("architecture"), dict) else {}
+        raw_architecture = model.get("architecture")
+        architecture: dict[str, Any] = (
+            raw_architecture if isinstance(raw_architecture, dict) else {}
+        )
         input_modalities = self._string_list(architecture.get("input_modalities"))
         output_modalities = self._string_list(architecture.get("output_modalities"))
         modality = architecture.get("modality")
@@ -219,7 +299,14 @@ class ModelRouter:
             input_modalities = input_modalities or inferred_input
             output_modalities = output_modalities or inferred_output
         supported_parameters = self._string_list(model.get("supported_parameters"))
-        pricing = model.get("pricing") if isinstance(model.get("pricing"), dict) else {}
+        raw_pricing = model.get("pricing")
+        pricing: dict[str, Any] = raw_pricing if isinstance(raw_pricing, dict) else {}
+        retirement_status, days_to_expiry = lifecycle_status(
+            str(model.get("expiration_date")) if model.get("expiration_date") else None,
+            watch_days=self.settings.model_retirement_watch_days,
+            deprecating_days=self.settings.model_retirement_deprecating_days,
+            quarantine_days=self.settings.model_retirement_quarantine_days,
+        )
         configured_roles = self.configured_roles(model_id)
         is_free = self._is_free_model(model_id, pricing)
         groups = self._model_groups(
@@ -234,7 +321,11 @@ class ModelRouter:
             is_free=is_free,
         )
         discovery_group = next(
-            (group for group in ["image_generation", "video_generation", "audio"] if group in groups),
+            (
+                group
+                for group in ["image_generation", "video_generation", "audio"]
+                if group in groups
+            ),
             None,
         )
         primary_group = discovery_group or next(
@@ -255,6 +346,10 @@ class ModelRouter:
             "completion_price": pricing.get("completion"),
             "image_price": pricing.get("image"),
             "request_price": pricing.get("request"),
+            "canonical_slug": model.get("canonical_slug"),
+            "expiration_date": model.get("expiration_date"),
+            "lifecycle_status": retirement_status,
+            "days_to_expiry": days_to_expiry,
             "architecture": architecture,
             "input_modalities": input_modalities,
             "output_modalities": output_modalities,
@@ -322,12 +417,29 @@ class ModelRouter:
             groups.add("documents")
         if "reasoning" in supported_parameters or any(
             token in text
-            for token in ["reasoning", "thinking", "deepseek-r1", "/o1", "/o3", "/o4", " qwq", "r1-"]
+            for token in [
+                "reasoning",
+                "thinking",
+                "deepseek-r1",
+                "/o1",
+                "/o3",
+                "/o4",
+                " qwq",
+                "r1-",
+            ]
         ):
             groups.add("reasoning")
         if any(
             token in text
-            for token in ["coder", "coding", "code ", "codex", "devstral", "grok-build", "qwen3-coder"]
+            for token in [
+                "coder",
+                "coding",
+                "code ",
+                "codex",
+                "devstral",
+                "grok-build",
+                "qwen3-coder",
+            ]
         ):
             groups.add("coding")
         if "text" in output_modalities and not groups.intersection(
@@ -348,10 +460,16 @@ class ModelRouter:
                 "Discovery-only in HIVE chat; use the future creation workspace for image or video generation.",
             )
         if outputs.intersection({"audio", "speech"}):
-            return True, "Enabled for explicit selection; non-text audio responses may require a dedicated renderer."
+            return (
+                True,
+                "Enabled for explicit selection; non-text audio responses may require a dedicated renderer.",
+            )
         if outputs.intersection({"embeddings", "rerank", "transcription"}):
             return True, "Enabled for explicit selection; this is an infrastructure-style model."
-        return True, "Enabled for explicit selection; output modality was not declared by the provider."
+        return (
+            True,
+            "Enabled for explicit selection; output modality was not declared by the provider.",
+        )
 
     def _is_free_model(self, model_id: str, pricing: dict[str, Any]) -> bool:
         if self._is_free_model_id(model_id):

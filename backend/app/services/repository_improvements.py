@@ -27,6 +27,7 @@ from app.services.repository_memory import append_history_entry, get_memory_fiel
 from app.services.repository_qa import run_repository_qa_for_workdir
 from app.storage.d1 import D1MetadataStore
 from app.storage.r2 import R2Storage
+from app.storage.sql_store import SqlStore
 
 logger = logging.getLogger("uvicorn.error.hive.repository_improvements")
 
@@ -45,8 +46,24 @@ _MAX_GENERATED_CHARS = 800_000
 _MAX_FILE_CHARS = 240_000
 
 _TEXT_SUFFIXES = {
-    ".py", ".pyi", ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".json",
-    ".md", ".txt", ".toml", ".yaml", ".yml", ".css", ".scss", ".html", ".sh",
+    ".py",
+    ".pyi",
+    ".js",
+    ".jsx",
+    ".mjs",
+    ".cjs",
+    ".ts",
+    ".tsx",
+    ".json",
+    ".md",
+    ".txt",
+    ".toml",
+    ".yaml",
+    ".yml",
+    ".css",
+    ".scss",
+    ".html",
+    ".sh",
 }
 _ROOT_CONTEXT_FILES = (
     "README.md",
@@ -67,7 +84,9 @@ _SENSITIVE_NAMES = {
     "id_rsa",
     "id_ed25519",
 }
-_PATH_LIKE_RE = re.compile(r"(?:^|[\s'\"`])([A-Za-z0-9_.@+-]+(?:/[A-Za-z0-9_.@+\-]+)+\.[A-Za-z0-9]+)")
+_PATH_LIKE_RE = re.compile(
+    r"(?:^|[\s'\"`])([A-Za-z0-9_.@+-]+(?:/[A-Za-z0-9_.@+\-]+)+\.[A-Za-z0-9]+)"
+)
 
 _MODEL_SECRET_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"AKIA[0-9A-Z]{16}"),
@@ -91,7 +110,9 @@ def _now_iso() -> str:
 
 
 def _jobs_root(settings: Settings) -> Path:
-    base = Path(settings.repository_temp_dir or tempfile.gettempdir()) / "hive-repository-improvements"
+    base = (
+        Path(settings.repository_temp_dir or tempfile.gettempdir()) / "hive-repository-improvements"
+    )
     base.mkdir(parents=True, exist_ok=True)
     return base
 
@@ -113,7 +134,9 @@ def _safe_target(root: Path, relative_path: str) -> Path:
     target = (root / relative_path).resolve()
     resolved_root = root.resolve()
     if target != resolved_root and resolved_root not in target.parents:
-        raise RepositoryImprovementError(f"Improvement path escaped repository root: {relative_path}")
+        raise RepositoryImprovementError(
+            f"Improvement path escaped repository root: {relative_path}"
+        )
     return target
 
 
@@ -154,7 +177,10 @@ def _current_intelligence(
     context = cast(dict[str, Any], raw_context) if isinstance(raw_context, dict) else {}
     report_repository_id = str(intelligence.get("repository_id") or "")
     context_repository_id = str(context.get("repository_id") or "")
-    if report_repository_id != record.repository_id or context_repository_id != record.repository_id:
+    if (
+        report_repository_id != record.repository_id
+        or context_repository_id != record.repository_id
+    ):
         raise RepositoryImprovementError(
             "Repository Intelligence belongs to a different repository. "
             "Run Repository Intelligence again for the selected repository before applying improvements."
@@ -261,14 +287,19 @@ def _candidate_paths(record: RepositoryRecord, intelligence: dict[str, Any]) -> 
             if not path.is_file() or path.suffix.lower() not in _TEXT_SUFFIXES:
                 continue
             relative = path.relative_to(root)
-            if any(part in {"node_modules", ".git", "dist", "build", ".venv", "venv", "__pycache__"} for part in relative.parts):
+            if any(
+                part in {"node_modules", ".git", "dist", "build", ".venv", "venv", "__pycache__"}
+                for part in relative.parts
+            ):
                 continue
             add(relative.as_posix())
 
     return candidates[:_MAX_CONTEXT_FILES]
 
 
-def _read_context_files(record: RepositoryRecord, intelligence: dict[str, Any]) -> list[dict[str, str]]:
+def _read_context_files(
+    record: RepositoryRecord, intelligence: dict[str, Any]
+) -> list[dict[str, str]]:
     context: list[dict[str, str]] = []
     used = 0
     for relative in _candidate_paths(record, intelligence):
@@ -293,9 +324,15 @@ def _model_request(
     intelligence: dict[str, Any],
     files: list[dict[str, str]],
 ) -> tuple[str, str]:
-    context = intelligence.get("repository_context") if isinstance(intelligence.get("repository_context"), dict) else {}
+    context = (
+        intelligence.get("repository_context")
+        if isinstance(intelligence.get("repository_context"), dict)
+        else {}
+    )
     summary = intelligence.get("summary") if isinstance(intelligence.get("summary"), dict) else {}
-    findings = intelligence.get("findings") if isinstance(intelligence.get("findings"), list) else []
+    findings = (
+        intelligence.get("findings") if isinstance(intelligence.get("findings"), list) else []
+    )
 
     system = (
         "You are HIVE's repository improvement engine. Produce minimal, production-grade code changes from "
@@ -322,7 +359,9 @@ def _model_request(
                         "rationale": "Which Intelligence finding this change addresses.",
                     }
                 ],
-                "remaining_risks": ["Anything that still requires native CI, deployment or human verification."],
+                "remaining_risks": [
+                    "Anything that still requires native CI, deployment or human verification."
+                ],
             },
             "rules": [
                 "Return complete replacement content, never ellipses or partial snippets.",
@@ -368,7 +407,9 @@ def _parse_json_object(text: str) -> dict[str, Any]:
         start = candidate.find("{")
         end = candidate.rfind("}")
         if start < 0 or end <= start:
-            raise RepositoryImprovementError("Coding model did not return a JSON improvement payload")
+            raise RepositoryImprovementError(
+                "Coding model did not return a JSON improvement payload"
+            )
         try:
             parsed = json.loads(candidate[start : end + 1])
         except json.JSONDecodeError as exc:
@@ -395,16 +436,24 @@ def _validated_changes(payload: dict[str, Any]) -> list[dict[str, Any]]:
         path = _normalise_relative_path(raw.get("path"))
         action = str(raw.get("action") or "replace").strip().lower()
         if action not in {"replace", "create", "delete"}:
-            raise RepositoryImprovementError(f"Unsupported improvement action {action!r} for {path}")
+            raise RepositoryImprovementError(
+                f"Unsupported improvement action {action!r} for {path}"
+            )
         content = raw.get("content")
         if action != "delete":
             if not isinstance(content, str):
-                raise RepositoryImprovementError(f"Improvement for {path} is missing complete file content")
+                raise RepositoryImprovementError(
+                    f"Improvement for {path} is missing complete file content"
+                )
             if len(content) > _MAX_FILE_CHARS:
-                raise RepositoryImprovementError(f"Improvement for {path} exceeds the per-file output limit")
+                raise RepositoryImprovementError(
+                    f"Improvement for {path} exceeds the per-file output limit"
+                )
             generated_chars += len(content)
         if generated_chars > _MAX_GENERATED_CHARS:
-            raise RepositoryImprovementError("Coding model output exceeds the total generated-content limit")
+            raise RepositoryImprovementError(
+                "Coding model output exceeds the total generated-content limit"
+            )
         changes.append(
             {
                 "path": path,
@@ -429,9 +478,13 @@ def _apply_changes(staging: Path, changes: list[dict[str, Any]]) -> tuple[list[s
                 deleted.append(relative)
             continue
         if action == "create" and target.exists():
-            raise RepositoryImprovementError(f"Coding model attempted to create an existing file: {relative}")
+            raise RepositoryImprovementError(
+                f"Coding model attempted to create an existing file: {relative}"
+            )
         if action == "replace" and not target.is_file():
-            raise RepositoryImprovementError(f"Coding model attempted to replace a missing file: {relative}")
+            raise RepositoryImprovementError(
+                f"Coding model attempted to replace a missing file: {relative}"
+            )
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(str(change["content"]), encoding="utf-8")
         changed.append(relative)
@@ -439,12 +492,29 @@ def _apply_changes(staging: Path, changes: list[dict[str, Any]]) -> tuple[list[s
 
 
 def _zip_tree(root: Path, destination: Path) -> None:
-    with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+    with zipfile.ZipFile(
+        destination, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9
+    ) as archive:
         for path in sorted(root.rglob("*")):
             if not path.is_file():
                 continue
             relative = path.relative_to(root)
-            if any(part in {".git", "node_modules", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", "dist", "build", ".venv", "venv"} for part in relative.parts):
+            if any(
+                part
+                in {
+                    ".git",
+                    "node_modules",
+                    "__pycache__",
+                    ".pytest_cache",
+                    ".mypy_cache",
+                    ".ruff_cache",
+                    "dist",
+                    "build",
+                    ".venv",
+                    "venv",
+                }
+                for part in relative.parts
+            ):
                 continue
             archive.write(path, arcname=relative.as_posix())
 
@@ -456,12 +526,16 @@ def _zip_changed_files(
     deleted: list[str],
     report: dict[str, Any],
 ) -> None:
-    with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+    with zipfile.ZipFile(
+        destination, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9
+    ) as archive:
         for relative in changed:
             path = _safe_target(staging, relative)
             if path.is_file():
                 archive.write(path, arcname=relative)
-        archive.writestr("HIVE-IMPROVEMENT-REPORT.json", json.dumps(report, ensure_ascii=False, indent=2))
+        archive.writestr(
+            "HIVE-IMPROVEMENT-REPORT.json", json.dumps(report, ensure_ascii=False, indent=2)
+        )
         if deleted:
             archive.writestr("HIVE-DELETED-FILES.txt", "\n".join(deleted) + "\n")
 
@@ -522,13 +596,19 @@ def _stored_jobs(settings: Settings) -> list[dict[str, Any]]:
     return jobs
 
 
-def get_improvement_job(settings: Settings, repository_id: str, job_id: str) -> dict[str, Any] | None:
+def get_improvement_job(
+    settings: Settings, repository_id: str, job_id: str
+) -> dict[str, Any] | None:
     with _JOB_LOCK:
         local = _JOBS.get(job_id)
         task = _TASKS.get(job_id)
         if local is not None and local.get("repository_id") == repository_id:
             payload = dict(local)
-            if payload.get("status") in {"accepted", "running"} and task is not None and task.done():
+            if (
+                payload.get("status") in {"accepted", "running"}
+                and task is not None
+                and task.done()
+            ):
                 payload = _set_job(
                     settings,
                     job_id,
@@ -560,10 +640,14 @@ def latest_improvement_job(settings: Settings, repository_id: str) -> dict[str, 
         candidates.extend(
             dict(job) for job in _JOBS.values() if job.get("repository_id") == repository_id
         )
-    candidates.extend(job for job in _stored_jobs(settings) if job.get("repository_id") == repository_id)
+    candidates.extend(
+        job for job in _stored_jobs(settings) if job.get("repository_id") == repository_id
+    )
     if not candidates:
         return None
-    return max(candidates, key=lambda item: str(item.get("created_at") or item.get("updated_at") or ""))
+    return max(
+        candidates, key=lambda item: str(item.get("created_at") or item.get("updated_at") or "")
+    )
 
 
 def active_improvement_job(repository_id: str) -> str | None:
@@ -586,7 +670,7 @@ async def _run_model(
 ) -> tuple[dict[str, Any], str | None]:
     router = ModelRouter(settings)
     model = router.select_model(TaskType.CODE)
-    fallbacks = router.fallback_models_for_task(TaskType.CODE, model)
+    fallbacks = router.fallback_models_for_task(TaskType.CODE, model, allow_free=False)
     system, user = _model_request(repository_id, intelligence, files)
     response = await OpenRouterClient(settings).chat_completion(
         {
@@ -597,11 +681,22 @@ async def _run_model(
             ],
             "temperature": 0.1,
             "max_tokens": 16_000,
+            "usage": {"include": True},
         },
         fallback_models=fallbacks,
     )
     if response.get("_all_attempts_failed"):
         raise RepositoryImprovementError(_assistant_text(response) or "Coding model failed")
+    usage = response.get("usage")
+    if isinstance(usage, dict):
+        await asyncio.to_thread(
+            SqlStore(settings).record_usage_event,
+            conversation_id=f"repository-improvement:{repository_id}",
+            model_used=str(response.get("model") or model),
+            provider=(str(response.get("provider")) if response.get("provider") else None),
+            usage=usage,
+            metadata={"operation": "repository_improvement", "repository_id": repository_id},
+        )
     parsed = _parse_json_object(_assistant_text(response))
     return parsed, str(response.get("model") or model)
 
@@ -617,10 +712,14 @@ def _store_artifact(
     storage = R2Storage(settings)
     if not settings.r2_bucket_repositories or not storage.write_enabled:
         if settings.production_require_r2:
-            raise RepositoryImprovementError("R2 repository storage is required for durable improvement downloads")
+            raise RepositoryImprovementError(
+                "R2 repository storage is required for durable improvement downloads"
+            )
         return None, False
     key = f"improvements/{repository_id}/{job_id}/{name}"
-    storage.put_file(path, key, content_type="application/zip", bucket=settings.r2_bucket_repositories)
+    storage.put_file(
+        path, key, content_type="application/zip", bucket=settings.r2_bucket_repositories
+    )
     return key, True
 
 
@@ -628,7 +727,9 @@ async def _run_job(settings: Settings, job_id: str, repository_id: str) -> None:
     job_root = _jobs_root(settings) / job_id
     staging = job_root / "workspace"
     job_root.mkdir(parents=True, exist_ok=True)
-    _set_job(settings, job_id, status="running", started_at=_now_iso(), stage="loading_intelligence")
+    _set_job(
+        settings, job_id, status="running", started_at=_now_iso(), stage="loading_intelligence"
+    )
     try:
         record = get_repository(repository_id)
         if record is None:
@@ -641,24 +742,41 @@ async def _run_job(settings: Settings, job_id: str, repository_id: str) -> None:
         intelligence = _current_intelligence(settings, record)
         _require_actionable_findings(intelligence)
 
-        _set_job(settings, job_id, stage="preparing_workspace", source_fingerprint=record.manifest.fingerprint)
+        _set_job(
+            settings,
+            job_id,
+            stage="preparing_workspace",
+            source_fingerprint=record.manifest.fingerprint,
+        )
         shutil.copytree(record.workdir, staging, dirs_exist_ok=False)
         context_files = _read_context_files(record, intelligence)
         if not context_files:
-            raise RepositoryImprovementError("No suitable repository text files were available for the coding model")
+            raise RepositoryImprovementError(
+                "No suitable repository text files were available for the coding model"
+            )
 
         _set_job(settings, job_id, stage="coding_model", context_file_count=len(context_files))
-        model_payload, model_used = await _run_model(settings, repository_id, intelligence, context_files)
+        model_payload, model_used = await _run_model(
+            settings, repository_id, intelligence, context_files
+        )
         changes = _validated_changes(model_payload)
         if not changes:
             raise RepositoryImprovementError(
                 "Coding model did not identify a safe file change. Review the remaining risks in Repository Intelligence."
             )
 
-        _set_job(settings, job_id, stage="applying_changes", model_used=model_used, proposed_change_count=len(changes))
+        _set_job(
+            settings,
+            job_id,
+            stage="applying_changes",
+            model_used=model_used,
+            proposed_change_count=len(changes),
+        )
         changed, deleted = _apply_changes(staging, changes)
         if not changed and not deleted:
-            raise RepositoryImprovementError("Coding model changes produced no repository modifications")
+            raise RepositoryImprovementError(
+                "Coding model changes produced no repository modifications"
+            )
 
         _set_job(settings, job_id, stage="static_validation")
         qa_after = run_repository_qa_for_workdir(
@@ -676,7 +794,9 @@ async def _run_job(settings: Settings, job_id: str, repository_id: str) -> None:
                 + "; no downloadable artifact was published."
             )
         raw_summary = intelligence.get("summary")
-        baseline_summary = cast(dict[str, Any], raw_summary) if isinstance(raw_summary, dict) else {}
+        baseline_summary = (
+            cast(dict[str, Any], raw_summary) if isinstance(raw_summary, dict) else {}
+        )
         try:
             baseline_qa_score = float(baseline_summary.get("qa_score") or 0.0)
             after_qa_score = float(qa_after.get("score") or 0.0)
@@ -689,11 +809,19 @@ async def _run_job(settings: Settings, job_id: str, repository_id: str) -> None:
                 f"to {after_qa_score:.3f}; no downloadable artifact was published."
             )
         build_check = next(
-            (item for item in qa_after.get("checks", []) if isinstance(item, dict) and item.get("name") == "build_verification"),
+            (
+                item
+                for item in qa_after.get("checks", [])
+                if isinstance(item, dict) and item.get("name") == "build_verification"
+            ),
             None,
         )
         security_check = next(
-            (item for item in qa_after.get("checks", []) if isinstance(item, dict) and item.get("name") == "security_scanning"),
+            (
+                item
+                for item in qa_after.get("checks", [])
+                if isinstance(item, dict) and item.get("name") == "security_scanning"
+            ),
             None,
         )
         if isinstance(build_check, dict) and build_check.get("status") == "warning":
@@ -707,8 +835,12 @@ async def _run_job(settings: Settings, job_id: str, repository_id: str) -> None:
         # A *new* security_scanning warning is still blocked above via
         # new_warning_checks, so generated code cannot introduce a new candidate.
         security_validation = {
-            "status": str(security_check.get("status") or "unknown") if isinstance(security_check, dict) else "unknown",
-            "details": security_check.get("details", {}) if isinstance(security_check, dict) else {},
+            "status": str(security_check.get("status") or "unknown")
+            if isinstance(security_check, dict)
+            else "unknown",
+            "details": security_check.get("details", {})
+            if isinstance(security_check, dict)
+            else {},
             "blocking_policy": "new_warning_only",
         }
 
@@ -818,7 +950,9 @@ async def _run_job(settings: Settings, job_id: str, repository_id: str) -> None:
             },
         )
     except Exception as exc:  # noqa: BLE001
-        logger.exception("Repository improvement failed repository_id=%s job_id=%s", repository_id, job_id)
+        logger.exception(
+            "Repository improvement failed repository_id=%s job_id=%s", repository_id, job_id
+        )
         _set_job(
             settings,
             job_id,
@@ -842,7 +976,9 @@ def start_improvement_job(settings: Settings, repository_id: str) -> dict[str, A
     if not settings.repository_manager_enabled:
         raise RepositoryImprovementError("Repository Manager is disabled")
     if not settings.openrouter_api_key.strip():
-        raise RepositoryImprovementError("OPENROUTER_API_KEY is required for automatic repository improvements")
+        raise RepositoryImprovementError(
+            "OPENROUTER_API_KEY is required for automatic repository improvements"
+        )
 
     record = get_repository(repository_id)
     if record is None:
@@ -871,7 +1007,9 @@ def start_improvement_job(settings: Settings, repository_id: str) -> dict[str, A
         source_fingerprint=record.manifest.fingerprint,
         ok=None,
     )
-    task = asyncio.create_task(_run_job(settings, job_id, repository_id), name=f"repository-improvement-{job_id}")
+    task = asyncio.create_task(
+        _run_job(settings, job_id, repository_id), name=f"repository-improvement-{job_id}"
+    )
     with _JOB_LOCK:
         _TASKS[job_id] = task
 
@@ -902,7 +1040,9 @@ def improvement_artifact(
     artifact = cast(dict[str, Any], artifact) if isinstance(artifact, dict) else {}
     filename = str(artifact.get("filename") or f"{repository_id}-{kind}.zip")
 
-    local_artifacts = job.get("local_artifacts") if isinstance(job.get("local_artifacts"), dict) else {}
+    local_artifacts = (
+        job.get("local_artifacts") if isinstance(job.get("local_artifacts"), dict) else {}
+    )
     local_path = local_artifacts.get(kind) if isinstance(local_artifacts, dict) else None
     if isinstance(local_path, str) and Path(local_path).is_file():
         return filename, Path(local_path).read_bytes(), "application/zip"
@@ -920,7 +1060,9 @@ def improvement_artifact(
         try:
             obj = storage.read_object(
                 r2_key,
-                max_bytes=max(int(settings.repository_max_uncompressed_bytes), int(settings.max_upload_bytes)),
+                max_bytes=max(
+                    int(settings.repository_max_uncompressed_bytes), int(settings.max_upload_bytes)
+                ),
                 bucket=settings.r2_bucket_repositories,
                 read_only=read_only,
             )

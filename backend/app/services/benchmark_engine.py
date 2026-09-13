@@ -43,6 +43,27 @@ DEFAULT_WEIGHTS: dict[str, float] = {
     "community_maturity": 0.03,
 }
 
+# Category multipliers make the trade-off task-specific while preserving
+# operator overrides from BENCHMARK_WEIGHTS_JSON. For example, cheap/fast
+# routes emphasise cost and latency; coding routes emphasise measured coding,
+# reliability and structured output. ``score_model`` normalises the result.
+CATEGORY_WEIGHT_MULTIPLIERS: dict[str, dict[str, float]] = {
+    "coding": {
+        "coding_benchmark": 1.8,
+        "reliability": 1.4,
+        "json_reliability": 1.5,
+        "structured_output": 1.4,
+    },
+    "reasoning": {"reasoning_benchmark": 2.0, "reliability": 1.4},
+    "planning": {"reasoning_benchmark": 1.5, "structured_output": 2.0, "json_reliability": 1.8},
+    "vision": {"reasoning_benchmark": 1.3, "reliability": 1.5},
+    "research": {"reasoning_benchmark": 1.5, "long_context": 2.0, "reliability": 1.5},
+    "fast": {"latency": 4.0, "cost": 3.0, "reliability": 1.5},
+    "cheap": {"cost": 6.0, "latency": 2.0, "reliability": 1.5},
+    "creative": {"reasoning_benchmark": 1.4, "internal_historical_performance": 1.5},
+    "long_context": {"long_context": 4.0, "reliability": 1.8, "cost": 1.5},
+}
+
 
 class BenchmarkEngineError(ValueError):
     pass
@@ -89,7 +110,20 @@ def normalise_weights(weights: dict[str, float]) -> dict[str, float]:
     return {key: max(0.0, value) / total for key, value in weights.items()}
 
 
-def score_model(metrics: dict[str, float], *, weights: dict[str, float] | None = None) -> BenchmarkResult:
+def weights_for_category(category: str, base_weights: dict[str, float]) -> dict[str, float]:
+    """Apply the governed task profile to configured base weights."""
+
+    multipliers = CATEGORY_WEIGHT_MULTIPLIERS.get(category, {})
+    profiled = {
+        key: float(base_weights.get(key, 0.0)) * float(multipliers.get(key, 1.0))
+        for key in METRIC_KEYS
+    }
+    return normalise_weights(profiled)
+
+
+def score_model(
+    metrics: dict[str, float], *, weights: dict[str, float] | None = None
+) -> BenchmarkResult:
     """Compute a weighted 0.0-1.0 score for a single model's metrics.
 
     Missing metric keys are treated as 0.5 (neutral) rather than 0.0, so a
@@ -128,8 +162,19 @@ def rank_models(
     results = []
     for candidate in candidates:
         model_id = str(candidate.get("model_id", ""))
-        metrics = {key: candidate.get(key) for key in METRIC_KEYS if key in candidate}
+        metrics = {
+            key: float(candidate[key])
+            for key in METRIC_KEYS
+            if key in candidate and isinstance(candidate[key], (int, float))
+        }
         result = score_model(metrics, weights=resolved_weights)
-        results.append(BenchmarkResult(model_id=model_id, score=result.score, confidence=result.confidence, metrics=result.metrics))
+        results.append(
+            BenchmarkResult(
+                model_id=model_id,
+                score=result.score,
+                confidence=result.confidence,
+                metrics=result.metrics,
+            )
+        )
     results.sort(key=lambda item: item.score, reverse=True)
     return results

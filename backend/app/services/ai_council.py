@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
-import uuid
 from typing import Any
 
 from app.core.config import Settings
 from app.services import benchmark_engine, model_registry
+from app.services.model_governance import lifecycle_is_routable, lifecycle_status
 from app.services.ops_events import ingest_ops_event
 from app.services.providers.base import ProviderModelInfo
 from app.services.providers.registry import discover_providers
@@ -52,6 +53,9 @@ class CouncilRunReport:
     promotions: list[CouncilPromotion]
     weights_used: dict[str, float]
     benchmark_sources: list[dict[str, Any]] = field(default_factory=list)
+    retirement_watch: list[dict[str, Any]] = field(default_factory=list)
+    category_weights_used: dict[str, dict[str, float]] = field(default_factory=dict)
+    alias_changes: list[dict[str, str | None]] = field(default_factory=list)
 
     def public_payload(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -126,13 +130,13 @@ def _is_long_context_candidate(model: ProviderModelInfo) -> bool:
 
 # Mapping: category → classifier function
 _CATEGORY_CLASSIFIERS: dict[str, object] = {
-    "reasoning":    _is_reasoning_candidate,
-    "planning":     _is_planning_candidate,
-    "vision":       _is_vision_candidate,
-    "research":     _is_research_candidate,
-    "fast":         _is_fast_candidate,
-    "cheap":        _is_cheap_candidate,
-    "creative":     _is_creative_candidate,
+    "reasoning": _is_reasoning_candidate,
+    "planning": _is_planning_candidate,
+    "vision": _is_vision_candidate,
+    "research": _is_research_candidate,
+    "fast": _is_fast_candidate,
+    "cheap": _is_cheap_candidate,
+    "creative": _is_creative_candidate,
     "long_context": _is_long_context_candidate,
 }
 
@@ -141,9 +145,15 @@ def _cost_score(model: ProviderModelInfo) -> float | None:
     """Cheaper = higher score. Normalised against a soft ceiling since actual
     price ranges vary a lot across providers; anything at or above the
     ceiling scores 0.0, free/near-free scores close to 1.0."""
-    price = model.pricing_prompt
-    if price is None:
+    available: list[tuple[float, float]] = []
+    if model.pricing_prompt is not None:
+        available.append((model.pricing_prompt, 0.8))
+    if model.pricing_completion is not None:
+        available.append((model.pricing_completion, 0.2))
+    if not available:
         return None
+    total_weight = sum(weight for _, weight in available)
+    price = sum(float(value) * weight for value, weight in available) / total_weight
     ceiling = 0.00006  # ~$60 / 1M prompt tokens, a generous soft ceiling
     if price <= 0:
         return 1.0
@@ -274,26 +284,48 @@ def _confidence_label(confidence_fraction: float) -> str:
 
 
 def _cost_per_1k(model: ProviderModelInfo) -> float | None:
-    """Provider-reported prompt price, converted from per-token to
-    per-1,000-tokens for the Model Registry's cost field. None if the
-    provider didn't report pricing."""
-    if model.pricing_prompt is None:
+    """Blended provider price for a representative 80:20 input/output mix."""
+    available: list[tuple[float, float]] = []
+    if model.pricing_prompt is not None:
+        available.append((model.pricing_prompt, 0.8))
+    if model.pricing_completion is not None:
+        available.append((model.pricing_completion, 0.2))
+    if not available:
         return None
-    return round(model.pricing_prompt * 1000, 6)
+    total_weight = sum(weight for _, weight in available)
+    blended = sum(float(price) * weight for price, weight in available) / total_weight
+    return round(blended * 1000, 6)
 
 
-def _previous_snapshot(store: D1MetadataStore, provider_name: str) -> set[str]:
+def _previous_snapshot(
+    store: D1MetadataStore, provider_name: str
+) -> tuple[set[str], dict[str, str]]:
     result = store.list_metadata(lane=LANE, limit=500)
     if not result.get("ok"):
-        return set()
+        return set(), {}
     for row in result.get("items", []):
         if row.get("source_type") == "model_catalogue" and row.get("source_id") == provider_name:
             metadata = row.get("metadata") or {}
-            return set(metadata.get("model_ids") or [])
-    return set()
+            raw_map = metadata.get("canonical_by_id")
+            canonical_by_id = (
+                {
+                    str(model_id): str(canonical)
+                    for model_id, canonical in raw_map.items()
+                    if model_id and canonical
+                }
+                if isinstance(raw_map, dict)
+                else {}
+            )
+            return set(metadata.get("model_ids") or []), canonical_by_id
+    return set(), {}
 
 
-def _store_snapshot(store: D1MetadataStore, provider_name: str, model_ids: list[str]) -> None:
+def _store_snapshot(
+    store: D1MetadataStore,
+    provider_name: str,
+    models: list[ProviderModelInfo],
+) -> None:
+    model_ids = [model.model_id for model in models if model.model_id]
     store.upsert_metadata(
         item_id=f"ai-council:catalogue:{provider_name}",
         lane=LANE,
@@ -301,7 +333,19 @@ def _store_snapshot(store: D1MetadataStore, provider_name: str, model_ids: list[
         source_id=provider_name,
         title=f"Model catalogue for {provider_name}",
         url=None,
-        metadata={"model_ids": model_ids},
+        metadata={
+            "model_ids": model_ids,
+            "canonical_by_id": {
+                model.model_id: model.canonical_slug
+                for model in models
+                if model.model_id and model.canonical_slug
+            },
+            "expiration_by_id": {
+                model.model_id: model.expiration_date
+                for model in models
+                if model.model_id and model.expiration_date
+            },
+        },
     )
 
 
@@ -363,7 +407,11 @@ def _load_benchmark_snapshot(
         raw_metadata = row.get("metadata")
         metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
         raw_items = metadata.get("items")
-        items = [dict(item) for item in raw_items if isinstance(item, dict)] if isinstance(raw_items, list) else []
+        items = (
+            [dict(item) for item in raw_items if isinstance(item, dict)]
+            if isinstance(raw_items, list)
+            else []
+        )
         fetched_text = str(metadata.get("fetched_at") or row.get("updated_at") or "").strip()
         try:
             fetched_at = datetime.fromisoformat(fetched_text.replace("Z", "+00:00"))
@@ -424,7 +472,11 @@ async def _load_provider_benchmarks(
     for attempt in range(1, attempts + 1):
         try:
             raw = await loader(source=source)
-            items = [dict(item) for item in raw if isinstance(item, dict)] if isinstance(raw, list) else []
+            items = (
+                [dict(item) for item in raw if isinstance(item, dict)]
+                if isinstance(raw, list)
+                else []
+            )
             if not items:
                 raise RuntimeError("benchmark feed returned no rows")
             cache_written = _store_benchmark_snapshot(
@@ -479,7 +531,9 @@ async def _load_provider_benchmarks(
     }
 
 
-def _record_run_history(store: D1MetadataStore, report: CouncilRunReport, max_entries: int = 200) -> None:
+def _record_run_history(
+    store: D1MetadataStore, report: CouncilRunReport, max_entries: int = 200
+) -> None:
     result = store.list_metadata(lane=LANE, limit=500)
     history: list[dict[str, Any]] = []
     if result.get("ok"):
@@ -531,7 +585,11 @@ def record_run_completion(
             metadata = row.get("metadata") or {}
             if isinstance(metadata, dict):
                 raw_history = metadata.get("items")
-                history = [dict(item) for item in raw_history if isinstance(item, dict)] if isinstance(raw_history, list) else []
+                history = (
+                    [dict(item) for item in raw_history if isinstance(item, dict)]
+                    if isinstance(raw_history, list)
+                    else []
+                )
             break
 
     updated = False
@@ -573,6 +631,9 @@ async def run_council(settings: Settings, *, run_id: str | None = None) -> Counc
     all_retired: list[str] = []
     promotions: list[CouncilPromotion] = []
     benchmark_sources: list[dict[str, Any]] = []
+    retirement_watch: list[dict[str, Any]] = []
+    category_weights_used: dict[str, dict[str, float]] = {}
+    alias_changes: list[dict[str, str | None]] = []
     models_seen = 0
 
     for provider in providers:
@@ -590,12 +651,63 @@ async def run_council(settings: Settings, *, run_id: str | None = None) -> Counc
         benchmark_sources.append(benchmark_status)
 
         current_ids = [model.model_id for model in models if model.model_id]
-        previous_ids = _previous_snapshot(store, provider.name)
+        previous_ids, previous_canonical_by_id = _previous_snapshot(store, provider.name)
+        current_canonical_by_id = {
+            model.model_id: model.canonical_slug
+            for model in models
+            if model.model_id and model.canonical_slug
+        }
         new_ids = sorted(set(current_ids) - previous_ids)
         retired_ids = sorted(previous_ids - set(current_ids))
         all_new.extend(f"{provider.name}:{model_id}" for model_id in new_ids)
         all_retired.extend(f"{provider.name}:{model_id}" for model_id in retired_ids)
-        _store_snapshot(store, provider.name, current_ids)
+        for model_id in sorted(previous_ids & set(current_ids)):
+            previous_canonical = previous_canonical_by_id.get(model_id)
+            current_canonical = current_canonical_by_id.get(model_id)
+            if previous_canonical and current_canonical and previous_canonical != current_canonical:
+                alias_changes.append(
+                    {
+                        "provider": provider.name,
+                        "model_id": model_id,
+                        "previous_canonical_slug": previous_canonical,
+                        "current_canonical_slug": current_canonical,
+                    }
+                )
+        for model_id in retired_ids:
+            lifecycle_model_id = previous_canonical_by_id.get(model_id) or model_id
+            model_registry.set_model_lifecycle(
+                lifecycle_model_id,
+                lifecycle_status="retired",
+                store=store,
+            )
+        lifecycle_by_model: dict[str, tuple[str, int | None]] = {}
+        for model in models:
+            state, days_to_expiry = lifecycle_status(
+                model.expiration_date,
+                watch_days=settings.model_retirement_watch_days,
+                deprecating_days=settings.model_retirement_deprecating_days,
+                quarantine_days=settings.model_retirement_quarantine_days,
+            )
+            lifecycle_by_model[model.model_id] = (state, days_to_expiry)
+            model_registry.set_model_lifecycle(
+                model.model_id,
+                lifecycle_status=state,
+                expiration_date=model.expiration_date,
+                canonical_slug=model.canonical_slug,
+                store=store,
+            )
+            if state != "active":
+                retirement_watch.append(
+                    {
+                        "provider": provider.name,
+                        "model_id": model.model_id,
+                        "canonical_slug": model.canonical_slug,
+                        "expiration_date": model.expiration_date,
+                        "lifecycle_status": state,
+                        "days_to_expiry": days_to_expiry,
+                    }
+                )
+        _store_snapshot(store, provider.name, models)
         models_seen += len(models)
 
         # Classify each model into all applicable categories (coding + 8 others).
@@ -614,32 +726,42 @@ async def run_council(settings: Settings, *, run_id: str | None = None) -> Counc
         for cat, classifier in _CATEGORY_CLASSIFIERS.items():
             category_candidates[cat] = [m for m in models if classifier(m)]  # type: ignore[operator]
 
-        # Deduplicate per-model scoring: score once, promote to all qualifying categories.
-        scored_cache: dict[str, object] = {}  # model_id -> benchmark result
         for category, candidates in category_candidates.items():
+            category_weights = benchmark_engine.weights_for_category(category, weights)
+            category_weights_used[category] = category_weights
             for model in candidates:
-                if model.model_id not in scored_cache:
-                    metrics = _metrics_for_model(model, benchmark_by_model.get(model.model_id))
-                    scored_cache[model.model_id] = benchmark_engine.score_model(metrics, weights=weights)
-                result = scored_cache[model.model_id]
+                state, _days_to_expiry = lifecycle_by_model.get(model.model_id, ("active", None))
+                if not lifecycle_is_routable(state):
+                    continue
+                metrics = _metrics_for_model(model, benchmark_by_model.get(model.model_id))
+                result = benchmark_engine.score_model(metrics, weights=category_weights)
                 if (
                     result.score >= settings.ai_council_promotion_threshold
                     and result.confidence >= settings.ai_council_auto_promotion_min_confidence
                 ):
+                    governed_model_id = model.canonical_slug or model.model_id
                     model_registry.register_model(
                         category,
-                        model.model_id,
+                        governed_model_id,
                         score=result.score,
                         provider=provider.name,
                         benchmark_score=(
-                            round(float(benchmark_by_model[model.model_id].get("coding_index")
-                                        or benchmark_by_model[model.model_id].get("intelligence_index")
-                                        or result.score * 100), 1)
+                            round(
+                                float(
+                                    benchmark_by_model[model.model_id].get("coding_index")
+                                    or benchmark_by_model[model.model_id].get("intelligence_index")
+                                    or result.score * 100
+                                ),
+                                1,
+                            )
                             if model.model_id in benchmark_by_model
                             else round(result.score * 100, 1)
                         ),
                         confidence=_confidence_label(result.confidence),
                         cost_per_1k_tokens=_cost_per_1k(model),
+                        canonical_slug=model.canonical_slug,
+                        expiration_date=model.expiration_date,
+                        lifecycle_status=state,
                         notes=(
                             f"AI Council: {result.confidence * 100:.0f}% of benchmark axes "
                             f"had real signal (rest scored neutral)."
@@ -655,12 +777,16 @@ async def run_council(settings: Settings, *, run_id: str | None = None) -> Counc
                     )
                     promotions.append(
                         CouncilPromotion(
-                            category=category, model_id=model.model_id, score=result.score, provider=provider.name
+                            category=category,
+                            model_id=governed_model_id,
+                            score=result.score,
+                            provider=provider.name,
                         )
                     )
 
     report = CouncilRunReport(
-        run_id=run_id or f"council-{datetime.now(UTC).strftime('%Y%m%dT%H%M%S%f')}-{uuid.uuid4().hex[:6]}",
+        run_id=run_id
+        or f"council-{datetime.now(UTC).strftime('%Y%m%dT%H%M%S%f')}-{uuid.uuid4().hex[:6]}",
         occurred_at=datetime.now(UTC).isoformat(),
         providers_discovered=len(providers),
         models_seen=models_seen,
@@ -669,6 +795,9 @@ async def run_council(settings: Settings, *, run_id: str | None = None) -> Counc
         promotions=promotions,
         weights_used=weights,
         benchmark_sources=benchmark_sources,
+        retirement_watch=retirement_watch,
+        category_weights_used=category_weights_used,
+        alias_changes=alias_changes,
     )
     _record_run_history(store, report)
 

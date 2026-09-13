@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import threading
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -66,6 +66,14 @@ class ModelRegistryError(ValueError):
 #: real signal has been attached yet and the figure should be treated as a
 #: unverified ranking hint only.
 CONFIDENCE_LEVELS: tuple[str, ...] = ("measured", "heuristic", "unverified")
+LIFECYCLE_STATUSES: tuple[str, ...] = (
+    "active",
+    "watch",
+    "deprecating",
+    "quarantined",
+    "retired",
+)
+ROUTABLE_LIFECYCLE_STATUSES = frozenset({"active", "watch"})
 
 
 @dataclass(frozen=True)
@@ -90,6 +98,11 @@ class RankedModel:
     # Cost per 1,000 tokens in USD (blended input/output, or input-only if
     # that is all that is known - see notes for detail). None if unknown.
     cost_per_1k_tokens: float | None = None
+    # OpenRouter lifecycle identity. Canonical slugs prevent a moving alias
+    # from changing the governed model between Council reviews.
+    canonical_slug: str | None = None
+    expiration_date: str | None = None
+    lifecycle_status: str = "active"
 
 
 def _require_known_category(category: str) -> None:
@@ -140,6 +153,9 @@ def _persist_model(store: "D1MetadataStore | None", ranked: RankedModel) -> None
                 "confidence": ranked.confidence,
                 "latency_ms": ranked.latency_ms,
                 "cost_per_1k_tokens": ranked.cost_per_1k_tokens,
+                "canonical_slug": ranked.canonical_slug,
+                "expiration_date": ranked.expiration_date,
+                "lifecycle_status": ranked.lifecycle_status,
             },
         )
     except Exception:  # noqa: BLE001 - persistence must never break registration
@@ -168,6 +184,9 @@ def register_model(
     confidence: str = "unverified",
     latency_ms: float | None = None,
     cost_per_1k_tokens: float | None = None,
+    canonical_slug: str | None = None,
+    expiration_date: str | None = None,
+    lifecycle_status: str = "active",
     store: "D1MetadataStore | None" = None,
 ) -> list[RankedModel]:
     """Register (or re-score) a model within a category and return the
@@ -188,6 +207,10 @@ def register_model(
         raise ModelRegistryError(
             f"Unknown confidence level: {confidence!r}. Expected one of {CONFIDENCE_LEVELS}."
         )
+    if lifecycle_status not in LIFECYCLE_STATUSES:
+        raise ModelRegistryError(
+            f"Unknown lifecycle status: {lifecycle_status!r}. Expected one of {LIFECYCLE_STATUSES}."
+        )
 
     ranked = RankedModel(
         model_id=model_id,
@@ -200,6 +223,9 @@ def register_model(
         confidence=confidence,
         latency_ms=latency_ms,
         cost_per_1k_tokens=cost_per_1k_tokens,
+        canonical_slug=canonical_slug,
+        expiration_date=expiration_date,
+        lifecycle_status=lifecycle_status,
     )
     with _LOCK:
         existing = [m for m in _REGISTRY[category] if m.model_id != model_id]
@@ -220,6 +246,45 @@ def remove_model(category: str, model_id: str, *, store: "D1MetadataStore | None
     if removed:
         _delete_persisted_model(store, category, model_id)
     return removed
+
+
+def set_model_lifecycle(
+    model_id: str,
+    *,
+    lifecycle_status: str,
+    expiration_date: str | None = None,
+    canonical_slug: str | None = None,
+    store: "D1MetadataStore | None" = None,
+) -> int:
+    """Update matching registry entries without deleting their audit history."""
+
+    if lifecycle_status not in LIFECYCLE_STATUSES:
+        raise ModelRegistryError(
+            f"Unknown lifecycle status: {lifecycle_status!r}. Expected one of {LIFECYCLE_STATUSES}."
+        )
+    updated: list[RankedModel] = []
+    with _LOCK:
+        for category in CATEGORIES:
+            replacements: list[RankedModel] = []
+            for item in _REGISTRY[category]:
+                if (
+                    item.model_id not in {model_id, canonical_slug}
+                    and item.canonical_slug != model_id
+                ):
+                    replacements.append(item)
+                    continue
+                changed = replace(
+                    item,
+                    lifecycle_status=lifecycle_status,
+                    expiration_date=expiration_date or item.expiration_date,
+                    canonical_slug=canonical_slug or item.canonical_slug,
+                )
+                replacements.append(changed)
+                updated.append(changed)
+            _REGISTRY[category] = replacements
+    for item in updated:
+        _persist_model(store, item)
+    return len(updated)
 
 
 def load_registry_from_store(store: "D1MetadataStore | None") -> int:
@@ -269,6 +334,13 @@ def load_registry_from_store(store: "D1MetadataStore | None") -> int:
                 confidence=confidence,
                 latency_ms=_optional_float(metadata, "latency_ms"),
                 cost_per_1k_tokens=_optional_float(metadata, "cost_per_1k_tokens"),
+                canonical_slug=metadata.get("canonical_slug"),
+                expiration_date=metadata.get("expiration_date"),
+                lifecycle_status=(
+                    str(metadata.get("lifecycle_status") or "active")
+                    if str(metadata.get("lifecycle_status") or "active") in LIFECYCLE_STATUSES
+                    else "active"
+                ),
             )
             _REGISTRY[category] = [m for m in _REGISTRY[category] if m.model_id != model_id]
             _REGISTRY[category].append(ranked)
@@ -289,7 +361,10 @@ def get_default_model(category: str) -> str | None:
     category has no registered models (caller should fall back to static
     configuration in that case)."""
     ranked = get_ranked_models(category)
-    return ranked[0].model_id if ranked else None
+    return next(
+        (item.model_id for item in ranked if item.lifecycle_status in ROUTABLE_LIFECYCLE_STATUSES),
+        None,
+    )
 
 
 def list_categories() -> dict[str, list[dict[str, object]]]:
@@ -347,6 +422,13 @@ def seed_from_json(seed_json: str) -> int:
                 confidence=confidence,
                 latency_ms=_optional_float(entry, "latency_ms"),
                 cost_per_1k_tokens=_optional_float(entry, "cost_per_1k_tokens"),
+                canonical_slug=entry.get("canonical_slug"),
+                expiration_date=entry.get("expiration_date"),
+                lifecycle_status=(
+                    str(entry.get("lifecycle_status") or "active")
+                    if str(entry.get("lifecycle_status") or "active") in LIFECYCLE_STATUSES
+                    else "active"
+                ),
             )
             count += 1
     return count

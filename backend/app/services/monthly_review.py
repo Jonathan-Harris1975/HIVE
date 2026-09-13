@@ -56,7 +56,11 @@ def _period_bounds(period: str | None) -> tuple[str, str, str]:
             year, month = first_of_this_month.year, first_of_this_month.month - 1
 
     since = datetime(year, month, 1, tzinfo=timezone.utc)
-    until = datetime(year + 1, 1, 1, tzinfo=timezone.utc) if month == 12 else datetime(year, month + 1, 1, tzinfo=timezone.utc)
+    until = (
+        datetime(year + 1, 1, 1, tzinfo=timezone.utc)
+        if month == 12
+        else datetime(year, month + 1, 1, tzinfo=timezone.utc)
+    )
     return f"{year:04d}-{month:02d}", since.isoformat(), until.isoformat()
 
 
@@ -116,12 +120,14 @@ def _model_registry_status(settings: Settings) -> dict[str, Any]:
             total_count += 1
             raw_score = item.get("score")
             try:
-                score = (
-                    float(raw_score) if isinstance(raw_score, (int, float, str)) else 0.0
-                )
+                score = float(raw_score) if isinstance(raw_score, (int, float, str)) else 0.0
             except ValueError:
                 score = 0.0
-            if score >= settings.model_registry_min_visible_score:
+            lifecycle = str(item.get("lifecycle_status") or "active")
+            if score >= settings.model_registry_min_visible_score and lifecycle in {
+                "active",
+                "watch",
+            }:
                 visible.append(item)
                 qualified_count += 1
         qualified[category] = visible
@@ -144,21 +150,30 @@ def _ai_council_status(
     """Return Council history and fail closed for stale or unverified runs."""
     runs = get_run_history(settings, limit=limit)
     if not runs:
-        return {"ok": False, "count": 0, "runs": [], "reason": "no AI Council run history available"}
+        return {
+            "ok": False,
+            "count": 0,
+            "runs": [],
+            "reason": "no AI Council run history available",
+        }
 
     latest = runs[-1] if isinstance(runs[-1], dict) else {}
     completion_status = str(latest.get("completion_status") or "unknown")
     raw_downstream_sync = latest.get("downstream_sync")
     downstream_sync = raw_downstream_sync if isinstance(raw_downstream_sync, dict) else None
     completed_at = _parse_timestamp(latest.get("completed_at") or latest.get("occurred_at"))
-    fresh = required_since is None or bool(completed_at and completed_at >= required_since.astimezone(UTC))
+    fresh = required_since is None or bool(
+        completed_at and completed_at >= required_since.astimezone(UTC)
+    )
     verified_complete = bool(
         completion_status == "completed"
         and downstream_sync is not None
         and downstream_sync.get("ok") is True
         and fresh
     )
-    if completion_status == "degraded" or bool(downstream_sync and downstream_sync.get("ok") is False):
+    if completion_status == "degraded" or bool(
+        downstream_sync and downstream_sync.get("ok") is False
+    ):
         reason = "latest AI Council downstream sync failed"
     elif not fresh:
         reason = "latest AI Council run is stale for the current monthly governance cycle"
@@ -195,6 +210,9 @@ async def generate_monthly_review(
     sections: dict[str, Any] = {
         "cost_and_tokens": _section(
             lambda: SqlStore(settings).cost_summary(by_model_limit=20, since=since, until=until)
+        ),
+        "model_governance": _section(
+            lambda: SqlStore(settings).model_governance_audit(since=since, until=until)
         ),
         "ai_council_history": _section(
             _ai_council_status, settings, limit=5, required_since=council_required_since
@@ -240,7 +258,9 @@ def _write_report_to_r2(settings: Settings, report: dict[str, Any]) -> dict[str,
         key = f"monthly-reviews/{report['period']}/{report['report_id']}.json"
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir) / "report.json"
-            tmp_path.write_text(json.dumps(report, ensure_ascii=False, default=str, indent=2), encoding="utf-8")
+            tmp_path.write_text(
+                json.dumps(report, ensure_ascii=False, default=str, indent=2), encoding="utf-8"
+            )
             stored = r2.put_file(
                 tmp_path,
                 key,
@@ -259,7 +279,9 @@ def _write_report_to_r2(settings: Settings, report: dict[str, Any]) -> dict[str,
         return {"ok": False, "error": str(exc)}
 
 
-def _index_report_in_d1(settings: Settings, report: dict[str, Any], r2_object: dict[str, Any] | None) -> dict[str, Any]:
+def _index_report_in_d1(
+    settings: Settings, report: dict[str, Any], r2_object: dict[str, Any] | None
+) -> dict[str, Any]:
     d1 = D1MetadataStore(settings)
     if not d1.enabled:
         return {"ok": False, "enabled": False}
@@ -277,7 +299,11 @@ def _index_report_in_d1(settings: Settings, report: dict[str, Any], r2_object: d
         ),
         "r2_object": r2_object,
         "cost_usd_total": (
-            report["sections"].get("cost_and_tokens", {}).get("data", {}).get("totals", {}).get("cost_usd")
+            report["sections"]
+            .get("cost_and_tokens", {})
+            .get("data", {})
+            .get("totals", {})
+            .get("cost_usd")
         ),
         "open_execution_reviews": (
             report["sections"].get("execution_reviews", {}).get("data", {}).get("open_count")
@@ -294,7 +320,9 @@ def _index_report_in_d1(settings: Settings, report: dict[str, Any], r2_object: d
     )
 
 
-async def generate_and_archive_monthly_review(settings: Settings, *, period: str | None = None) -> dict[str, Any]:
+async def generate_and_archive_monthly_review(
+    settings: Settings, *, period: str | None = None
+) -> dict[str, Any]:
     """Run/reuse this month's Council, then build, archive and index the review.
 
     This makes the existing MAST ``hive-monthly-review-generate`` call a complete
@@ -317,19 +345,20 @@ async def generate_and_archive_monthly_review(settings: Settings, *, period: str
     report["r2_object"] = r2_object
     report["d1_index"] = index_result
     report["ok"] = bool(
-        report.get("ok")
-        and r2_object
-        and r2_object.get("ok")
-        and index_result.get("ok")
+        report.get("ok") and r2_object and r2_object.get("ok") and index_result.get("ok")
     )
     return report
 
 
-def list_monthly_reviews(settings: Settings, *, limit: int = DEFAULT_HISTORY_LIMIT) -> dict[str, Any]:
+def list_monthly_reviews(
+    settings: Settings, *, limit: int = DEFAULT_HISTORY_LIMIT
+) -> dict[str, Any]:
     """List previously generated reports (summary only; fetch the R2 object
     for the full report body)."""
     d1 = D1MetadataStore(settings)
     if not d1.enabled:
         return {"ok": False, "enabled": False}
-    result = d1.list_metadata(lane=MONTHLY_REVIEW_LANE, limit=max(1, min(int(limit or DEFAULT_HISTORY_LIMIT), 200)))
+    result = d1.list_metadata(
+        lane=MONTHLY_REVIEW_LANE, limit=max(1, min(int(limit or DEFAULT_HISTORY_LIMIT), 200))
+    )
     return result

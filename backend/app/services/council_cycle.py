@@ -24,34 +24,45 @@ def _parse_timestamp(value: object) -> datetime | None:
     return parsed.astimezone(UTC)
 
 
-
-
 def _qualified_registry(settings: Settings) -> tuple[dict[str, list[dict[str, object]]], int]:
     registry = list_categories()
+    qualified: dict[str, list[dict[str, object]]] = {}
     qualified_count = 0
-    for items in registry.values():
+    for category, items in registry.items():
+        eligible: list[dict[str, object]] = []
         for item in items:
             if not isinstance(item, dict):
                 continue
             raw_score = item.get("score")
             try:
-                score = (
-                    float(raw_score) if isinstance(raw_score, (int, float, str)) else 0.0
-                )
+                score = float(raw_score) if isinstance(raw_score, (int, float, str)) else 0.0
             except ValueError:
                 score = 0.0
-            if score >= settings.model_registry_min_visible_score:
+            lifecycle = str(item.get("lifecycle_status") or "active")
+            if score >= settings.model_registry_min_visible_score and lifecycle in {
+                "active",
+                "watch",
+            }:
                 qualified_count += 1
-    return registry, qualified_count
+                eligible.append(item)
+        qualified[category] = eligible
+    return qualified, qualified_count
 
-def latest_verified_run(settings: Settings, *, since: datetime | None = None) -> dict[str, Any] | None:
+
+def latest_verified_run(
+    settings: Settings, *, since: datetime | None = None
+) -> dict[str, Any] | None:
     """Return the newest fully-synchronised Council run, optionally bounded by freshness."""
     runs = get_run_history(settings, limit=50)
     for run in reversed(runs):
         if not isinstance(run, dict):
             continue
         sync = run.get("downstream_sync")
-        if run.get("completion_status") != "completed" or not isinstance(sync, dict) or sync.get("ok") is not True:
+        if (
+            run.get("completion_status") != "completed"
+            or not isinstance(sync, dict)
+            or sync.get("ok") is not True
+        ):
             continue
         occurred = _parse_timestamp(run.get("completed_at") or run.get("occurred_at"))
         if since is not None and (occurred is None or occurred < since.astimezone(UTC)):
