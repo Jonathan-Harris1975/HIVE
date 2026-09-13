@@ -246,6 +246,13 @@ class Settings(BaseSettings):
     audit_model: str = "~google/gemini-flash-latest"
     openrouter_free_fallback_model: str = "nvidia/nemotron-3-ultra-550b-a55b:free"
     allow_paid_fallback: bool = False
+    # Free OpenRouter endpoints may retain prompts for provider improvement and
+    # are therefore public-data-only by default. This is a data-governance
+    # control, not a spending control.
+    openrouter_free_fallback_public_only: bool = Field(
+        True,
+        validation_alias=AliasChoices("OPENROUTER_FREE_FALLBACK_PUBLIC_ONLY"),
+    )
     openrouter_model_preflight_enabled: bool = True
     openrouter_model_list_timeout_seconds: float = 10
     openrouter_attempt_timeout_seconds: float = Field(
@@ -260,7 +267,7 @@ class Settings(BaseSettings):
     openrouter_stream_first_token_timeout_seconds: float = Field(
         12, validation_alias=AliasChoices("OPENROUTER_STREAM_FIRST_TOKEN_TIMEOUT_SECONDS")
     )
-    openrouter_max_fallback_attempts: int = 1
+    openrouter_max_fallback_attempts: int = 2
     openrouter_empty_reply_retry_enabled: bool = True
     openrouter_min_response_tokens: int = 80
 
@@ -616,6 +623,37 @@ class Settings(BaseSettings):
         ge=0.0,
         le=1.0,
         validation_alias=AliasChoices("MODEL_REGISTRY_MIN_VISIBLE_SCORE"),
+    )
+    # Operator-selected expert models require time-bounded evidence. Missing
+    # evidence sends the request to its governed baseline; the workload is not
+    # rejected. Cost thresholds remain advisory and never block execution.
+    model_governance_enabled: bool = Field(
+        True, validation_alias=AliasChoices("MODEL_GOVERNANCE_ENABLED")
+    )
+    model_governance_premium_patterns: str = Field(
+        "claude-opus,gpt-4,gpt-5.3-codex",
+        validation_alias=AliasChoices("MODEL_GOVERNANCE_PREMIUM_PATTERNS"),
+    )
+    model_governance_approval_max_days: int = Field(
+        90,
+        ge=1,
+        le=90,
+        validation_alias=AliasChoices("MODEL_GOVERNANCE_APPROVAL_MAX_DAYS"),
+    )
+    model_retirement_watch_days: int = Field(
+        60, ge=1, le=365, validation_alias=AliasChoices("MODEL_RETIREMENT_WATCH_DAYS")
+    )
+    model_retirement_deprecating_days: int = Field(
+        30,
+        ge=1,
+        le=180,
+        validation_alias=AliasChoices("MODEL_RETIREMENT_DEPRECATING_DAYS"),
+    )
+    model_retirement_quarantine_days: int = Field(
+        7,
+        ge=1,
+        le=90,
+        validation_alias=AliasChoices("MODEL_RETIREMENT_QUARANTINE_DAYS"),
     )
 
     # Phase 10 - Connector Framework. GitHub is one of the four initial
