@@ -13,6 +13,11 @@ import httpx
 from fastapi import HTTPException, status
 
 from app.core.config import Settings
+from app.services.context_resilience import (
+    add_openrouter_context_compression,
+    deterministic_compact_payload,
+    provider_order,
+)
 from app.services.headroom_optimizer import HeadroomOptimizer, HeadroomOutcome
 
 logger = logging.getLogger("uvicorn.error.hive.openrouter")
@@ -371,36 +376,135 @@ class OpenRouterClient:
         max_attempts = 1 + max(0, int(self.settings.openrouter_max_fallback_attempts))
         for model in ordered_models[:max_attempts]:
             candidate = {**payload, "model": model}
-            yield await self._optimise_candidate_payload(candidate)
+            yield candidate
 
-    async def _optimise_candidate_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Apply Headroom to eligible chat messages without blocking the event loop."""
-        raw_messages = payload.get("messages")
-        model = payload.get("model")
-        if not isinstance(raw_messages, list) or not isinstance(model, str) or not model:
-            return payload
+    async def _context_attempts(
+        self, payload: dict[str, Any]
+    ) -> AsyncIterator[tuple[str, str, dict[str, str], dict[str, Any]]]:
+        """Yield configured context routes in failover order.
 
-        messages: list[dict[str, str]] = []
-        for raw in raw_messages:
-            if not isinstance(raw, dict):
-                return payload
-            role = raw.get("role")
-            content = raw.get("content")
-            if not isinstance(role, str) or not isinstance(content, str):
-                return payload
-            messages.append({"role": role, "content": content})
+        Proxy routes are attempted only when a base URL is configured.  Internal
+        routing metadata is removed before anything leaves HIVE.
+        """
 
-        exact_context = self._requires_exact_context(messages)
-        outcome = await asyncio.to_thread(
-            self._headroom.optimise,
-            messages,
-            model=model,
-            exact_context=exact_context,
-        )
-        self._log_headroom(outcome, model=model)
-        if outcome.messages == messages:
-            return payload
-        return {**payload, "messages": outcome.messages}
+        profile = str(payload.get("_hive_context_profile") or "general").strip().lower()
+        clean_payload = dict(payload)
+        clean_payload.pop("_hive_context_profile", None)
+        model = clean_payload.get("model")
+        raw_messages = clean_payload.get("messages")
+        messages: list[dict[str, str]] | None = None
+        if isinstance(raw_messages, list) and all(
+            isinstance(raw, dict)
+            and isinstance(raw.get("role"), str)
+            and isinstance(raw.get("content"), str)
+            for raw in raw_messages
+        ):
+            messages = [
+                {"role": str(raw["role"]), "content": str(raw["content"])}
+                for raw in raw_messages
+            ]
+        exact_context = bool(messages and self._requires_exact_context(messages))
+
+        if profile == "coding":
+            primary = self.settings.context_coding_primary_provider
+            fallbacks = self.settings.context_coding_fallback_providers
+        else:
+            primary = self.settings.context_primary_provider
+            fallbacks = self.settings.context_fallback_providers
+
+        openrouter_url = f"{self.settings.openrouter_base_url.rstrip('/')}/chat/completions"
+        openrouter_headers = self._headers()
+        for route_name in provider_order(primary, fallbacks):
+            if route_name == "leanctx":
+                base = self.settings.leanctx_base_url.strip().rstrip("/")
+                if not base:
+                    continue
+                yield (
+                    route_name,
+                    f"{base}/chat/completions",
+                    self._proxy_headers(self.settings.leanctx_api_key, openrouter_headers),
+                    dict(clean_payload),
+                )
+                continue
+
+            if route_name == "context_gateway":
+                base = self.settings.context_gateway_base_url.strip().rstrip("/")
+                if not base:
+                    continue
+                yield (
+                    route_name,
+                    f"{base}/chat/completions",
+                    self._proxy_headers(
+                        self.settings.context_gateway_api_key, openrouter_headers
+                    ),
+                    dict(clean_payload),
+                )
+                continue
+
+            if route_name == "headroom":
+                if messages is None or not isinstance(model, str) or not model:
+                    continue
+                outcome = await asyncio.to_thread(
+                    self._headroom.optimise,
+                    messages,
+                    model=model,
+                    exact_context=exact_context,
+                )
+                self._log_headroom(outcome, model=model)
+                if outcome.failed or (
+                    outcome.skipped_reason and outcome.skipped_reason != "exact_context"
+                ):
+                    logger.warning(
+                        "Headroom did not produce a usable context result reason=%s; trying next route",
+                        outcome.skipped_reason or "failed",
+                    )
+                    continue
+                yield (
+                    route_name,
+                    openrouter_url,
+                    openrouter_headers,
+                    {**clean_payload, "messages": outcome.messages},
+                )
+                continue
+
+            if route_name == "openrouter":
+                if exact_context:
+                    continue
+                yield (
+                    route_name,
+                    openrouter_url,
+                    openrouter_headers,
+                    add_openrouter_context_compression(clean_payload),
+                )
+                continue
+
+            if route_name == "deterministic":
+                if exact_context:
+                    continue
+                yield (
+                    route_name,
+                    openrouter_url,
+                    openrouter_headers,
+                    deterministic_compact_payload(
+                        clean_payload,
+                        max_chars=self.settings.context_local_max_chars,
+                        exact_context=False,
+                    ),
+                )
+                continue
+
+            if route_name == "direct":
+                yield route_name, openrouter_url, openrouter_headers, dict(clean_payload)
+
+    @staticmethod
+    def _proxy_headers(
+        proxy_api_key: str, openrouter_headers: dict[str, str]
+    ) -> dict[str, str]:
+        headers = dict(openrouter_headers)
+        key = str(proxy_api_key or "").strip()
+        if key:
+            headers["Authorization"] = f"Bearer {key}"
+        return headers
 
     @staticmethod
     def _requires_exact_context(messages: list[dict[str, str]]) -> bool:
@@ -448,34 +552,156 @@ class OpenRouterClient:
             return None
 
     async def _post_json(self, payload: dict[str, Any]) -> dict[str, Any]:
-        url = f"{self.settings.openrouter_base_url.rstrip('/')}/chat/completions"
-        try:
-            async with httpx.AsyncClient(timeout=self._attempt_timeout()) as client:
-                response = await client.post(url, headers=self._headers(), json={**payload, "stream": False})
-        except httpx.TimeoutException as exc:
-            logger.info("OpenRouter attempt timed out model=%s error=%s", payload.get("model"), exc)
-            return {
-                "_retryable_model_error": True,
-                "status_code": 408,
-                "message": f"OpenRouter attempt timed out for {payload.get('model')}: {exc}",
-            }
-        except httpx.HTTPError as exc:
-            logger.info("OpenRouter attempt failed model=%s error=%s", payload.get("model"), exc)
-            return {
-                "_retryable_model_error": True,
-                "status_code": 502,
-                "message": f"OpenRouter request failed for {payload.get('model')}: {exc}",
-            }
+        last_failure: dict[str, Any] | None = None
+        async for route_name, url, headers, route_payload in self._context_attempts(payload):
+            try:
+                async with httpx.AsyncClient(timeout=self._attempt_timeout()) as client:
+                    response = await client.post(
+                        url, headers=headers, json={**route_payload, "stream": False}
+                    )
+            except httpx.TimeoutException as exc:
+                logger.info(
+                    "Context route timed out route=%s model=%s error=%s",
+                    route_name,
+                    payload.get("model"),
+                    exc,
+                )
+                last_failure = {
+                    "_retryable_model_error": True,
+                    "status_code": 408,
+                    "message": f"Context route {route_name} timed out for {payload.get('model')}: {exc}",
+                }
+                if route_name in {"leanctx", "context_gateway"}:
+                    continue
+                return last_failure
+            except httpx.HTTPError as exc:
+                logger.info(
+                    "Context route failed route=%s model=%s error=%s",
+                    route_name,
+                    payload.get("model"),
+                    exc,
+                )
+                last_failure = {
+                    "_retryable_model_error": True,
+                    "status_code": 502,
+                    "message": f"Context route {route_name} failed for {payload.get('model')}: {exc}",
+                }
+                if route_name in {"leanctx", "context_gateway"}:
+                    continue
+                return last_failure
 
-        if response.status_code >= 400:
-            message = response.text
-            if response.status_code in RETRYABLE_STATUS_CODES:
-                return {"_retryable_model_error": True, "status_code": response.status_code, "message": message}
-            raise HTTPException(status_code=response.status_code, detail=message)
-        return response.json()
+            if response.status_code >= 400:
+                message = response.text
+                last_failure = {
+                    "_retryable_model_error": True,
+                    "status_code": response.status_code,
+                    "message": message,
+                }
+                if route_name in {"leanctx", "context_gateway"}:
+                    logger.warning(
+                        "Context proxy route failed route=%s status=%s; trying fallback",
+                        route_name,
+                        response.status_code,
+                    )
+                    continue
+                if route_name in {"openrouter", "deterministic"} and self._is_context_limit_response(
+                    response.status_code, message
+                ):
+                    logger.warning(
+                        "Context route could not fit prompt route=%s; trying fallback",
+                        route_name,
+                    )
+                    continue
+                if response.status_code in RETRYABLE_STATUS_CODES:
+                    return last_failure
+                raise HTTPException(status_code=response.status_code, detail=message)
+
+            data = response.json()
+            if isinstance(data, dict):
+                data.setdefault("hive_context_route", route_name)
+            return data
+
+        return last_failure or {
+            "_retryable_model_error": True,
+            "status_code": 503,
+            "message": "No configured context route was available.",
+        }
+
+    @staticmethod
+    def _is_context_limit_response(status_code: int | None, message: str) -> bool:
+        if status_code not in {400, 413, 422}:
+            return False
+        text = str(message or "").lower()
+        markers = (
+            "context length",
+            "context_length",
+            "maximum context",
+            "too many messages",
+            "prompt is too long",
+            "input is too long",
+            "token limit",
+        )
+        return any(marker in text for marker in markers)
 
     async def _stream_one_attempt(self, payload: dict[str, Any]) -> AsyncIterator[dict[str, Any]]:
-        url = f"{self.settings.openrouter_base_url.rstrip('/')}/chat/completions"
+        last_retry: dict[str, Any] | None = None
+        async for route_name, url, headers, route_payload in self._context_attempts(payload):
+            saw_token = False
+            route_fallback = False
+            async for event in self._stream_route_attempt(
+                route_payload, url=url, headers=headers
+            ):
+                event_type = event.get("event")
+                if event_type == "token":
+                    saw_token = True
+                    yield event
+                    continue
+
+                if event_type in {"retry_model", "error"} and not saw_token:
+                    status_code = event.get("status_code")
+                    message = str(event.get("message") or "")
+                    can_context_fallback = route_name in {"leanctx", "context_gateway"}
+                    if route_name in {"openrouter", "deterministic"}:
+                        can_context_fallback = self._is_context_limit_response(
+                            int(status_code) if isinstance(status_code, int) else None,
+                            message,
+                        )
+                    if can_context_fallback:
+                        last_retry = {
+                            "event": "retry_model",
+                            "message": message or f"Context route {route_name} failed",
+                            "status_code": status_code,
+                            "model_used": payload.get("model"),
+                        }
+                        logger.warning(
+                            "Streaming context route failed route=%s; trying fallback",
+                            route_name,
+                        )
+                        route_fallback = True
+                        break
+
+                if event_type == "done":
+                    event = {**event, "context_route": route_name}
+                yield event
+
+            if route_fallback:
+                continue
+            return
+
+        yield last_retry or {
+            "event": "retry_model",
+            "message": "No configured context route was available.",
+            "status_code": 503,
+            "model_used": payload.get("model"),
+        }
+
+    async def _stream_route_attempt(
+        self,
+        payload: dict[str, Any],
+        *,
+        url: str,
+        headers: dict[str, str],
+    ) -> AsyncIterator[dict[str, Any]]:
         # stream_options.include_usage is required for OpenRouter/OpenAI-compatible
         # streaming to emit a usage object on the final chunk at all; without it,
         # `final_usage` below always stays None regardless of the usage.include flag.
@@ -504,7 +730,7 @@ class OpenRouterClient:
 
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
-                async with client.stream("POST", url, headers=self._headers(), json=request_payload) as response:
+                async with client.stream("POST", url, headers=headers, json=request_payload) as response:
                     if response.status_code >= 400:
                         body = await response.aread()
                         message = body.decode("utf-8", errors="replace")

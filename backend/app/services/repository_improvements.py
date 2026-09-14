@@ -719,6 +719,7 @@ async def _run_model(
             "temperature": 0.1,
             "max_tokens": 16_000,
             "usage": {"include": True},
+            "_hive_context_profile": "coding",
         },
         fallback_models=fallbacks,
         allow_implicit_free_fallback=False,
