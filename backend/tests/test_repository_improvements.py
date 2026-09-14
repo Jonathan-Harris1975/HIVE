@@ -196,3 +196,213 @@ def test_improvement_routes_are_registered() -> None:
     assert "/v1/repositories/{repository_id}/improvements/latest" in paths
     assert "/v1/repositories/{repository_id}/improvements/jobs/{job_id}" in paths
     assert "/v1/repositories/{repository_id}/improvements/jobs/{job_id}/download/{kind}" in paths
+
+
+def _orchestration_settings(tmp_path: Path) -> Settings:
+    return Settings(  # type: ignore[call-arg]
+        _env_file=None,
+        app_env="test",
+        d1_enabled=False,
+        repository_temp_dir=str(tmp_path / "runtime"),
+        openrouter_api_key="test-key",
+        production_require_r2=False,
+        cheap_model="loop/cheap",
+        balanced_model="loop/balanced",
+        code_model="loop/code",
+        audit_model="council/audit",
+        premium_model="council/premium",
+        repository_improvement_max_loops=3,
+        repository_improvement_max_council_runs=2,
+        repository_improvement_success_threshold=0.95,
+        repository_improvement_near_threshold_tolerance=0.05,
+    )
+
+
+def _orchestration_intelligence() -> dict[str, object]:
+    return {
+        "repository_id": "HIVE",
+        "repository_context": {"repository_id": "HIVE", "fingerprint": "fingerprint-1"},
+        "summary": {"headline": "HIVE needs repair", "finding_count": 1, "qa_score": 0.7},
+        "findings": [
+            {
+                "source": "repository_council",
+                "category": "maintainability",
+                "title": "Improve maintainability",
+                "details": {"path": "app.py"},
+            }
+        ],
+    }
+
+
+def _qa_payload(score: float) -> dict[str, object]:
+    return {
+        "repository_id": "HIVE",
+        "score": score,
+        "warning_count": 0,
+        "checks": [
+            {"name": "build_verification", "status": "ok", "details": {}, "summary": "ok"},
+            {"name": "security_scanning", "status": "ok", "details": {}, "summary": "ok"},
+        ],
+    }
+
+
+@pytest.mark.asyncio
+async def test_improvement_runs_progressive_loops_before_any_council(monkeypatch, tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "app.py").write_text("VALUE = 'source'\n", encoding="utf-8")
+    (root / "README.md").write_text("# HIVE\n", encoding="utf-8")
+    record = _record(root)
+    settings = _orchestration_settings(tmp_path)
+    intelligence = _orchestration_intelligence()
+    calls: list[tuple[str, int, str]] = []
+
+    monkeypatch.setattr(repository_improvements, "get_repository", lambda _repository_id: record)
+    monkeypatch.setattr(repository_improvements, "is_rehydrated", lambda _record: False)
+    monkeypatch.setattr(repository_improvements, "_extract_latest_intelligence", lambda *_args: intelligence)
+    monkeypatch.setattr(
+        repository_improvements.ModelRouter,
+        "progressive_models_for_task",
+        lambda *_args, **_kwargs: ["loop/cheap", "loop/balanced", "loop/code"],
+    )
+    monkeypatch.setattr(
+        repository_improvements.ModelRouter,
+        "council_models_for_task",
+        lambda *_args, **_kwargs: ["council/audit", "council/premium"],
+    )
+
+    async def fake_model(*_args, model=None, orchestration=None, **_kwargs):
+        stage = str(orchestration["stage"])
+        iteration = int(orchestration["iteration"])
+        calls.append((stage, iteration, str(model)))
+        return (
+            {
+                "summary": f"{stage} {iteration}",
+                "changes": [
+                    {
+                        "path": "app.py",
+                        "action": "replace",
+                        "content": f"VALUE = '{model}'\n",
+                        "rationale": "Improve validated candidate.",
+                    }
+                ],
+                "remaining_risks": [],
+            },
+            model,
+        )
+
+    scores = {
+        "loop/cheap": 0.8,
+        "loop/balanced": 0.9,
+        "loop/code": 1.0,
+        "council/audit": 1.0,
+        "council/premium": 1.0,
+    }
+
+    def fake_qa(_repository_id, workspace, **_kwargs):
+        content = Path(workspace, "app.py").read_text(encoding="utf-8")
+        model = next(key for key in scores if key in content)
+        return SimpleNamespace(public_payload=lambda: _qa_payload(scores[model]))
+
+    monkeypatch.setattr(repository_improvements, "_run_model", fake_model)
+    monkeypatch.setattr(repository_improvements, "run_repository_qa_for_workdir", fake_qa)
+    monkeypatch.setattr(repository_improvements, "_store_artifact", lambda *_args, name, **_kwargs: (f"key/{name}", True))
+    monkeypatch.setattr(repository_improvements, "D1MetadataStore", lambda _settings: SimpleNamespace(enabled=False))
+
+    job_id = "job-loop-first"
+    repository_improvements._JOBS.clear()
+    await repository_improvements._run_job(settings, job_id, "HIVE")
+    job = repository_improvements._JOBS[job_id]
+
+    assert job["status"] == "completed"
+    assert calls == [
+        ("self_improvement", 1, "loop/cheap"),
+        ("self_improvement", 2, "loop/balanced"),
+        ("self_improvement", 3, "loop/code"),
+    ]
+    assert job["orchestration"]["accepted_stage"] == "self_improvement"
+    assert job["orchestration"]["self_improvement_loops_run"] == 3
+    assert job["orchestration"]["council_runs"] == []
+    assert job["accepted_under_5_percent_rule"] is False
+
+
+@pytest.mark.asyncio
+async def test_council_accepts_result_within_five_percent_without_second_run(monkeypatch, tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "app.py").write_text("VALUE = 'source'\n", encoding="utf-8")
+    (root / "README.md").write_text("# HIVE\n", encoding="utf-8")
+    record = _record(root)
+    settings = _orchestration_settings(tmp_path)
+    intelligence = _orchestration_intelligence()
+    calls: list[tuple[str, int, str]] = []
+
+    monkeypatch.setattr(repository_improvements, "get_repository", lambda _repository_id: record)
+    monkeypatch.setattr(repository_improvements, "is_rehydrated", lambda _record: False)
+    monkeypatch.setattr(repository_improvements, "_extract_latest_intelligence", lambda *_args: intelligence)
+    monkeypatch.setattr(
+        repository_improvements.ModelRouter,
+        "progressive_models_for_task",
+        lambda *_args, **_kwargs: ["loop/cheap", "loop/balanced", "loop/code"],
+    )
+    monkeypatch.setattr(
+        repository_improvements.ModelRouter,
+        "council_models_for_task",
+        lambda *_args, **_kwargs: ["council/audit", "council/premium"],
+    )
+
+    async def fake_model(*_args, model=None, orchestration=None, **_kwargs):
+        stage = str(orchestration["stage"])
+        iteration = int(orchestration["iteration"])
+        calls.append((stage, iteration, str(model)))
+        return (
+            {
+                "summary": f"{stage} {iteration}",
+                "changes": [
+                    {
+                        "path": "app.py",
+                        "action": "replace",
+                        "content": f"VALUE = '{model}'\n",
+                        "rationale": "Improve validated candidate.",
+                    }
+                ],
+                "remaining_risks": [],
+            },
+            model,
+        )
+
+    scores = {
+        "loop/cheap": 0.8,
+        "loop/balanced": 0.85,
+        "loop/code": 0.89,
+        "council/audit": 0.91,
+        "council/premium": 1.0,
+    }
+
+    def fake_qa(_repository_id, workspace, **_kwargs):
+        content = Path(workspace, "app.py").read_text(encoding="utf-8")
+        model = next(key for key in scores if key in content)
+        return SimpleNamespace(public_payload=lambda: _qa_payload(scores[model]))
+
+    monkeypatch.setattr(repository_improvements, "_run_model", fake_model)
+    monkeypatch.setattr(repository_improvements, "run_repository_qa_for_workdir", fake_qa)
+    monkeypatch.setattr(repository_improvements, "_store_artifact", lambda *_args, name, **_kwargs: (f"key/{name}", True))
+    monkeypatch.setattr(repository_improvements, "D1MetadataStore", lambda _settings: SimpleNamespace(enabled=False))
+
+    job_id = "job-near-threshold"
+    repository_improvements._JOBS.clear()
+    await repository_improvements._run_job(settings, job_id, "HIVE")
+    job = repository_improvements._JOBS[job_id]
+
+    assert job["status"] == "completed"
+    assert calls == [
+        ("self_improvement", 1, "loop/cheap"),
+        ("self_improvement", 2, "loop/balanced"),
+        ("self_improvement", 3, "loop/code"),
+        ("council", 1, "council/audit"),
+    ]
+    assert job["accepted_under_5_percent_rule"] is True
+    assert job["orchestration"]["accepted_stage"] == "council"
+    assert len(job["orchestration"]["council_runs"]) == 1
+    assert job["orchestration"]["council_runs"][0]["accepted_under_5_percent_rule"] is True
+    assert not any(model == "council/premium" for _stage, _iteration, model in calls)

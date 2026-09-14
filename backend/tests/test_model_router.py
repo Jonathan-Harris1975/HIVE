@@ -74,3 +74,32 @@ def test_auto_mode_resolves_aims_rams_to_audit_prompt_mode() -> None:
 def test_audit_signal_takes_precedence_over_repo_signal() -> None:
     router = ModelRouter(Settings())
     assert router.classify_task("Audit this repo governance gate", Mode.AUTO) == TaskType.AUDIT
+
+
+def test_progressive_code_models_are_unique_bounded_and_non_premium() -> None:
+    settings = Settings(
+        cheap_model="cheap-coder",
+        balanced_model="balanced-coder",
+        code_model="strong-coder",
+        premium_model="premium-expert",
+    )
+    router = ModelRouter(settings)
+
+    ladder = router.progressive_models_for_task(TaskType.CODE, max_models=4)
+
+    assert ladder == ["cheap-coder", "balanced-coder", "strong-coder"]
+    assert "premium-expert" not in ladder
+
+
+def test_council_model_ladder_has_hard_two_run_ceiling() -> None:
+    settings = Settings(
+        code_model="code-reviewer",
+        audit_model="audit-reviewer",
+        premium_model="premium-expert",
+    )
+    router = ModelRouter(settings)
+
+    ladder = router.council_models_for_task(TaskType.CODE, max_models=99)
+
+    assert len(ladder) == 2
+    assert ladder[-1] == "premium-expert"

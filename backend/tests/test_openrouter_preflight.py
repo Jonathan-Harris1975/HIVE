@@ -456,3 +456,28 @@ async def test_file_chat_exact_context_bypasses_headroom(monkeypatch: pytest.Mon
 
     assert attempts[0]["messages"] == payload["messages"]
     assert seen_exact == [True]
+
+
+@pytest.mark.asyncio
+async def test_payload_attempts_can_disable_implicit_free_fallback(monkeypatch) -> None:
+    settings = Settings(
+        _env_file=None,
+        openrouter_free_fallback_model="fallback/free:free",
+        openrouter_model_preflight_enabled=True,
+    )
+    client = OpenRouterClient(settings)
+
+    async def fake_model_ids():
+        return {"different/model"}
+
+    monkeypatch.setattr(client, "model_ids", fake_model_ids)
+    attempts = [
+        item
+        async for item in client._payload_attempts(
+            {"model": "missing/paid", "messages": []},
+            [],
+            allow_implicit_free_fallback=False,
+        )
+    ]
+
+    assert attempts == []
