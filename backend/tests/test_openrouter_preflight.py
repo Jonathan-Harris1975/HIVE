@@ -412,9 +412,12 @@ async def test_payload_attempts_apply_headroom_per_selected_model(
     }
 
     attempts = [item async for item in client._payload_attempts(payload, [])]
+    context_routes = [item async for item in client._context_attempts(attempts[0])]
 
-    assert attempts[0]["messages"][0]["content"] == "compressed history"
-    assert attempts[0]["messages"][1]["content"] == "current request"
+    route_name, _url, _headers, routed_payload = context_routes[0]
+    assert route_name == "headroom"
+    assert routed_payload["messages"][0]["content"] == "compressed history"
+    assert routed_payload["messages"][1]["content"] == "current request"
     assert calls == [("primary:free", False)]
 
 
@@ -453,8 +456,11 @@ async def test_file_chat_exact_context_bypasses_headroom(monkeypatch: pytest.Mon
     }
 
     attempts = [item async for item in client._payload_attempts(payload, [])]
+    context_routes = [item async for item in client._context_attempts(attempts[0])]
 
-    assert attempts[0]["messages"] == payload["messages"]
+    route_name, _url, _headers, routed_payload = context_routes[0]
+    assert route_name == "headroom"
+    assert routed_payload["messages"] == payload["messages"]
     assert seen_exact == [True]
 
 
