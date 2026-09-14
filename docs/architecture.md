@@ -355,6 +355,18 @@ dimension weights. "Performance" and "AI-generated code" are explicitly
 documented low-confidence placeholders pending real profiling/classifier
 data. History persists via Repository Memory's `repository_council_history`.
 
+**Controlled repository improvements** (`services/repository_improvements.py`):
+after Repository Intelligence identifies actionable findings, the isolated
+improvement worker uses a bounded loop-first orchestration policy. Up to four
+progressively governed coding-model attempts are validated and only the best
+non-regressing candidate is carried forward. Expert council review is unreachable
+until those loops fail the configured QA target and is capped at two runs. Council
+results within the configured 5 percentage-point tolerance may be accepted only
+when build/security/new-warning gates remain clean. Every attempt, model, QA score,
+promotion and acceptance decision is persisted in the improvement report. Explicit
+model escalation disables OpenRouter's implicit free fallback so internal repository
+content cannot escape onto a free route when a paid model ID is unavailable.
+
 **Phase 9 - Bucket Manager** (`services/bucket_manager.py`): the explicit
 accessible/hidden bucket registry from the programme spec, with an
 `assert_accessible()` guard so hidden buckets (`metasystem`,
