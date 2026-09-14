@@ -150,6 +150,7 @@ def build_payload_with_context(
         # hive_messages.cost_usd; without this flag OpenRouter omits the field and
         # every conversation's cost_usd/total_cost_usd silently stays null.
         "usage": {"include": True},
+        "_hive_context_profile": "coding" if task == TaskType.CODE else "general",
     }
     return payload, fallback_models, skill_context
 

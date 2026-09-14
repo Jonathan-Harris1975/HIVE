@@ -38,7 +38,7 @@ from app.services.brand_modes import build_system_prompt
 from app.services.context_manager import ContextWindow
 from app.services.embeddings import CloudflareEmbeddingsClient
 from app.services.model_governance import ModelUseJustification
-from app.services.model_router import Mode, ModelRouter
+from app.services.model_router import Mode, ModelRouter, TaskType
 from app.services.openrouter import OpenRouterClient
 from app.services.skill_registry import get_skill_catalogue_item
 from app.services.workflow_presets import (
@@ -2084,6 +2084,7 @@ def _build_file_chat_payload(
         "temperature": request.temperature,
         "max_tokens": max(request.max_tokens, settings.openrouter_min_response_tokens),
         "usage": {"include": True},
+        "_hive_context_profile": "coding" if task == TaskType.CODE else "general",
     }
     return {
         "payload": payload,
