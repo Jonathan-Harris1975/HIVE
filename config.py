@@ -406,6 +406,22 @@ class Settings(BaseSettings):
         512 * 1024 * 1024, validation_alias=AliasChoices("REPOSITORY_MAX_UNCOMPRESSED_BYTES")
     )
 
+    # Repository improvement orchestration. Iterative model loops are always
+    # exhausted before expert council review, with strict cost/run ceilings.
+    repository_improvement_max_loops: int = Field(
+        4, ge=1, le=4, validation_alias=AliasChoices("REPOSITORY_IMPROVEMENT_MAX_LOOPS")
+    )
+    repository_improvement_max_council_runs: int = Field(
+        2, ge=0, le=2, validation_alias=AliasChoices("REPOSITORY_IMPROVEMENT_MAX_COUNCIL_RUNS")
+    )
+    repository_improvement_success_threshold: float = Field(
+        0.95, ge=0.0, le=1.0, validation_alias=AliasChoices("REPOSITORY_IMPROVEMENT_SUCCESS_THRESHOLD")
+    )
+    repository_improvement_near_threshold_tolerance: float = Field(
+        0.05, ge=0.0, le=0.10,
+        validation_alias=AliasChoices("REPOSITORY_IMPROVEMENT_NEAR_THRESHOLD_TOLERANCE"),
+    )
+
     # Optional SQL persistence. HIVE v1 works without this; enable when you want
     # conversation/message/file/cost records in SQLite or Koyeb/PostgreSQL.
     database_enabled: bool = Field(False, validation_alias=AliasChoices("DATABASE_ENABLED"))
