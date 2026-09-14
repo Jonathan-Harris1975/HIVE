@@ -111,7 +111,13 @@ class OpenRouterClient:
         models = await self.list_models()
         return {model["id"] for model in models if isinstance(model, dict) and model.get("id")}
 
-    async def chat_completion(self, payload: dict[str, Any], fallback_models: list[str] | None = None) -> dict[str, Any]:
+    async def chat_completion(
+        self,
+        payload: dict[str, Any],
+        fallback_models: list[str] | None = None,
+        *,
+        allow_implicit_free_fallback: bool = True,
+    ) -> dict[str, Any]:
         """Non-streaming chat completion for Make.com and simple smoke tests.
 
         The attempt list is preflighted against OpenRouter's current model list by
@@ -127,7 +133,19 @@ class OpenRouterClient:
         """
 
         attempts: list[dict[str, Any]] = []
-        candidate_payloads = [item async for item in self._payload_attempts(payload, fallback_models)]
+        if allow_implicit_free_fallback:
+            candidate_payloads = [
+                item async for item in self._payload_attempts(payload, fallback_models)
+            ]
+        else:
+            candidate_payloads = [
+                item
+                async for item in self._payload_attempts(
+                    payload,
+                    fallback_models,
+                    allow_implicit_free_fallback=False,
+                )
+            ]
 
         for candidate_payload in candidate_payloads:
             model = candidate_payload.get("model")
@@ -307,6 +325,8 @@ class OpenRouterClient:
         self,
         payload: dict[str, Any],
         fallback_models: list[str] | None,
+        *,
+        allow_implicit_free_fallback: bool = True,
     ) -> AsyncIterator[dict[str, Any]]:
         models = [payload.get("model"), *(fallback_models or [])]
         seen: set[str] = set()
@@ -341,7 +361,11 @@ class OpenRouterClient:
                 model for model in ordered_models[1:] if model != self.settings.openrouter_free_fallback_model
             ]
 
-        if not ordered_models and self.settings.openrouter_free_fallback_model:
+        if (
+            not ordered_models
+            and allow_implicit_free_fallback
+            and self.settings.openrouter_free_fallback_model
+        ):
             ordered_models = [self.settings.openrouter_free_fallback_model]
 
         max_attempts = 1 + max(0, int(self.settings.openrouter_max_fallback_attempts))

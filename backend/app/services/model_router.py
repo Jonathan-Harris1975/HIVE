@@ -182,6 +182,108 @@ class ModelRouter:
                     return item.lifecycle_status
         return None
 
+    def progressive_models_for_task(
+        self,
+        task: TaskType,
+        *,
+        max_models: int = 4,
+        allow_free: bool = False,
+        allow_premium: bool = False,
+    ) -> list[str]:
+        """Return a bounded, cheapest-first escalation ladder for iterative work.
+
+        Repository improvement loops need model progression to be explicit: a
+        failed cheap attempt must not silently jump to an expert model through
+        OpenRouter fallback handling.  The ladder therefore contains unique,
+        routable candidates only and leaves premium models out unless the caller
+        deliberately opts in.
+        """
+        limit = max(1, min(int(max_models), 4))
+        if task == TaskType.CODE:
+            candidates = [self.settings.cheap_model, self.settings.balanced_model]
+            # Registry candidates are Council-ranked. Iterate weakest qualified
+            # to strongest so each loop represents a genuine capability step.
+            ranked = [
+                item
+                for item in reversed(model_registry.get_ranked_models("coding"))
+                if item.score >= self.settings.model_registry_min_visible_score
+                and lifecycle_is_routable(item.lifecycle_status)
+            ]
+            candidates.extend(item.model_id for item in ranked)
+            candidates.append(self.settings.code_model)
+        else:
+            candidates = [
+                self.settings.cheap_model,
+                self.settings.balanced_model,
+                self._baseline_model(task),
+            ]
+
+        ordered: list[str] = []
+        seen: set[str] = set()
+        for model in candidates:
+            model = str(model or "").strip()
+            if not model or model in seen:
+                continue
+            if not allow_free and self._is_free_model_id(model):
+                continue
+            if not allow_premium and is_premium_model(model, self.settings):
+                continue
+            status = self._registered_lifecycle_status(model)
+            if status is not None and not lifecycle_is_routable(status):
+                continue
+            seen.add(model)
+            ordered.append(model)
+
+        if len(ordered) <= limit:
+            return ordered
+        # Preserve the cheapest starting point and the strongest final point
+        # while bounding the number of paid calls.
+        return [*ordered[: limit - 1], ordered[-1]]
+
+    def council_models_for_task(
+        self,
+        task: TaskType,
+        *,
+        max_models: int = 2,
+    ) -> list[str]:
+        """Return the bounded expert-review ladder for post-loop councils.
+
+        A council is intentionally separate from the self-improvement ladder.
+        The first seat uses the configured audit model and the second may use the
+        configured premium model.  Callers still decide whether a council is
+        necessary; this method only enforces the hard two-model ceiling.
+        """
+        limit = max(0, min(int(max_models), 2))
+        if limit == 0:
+            return []
+        candidates = [self.settings.audit_model]
+        if task == TaskType.CODE:
+            candidates.append(self.settings.code_model)
+        candidates.append(self.settings.premium_model)
+
+        ordered: list[str] = []
+        seen: set[str] = set()
+        for model in candidates:
+            model = str(model or "").strip()
+            if not model or model in seen or self._is_free_model_id(model):
+                continue
+            status = self._registered_lifecycle_status(model)
+            if status is not None and not lifecycle_is_routable(status):
+                continue
+            seen.add(model)
+            ordered.append(model)
+        # Prefer the audit/code reviewer first, but reserve the configured
+        # premium model for the final escalation when it is distinct.
+        if len(ordered) <= limit:
+            return ordered
+        if self.settings.premium_model in ordered and limit >= 2:
+            first = next(
+                (model for model in ordered if model != self.settings.premium_model),
+                ordered[0],
+            )
+            return [first, self.settings.premium_model]
+        return ordered[:limit]
+
     def fallback_models_for_task(
         self,
         task: TaskType,
