@@ -299,6 +299,43 @@ class Settings(BaseSettings):
         True, validation_alias=AliasChoices("HEADROOM_LOG_SAVINGS")
     )
 
+    # Context resilience. General HIVE work prefers Context Gateway; coding
+    # tasks prefer LeanCTX. Empty proxy URLs make that route a zero-cost skip,
+    # so HIVE remains operational before/while the side services are deployed.
+    context_primary_provider: Literal[
+        "leanctx", "context_gateway", "headroom", "openrouter", "deterministic", "direct"
+    ] = Field(
+        "context_gateway", validation_alias=AliasChoices("HIVE_CONTEXT_PRIMARY_PROVIDER")
+    )
+    context_coding_primary_provider: Literal[
+        "leanctx", "context_gateway", "headroom", "openrouter", "deterministic", "direct"
+    ] = Field(
+        "leanctx", validation_alias=AliasChoices("HIVE_CONTEXT_CODING_PRIMARY_PROVIDER")
+    )
+    context_fallback_providers: str = Field(
+        "headroom,openrouter,deterministic,direct",
+        validation_alias=AliasChoices("HIVE_CONTEXT_FALLBACK_PROVIDERS"),
+    )
+    context_coding_fallback_providers: str = Field(
+        "context_gateway,headroom,openrouter,deterministic,direct",
+        validation_alias=AliasChoices("HIVE_CONTEXT_CODING_FALLBACK_PROVIDERS"),
+    )
+    leanctx_base_url: str = Field(
+        "", validation_alias=AliasChoices("HIVE_LEANCTX_BASE_URL")
+    )
+    leanctx_api_key: str = Field(
+        "", validation_alias=AliasChoices("HIVE_LEANCTX_API_KEY", "LEAN_CTX_PROXY_TOKEN")
+    )
+    context_gateway_base_url: str = Field(
+        "", validation_alias=AliasChoices("HIVE_CONTEXT_GATEWAY_BASE_URL")
+    )
+    context_gateway_api_key: str = Field(
+        "", validation_alias=AliasChoices("HIVE_CONTEXT_GATEWAY_API_KEY")
+    )
+    context_local_max_chars: int = Field(
+        120_000, ge=8_192, le=1_048_576, validation_alias=AliasChoices("HIVE_CONTEXT_LOCAL_MAX_CHARS")
+    )
+
     chat_with_file_model_timeout_seconds: float = 30
 
     cf_r2_account_id: str = Field(
