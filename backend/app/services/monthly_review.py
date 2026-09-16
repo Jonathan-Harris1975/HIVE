@@ -14,12 +14,6 @@ from app.services.execution_reviews import list_execution_review_plans
 from app.services.model_registry import list_categories
 from app.services.optimisation_engine import list_decisions, list_experiments, success_rate_report
 from app.services.repo_health import build_repo_health_report
-from app.services.skill_registry import (
-    skill_registry_duplicates,
-    skill_registry_integrity_report,
-    skill_registry_missing,
-    skill_registry_orphans,
-)
 from app.storage.d1 import D1MetadataStore
 from app.storage.r2 import R2Storage
 from app.storage.sql_store import SqlStore
@@ -74,7 +68,7 @@ def _normalise_section_result(data: Any) -> dict[str, Any]:
 
 def _section(fn, *args, **kwargs) -> dict[str, Any]:
     """Run one report section defensively. A failure in any single subsystem
-    (e.g. D1 unreachable, skills index empty) must not blank the rest of the
+    (e.g. D1 unreachable or a downstream probe failing) must not blank the rest of the
     monthly review -- it should show up as a flagged section instead."""
     try:
         return _normalise_section_result(fn(*args, **kwargs))
@@ -218,10 +212,6 @@ async def generate_monthly_review(
             _ai_council_status, settings, limit=5, required_since=council_required_since
         ),
         "model_registry": _section(_model_registry_status, settings),
-        "skills_duplicates": _section(skill_registry_duplicates, settings=settings, limit=500),
-        "skills_missing": _section(skill_registry_missing, settings=settings, limit=500),
-        "skills_orphans": _section(skill_registry_orphans, settings=settings, limit=500),
-        "skills_integrity": _section(skill_registry_integrity_report, settings=settings, limit=500),
         "optimisation_success_rate": _section(success_rate_report, settings),
         "optimisation_experiments": _section(list_experiments, settings),
         "optimisation_decisions": _section(list_decisions, settings),

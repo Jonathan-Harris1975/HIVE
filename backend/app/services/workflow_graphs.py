@@ -9,7 +9,7 @@ from app.core.config import Settings
 from app.core.version import BUILD_STAGE
 from app.services.catalogue_metadata import enrich_task_item
 from app.services.execution_adapters import execution_adapter_policy
-from app.services.skill_registry import shared_execution_plan
+from app.services.execution_plans import shared_execution_plan
 from app.storage.d1 import D1MetadataStore
 
 WORKFLOW_GRAPH_TEMPLATES: dict[str, dict[str, object]] = {
@@ -21,21 +21,15 @@ WORKFLOW_GRAPH_TEMPLATES: dict[str, dict[str, object]] = {
     },
     "repo_debug": {
         "label": "Repo/debug workflow",
-        "description": "Classify repo/log issues, identify candidate skills, and produce a review-gated patch plan.",
+        "description": "Classify repo/log issues, gather evidence, and produce a review-gated patch plan.",
         "recommended_presets": ["repo_debug_bundle", "ci_log_analysis"],
         "default_repo": "HIVE",
     },
     "content_qa": {
         "label": "Evidence QA workflow",
         "description": "Review supplied content or audit evidence against repository quality gates.",
-        "recommended_presets": ["HIVE-sk003"],
+        "recommended_presets": ["social_content_qa", "podcast_episode_review", "ebook_keyword_review"],
         "default_repo": "AIMS",
-    },
-    "skills_registry": {
-        "label": "Skills registry workflow",
-        "description": "Search, recommend, route and review repository-local capabilities.",
-        "recommended_presets": [],
-        "default_repo": "HIVE",
     },
 }
 
@@ -132,7 +126,7 @@ def workflow_graph_templates() -> dict[str, object]:
         "build_stage_hint": BUILD_STAGE,
         "count": len(templates),
         "templates": templates,
-        "note": "Templates are UI/planning hints only. They do not execute skills or mutate repos.",
+        "note": "Templates are UI/planning hints only. They do not mutate repos.",
     }
 
 
@@ -168,13 +162,11 @@ def build_workflow_graph(
         return plan
 
     graph_id = f"workflow-graph-{uuid4()}"
-    candidate_skills = _candidate_skills_from_plan(plan)
-    risk_summary = _risk_summary(candidate_skills)
+    risk_summary = _risk_summary(plan)
     nodes = _workflow_nodes(
         task=clean_task,
         template=selected_template,
         plan=plan,
-        candidate_skills=candidate_skills,
         risk_summary=risk_summary,
     )
     edges = _workflow_edges(nodes)
@@ -196,7 +188,6 @@ def build_workflow_graph(
         "nodes": nodes,
         "edges": edges,
         "risk_summary": risk_summary,
-        "candidate_skills": candidate_skills,
         "source_plan": plan,
         "safety_note": _safety_note(),
     }
@@ -287,32 +278,24 @@ def _normalise_template(template: str | None, workflow_preset: str | None, repo:
     preset = (workflow_preset or "").strip().lower()
     if "audit" in preset:
         return "audit_review"
+    if "social" in preset or "podcast" in preset or "ebook" in preset or "content" in preset:
+        return "content_qa"
     if "repo" in preset or "ci" in preset or (repo or "").strip().lower() == "hive":
         return "repo_debug"
-    if "social" in preset or "podcast" in preset or "ebook" in preset:
-        return "content_qa"
-    if "skill" in preset:
-        return "skills_registry"
-    return "skills_registry"
+    return "repo_debug"
 
 
-def _candidate_skills_from_plan(plan: dict[str, object]) -> list[dict[str, object]]:
-    routed = plan.get("routed_skill_plan") if isinstance(plan.get("routed_skill_plan"), dict) else {}
-    candidates = routed.get("candidate_skills") if isinstance(routed.get("candidate_skills"), list) else []
-    return [item for item in candidates if isinstance(item, dict)][:25]
-
-
-def _risk_summary(candidate_skills: list[dict[str, object]]) -> dict[str, object]:
-    counts = {"low": 0, "medium": 0, "high": 0, "unknown": 0}
-    for item in candidate_skills:
-        risk = str(item.get("risk_level") or "unknown").strip().lower()
-        counts[risk if risk in counts else "unknown"] += 1
-    highest = "high" if counts["high"] else "medium" if counts["medium"] else "low" if counts["low"] else "unknown"
+def _risk_summary(plan: dict[str, object]) -> dict[str, object]:
+    risk = str(plan.get("risk_level") or "medium").strip().lower()
+    if risk not in {"low", "medium", "high"}:
+        risk = "medium"
+    counts = {"low": 0, "medium": 0, "high": 0}
+    counts[risk] = 1
+    requires_approval = bool(plan.get("requires_approval", risk in {"medium", "high"}))
     return {
-        "candidate_count": len(candidate_skills),
         "by_risk": counts,
-        "highest_risk": highest,
-        "review_required": highest in {"medium", "high", "unknown"} or bool(candidate_skills),
+        "highest_risk": risk,
+        "review_required": requires_approval,
     }
 
 
@@ -321,7 +304,6 @@ def _workflow_nodes(
     task: str,
     template: str,
     plan: dict[str, object],
-    candidate_skills: list[dict[str, object]],
     risk_summary: dict[str, object],
 ) -> list[dict[str, object]]:
     nodes = [
@@ -338,14 +320,6 @@ def _workflow_nodes(
             "label": "Classify workflow",
             "status": "planned",
             "summary": f"Template: {template}; repo: {plan.get('repo') or 'unspecified'}.",
-        },
-        {
-            "id": "recommend_skills",
-            "type": "skill_selection",
-            "label": "Recommend skills",
-            "status": "planned",
-            "summary": f"{len(candidate_skills)} candidate skill(s) selected from the D1 registry.",
-            "skill_ids": [item.get("skill_id") for item in candidate_skills if item.get("skill_id")],
         },
         {
             "id": "collect_evidence",
@@ -366,7 +340,7 @@ def _workflow_nodes(
             "type": "gate",
             "label": "Risk gate",
             "status": "review_required" if risk_summary.get("review_required") else "planned",
-            "summary": f"Highest candidate risk: {risk_summary.get('highest_risk')}.",
+            "summary": f"Workflow risk: {risk_summary.get('highest_risk')}.",
             "risk_summary": risk_summary,
         },
         {
@@ -456,7 +430,7 @@ def _next_required_actions(
         actions.append("Approved plan is ready for operator-triggered production adapter handoff.")
     if blocked and not adapter_enabled:
         actions.append("Set EXECUTION_ADAPTERS_ENABLED=true to enable the production adapter gate.")
-    actions.append("Use the evidence pack endpoint to review sources, candidate skills and risk notes.")
+    actions.append("Use the evidence pack endpoint to review sources, planned steps and risk notes.")
     return actions
 
 
@@ -514,10 +488,9 @@ def simulate_workflow_execution(
         return preview
     graph = preview.get("workflow_graph") if isinstance(preview.get("workflow_graph"), dict) else {}
     risk_summary = graph.get("risk_summary") if isinstance(graph.get("risk_summary"), dict) else {}
-    candidate_skills = graph.get("candidate_skills") if isinstance(graph.get("candidate_skills"), list) else []
     selected_profile = _normalise_policy_profile(policy_profile, risk_summary)
     required_services = _required_services_for_graph(graph)
-    cost_estimate = _simulation_cost_estimate(candidate_skills, required_services)
+    cost_estimate = _simulation_cost_estimate(required_services)
     can_execute_now = bool(preview.get("can_execute_now"))
     adapter_enabled = bool(preview.get("adapter_execution_enabled"))
     missing_prerequisites = _simulation_missing_prerequisites(
@@ -787,38 +760,23 @@ def _normalise_policy_profile(value: str | None, risk_summary: dict[str, object]
 
 
 def _required_services_for_graph(graph: dict[str, object]) -> list[dict[str, object]]:
-    services = [
+    del graph
+    return [
         {"service": "D1", "purpose": "metadata, review records and saved previews", "required": True},
         {"service": "PostgreSQL", "purpose": "conversation/file/chunk memory where relevant", "required": False},
         {"service": "R2", "purpose": "source artefacts/evidence packs where already configured", "required": False},
         {"service": "Vectorize", "purpose": "semantic retrieval over indexed evidence when available", "required": False},
         {"service": "OpenRouter", "purpose": "answer/summary generation outside preview-only simulation", "required": False},
     ]
-    candidate_count = len(graph.get("candidate_skills", []) if isinstance(graph.get("candidate_skills"), list) else [])
-    if candidate_count:
-        services.append(
-            {
-                "service": "Local HIVE catalogue",
-                "purpose": "versioned native-capability metadata",
-                "required": True,
-            }
-        )
-    return services
 
 
-def _simulation_cost_estimate(candidate_skills: list[dict[str, object]], required_services: list[dict[str, object]]) -> dict[str, object]:
-    skill_count = len(candidate_skills)
+def _simulation_cost_estimate(required_services: list[dict[str, object]]) -> dict[str, object]:
     service_count = len(required_services)
-    if skill_count <= 2:
-        cost_class = "low"
-    elif skill_count <= 8:
-        cost_class = "medium"
-    else:
-        cost_class = "high"
+    cost_class = "low" if service_count <= 5 else "medium"
     return {
         "cost_class": cost_class,
         "estimated_model_calls": 0,
-        "estimated_d1_reads": max(1, skill_count),
+        "estimated_d1_reads": 1,
         "estimated_r2_reads": 0,
         "estimated_vector_queries": 0,
         "service_touch_count": service_count,
@@ -846,15 +804,6 @@ def _simulation_rollback_notes(required_services: list[dict[str, object]]) -> li
 
 
 def _affected_surfaces(preview: dict[str, object], graph: dict[str, object]) -> dict[str, list[str]]:
-    repos = []
     repo = preview.get("repo") or graph.get("repo")
-    if repo:
-        repos.append(str(repo))
-    candidates = graph.get("candidate_skills") if isinstance(graph.get("candidate_skills"), list) else []
-    for item in candidates:
-        if isinstance(item, dict):
-            for repo_name in item.get("repos", []) if isinstance(item.get("repos"), list) else []:
-                name = str(repo_name)
-                if name not in repos:
-                    repos.append(name)
+    repos = [str(repo)] if repo else []
     return {"repos": repos[:10], "buckets": []}

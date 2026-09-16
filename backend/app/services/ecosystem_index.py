@@ -6,7 +6,6 @@ from typing import Any
 
 from app.core.config import Settings
 from app.core.version import BUILD_STAGE
-from app.services.catalogue_metadata import load_skill_catalogue_metadata
 from app.services.embeddings import CloudflareEmbeddingsClient
 from app.storage.d1 import D1MetadataStore
 from app.storage.r2 import R2Storage
@@ -45,11 +44,6 @@ def ecosystem_status(settings: Settings) -> dict[str, object]:
     r2 = R2Storage(settings)
     vectorize = VectorizeClient(settings)
     embeddings = CloudflareEmbeddingsClient(settings)
-    local_skills = load_skill_catalogue_metadata()
-    raw_local_skill_items = local_skills.get("items")
-    local_skill_items: list[object] = (
-        raw_local_skill_items if isinstance(raw_local_skill_items, list) else []
-    )
     lanes = settings.r2_ecosystem_lanes
     configured_lanes = [item for item in lanes if item.get("configured")]
     return {
@@ -76,14 +70,6 @@ def ecosystem_status(settings: Settings) -> dict[str, object]:
                 "provider": settings.embeddings_provider,
                 "model": settings.embeddings_model,
                 "dimensions": settings.embeddings_dimensions,
-            },
-            "skills": {
-                "lane": "hive_local_skills",
-                "configured": bool(local_skill_items),
-                "access_mode": "repository-local-read-only",
-                "source": "repo://skills/catalogue_metadata.json",
-                "count": len(local_skill_items),
-                "shared_bucket_required": False,
             },
         },
         "recommended_mast_probe": "/v1/ecosystem/status",

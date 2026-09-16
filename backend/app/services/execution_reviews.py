@@ -9,7 +9,7 @@ from app.core.config import Settings
 from app.core.version import BUILD_STAGE
 from app.services.execution_adapters import approved_execution_payload, execution_adapter_policy
 from app.services.catalogue_metadata import enrich_task_item
-from app.services.skill_registry import shared_execution_plan
+from app.services.execution_plans import shared_execution_plan
 from app.storage.d1 import D1MetadataStore
 
 EXECUTION_REVIEW_LANE = "hive_execution_reviews"
@@ -315,7 +315,7 @@ def execution_review_evidence_pack(*, settings: Settings, plan_id: str) -> dict[
     """Build a read-only evidence pack for one review plan.
 
     The pack is intended for the future UI and for copy/paste review outside HIVE.
-    It contains the plan, candidate skills, decision trail and safety guardrails,
+    It contains the plan, planned steps, decision trail and safety guardrails,
     but never executes an action.
     """
 
@@ -325,13 +325,6 @@ def execution_review_evidence_pack(*, settings: Settings, plan_id: str) -> dict[
     item = detail.get("review") if isinstance(detail.get("review"), dict) else {}
     meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
     plan = meta.get("plan") if isinstance(meta.get("plan"), dict) else {}
-    routed = (
-        plan.get("routed_skill_plan") if isinstance(plan.get("routed_skill_plan"), dict) else {}
-    )
-    primary = routed.get("primary_skill") if isinstance(routed.get("primary_skill"), dict) else None
-    candidates = (
-        routed.get("candidate_skills") if isinstance(routed.get("candidate_skills"), list) else []
-    )
     audit = execution_review_audit_trail(settings=settings, plan_id=plan_id)
     pack = {
         "plan_id": plan_id,
@@ -348,9 +341,7 @@ def execution_review_evidence_pack(*, settings: Settings, plan_id: str) -> dict[
         "adapter_execution_enabled": bool(meta.get("adapter_execution_enabled")),
         "execution_state": meta.get("execution_state") or "awaiting_approval",
         "execution_handoff": meta.get("execution_handoff") or {},
-        "primary_skill": primary,
-        "candidate_skills": candidates,
-        "candidate_count": len(candidates),
+        "risk_level": plan.get("risk_level") or meta.get("risk_level") or "medium",
         "shared_steps": plan.get("shared_steps") or [],
         "guardrails": plan.get("guardrails") or {},
         "review_gate": meta.get("review_gate") or {},
@@ -476,16 +467,13 @@ def _json_or_none(value: Any) -> Any:
 def _review_summary(item: dict[str, Any]) -> dict[str, object]:
     meta = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
     plan = meta.get("plan") if isinstance(meta.get("plan"), dict) else {}
-    routed = plan.get("routed_skill_plan") if isinstance(plan.get("routed_skill_plan"), dict) else {}
-    primary = routed.get("primary_skill") if isinstance(routed.get("primary_skill"), dict) else None
-    risk_level = _review_risk_level(meta, plan, routed, primary)
-    skill_name = _review_skill_name(primary)
+    risk_level = _review_risk_level(meta, plan)
     task = meta.get("task")
     task_meta = enrich_task_item(
         {
             "id": meta.get("workflow_preset") or "review_queue",
             "label": str(item.get("title") or "Execution review"),
-            "summary": _review_evidence_summary(task, skill_name, risk_level),
+            "summary": _review_evidence_summary(task, risk_level),
             "risk": risk_level,
             "requires_approval": meta.get("requires_approval", True),
         },
@@ -510,12 +498,10 @@ def _review_summary(item: dict[str, Any]) -> dict[str, object]:
         "risk_level": risk_level,
         "risk": risk_level,
         "action_type": "review_gated_plan",
-        "skill_name": skill_name,
-        "primary_skill": primary,
         "description": task_meta.get("description"),
         "category": task_meta.get("category"),
         "when_to_use": task_meta.get("when_to_use"),
-        "evidence_summary": _review_evidence_summary(task, skill_name, risk_level),
+        "evidence_summary": _review_evidence_summary(task, risk_level),
         "decision_count": len(meta.get("decision_log") or [])
         if isinstance(meta.get("decision_log"), list)
         else 0,
@@ -525,38 +511,21 @@ def _review_summary(item: dict[str, Any]) -> dict[str, object]:
     }
 
 
-def _review_risk_level(
-    meta: dict[str, Any],
-    plan: dict[str, Any],
-    routed: dict[str, Any],
-    primary: dict[str, Any] | None,
-) -> str:
+def _review_risk_level(meta: dict[str, Any], plan: dict[str, Any]) -> str:
     for value in (
         meta.get("risk_level"),
         meta.get("risk"),
-        routed.get("risk_level"),
-        (primary or {}).get("risk_level"),
-        ((primary or {}).get("metadata") or {}).get("risk_level")
-        if isinstance((primary or {}).get("metadata"), dict)
-        else None,
+        plan.get("risk_level"),
     ):
         cleaned = _clean_risk(value)
         if cleaned:
             return cleaned
-
-    candidates = routed.get("candidate_skills") if isinstance(routed.get("candidate_skills"), list) else []
-    for candidate in candidates:
-        if isinstance(candidate, dict):
-            cleaned = _clean_risk(candidate.get("risk_level"))
-            if cleaned:
-                return cleaned
 
     guardrails = plan.get("guardrails") if isinstance(plan.get("guardrails"), dict) else {}
     gates = guardrails.get("risk_gates_required") if isinstance(guardrails.get("risk_gates_required"), list) else []
     if "high" in {str(item).lower() for item in gates}:
         return "medium"
     return "medium"
-
 
 
 def _status_filter(value: str | None) -> str | None:
@@ -593,20 +562,9 @@ def _clean_risk(value: Any) -> str:
     return ""
 
 
-def _review_skill_name(primary: dict[str, Any] | None) -> str | None:
-    if not isinstance(primary, dict):
-        return None
-    for key in ("name", "title", "skill_id", "source_id"):
-        value = primary.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()[:120]
-    return None
-
-
-def _review_evidence_summary(task: Any, skill_name: str | None, risk_level: str) -> str:
+def _review_evidence_summary(task: Any, risk_level: str) -> str:
     task_text = " ".join(str(task or "").split())
-    skill_text = skill_name or "No specific skill linked"
-    return f"{skill_text}; {risk_level} risk; {task_text[:180]}"
+    return f"{risk_level} risk; {task_text[:180]}"
 
 
 def _title_for_plan(
@@ -629,7 +587,6 @@ def _safety_note() -> str:
 
 
 def _evidence_pack_markdown(pack: dict[str, Any]) -> str:
-    primary = pack.get("primary_skill") if isinstance(pack.get("primary_skill"), dict) else {}
     lines = [
         "# HIVE Execution Review Evidence Pack",
         "",
@@ -638,29 +595,22 @@ def _evidence_pack_markdown(pack: dict[str, Any]) -> str:
         f"- Task: {pack.get('task')}",
         f"- Repo: {pack.get('repo') or 'not specified'}",
         f"- Workflow preset: {pack.get('workflow_preset') or 'not specified'}",
+        f"- Risk: {pack.get('risk_level') or 'unknown'}",
         f"- Execution mode: `{pack.get('execution_mode')}`",
         f"- Can execute now: `{pack.get('can_execute_now')}`",
         "",
-        "## Primary skill",
-        "",
-        f"- Skill: {primary.get('name') or primary.get('title') or 'none'}",
-        f"- Skill ID: {primary.get('skill_id') or primary.get('source_id') or 'none'}",
-        f"- Risk: {primary.get('risk_level') or 'unknown'}",
-        "",
-        "## Candidate skills",
+        "## Planned steps",
         "",
     ]
-    candidates = (
-        pack.get("candidate_skills") if isinstance(pack.get("candidate_skills"), list) else []
-    )
-    if candidates:
-        for index, item in enumerate(candidates, start=1):
+    steps = pack.get("shared_steps") if isinstance(pack.get("shared_steps"), list) else []
+    if steps:
+        for index, item in enumerate(steps, start=1):
             if isinstance(item, dict):
                 lines.append(
-                    f"{index}. {item.get('name') or item.get('title') or item.get('skill_id')} — {item.get('risk_level') or 'unknown'}"
+                    f"{index}. {item.get('name') or 'step'}: {item.get('description') or ''}"
                 )
     else:
-        lines.append("No candidate skills recorded.")
+        lines.append("No planned steps recorded.")
     lines.extend(["", "## Audit timeline", ""])
     timeline = pack.get("audit_timeline") if isinstance(pack.get("audit_timeline"), list) else []
     if timeline:

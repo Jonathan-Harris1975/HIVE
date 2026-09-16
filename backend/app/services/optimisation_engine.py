@@ -200,7 +200,7 @@ def success_rate_report(settings: Settings) -> dict[str, Any]:
 # This is the wiring the deployment-readiness audit flagged as critical:
 # previously nothing connected an incoming RAMS QA event to the
 # optimisation decision ledger above. A QA event describes something RAMS
-# observed about a repository/skill/workflow it QA'd (a score, a pass/fail
+# observed about a repository/workflow it QA'd (a score, a pass/fail
 # check, a recommended action); this adapter turns that observation into a
 # recorded, reviewable, and rollback-able optimisation decision so it shows
 # up in both `list_decisions` and `success_rate_report` (the two places the
