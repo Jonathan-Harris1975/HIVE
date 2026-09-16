@@ -1,191 +1,182 @@
 {
-  "schema_version": "2026-06-22.catalogue-metadata.v1",
-  "updated_at": "2026-06-22",
-  "description": "Governed HIVE skill catalogue metadata. Entries enrich imported D1/R2 skill records; fallback rules prevent blank descriptions for registry skills that arrive without local metadata.",
-  "required_fields": ["id", "title", "description", "category", "risk", "requires_approval"],
+  "schema_version": "2026-09-15.repository-skills.v1",
+  "updated_at": "2026-09-15",
+  "description": "Authoritative repository-local HIVE skill catalogue. Every entry maps to native HIVE code; no descriptor, prompt body or runtime dependency is loaded from a shared bucket or third-party skill source.",
+  "required_fields": [
+    "id",
+    "slug",
+    "title",
+    "description",
+    "category",
+    "risk",
+    "requires_approval",
+    "priority_tier",
+    "hive_lane",
+    "repos",
+    "tags",
+    "implementation_paths"
+  ],
   "defaults": {
-    "type": "skill",
-    "category": "General operations",
+    "type": "repository_skill",
     "risk": "medium",
     "requires_approval": true,
-    "description": "Supports a governed HIVE operational task using registry metadata and review-gated planning.",
-    "when_to_use": "Use when a request matches the skill title, tags, repository or lane metadata."
+    "priority_tier": "P2 - Useful",
+    "repos": ["HIVE"],
+    "origin": "repository-native",
+    "external_content_copied": false
   },
-  "fallback_rules": [
-    {
-      "match_any": ["ci", "log", "koyeb", "deployment", "trace", "error"],
-      "category": "CI and deployment diagnostics",
-      "description": "Analyses logs, failed checks and deployment signals to identify the smallest safe fix.",
-      "risk": "medium",
-      "requires_approval": true
-    },
-    {
-      "match_any": ["repo", "github", "patch", "code", "test", "lint"],
-      "category": "Repository engineering",
-      "description": "Reviews repository evidence and prepares a bounded, testable change plan.",
-      "risk": "medium",
-      "requires_approval": true
-    },
-    {
-      "match_any": ["security", "secret", "auth", "token", "risk"],
-      "category": "Security and risk",
-      "description": "Checks security-sensitive configuration, access boundaries and approval gates before changes proceed.",
-      "risk": "high",
-      "requires_approval": true
-    },
-    {
-      "match_any": ["r2", "cloudflare", "bucket", "storage", "object"],
-      "category": "Cloudflare storage operations",
-      "description": "Works with configured Cloudflare storage lanes using bounded reads, writes only where explicitly allowed.",
-      "risk": "medium",
-      "requires_approval": true
-    },
-    {
-      "match_any": ["vector", "vectorize", "embedding", "search", "retrieval"],
-      "category": "Retrieval and indexing",
-      "description": "Improves skill, file or context retrieval using configured index metadata and safe fallback paths.",
-      "risk": "medium",
-      "requires_approval": true
-    },
-    {
-      "match_any": ["rss", "blog", "social", "caption", "content", "brand"],
-      "category": "Content operations",
-      "description": "Reviews or prepares brand-aware content while keeping QA recommendations future-facing.",
-      "risk": "low",
-      "requires_approval": false
-    },
-    {
-      "match_any": ["podcast", "episode", "transcript", "audio", "podseo"],
-      "category": "Podcast operations",
-      "description": "Reviews podcast transcript, metadata or publishing evidence for QA and amplification planning.",
-      "risk": "low",
-      "requires_approval": false
-    },
-    {
-      "match_any": ["ebook", "kdp", "keyword", "catalogue", "book"],
-      "category": "eBook operations",
-      "description": "Reviews eBook catalogue, keyword or positioning evidence without inventing marketplace data.",
-      "risk": "low",
-      "requires_approval": false
-    },
-    {
-      "match_any": ["audit", "qa", "readiness", "rams", "aims", "verification"],
-      "category": "Audit and readiness",
-      "description": "Checks production-readiness evidence and turns findings into a controlled improvement plan.",
-      "risk": "medium",
-      "requires_approval": true
-    }
-  ],
+  "fallback_rules": [],
   "items": [
     {
-      "id": "ci_log_analysis",
-      "aliases": ["ci-log-analysis", "ci", "logs", "koyeb-logs"],
-      "title": "CI/log analysis",
+      "id": "HIVE-sk001",
+      "aliases": ["ci_log_analysis", "ci-log-analysis", "ci", "logs", "koyeb-logs"],
+      "slug": "ci-log-analysis",
+      "title": "CI and runtime log analysis",
       "category": "CI and deployment diagnostics",
       "risk": "medium",
       "requires_approval": false,
-      "description": "Analyses CI logs, runtime logs and deployment output to find the first meaningful failure and the safest next fix.",
-      "when_to_use": "Use for GitHub Actions, Koyeb, Cloudflare Pages or runtime diagnostic bundles."
+      "priority_tier": "P0 - Foundation",
+      "hive_lane": "CI and deployment diagnostics",
+      "repos": ["HIVE", "HIVE-UI", "AIMS", "RAMS", "Website"],
+      "tags": ["ci", "logs", "deployment", "diagnostics"],
+      "description": "Analyses CI, runtime and deployment output to identify the first meaningful failure and the smallest safe next step.",
+      "when_to_use": "Use for GitHub Actions, Koyeb, Cloudflare Pages or application runtime diagnostic evidence.",
+      "implementation_paths": [
+        "backend/app/services/repo_health.py",
+        "backend/app/services/repository_intelligence.py"
+      ]
     },
     {
-      "id": "repo_debug_bundle",
-      "aliases": ["repo-debug-bundle", "repo_debug", "debug", "repo"],
-      "title": "Repo/debug bundle",
+      "id": "HIVE-sk002",
+      "aliases": ["repo_debug_bundle", "repo-debug-bundle", "repo_debug", "debug", "repo"],
+      "slug": "repository-diagnosis",
+      "title": "Repository diagnosis",
       "category": "Repository engineering",
       "risk": "medium",
       "requires_approval": true,
-      "description": "Inspects repository ZIPs, failing tests and deployment artefacts to produce a minimal patch plan.",
-      "when_to_use": "Use when a repo upload, stack trace or failing build needs grounded triage."
+      "priority_tier": "P0 - Foundation",
+      "hive_lane": "Repository engineering",
+      "repos": ["HIVE", "HIVE-UI", "AIMS", "RAMS", "Website"],
+      "tags": ["repository", "debug", "tests", "quality"],
+      "description": "Inspects repository evidence, failing tests and build artefacts to produce a bounded diagnosis and reviewable change plan.",
+      "when_to_use": "Use when an uploaded repository, stack trace or failing build needs evidence-grounded triage.",
+      "implementation_paths": [
+        "backend/app/services/repository_manager.py",
+        "backend/app/services/repository_qa.py",
+        "backend/app/services/repository_intelligence.py"
+      ]
     },
     {
-      "id": "audit_report_review",
-      "aliases": ["audit-report-review", "audit", "rams-audit", "aims-audit"],
+      "id": "HIVE-sk003",
+      "aliases": ["audit_report_review", "audit-report-review", "audit", "rams-audit", "aims-audit"],
+      "slug": "audit-report-review",
       "title": "Audit report review",
       "category": "Audit and readiness",
       "risk": "medium",
       "requires_approval": true,
+      "priority_tier": "P1 - High",
+      "hive_lane": "Audit and readiness",
+      "repos": ["HIVE", "AIMS", "RAMS"],
+      "tags": ["audit", "evidence", "readiness", "quality"],
       "description": "Summarises audit bundles, highlights production risks and turns evidence into a review-gated improvement path.",
-      "when_to_use": "Use for RAMS/AIMS/HIVE audit reports, readiness checks and QA evidence packs."
+      "when_to_use": "Use for RAMS, AIMS or HIVE audit reports, readiness checks and QA evidence packs.",
+      "implementation_paths": [
+        "backend/app/api/files.py",
+        "backend/app/services/execution_reviews.py"
+      ]
     },
     {
-      "id": "social_content_qa",
-      "aliases": ["social-content-qa", "social", "content-qa", "brand-qa"],
-      "title": "Social content QA",
-      "category": "Content operations",
-      "risk": "low",
-      "requires_approval": false,
-      "description": "Reviews social, RSS and short-form content for brand fit, clarity and future QA improvements.",
-      "when_to_use": "Use for captions, hooks, platform posts, RSS rewrites and brand-safety checks."
-    },
-    {
-      "id": "podcast_episode_review",
-      "aliases": ["podcast-episode-review", "podcast", "transcript-review"],
-      "title": "Podcast episode review",
-      "category": "Podcast operations",
-      "risk": "low",
-      "requires_approval": false,
-      "description": "Reviews podcast transcripts, episode metadata and RSS wording for QA and amplification opportunities.",
-      "when_to_use": "Use for podcast transcript reviews, episode pages, show notes and podcast SEO planning."
-    },
-    {
-      "id": "ebook_keyword_review",
-      "aliases": ["ebook-keyword-review", "ebook", "kdp", "keyword-review"],
-      "title": "eBook keyword review",
-      "category": "eBook operations",
-      "risk": "low",
-      "requires_approval": false,
-      "description": "Reviews eBook keyword notes, catalogue positioning and niche-gap evidence without inventing market data.",
-      "when_to_use": "Use for KDP keyword council work, catalogue planning and eBook positioning checks."
-    },
-    {
-      "id": "skill_registry_integrity",
-      "aliases": ["skill-registry-integrity", "registry-integrity", "skills-integrity"],
-      "title": "Skill registry integrity",
+      "id": "HIVE-sk004",
+      "aliases": ["skill_registry_integrity", "skill-registry-integrity", "catalogue-integrity", "skills-integrity"],
+      "slug": "local-skill-catalogue-integrity",
+      "title": "Local skill catalogue integrity",
       "category": "Skill governance",
-      "risk": "medium",
-      "requires_approval": true,
-      "description": "Checks shared skill records for missing fields, duplicate identifiers and taxonomy drift before routing work.",
-      "when_to_use": "Use when the skill catalogue looks stale, duplicated or under-described."
+      "risk": "low",
+      "requires_approval": false,
+      "priority_tier": "P0 - Foundation",
+      "hive_lane": "Skill governance",
+      "repos": ["HIVE"],
+      "tags": ["skills", "catalogue", "integrity", "local"],
+      "description": "Validates HIVE's bundled skill records for required fields, duplicate identifiers, safe implementation paths and taxonomy drift.",
+      "when_to_use": "Use after changing the local catalogue or before a HIVE release.",
+      "implementation_paths": [
+        "backend/app/services/catalogue_metadata.py",
+        "backend/app/services/skill_registry.py"
+      ]
     },
     {
-      "id": "repo_hygiene",
-      "aliases": ["repo-hygiene", "digital-dust", "dust-cleanup"],
+      "id": "HIVE-sk005",
+      "aliases": ["repo_hygiene", "repo-hygiene", "digital-dust", "dust-cleanup"],
+      "slug": "repository-hygiene",
       "title": "Repository hygiene",
       "category": "Repository engineering",
       "risk": "medium",
       "requires_approval": true,
+      "priority_tier": "P1 - High",
+      "hive_lane": "Repository engineering",
+      "repos": ["HIVE", "HIVE-UI", "AIMS", "RAMS", "Website"],
+      "tags": ["repository", "hygiene", "duplicates", "cleanup"],
       "description": "Finds duplicate, generated or stale files and returns a reviewable deletion manifest without deleting automatically.",
-      "when_to_use": "Use before repo cleanup commits or when old patch notes and generated artefacts clutter production branches."
+      "when_to_use": "Use before repository cleanup work or when generated artefacts and superseded notes obscure the production tree.",
+      "implementation_paths": ["backend/app/services/repo_hygiene.py"]
     },
     {
-      "id": "production_readiness",
-      "aliases": ["production-readiness", "readiness", "preflight"],
+      "id": "HIVE-sk006",
+      "aliases": ["production_readiness", "production-readiness", "readiness", "preflight"],
+      "slug": "production-readiness",
       "title": "Production readiness",
       "category": "Audit and readiness",
       "risk": "high",
       "requires_approval": true,
+      "priority_tier": "P0 - Foundation",
+      "hive_lane": "Audit and readiness",
+      "repos": ["HIVE"],
+      "tags": ["production", "readiness", "configuration", "dependencies"],
       "description": "Validates production-critical configuration, dependency gates and operator safety before deployment.",
-      "when_to_use": "Use before Koyeb deployment or after env, auth, database, storage or model-routing changes."
+      "when_to_use": "Use before deployment or after authentication, database, storage or model-routing changes.",
+      "implementation_paths": [
+        "backend/app/core/production.py",
+        "backend/app/services/dependency_readiness.py"
+      ]
     },
     {
-      "id": "r2_lane_review",
-      "aliases": ["r2-lane-review", "r2", "bucket-review"],
-      "title": "R2 lane review",
+      "id": "HIVE-sk007",
+      "aliases": ["r2_lane_review", "r2-lane-review", "r2", "bucket-review"],
+      "slug": "storage-lane-review",
+      "title": "Storage lane review",
       "category": "Cloudflare storage operations",
       "risk": "medium",
       "requires_approval": true,
-      "description": "Reviews configured R2 lanes, bucket mappings and public-base URLs for safe read/write behaviour.",
-      "when_to_use": "Use when adding buckets, checking file access or debugging storage-lane behaviour."
+      "priority_tier": "P1 - High",
+      "hive_lane": "Cloudflare storage operations",
+      "repos": ["HIVE"],
+      "tags": ["r2", "storage", "bucket", "access"],
+      "description": "Reviews configured storage lanes, bucket mappings and access modes for safe bounded read and write behaviour.",
+      "when_to_use": "Use when adding a storage lane, checking file access or diagnosing object-store behaviour.",
+      "implementation_paths": [
+        "backend/app/core/config.py",
+        "backend/app/services/bucket_manager.py"
+      ]
     },
     {
-      "id": "model_routing_review",
-      "aliases": ["model-routing-review", "model-router", "openrouter", "fallback"],
+      "id": "HIVE-sk008",
+      "aliases": ["model_routing_review", "model-routing-review", "model-router", "openrouter", "fallback"],
+      "slug": "model-routing-review",
       "title": "Model routing review",
       "category": "Model operations",
       "risk": "medium",
       "requires_approval": true,
-      "description": "Checks OpenRouter model defaults, fallback policy and stream behaviour against cost and reliability goals.",
-      "when_to_use": "Use when replies are slow, truncated, empty or routed through unsuitable models."
+      "priority_tier": "P1 - High",
+      "hive_lane": "Model operations",
+      "repos": ["HIVE"],
+      "tags": ["models", "routing", "openrouter", "fallback"],
+      "description": "Checks model defaults, fallback policy and routing evidence against cost, quality and reliability goals.",
+      "when_to_use": "Use when replies are slow, truncated, empty or routed through unsuitable models.",
+      "implementation_paths": [
+        "backend/app/services/model_router.py",
+        "backend/app/services/model_governance.py",
+        "backend/app/services/model_registry.py"
+      ]
     }
   ]
 }
