@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
 import json
+from dataclasses import asdict, dataclass
+from pathlib import Path
 from urllib.parse import urlparse
 
 from app.core.config import Settings
@@ -282,18 +283,23 @@ def build_readiness_report(settings: Settings) -> ReadinessReport:
         )
     )
 
-    skills_lane = configured_lanes.get("hive_skills") or {}
-    skills_contract_ok = bool(
-        skills_lane.get("bucket")
-        and skills_lane.get("readable")
-    )
+    skills_catalogue_path = Path(__file__).resolve().parents[3] / "skills/catalogue_metadata.json"
+    try:
+        skills_catalogue = json.loads(skills_catalogue_path.read_text(encoding="utf-8"))
+        skills_contract_ok = bool(
+            isinstance(skills_catalogue, dict)
+            and isinstance(skills_catalogue.get("items"), list)
+            and skills_catalogue["items"]
+        )
+    except (OSError, json.JSONDecodeError):
+        skills_contract_ok = False
     checks.append(
         _check(
-            "shared_skills_source",
-            skills_contract_ok or not (production and settings.production_require_r2),
-            "The private shared skills bucket and authenticated retrieval path are configured.",
-            "Production requires the private HIVE shared skills bucket with authenticated R2 read access.",
-            required=production and settings.production_require_r2,
+            "local_skills_catalogue",
+            skills_contract_ok,
+            "The repository-local HIVE skill catalogue is bundled and non-empty.",
+            "The repository-local HIVE skill catalogue is missing, invalid or empty.",
+            required=production,
         )
     )
 

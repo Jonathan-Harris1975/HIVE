@@ -396,7 +396,6 @@ class Settings(BaseSettings):
     )
     r2_bucket_rss_feeds: str = Field("", validation_alias=AliasChoices("R2_BUCKET_RSS_FEEDS"))
     r2_bucket_transcripts: str = Field("", validation_alias=AliasChoices("R2_BUCKET_TRANSCRIPTS"))
-    r2_bucket_hive_skills: str = Field("", validation_alias=AliasChoices("R2_BUCKET_HIVE_SKILLS"))
     r2_bucket_repositories: str = Field(
         "hive-repositories", validation_alias=AliasChoices("R2_BUCKET_REPOSITORIES")
     )
@@ -426,10 +425,6 @@ class Settings(BaseSettings):
     r2_public_base_url_transcript: str = Field(
         "", validation_alias=AliasChoices("R2_PUBLIC_BASE_URL_TRANSCRIPT")
     )
-    r2_public_base_url_hive_skills: str = Field(
-        "", validation_alias=AliasChoices("R2_PUBLIC_BASE_URL_HIVE_SKILLS")
-    )
-
     # Phase 1 - Repository Intelligence. Uploaded repository ZIPs are extracted
     # into a per-process temp root and are never persisted permanently on
     # local disk. repository_ttl_seconds is the expiry threshold used when
@@ -830,22 +825,8 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("ZIP_EXTRACT_SUPPORTED_FILENAMES"),
     )
 
-    # v1.8 shared skill pool importer. Bounded for production; skills live in R2 and D1 stores catalogue metadata.
-    skill_registry_import_max_items: int = Field(
-        250, validation_alias=AliasChoices("SKILL_REGISTRY_IMPORT_MAX_ITEMS")
-    )
-    skill_registry_import_timeout_seconds: int = Field(
-        6, validation_alias=AliasChoices("SKILL_REGISTRY_IMPORT_TIMEOUT_SECONDS")
-    )
-    skill_registry_max_source_bytes: int = Field(
-        5 * 1024 * 1024, validation_alias=AliasChoices("SKILL_REGISTRY_MAX_SOURCE_BYTES")
-    )
-    skill_registry_fallback_enabled: bool = Field(
-        True, validation_alias=AliasChoices("SKILL_REGISTRY_FALLBACK_ENABLED")
-    )
-    skill_registry_fallback_cache_seconds: int = Field(
-        300, validation_alias=AliasChoices("SKILL_REGISTRY_FALLBACK_CACHE_SECONDS")
-    )
+    # Repository-local skill context. Catalogue data is bundled with HIVE and
+    # never imported from object storage or a third-party skill service.
     skill_context_enabled: bool = Field(
         True, validation_alias=AliasChoices("SKILL_CONTEXT_ENABLED")
     )
@@ -955,7 +936,9 @@ class Settings(BaseSettings):
         return f"https://{self.cf_r2_account_id.strip()}.r2.cloudflarestorage.com"
 
     _HIDDEN_R2_LANES: frozenset[str] = frozenset({"meta_system"})
-    _PRIVATE_R2_LANES: frozenset[str] = frozenset({"uploads", "repositories", "meta_system", "audits", "hive_skills"})
+    _PRIVATE_R2_LANES: frozenset[str] = frozenset(
+        {"uploads", "repositories", "meta_system", "audits"}
+    )
 
     @property
     def r2_ecosystem_lanes(self) -> list[dict[str, Any]]:
@@ -1031,12 +1014,6 @@ class Settings(BaseSettings):
                 self.r2_public_base_url_transcript,
                 "Podcast transcripts",
             ),
-            (
-                "hive_skills",
-                self.r2_bucket_hive_skills,
-                self.r2_public_base_url_hive_skills,
-                "Shared HIVE/AIMS/RAMS skills pool",
-            ),
         ]
         payload: list[dict[str, Any]] = []
         write_credentials_configured = bool(
@@ -1098,7 +1075,6 @@ class Settings(BaseSettings):
         clean_lane = (lane or "").strip().lower().replace("-", "_")
         aliases = {
             "upload": "uploads",
-            "skills": "hive_skills",
             "podcast_rss_feeds": "podcast_rss",
             "rss_feeds": "rss",
             "transcript": "transcripts",
@@ -1117,7 +1093,6 @@ class Settings(BaseSettings):
         clean_lane = (lane or "").strip().lower().replace("-", "_")
         aliases = {
             "upload": "uploads",
-            "skills": "hive_skills",
             "podcast_rss_feeds": "podcast_rss",
             "rss_feeds": "rss",
             "transcript": "transcripts",
