@@ -49,11 +49,8 @@ HIVE has now moved beyond reference-study mode into its own operational architec
 
 ## v1.6 ecosystem lanes
 
-HIVE recognises AIMS/RAMS/website/podcast artefact lanes through explicit R2 bucket and public-base-url settings. Skill metadata is not an R2 lane: the bounded HIVE catalogue is versioned with this repository.
 
 In this build, lane support is registry/public-URL aware only. Direct multi-bucket ingestion should be added later behind explicit allowlists and tests, once the first HIVE workflows over extracted audit/report bundles are stable.
 
 
 ## v1.12 reference boundary
-
-The skill catalogue can map skills to HIVE, RAMS, AIMS and Website, but reference status does not mean execution authority. Skills are registry entries until the production adapter policy and approval gate explicitly allow a read-only or low-risk handoff.

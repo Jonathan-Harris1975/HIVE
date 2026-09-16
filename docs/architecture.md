@@ -108,7 +108,6 @@ The core v1 chat/R2 file loop still works with both stores disabled. Persistence
 The same schema works for local SQLite smoke tests and Koyeb/PostgreSQL.
 
 
-
 ### Persistence production rules
 
 - PostgreSQL writes use transaction context managers with rollback-on-error.
@@ -221,55 +220,43 @@ The current presets are:
 - `podcast_episode_review`
 - `ebook_keyword_review`
 
-The R2 ecosystem lane registry is metadata-first. It records configured bucket names and public base URLs for uploads, audits, blog artefacts, images, RSS feeds, brand assets, podcast artefacts and transcripts. Skills are deliberately excluded and remain repository-local. The primary upload lane remains the only direct read/write storage adapter in this build. This keeps paid-production resource use predictable while letting HIVE understand where wider AIMS/RAMS/website/podcast artefacts live.
-
 
 ## v1.12 ecosystem execution layer
 
 HIVE contains a review-gated local capability intelligence stack:
 
 ```text
-Repository-local skill catalogue
-  -> weighted skill search
   -> recommendation engine
   -> review-gated routing
   -> reviewable ecosystem execution plan
 ```
 
-The execution layer does not mutate repos, install skills, run deploys or start background workers. It returns reviewable plans for HIVE/AIMS/RAMS/Website workflows and keeps PostgreSQL, D1, R2, Vectorize and the repository-local skill catalogue as separate, bounded layers.
 
 ## v1.15 execution review queue
 
-The execution review queue sits between skill routing and the production adapter handoff. It stores reviewable plan records in D1 using lane `hive_execution_reviews`. Each record contains the routed skill plan, task, repo, workflow preset, review gate state, decision log and adapter gate state.
 
 Pending reviews remain non-executable. An `approved` review now records `can_execute_now:true`, `adapter_execution_enabled:true` and `execution_state:ready_for_execution`, so HIVE-UI no longer treats production approval as review-only. The approval decision unlocks the allow-listed handoff; it does not auto-run repo pushes, package installs or background jobs.
 
 ## v1.15 review evidence packs
 
-The evidence-pack layer sits on top of the execution review queue. It turns a stored D1 review record into a UI/export friendly artefact with task metadata, primary skill evidence, candidate skills, shared execution steps, guardrails, decision log and audit timeline.
 
 Evidence packs remain inline review/export responses. Approved packs can signal readiness for allow-listed production handoff, but the export response itself does not push repos, install packages or start background work.
 
 ## v1.17 Registry Integrity Layer
 
-The HIVE skills catalogue is a governed, repository-local registry rather than a loose list of downloaded descriptors. The release file `skills/catalogue_metadata.json` is authoritative and the integrity endpoints validate it without network or database reads.
 
 The registry integrity layer checks:
 
-- duplicate skill IDs and slugs;
 - required metadata fields;
 - priority tier, risk level and repo taxonomy;
 - safe, existing native implementation paths;
 - repository-local source and provenance consistency.
 
-`/v1/skills/rebuild-index` now clears the in-process catalogue cache and reruns local integrity checks. It does not mutate D1/R2, install packages, execute skills or write to repositories.
 
 ## v1.18/v1.19 Workflow Graph and Controlled Preview Layer
 
-The workflow graph layer converts task, repo, workflow preset and skill-routing context into a UI-friendly graph:
 
 ```text
-request -> classify -> recommend_skills -> collect_evidence -> dry_run_output -> risk_gate -> review_queue -> adapter_execution(ready_after_approval)
 ```
 
 The controlled execution preview layer then annotates graph nodes with statuses, blockers and next actions. Pending plans wait at the review gate; approved plans mark the production adapter handoff as `ready_for_execution` and set `can_execute_now:true`.
@@ -295,7 +282,6 @@ A fourteen-phase programme layered on top of everything above, scoped strictly
 to the HIVE backend repository (never HIVE-UI, AIMS, or RAMS). Every phase
 reuses an existing pattern rather than introducing a parallel one:
 `hive_ecosystem_metadata` (D1) backs every new history/registry table need
-instead of new schemas; the workflow/skill/model-router patterns are extended
 rather than replaced.
 
 **Phase 1 - Repository Manager** (`services/repository_manager.py`): safe ZIP

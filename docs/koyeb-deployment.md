@@ -258,7 +258,6 @@ curl https://YOUR-KOYEB-APP.koyeb.app/health
 curl https://YOUR-KOYEB-APP.koyeb.app/healthz
 ```
 
-`/health` should show `build: v1.26-r2-write-skill-models` and clean flags for R2, SQL, D1, Vectorize and embeddings. `/healthz` is deliberately small and unauthenticated for later MAST keep-awake use.
 
 Use `POST /v1/db/test-cleanup` with `dry_run:true` before deleting smoke-test records.
 
@@ -292,7 +291,6 @@ curl "$HIVE_URL/v1/workflow-presets" -H "Authorization: Bearer $ADMIN_BEARER_TOK
 curl "$HIVE_URL/v1/files/r2-lanes" -H "Authorization: Bearer $ADMIN_BEARER_TOKEN"
 ```
 
-`/health` should show `build: v1.26-r2-write-skill-models`, `workflow_presets_enabled: true`, and `r2_ecosystem_lanes_enabled: true`.
 
 MAST may still use `/healthz` for a minimal dependency check, but HIVE monitors
 the MAST Worker itself through the durable R2 scheduler heartbeat rather than a
@@ -317,7 +315,6 @@ Do not configure `MAST_HEALTH_URL` or `MAST_STATUS_URL` for the Worker deploymen
 
 ## Production dependency readiness
 
-`/livez` proves only that the process is alive. `/readyz` combines configuration checks with cached, bounded list probes for every required R2 lane and validates that the repository-local HIVE skill catalogue is present.
 
 ```env
 READINESS_DEPENDENCY_PROBES_ENABLED=true
@@ -327,44 +324,26 @@ R2_REQUIRED_READ_LANES=uploads,audits,blog,blog_rss,meta_system,podcast,podcast_
 
 If `R2_REQUIRED_READ_LANES` is omitted while `PRODUCTION_REQUIRE_R2=true`, every configured bucket lane is required. The authenticated `/v1/runtime/readiness` response shows redacted per-lane evidence; credentials and provider signing material are never returned.
 
-## Repository-local skill catalogue
-
-HIVE loads its bounded skill catalogue from `skills/catalogue_metadata.json` in the deployed release. No shared-skills bucket, D1 import or external skill download is required. These optional settings control how much local capability context a chat request may receive:
 
 ```env
-SKILL_CONTEXT_ENABLED=true
-SKILL_CONTEXT_MAX_ITEMS=3
-SKILL_CONTEXT_MAX_CHARS=6000
-SKILL_CONTEXT_RISK_CEILING=medium
 ```
 
-The catalogue maps each `HIVE-skNNN` record to existing native code. Catalogue summaries are planning context only and cannot install packages, change policy or bypass approval gates.
-
-## v1.9 Intelligent Skill Search Checks
-
-After deploy, `/health` should show `build: v1.26-r2-write-skill-models`.
 
 Useful checks:
 
 ```bash
-curl "$HIVE_URL/v1/skills/search?q=RSS%20rewrite&limit=10" -H "Authorization: Bearer $ADMIN_BEARER_TOKEN"
-curl "$HIVE_URL/v1/skills/by-repo?repo=AIMS&limit=10" -H "Authorization: Bearer $ADMIN_BEARER_TOKEN"
-curl "$HIVE_URL/v1/skills/by-risk?risk=high&limit=10" -H "Authorization: Bearer $ADMIN_BEARER_TOKEN"
 ```
 
 The search layer is bounded for production because it prefers the imported D1 catalogue and uses the governed R2 search-document object as a cached fallback instead of walking buckets.
 
 ## v1.17 registry integrity smoke checks
 
-After deploying `v1.26-r2-write-skill-models`, run:
 
 ```bash
 curl "$HIVE_URL/health"
 
-curl "$HIVE_URL/v1/skills/integrity?limit=500" \
   -H "Authorization: Bearer $ADMIN_BEARER_TOKEN"
 
-curl -X POST "$HIVE_URL/v1/skills/rebuild-index" \
   -H "Authorization: Bearer $ADMIN_BEARER_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"dry_run":true}'

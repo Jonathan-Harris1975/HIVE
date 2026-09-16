@@ -163,7 +163,6 @@ Completed:
 - Added `workflow_preset` support to `/v1/chat/with-file`.
 - Added grounded `source_chunks[]` metadata for UI citations.
 - Added `retrieval_summary` with confidence and fallback notes.
-- Added a safe R2 ecosystem lane registry for operational AIMS/RAMS/website/podcast artefacts; skills are excluded and remain repository-local.
 - Added `/v1/files/r2-lanes` and `/v1/files/r2-lanes/public-url`.
 
 Next logical phase: a minimal UI cockpit that can upload/select files, choose a workflow preset, ask a question, and show retrieval metadata/source chunks without needing the full dashboard yet.
@@ -175,27 +174,21 @@ Completed in this stage:
 - MAST-friendly ecosystem status endpoint.
 - Cross-lane ecosystem metadata search over D1.
 - Recent ecosystem metadata grouping by lane.
-- Repository-local skill metadata search/list endpoints.
 - Bounded R2 lane discovery previews.
 - R2 lane public URL awareness retained from v1.6.
 
 The next likely phase is a minimal operator UI over these endpoints rather than more backend storage plumbing.
 
-## v1.8 – Skill Registry (superseded)
 
 Status: superseded by the repository-local catalogue.
 
-- Load the bounded catalogue from `skills/catalogue_metadata.json`.
-- Catalogue skills by priority tier, HIVE lane, risk level, repo membership and tags.
 - Support filtered list/search for HIVE, RAMS, AIMS and Website consumers.
 - Keep the repository release as the only source of truth.
 - Reload and integrity checks remain side-effect free.
 
-## v1.9 – Intelligent Skill Search
 
 Status: implemented.
 
-The v1.9 layer fixes the v1.8 limitation where phrase searches such as `RSS rewrite` could return zero results even when relevant skill metadata existed. Search now loads the bounded repository-local skill catalogue, applies optional filters, and scores results using weighted fields:
 
 - exact title
 - title
@@ -206,28 +199,17 @@ The v1.9 layer fixes the v1.8 limitation where phrase searches such as `RSS rewr
 - repo membership
 - indexable text
 
-Returned records include `matched_terms`, `matched_fields` and `score_explanation` so the future UI and review queue can explain why a skill was found.
-
-## v1.10-v1.16 Skill Intelligence and Review Integration
 
 Status: implemented and consolidated.
 
-- Skill recommendation endpoint.
-- Review-gated skill routing endpoint.
 - Ecosystem execution-plan endpoint backed by repository-local capability metadata.
 - D1-backed execution review queue.
 - Audit trail and evidence-pack endpoints.
-- Plan-only safety model preserved: no repo mutation, no skill execution, no background jobs.
 
 ## v1.17 – Registry Integrity
 
 Status: implemented.
 
-- Add `/v1/skills/integrity` for an overall registry health report.
-- Add `/v1/skills/duplicates` for duplicate skill IDs, slugs, object keys and search-document IDs.
-- Add `/v1/skills/missing` for required metadata and taxonomy validation.
-- Add `/v1/skills/orphans` for descriptor URL/object-key/lane/source-type mismatch checks.
-- Add `/v1/skills/rebuild-index` as a dry-run-first D1 catalogue maintenance endpoint.
 
 Next logical phase: use integrity status as a prerequisite gate for stronger recommendation/routing workflows and later operator UI controls.
 
