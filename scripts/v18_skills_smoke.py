@@ -35,8 +35,8 @@ def show(name: str, result: dict) -> None:
 
 
 show("1. Skills status", request("GET", "/v1/skills/status"))
-show("2. Import dry run", request("POST", "/v1/skills/import-manifest", {"dry_run": True}))
-show("3. Import live", request("POST", "/v1/skills/import-manifest", {"dry_run": False}))
+show("2. Local catalogue integrity", request("GET", "/v1/skills/integrity"))
+show("3. Reload local catalogue", request("POST", "/v1/skills/rebuild-index", {"dry_run": True}))
 show("4. Categories", request("GET", "/v1/skills/categories"))
 show("5. Search audit", request("GET", "/v1/skills/search?q=audit&limit=10"))
 show("6. RAMS list", request("GET", "/v1/skills/list?repo=RAMS&limit=10"))
