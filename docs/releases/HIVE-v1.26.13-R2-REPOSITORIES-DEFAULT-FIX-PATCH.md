@@ -26,7 +26,7 @@ r2_public_base_url_repositories: str = Field(
 )
 ```
 
-Every other ecosystem R2 lane (`audits`, `blog`, `meta`, `hive_skills`,
+Every other ecosystem R2 lane (`audits`, `blog`, `meta`,
 etc.) defaults to an empty string and is only populated when an operator
 sets the corresponding environment variable. Because these two fields
 defaulted to non-empty values instead, `Settings.r2_ecosystem_lanes`

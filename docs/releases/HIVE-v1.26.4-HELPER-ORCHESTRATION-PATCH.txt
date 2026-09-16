@@ -5,6 +5,11 @@ Purpose
 -------
 Reduce perceived and real slowness after the latest helper/skill updates while keeping the helper systems available and organised.
 
+Superseded skill-source note
+----------------------------
+The D1/R2 skill source described in the original v1.26.4 record has been retired.
+Current releases load the bounded catalogue from skills/catalogue_metadata.json only.
+
 Backend changes
 ---------------
 1. OpenRouter model list cache is now shared across OpenRouterClient instances.
@@ -28,16 +33,13 @@ Backend changes
    - Added idx_hive_conversations_updated.
    - Added idx_hive_messages_conversation_role_created.
 
-6. Skill/D1 helper defaults are more production-friendly.
-   - D1_TIMEOUT_SECONDS=3
-   - D1_MAX_ATTEMPTS=1
-   - SKILL_REGISTRY_IMPORT_TIMEOUT_SECONDS=6
+6. Skill-context defaults are bounded for production.
    - SKILL_CONTEXT_MAX_ITEMS=2
    - SKILL_CONTEXT_MAX_CHARS=4000
 
-7. Skill catalogue records now have a short in-process cache keyed by D1/fallback configuration.
-   - Avoids repeat D1/R2 skill catalogue pulls during helper-heavy usage.
-   - Cache key includes D1 enabled state, fallback enabled state and skill source URL to prevent stale cross-environment leakage.
+7. Skill catalogue records have a short in-process cache over the bundled release file.
+   - Avoids repeat local JSON parsing during helper-heavy usage.
+   - Reloading the index clears this cache and reruns local integrity checks without external writes.
 
 Validation
 ----------
