@@ -18,7 +18,7 @@ HIVE-UI (Cloudflare)
 
 ## Supported runtime
 
-`backend/pyproject.toml` declares Python `>=3.11,<3.15`. The Docker/runtime and CI files are the authority for the exact deployed/interpreted minor versions.
+The Docker/runtime and CI files are the authority for supported and deployed Python versions. Runtime dependencies have a single source of truth in the root `requirements.in` / compiled `requirements.txt` files.
 
 ## Production capabilities
 
