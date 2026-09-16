@@ -11,6 +11,9 @@ from app.services.context_resilience import (
 from app.services.openrouter import OpenRouterClient
 
 
+SYNTHETIC_OPENROUTER_TOKEN = "test-openrouter-token"
+
+
 def test_provider_order_is_deduplicated_and_direct_is_break_glass() -> None:
     assert provider_order("context_gateway", "headroom,openrouter,direct") == (
         "context_gateway",
@@ -28,7 +31,7 @@ def test_provider_order_is_deduplicated_and_direct_is_break_glass() -> None:
 @pytest.mark.asyncio
 async def test_general_and_coding_primary_routes_are_independently_configurable() -> None:
     settings = Settings(
-        OPENROUTER_API_KEY="openrouter-token",
+        OPENROUTER_API_KEY=SYNTHETIC_OPENROUTER_TOKEN,
         HIVE_CONTEXT_GATEWAY_BASE_URL="http://context-gateway:8080/v1",
         HIVE_CONTEXT_GATEWAY_API_KEY="gateway-token",
         HIVE_LEANCTX_BASE_URL="http://leanctx:4444/v1",
@@ -54,7 +57,7 @@ async def test_general_and_coding_primary_routes_are_independently_configurable(
 @pytest.mark.asyncio
 async def test_primary_can_be_changed_entirely_by_environment_setting() -> None:
     settings = Settings(
-        OPENROUTER_API_KEY="openrouter-token",
+        OPENROUTER_API_KEY=SYNTHETIC_OPENROUTER_TOKEN,
         HIVE_CONTEXT_PRIMARY_PROVIDER="openrouter",
         HIVE_CONTEXT_FALLBACK_PROVIDERS="deterministic,direct",
     )
@@ -62,6 +65,7 @@ async def test_primary_can_be_changed_entirely_by_environment_setting() -> None:
     payload = {"model": "test/model", "messages": [{"role": "user", "content": "hello"}]}
     routes = [item async for item in client._context_attempts(payload)]
     assert routes[0][0] == "openrouter"
+    assert routes[0][2]["Authorization"] == f"Bearer {SYNTHETIC_OPENROUTER_TOKEN}"
     assert routes[0][3]["plugins"] == [{"id": "context-compression"}]
 
 
