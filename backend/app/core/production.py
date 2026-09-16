@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass
-from pathlib import Path
 from urllib.parse import urlparse
 
 from app.core.config import Settings
