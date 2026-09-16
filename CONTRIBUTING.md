@@ -48,5 +48,3 @@ Never commit live credentials. `.env`, `.env.*`, private-key/certificate contain
 Do not set `FORWARDED_ALLOW_IPS=*` casually. HIVE defaults Uvicorn to loopback-only trusted proxies. Koyeb authentication throttling has a separate bounded rule for the platform-certified final `X-Forwarded-For` hop.
 
 ## Maintainability
-
-When changing a large module, prefer extracting cohesive helpers with tests rather than extending already-long route/service functions. The current refactoring priorities are `backend/app/api/files.py`, `backend/app/services/skill_registry.py`, `backend/app/storage/sql_store.py`, and `backend/app/core/config.py`. Preserve public API contracts and split work behind regression coverage.
