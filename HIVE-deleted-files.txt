@@ -1,9 +1,0 @@
-
-docs/releases/v1.16-skill-search-review-integration.md
-scripts/v110_skill_recommend_smoke.py
-scripts/v111_skill_route_smoke.py
-scripts/v117_registry_integrity_smoke.py
-scripts/v18_skills_smoke.py
-scripts/v19_skill_search_smoke.py
-skills/README.md
-skills/catalogue_metadata.json
