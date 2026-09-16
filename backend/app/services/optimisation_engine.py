@@ -9,18 +9,20 @@ from app.storage.d1 import D1MetadataStore
 
 # Phase 11 - Optimisation Engine.
 #
-# Tracks every optimisation decision HIVE makes (e.g. an AI Council
-# promotion, a Repository Council recommendation acted upon) so it can be
-# reviewed and, if it turns out to be wrong, rolled back. "Reversible" here
-# means the engine always records enough state (`previous_state`) to know
-# what to revert *to*; actually re-applying that state to whatever real
-# system the decision touched is the caller's responsibility — this engine
-# is the ledger, not the actuator.
+# Tracks optimisation decisions that connected producers explicitly write to
+# this ledger. It does not imply that every Council or repository recommendation
+# is captured automatically. A record can be marked reverted here, while actual
+# restoration of the external target remains the actuator/caller's responsibility.
+# This service records state and evidence; it is not itself the actuator.
 
 LANE = "optimisation_engine"
 
 
 class OptimisationEngineError(ValueError):
+    pass
+
+
+class OptimisationStateError(OptimisationEngineError):
     pass
 
 
@@ -36,9 +38,13 @@ def record_decision(
     previous_state: Any,
     new_state: Any,
     confidence: float,
+    status: str = "applied",
 ) -> dict[str, Any]:
     store = D1MetadataStore(settings)
     decision_id = uuid.uuid4().hex
+    clean_status = str(status or "applied").strip().lower()
+    if clean_status not in {"applied", "proposed"}:
+        raise OptimisationEngineError(f"Unsupported decision status: {status}")
     record = {
         "decision_id": decision_id,
         "decision_type": decision_type,
@@ -46,9 +52,10 @@ def record_decision(
         "previous_state": previous_state,
         "new_state": new_state,
         "confidence": max(0.0, min(1.0, float(confidence))),
-        "status": "applied",
+        "status": clean_status,
         "created_at": _now_iso(),
         "reverted_at": None,
+        "state_restored": None,
     }
     store.upsert_metadata(
         item_id=f"optimisation:decision:{decision_id}",
@@ -62,16 +69,37 @@ def record_decision(
     return record
 
 
-def rollback_decision(settings: Settings, decision_id: str) -> dict[str, Any]:
+def mark_decision_reverted(settings: Settings, decision_id: str) -> dict[str, Any]:
+    """Mark a ledger decision reverted without claiming the target state was restored."""
+
     store = D1MetadataStore(settings)
     decision = get_decision(settings, decision_id)
     if decision is None:
         raise OptimisationEngineError(f"Unknown decision_id: {decision_id}")
     if decision["status"] == "reverted":
+        if decision.get("state_restored") is not False:
+            decision["state_restored"] = False
+            decision["revert_semantics"] = "ledger_only"
+            store.upsert_metadata(
+                item_id=f"optimisation:decision:{decision_id}",
+                lane=LANE,
+                source_type="decision",
+                source_id=decision_id,
+                title=decision["description"],
+                url=None,
+                metadata=decision,
+            )
         return decision
+
+    if decision["status"] != "applied":
+        raise OptimisationStateError(
+            f"Decision {decision_id} has status {decision['status']!r} and cannot be marked reverted"
+        )
 
     decision["status"] = "reverted"
     decision["reverted_at"] = _now_iso()
+    decision["state_restored"] = False
+    decision["revert_semantics"] = "ledger_only"
     store.upsert_metadata(
         item_id=f"optimisation:decision:{decision_id}",
         lane=LANE,
@@ -82,6 +110,12 @@ def rollback_decision(settings: Settings, decision_id: str) -> dict[str, Any]:
         metadata=decision,
     )
     return decision
+
+
+def rollback_decision(settings: Settings, decision_id: str) -> dict[str, Any]:
+    """Backward-compatible alias for the legacy rollback endpoint."""
+
+    return mark_decision_reverted(settings, decision_id)
 
 
 def get_decision(settings: Settings, decision_id: str) -> dict[str, Any] | None:
@@ -161,7 +195,10 @@ def success_rate_report(settings: Settings) -> dict[str, Any]:
             "error": str(result.get("message") or result.get("error") or "optimisation ledger unavailable"),
             "decision_count": 0,
             "applied_count": 0,
+            "proposed_count": 0,
+            "actioned_count": 0,
             "reverted_count": 0,
+            "reverted_rate": 0.0,
             "rollback_rate": 0.0,
             "experiment_count": 0,
             "experiment_success_rate": 0.0,
@@ -180,15 +217,21 @@ def success_rate_report(settings: Settings) -> dict[str, Any]:
         if isinstance(row, dict) and row.get("source_type") == "experiment"
     ]
     applied = [d for d in decisions if d.get("status") == "applied"]
+    proposed = [d for d in decisions if d.get("status") == "proposed"]
     reverted = [d for d in decisions if d.get("status") == "reverted"]
+    actioned_count = len(applied) + len(reverted)
     successful_experiments = [e for e in experiments if e.get("success")]
 
     return {
         "ok": True,
         "decision_count": len(decisions),
         "applied_count": len(applied),
+        "proposed_count": len(proposed),
+        "actioned_count": actioned_count,
         "reverted_count": len(reverted),
-        "rollback_rate": (len(reverted) / len(decisions)) if decisions else 0.0,
+        "reverted_rate": (len(reverted) / actioned_count) if actioned_count else 0.0,
+        # Backward-compatible API field retained for existing consumers.
+        "rollback_rate": (len(reverted) / actioned_count) if actioned_count else 0.0,
         "experiment_count": len(experiments),
         "experiment_success_rate": (len(successful_experiments) / len(experiments)) if experiments else 0.0,
     }
@@ -201,8 +244,9 @@ def success_rate_report(settings: Settings) -> dict[str, Any]:
 # previously nothing connected an incoming RAMS QA event to the
 # optimisation decision ledger above. A QA event describes something RAMS
 # observed about a repository/workflow it QA'd (a score, a pass/fail
-# check, a recommended action); this adapter turns that observation into a
-# recorded, reviewable, and rollback-able optimisation decision so it shows
+# check, a recommended action); this adapter records that observation as a
+# proposed optimisation decision so ingestion never pretends the recommendation
+# was already applied. The proposal shows
 # up in both `list_decisions` and `success_rate_report` (the two places the
 # audit's integration test checks).
 # ---------------------------------------------------------------------------
@@ -249,8 +293,9 @@ def ingest_qa_event(settings: Settings, payload: dict[str, Any]) -> dict[str, An
             f"(category={payload['category']}): {payload['recommendation']}"
         ),
         previous_state={"source": "rams", "event_id": event_id, "raw": payload},
-        new_state={"recommendation": payload["recommendation"], "applied": True},
+        new_state={"recommendation": payload["recommendation"], "applied": False},
         confidence=qa_score,
+        status="proposed",
     )
     decision["source_event_id"] = event_id
     decision["source"] = "rams_qa_event"

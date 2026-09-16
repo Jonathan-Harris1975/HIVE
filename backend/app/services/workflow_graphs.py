@@ -468,9 +468,9 @@ def simulate_workflow_execution(
     approval_state: str | None = None,
     policy_profile: str | None = None,
 ) -> dict[str, object]:
-    """Run a pretend-mode simulation over a controlled execution preview.
+    """Build a planning estimate over a controlled execution preview.
 
-    The simulation estimates services, risk, cost class and blockers. It does
+    The preview estimates services, risk, cost class and blockers. It does
     not execute adapters, mutate repos, write R2 objects or start background
     work. It is intentionally deterministic and cheap for Koyeb Free.
     """
@@ -504,6 +504,8 @@ def simulate_workflow_execution(
         "ok": True,
         "build_stage_hint": BUILD_STAGE,
         "simulation_id": f"execution-simulation-{uuid4()}",
+        "simulation_kind": "planning_estimate",
+        "estimate_scope": "workflow_plan_only",
         "preview_id": preview.get("preview_id"),
         "task": preview.get("task"),
         "repo": preview.get("repo"),
@@ -542,6 +544,8 @@ def save_execution_preview(
     approval_state: str | None = None,
     requested_by: str | None = None,
     policy_profile: str | None = None,
+    preview_id: str | None = None,
+    simulation_id: str | None = None,
     dry_run: bool = False,
 ) -> dict[str, object]:
     """Persist a controlled execution preview/simulation record in D1.
@@ -562,11 +566,21 @@ def save_execution_preview(
     )
     if not simulation.get("ok"):
         return simulation
+
+    resolved_preview_id = str(preview_id or simulation.get("preview_id") or f"execution-preview-{uuid4()}")
+    resolved_simulation_id = str(
+        simulation_id or simulation.get("simulation_id") or f"execution-simulation-{uuid4()}"
+    )
+    simulation["preview_id"] = resolved_preview_id
+    simulation["simulation_id"] = resolved_simulation_id
+    controlled_preview = simulation.get("controlled_preview")
+    if isinstance(controlled_preview, dict):
+        controlled_preview["preview_id"] = resolved_preview_id
+
     now = _now()
-    preview_id = str(simulation.get("preview_id") or f"execution-preview-{uuid4()}")
     metadata = {
-        "preview_id": preview_id,
-        "simulation_id": simulation.get("simulation_id"),
+        "preview_id": resolved_preview_id,
+        "simulation_id": resolved_simulation_id,
         "task": simulation.get("task"),
         "repo": simulation.get("repo"),
         "workflow_preset": workflow_preset,
@@ -580,10 +594,11 @@ def save_execution_preview(
         "execution_mode": "persisted_execution_preview",
         "can_execute_now": bool(simulation.get("can_execute_now")),
         "adapter_execution_enabled": bool(simulation.get("adapter_execution_enabled")),
+        "preview_identity_preserved": bool(preview_id or simulation_id),
         "simulation": simulation,
     }
-    item_id = preview_id
-    title = _preview_title(str(simulation.get("task") or preview_id))
+    item_id = resolved_preview_id
+    title = _preview_title(str(simulation.get("task") or resolved_preview_id))
     if dry_run:
         return {
             "ok": True,
@@ -591,7 +606,7 @@ def save_execution_preview(
             "dry_run": True,
             "build_stage_hint": BUILD_STAGE,
             "lane": EXECUTION_PREVIEW_LANE,
-            "preview_id": preview_id,
+            "preview_id": resolved_preview_id,
             "would_save": metadata,
             "can_execute_now": bool(metadata.get("can_execute_now")),
             "safety_note": _safety_note(),
@@ -599,11 +614,42 @@ def save_execution_preview(
     d1 = D1MetadataStore(settings)
     if not d1.enabled:
         return {"ok": False, "enabled": False, "error_code": "d1_disabled"}
+
+    existing = _get_preview_item(d1, resolved_preview_id)
+    if existing:
+        existing_meta = existing.get("metadata") if isinstance(existing.get("metadata"), dict) else {}
+        same_identity = (
+            str(existing_meta.get("simulation_id") or "") == resolved_simulation_id
+            and str(existing_meta.get("task") or "") == str(metadata.get("task") or "")
+            and str(existing_meta.get("repo") or "") == str(metadata.get("repo") or "")
+            and str(existing_meta.get("workflow_preset") or "") == str(metadata.get("workflow_preset") or "")
+            and str(existing_meta.get("policy_profile") or "") == str(metadata.get("policy_profile") or "")
+        )
+        if not same_identity:
+            return {
+                "ok": False,
+                "enabled": True,
+                "error_code": "execution_preview_id_conflict",
+                "preview_id": resolved_preview_id,
+            }
+        return {
+            "ok": True,
+            "enabled": True,
+            "dry_run": False,
+            "already_saved": True,
+            "build_stage_hint": BUILD_STAGE,
+            "lane": EXECUTION_PREVIEW_LANE,
+            "preview_id": resolved_preview_id,
+            "preview": existing_meta,
+            "can_execute_now": bool(existing_meta.get("can_execute_now")),
+            "safety_note": _safety_note(),
+        }
+
     result = d1.upsert_metadata(
         item_id=item_id,
         lane=EXECUTION_PREVIEW_LANE,
         source_type=EXECUTION_PREVIEW_SOURCE_TYPE,
-        source_id=preview_id,
+        source_id=resolved_preview_id,
         title=title,
         url=None,
         metadata=metadata,
@@ -612,9 +658,10 @@ def save_execution_preview(
         "ok": bool(result.get("ok")),
         "enabled": True,
         "dry_run": False,
+        "already_saved": False,
         "build_stage_hint": BUILD_STAGE,
         "lane": EXECUTION_PREVIEW_LANE,
-        "preview_id": preview_id,
+        "preview_id": resolved_preview_id,
         "d1_result": result,
         "preview": metadata,
         "can_execute_now": bool(metadata.get("can_execute_now")),
@@ -689,6 +736,10 @@ def _get_preview_item(d1: D1MetadataStore, preview_id: str) -> dict[str, Any] | 
     if not result.get("ok"):
         return None
     for row in _extract_d1_rows(result.get("result")):
+        if row.get("lane") != EXECUTION_PREVIEW_LANE:
+            continue
+        if row.get("source_type") != EXECUTION_PREVIEW_SOURCE_TYPE:
+            continue
         row["metadata"] = _json_or_none(row.pop("metadata_json", None))
         return row
     return None
@@ -713,8 +764,10 @@ def _extract_d1_rows(result: Any) -> list[dict[str, Any]]:
 
 
 def _json_or_none(value: Any) -> Any:
-    if value in {None, ""}:
+    if value is None or value == "":
         return None
+    if not isinstance(value, (str, bytes, bytearray)):
+        return value
     try:
         return json.loads(value)
     except (TypeError, json.JSONDecodeError):
@@ -780,7 +833,7 @@ def _simulation_cost_estimate(required_services: list[dict[str, object]]) -> dic
         "estimated_r2_reads": 0,
         "estimated_vector_queries": 0,
         "service_touch_count": service_count,
-        "note": "Simulation is deterministic and does not call models, write R2, or run adapters.",
+        "note": "Planning estimate only: no models, R2 writes, repository mutation or adapters are run.",
     }
 
 
@@ -796,7 +849,7 @@ def _simulation_missing_prerequisites(
 
 
 def _simulation_rollback_notes(required_services: list[dict[str, object]]) -> list[str]:
-    notes = ["Preview/simulation rollback is not required because the endpoint does not auto-run external mutation."]
+    notes = ["No rollback is required for this preview because it does not perform external mutation."]
     touched = [item.get("service") for item in required_services]
     if "D1" in touched:
         notes.append("Saved previews can be removed from the D1 execution_previews lane if needed.")

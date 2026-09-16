@@ -10,6 +10,7 @@ from app.core.version import BUILD_STAGE
 from app.services.execution_adapters import approved_execution_payload, execution_adapter_policy
 from app.services.catalogue_metadata import enrich_task_item
 from app.services.execution_plans import shared_execution_plan
+from app.services.workflow_graphs import EXECUTION_PREVIEW_LANE, EXECUTION_PREVIEW_SOURCE_TYPE
 from app.storage.d1 import D1MetadataStore
 
 EXECUTION_REVIEW_LANE = "hive_execution_reviews"
@@ -31,6 +32,9 @@ def create_execution_review_plan(
     repo: str | None = None,
     workflow_preset: str | None = None,
     requested_by: str | None = None,
+    source_preview_id: str | None = None,
+    source_simulation_id: str | None = None,
+    policy_profile: str | None = None,
     limit: int = 5,
     dry_run: bool = True,
 ) -> dict[str, object]:
@@ -48,6 +52,52 @@ def create_execution_review_plan(
     d1 = D1MetadataStore(settings)
     if not d1.enabled:
         return {"ok": False, "enabled": False, "error_code": "d1_disabled"}
+    if source_simulation_id and not source_preview_id:
+        return {
+            "ok": False,
+            "enabled": True,
+            "error_code": "source_preview_required",
+            "message": "source_preview_id is required when source_simulation_id is supplied.",
+        }
+
+    source_preview_summary: dict[str, object] | None = None
+    source_preview_verified = False
+    if source_preview_id:
+        source_preview = _get_source_preview_item(d1, source_preview_id)
+        if not source_preview:
+            return {
+                "ok": False,
+                "enabled": True,
+                "error_code": "source_preview_not_found",
+                "source_preview_id": source_preview_id,
+                "message": "The saved execution preview could not be found.",
+            }
+        preview_meta = source_preview.get("metadata") if isinstance(source_preview.get("metadata"), dict) else {}
+        mismatch_fields = _source_preview_mismatches(
+            preview_meta,
+            task=clean_task,
+            repo=repo,
+            workflow_preset=workflow_preset,
+            policy_profile=policy_profile,
+            source_simulation_id=source_simulation_id,
+        )
+        if mismatch_fields:
+            return {
+                "ok": False,
+                "enabled": True,
+                "error_code": "source_preview_mismatch",
+                "source_preview_id": source_preview_id,
+                "mismatch_fields": mismatch_fields,
+                "message": "Review input does not match the saved execution preview.",
+            }
+
+        clean_task = " ".join(str(preview_meta.get("task") or clean_task).strip().split())[:1200]
+        repo = _optional_text(preview_meta.get("repo"))
+        workflow_preset = _optional_text(preview_meta.get("workflow_preset"))
+        policy_profile = _optional_text(preview_meta.get("policy_profile"))
+        source_simulation_id = _optional_text(preview_meta.get("simulation_id"))
+        source_preview_summary = _source_preview_summary(preview_meta)
+        source_preview_verified = True
 
     plan = shared_execution_plan(
         settings=settings,
@@ -68,6 +118,11 @@ def create_execution_review_plan(
         "repo": repo,
         "workflow_preset": workflow_preset,
         "requested_by": requested_by or "hive-user",
+        "source_preview_id": source_preview_id,
+        "source_simulation_id": source_simulation_id,
+        "source_preview_verified": source_preview_verified,
+        "source_preview_summary": source_preview_summary,
+        "policy_profile": policy_profile,
         "created_at": created_at,
         "updated_at": created_at,
         "execution_mode": "review_gated_execution",
@@ -332,6 +387,13 @@ def execution_review_evidence_pack(*, settings: Settings, plan_id: str) -> dict[
         "task": meta.get("task"),
         "repo": meta.get("repo"),
         "workflow_preset": meta.get("workflow_preset"),
+        "policy_profile": meta.get("policy_profile"),
+        "source_preview_id": meta.get("source_preview_id"),
+        "source_simulation_id": meta.get("source_simulation_id"),
+        "source_preview_verified": bool(meta.get("source_preview_verified")),
+        "source_preview_summary": meta.get("source_preview_summary")
+        if isinstance(meta.get("source_preview_summary"), dict)
+        else None,
         "requested_by": meta.get("requested_by"),
         "created_at": meta.get("created_at") or item.get("created_at"),
         "updated_at": meta.get("updated_at") or item.get("updated_at"),
@@ -419,6 +481,87 @@ def export_execution_review_pack(
     }
 
 
+def _get_source_preview_item(d1: D1MetadataStore, preview_id: str) -> dict[str, Any] | None:
+    result = d1.query(
+        """
+        SELECT id, lane, source_type, source_id, title, url, metadata_json, created_at, updated_at
+        FROM hive_ecosystem_metadata
+        WHERE lane = ? AND id = ?
+        LIMIT 1
+        """,
+        [EXECUTION_PREVIEW_LANE, preview_id],
+    )
+    if not result.get("ok"):
+        return None
+    for row in _extract_rows(result.get("result")):
+        if row.get("lane") != EXECUTION_PREVIEW_LANE:
+            continue
+        if row.get("source_type") != EXECUTION_PREVIEW_SOURCE_TYPE:
+            continue
+        metadata = _json_or_none(row.pop("metadata_json", None))
+        if not isinstance(metadata, dict) or str(metadata.get("preview_id") or "") != preview_id:
+            continue
+        row["metadata"] = metadata
+        return row
+    return None
+
+
+def _source_preview_mismatches(
+    preview_meta: dict[str, Any],
+    *,
+    task: str,
+    repo: str | None,
+    workflow_preset: str | None,
+    policy_profile: str | None,
+    source_simulation_id: str | None,
+) -> list[str]:
+    comparisons = {
+        "task": (" ".join(task.split()), " ".join(str(preview_meta.get("task") or "").split())),
+        "repo": (_normalise_optional(repo), _normalise_optional(preview_meta.get("repo"))),
+        "workflow_preset": (
+            _normalise_optional(workflow_preset),
+            _normalise_optional(preview_meta.get("workflow_preset")),
+        ),
+        "policy_profile": (
+            _normalise_optional(policy_profile),
+            _normalise_optional(preview_meta.get("policy_profile")),
+        ),
+        "source_simulation_id": (
+            _normalise_optional(source_simulation_id),
+            _normalise_optional(preview_meta.get("simulation_id")),
+        ),
+    }
+    mismatches: list[str] = []
+    for field, (provided, stored) in comparisons.items():
+        if provided is not None and provided != stored:
+            mismatches.append(field)
+    return mismatches
+
+
+def _source_preview_summary(preview_meta: dict[str, Any]) -> dict[str, object]:
+    simulation = preview_meta.get("simulation") if isinstance(preview_meta.get("simulation"), dict) else {}
+    return {
+        "preview_id": preview_meta.get("preview_id"),
+        "simulation_id": preview_meta.get("simulation_id"),
+        "policy_profile": preview_meta.get("policy_profile"),
+        "approval_state": preview_meta.get("approval_state"),
+        "status": preview_meta.get("status"),
+        "risk_summary": simulation.get("risk_summary") if isinstance(simulation.get("risk_summary"), dict) else {},
+        "estimated_cost": simulation.get("estimated_cost") if isinstance(simulation.get("estimated_cost"), dict) else {},
+        "created_at": preview_meta.get("created_at"),
+    }
+
+
+def _optional_text(value: Any) -> str | None:
+    text = str(value or "").strip()
+    return text or None
+
+
+def _normalise_optional(value: Any) -> str | None:
+    text = _optional_text(value)
+    return text.casefold() if text is not None else None
+
+
 def _get_review_item(d1: D1MetadataStore, plan_id: str) -> dict[str, Any] | None:
     result = d1.query(
         """
@@ -456,8 +599,10 @@ def _extract_rows(result: Any) -> list[dict[str, Any]]:
 
 
 def _json_or_none(value: Any) -> Any:
-    if value in {None, ""}:
+    if value is None or value == "":
         return None
+    if not isinstance(value, (str, bytes, bytearray)):
+        return value
     try:
         return json.loads(value)
     except (TypeError, json.JSONDecodeError):
@@ -487,6 +632,10 @@ def _review_summary(item: dict[str, Any]) -> dict[str, object]:
         "repo": meta.get("repo"),
         "target": meta.get("repo") or "HIVE",
         "workflow_preset": meta.get("workflow_preset"),
+        "policy_profile": meta.get("policy_profile"),
+        "source_preview_id": meta.get("source_preview_id"),
+        "source_simulation_id": meta.get("source_simulation_id"),
+        "source_preview_verified": bool(meta.get("source_preview_verified")),
         "requested_by": meta.get("requested_by"),
         "created_at": item.get("created_at") or meta.get("created_at"),
         "updated_at": item.get("updated_at") or meta.get("updated_at"),
@@ -595,6 +744,9 @@ def _evidence_pack_markdown(pack: dict[str, Any]) -> str:
         f"- Task: {pack.get('task')}",
         f"- Repo: {pack.get('repo') or 'not specified'}",
         f"- Workflow preset: {pack.get('workflow_preset') or 'not specified'}",
+        f"- Source preview: `{pack.get('source_preview_id') or 'none'}`",
+        f"- Source simulation: `{pack.get('source_simulation_id') or 'none'}`",
+        f"- Source preview verified: `{bool(pack.get('source_preview_verified'))}`",
         f"- Risk: {pack.get('risk_level') or 'unknown'}",
         f"- Execution mode: `{pack.get('execution_mode')}`",
         f"- Can execute now: `{pack.get('can_execute_now')}`",
