@@ -42,7 +42,7 @@ HIVE-UI (Cloudflare)
 - Repository Learning and Project DNA refresh.
 - Environment audit against `.env.example`.
 - Cloudflare Workers AI embeddings, Vectorize retrieval and AI Search fan-out.
-- Skills discovery, integrity checks, workflow planning, review queues and approved adapter hand-off.
+- Repository-local skills discovery, integrity checks, workflow planning, review queues and approved adapter hand-off.
 - Authenticated ecosystem health aggregation for HIVE-UI Ops.
 
 ## Important endpoints
