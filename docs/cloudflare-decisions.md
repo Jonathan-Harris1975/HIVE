@@ -107,18 +107,17 @@ The following non-secret R2 lane envs are recognised by HIVE. Bucket names are a
 - `R2_BUCKET_PODCAST_RSS_FEEDS` / `R2_PUBLIC_BASE_URL_PODCAST_RSS`
 - `R2_BUCKET_RSS_FEEDS` / `R2_PUBLIC_BASE_URL_RSS`
 - `R2_BUCKET_TRANSCRIPTS` / `R2_PUBLIC_BASE_URL_TRANSCRIPT`
-- `R2_BUCKET_HIVE_SKILLS` / `R2_PUBLIC_BASE_URL_HIVE_SKILLS`
 
-Use `GET /v1/files/r2-lanes` to inspect the configured registry. `brand-assets`, `podcastart` and `blog-images` are static-delivery buckets and are deliberately outside HIVE's R2 registry and AI Search scope. HIVE must not list, read, write, delete, chat over or semantically search those buckets. Public-URL helpers return `null` for the private `uploads`, `repositories` and hidden `meta_system` lanes even if a stale public-base environment value is present.
+Use `GET /v1/files/r2-lanes` to inspect the configured registry. `brand-assets`, `podcastart`, `blog-images` and the retired shared-skills bucket are deliberately outside HIVE's R2 registry and AI Search scope. HIVE must not list, read, write, delete, chat over or semantically search those buckets. Public-URL helpers return `null` for the private `uploads`, `repositories` and hidden `meta_system` lanes even if a stale public-base environment value is present. HIVE skills are versioned locally in `skills/catalogue_metadata.json`.
 
 
 ## v1.12 Cloudflare role
 
 Cloudflare services remain specialised rather than blended:
 
-- R2 stores raw files, artefacts and skill descriptors.
-- D1 stores ecosystem and skill catalogue metadata.
+- R2 stores raw files and operational artefacts; it is not a skill source.
+- D1 stores ecosystem, review and execution metadata; skill catalogue metadata is bundled with HIVE.
 - Vectorize provides semantic retrieval for file chunks.
 - Workers AI produces embeddings.
 
-Skill search/recommendation uses D1 metadata first. Future semantic skill search can add Vectorize later, but D1 remains the catalogue source for explainable routing.
+Skill search and recommendation read only `skills/catalogue_metadata.json`. D1, R2, Vectorize and public URLs are outside the skill-catalogue path.

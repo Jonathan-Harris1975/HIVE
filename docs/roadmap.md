@@ -163,7 +163,7 @@ Completed:
 - Added `workflow_preset` support to `/v1/chat/with-file`.
 - Added grounded `source_chunks[]` metadata for UI citations.
 - Added `retrieval_summary` with confidence and fallback notes.
-- Added safe R2 ecosystem lane registry for the user's AIMS/RAMS/website/podcast/skills buckets.
+- Added a safe R2 ecosystem lane registry for operational AIMS/RAMS/website/podcast artefacts; skills are excluded and remain repository-local.
 - Added `/v1/files/r2-lanes` and `/v1/files/r2-lanes/public-url`.
 
 Next logical phase: a minimal UI cockpit that can upload/select files, choose a workflow preset, ask a question, and show retrieval metadata/source chunks without needing the full dashboard yet.
@@ -175,27 +175,27 @@ Completed in this stage:
 - MAST-friendly ecosystem status endpoint.
 - Cross-lane ecosystem metadata search over D1.
 - Recent ecosystem metadata grouping by lane.
-- Shared skills metadata search/list endpoints.
+- Repository-local skill metadata search/list endpoints.
 - Bounded R2 lane discovery previews.
 - R2 lane public URL awareness retained from v1.6.
 
 The next likely phase is a minimal operator UI over these endpoints rather than more backend storage plumbing.
 
-## v1.8 – Skill Registry Import
+## v1.8 – Skill Registry (superseded)
 
-Status: implemented.
+Status: superseded by the repository-local catalogue.
 
-- Import R2 shared skill-pool search documents into D1.
+- Load the bounded catalogue from `skills/catalogue_metadata.json`.
 - Catalogue skills by priority tier, HIVE lane, risk level, repo membership and tags.
 - Support filtered list/search for HIVE, RAMS, AIMS and Website consumers.
-- Keep R2 as source of truth and D1 as the lightweight searchable catalogue.
-- Dry-run import remains the default for safe phone/ReqBin testing.
+- Keep the repository release as the only source of truth.
+- Reload and integrity checks remain side-effect free.
 
 ## v1.9 – Intelligent Skill Search
 
 Status: implemented.
 
-The v1.9 layer fixes the v1.8 limitation where phrase searches such as `RSS rewrite` could return zero results even when relevant skill metadata existed. Search now loads the bounded D1 skill catalogue, applies optional filters, and scores results using weighted fields:
+The v1.9 layer fixes the v1.8 limitation where phrase searches such as `RSS rewrite` could return zero results even when relevant skill metadata existed. Search now loads the bounded repository-local skill catalogue, applies optional filters, and scores results using weighted fields:
 
 - exact title
 - title
@@ -214,7 +214,7 @@ Status: implemented and consolidated.
 
 - Skill recommendation endpoint.
 - Review-gated skill routing endpoint.
-- Shared ecosystem execution-plan endpoint.
+- Ecosystem execution-plan endpoint backed by repository-local capability metadata.
 - D1-backed execution review queue.
 - Audit trail and evidence-pack endpoints.
 - Plan-only safety model preserved: no repo mutation, no skill execution, no background jobs.
@@ -264,4 +264,3 @@ Known caveats carried forward deliberately rather than papered over:
 - The Model Registry and Optimisation Engine are in-process only (D1-backed history exists, but the live ranked/decision state resets on restart unless re-seeded).
 
 Next logical direction: a real benchmark data source for AI Council, D1-backed persistence for the Model Registry itself, and — if HIVE ever needs real dynamic build/test execution — an isolated sandboxed CI runner kept explicitly separate from Repository QA's static pipeline.
-

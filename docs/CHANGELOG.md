@@ -1,8 +1,15 @@
 # HIVE Changelog
 
 > **Document status:** Production reference  
-> **Last reviewed:** 18 August 2026  
+> **Last reviewed:** 15 September 2026  
 > **Operational authority:** Current repository README, SECURITY policy and operations guide.
+
+## 15 September 2026 - repository-local skills
+
+- Retired the shared skills R2 lane, D1 importer, remote fallback and descriptor-from-file registration path.
+- Made `skills/catalogue_metadata.json` the authoritative bounded HIVE catalogue.
+- Added `HIVE-skNNN` identifiers and native implementation-path validation.
+- Kept general R2 lanes for operational artefacts while removing skills-bucket readiness and configuration requirements.
 
 ## 18 August 2026 - repository audit and remediation
 

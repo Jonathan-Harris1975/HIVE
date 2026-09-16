@@ -221,22 +221,22 @@ The current presets are:
 - `podcast_episode_review`
 - `ebook_keyword_review`
 
-The R2 ecosystem lane registry is metadata-first. It records configured bucket names and public base URLs for uploads, audits, blog artefacts, images, RSS feeds, brand assets, podcast artefacts, transcripts and HIVE skills. The primary upload lane remains the only direct read/write storage adapter in this build. This keeps paid-production resource use predictable while letting HIVE understand where wider AIMS/RAMS/website/podcast artefacts live.
+The R2 ecosystem lane registry is metadata-first. It records configured bucket names and public base URLs for uploads, audits, blog artefacts, images, RSS feeds, brand assets, podcast artefacts and transcripts. Skills are deliberately excluded and remain repository-local. The primary upload lane remains the only direct read/write storage adapter in this build. This keeps paid-production resource use predictable while letting HIVE understand where wider AIMS/RAMS/website/podcast artefacts live.
 
 
-## v1.12 shared ecosystem execution layer
+## v1.12 ecosystem execution layer
 
-HIVE now contains a review-gated skill intelligence stack:
+HIVE contains a review-gated local capability intelligence stack:
 
 ```text
-D1 skill catalogue
+Repository-local skill catalogue
   -> weighted skill search
   -> recommendation engine
   -> review-gated routing
-  -> shared ecosystem execution plan
+  -> reviewable ecosystem execution plan
 ```
 
-The execution layer does not mutate repos, install skills, run deploys or start background workers. It returns reviewable plans for HIVE/AIMS/RAMS/Website workflows and keeps PostgreSQL, D1, R2, Vectorize and the skill registry as separate, bounded layers.
+The execution layer does not mutate repos, install skills, run deploys or start background workers. It returns reviewable plans for HIVE/AIMS/RAMS/Website workflows and keeps PostgreSQL, D1, R2, Vectorize and the repository-local skill catalogue as separate, bounded layers.
 
 ## v1.15 execution review queue
 
@@ -252,17 +252,17 @@ Evidence packs remain inline review/export responses. Approved packs can signal 
 
 ## v1.17 Registry Integrity Layer
 
-The shared skills catalogue is now treated as a governed registry rather than a loose list of descriptors. HIVE keeps R2 as the descriptor source of truth and D1 as the searchable catalogue, then validates the D1 records through read-only integrity endpoints.
+The HIVE skills catalogue is a governed, repository-local registry rather than a loose list of downloaded descriptors. The release file `skills/catalogue_metadata.json` is authoritative and the integrity endpoints validate it without network or database reads.
 
 The registry integrity layer checks:
 
-- duplicate skill IDs, slugs, object keys and search-document IDs;
+- duplicate skill IDs and slugs;
 - required metadata fields;
 - priority tier, risk level and repo taxonomy;
-- descriptor URL/object-key consistency;
-- D1 lane and source-type consistency.
+- safe, existing native implementation paths;
+- repository-local source and provenance consistency.
 
-`/v1/skills/rebuild-index` is deliberately dry-run-first and only upserts D1 metadata from the shared R2 search documents. It does not mutate R2, install packages, execute skills or write to repos.
+`/v1/skills/rebuild-index` now clears the in-process catalogue cache and reruns local integrity checks. It does not mutate D1/R2, install packages, execute skills or write to repositories.
 
 ## v1.18/v1.19 Workflow Graph and Controlled Preview Layer
 
@@ -414,4 +414,3 @@ notes, and the updated `.env.example`/README endpoint table.
   `ModelRouter.select_model` the same way `TaskType.CODE` was wired.
 - New Repository QA / Council check: add a `_check_*` function and include
   it in the `checks` list — each check is independent and additive.
-

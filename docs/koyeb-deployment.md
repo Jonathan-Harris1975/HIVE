@@ -317,33 +317,28 @@ Do not configure `MAST_HEALTH_URL` or `MAST_STATUS_URL` for the Worker deploymen
 
 ## Production dependency readiness
 
-`/livez` proves only that the process is alive. `/readyz` combines configuration checks with cached, bounded list probes for every required R2 lane. When `hive_skills` is required, it also reads and schema-checks `manifests/shared-skill-pool-manifest.json` and `index/search-documents.json`.
+`/livez` proves only that the process is alive. `/readyz` combines configuration checks with cached, bounded list probes for every required R2 lane and validates that the repository-local HIVE skill catalogue is present.
 
 ```env
 READINESS_DEPENDENCY_PROBES_ENABLED=true
 READINESS_DEPENDENCY_PROBE_CACHE_SECONDS=30
-R2_REQUIRED_READ_LANES=uploads,audits,blog,blog_rss,meta_system,podcast,podcast_rss,rss,transcripts,hive_skills
+R2_REQUIRED_READ_LANES=uploads,audits,blog,blog_rss,meta_system,podcast,podcast_rss,rss,transcripts
 ```
 
 If `R2_REQUIRED_READ_LANES` is omitted while `PRODUCTION_REQUIRE_R2=true`, every configured bucket lane is required. The authenticated `/v1/runtime/readiness` response shows redacted per-lane evidence; credentials and provider signing material are never returned.
 
-## v1.8 Skill Registry Import Env
+## Repository-local skill catalogue
 
-Optional tuning for the R2 shared skill-pool importer:
+HIVE loads its bounded skill catalogue from `skills/catalogue_metadata.json` in the deployed release. No shared-skills bucket, D1 import or external skill download is required. These optional settings control how much local capability context a chat request may receive:
 
 ```env
-SKILL_REGISTRY_IMPORT_MAX_ITEMS=250
-SKILL_REGISTRY_IMPORT_TIMEOUT_SECONDS=20
-SKILL_REGISTRY_MAX_SOURCE_BYTES=5242880
-SKILL_REGISTRY_FALLBACK_ENABLED=true
-SKILL_REGISTRY_FALLBACK_CACHE_SECONDS=300
 SKILL_CONTEXT_ENABLED=true
 SKILL_CONTEXT_MAX_ITEMS=3
 SKILL_CONTEXT_MAX_CHARS=6000
 SKILL_CONTEXT_RISK_CEILING=medium
 ```
 
-The importer uses `R2_PUBLIC_BASE_URL_HIVE_SKILLS` and reads only the governed `index/search-documents.json` URL. Redirects and alternate hosts are rejected, the response is size-bounded, and D1 outages fall back to a short-lived read-only copy of those governed search documents. Chat requests can inject a small, provenance-rich excerpt set; retrieved skill text is explicitly treated as untrusted reference data.
+The catalogue maps each `HIVE-skNNN` record to existing native code. Catalogue summaries are planning context only and cannot install packages, change policy or bypass approval gates.
 
 ## v1.9 Intelligent Skill Search Checks
 
