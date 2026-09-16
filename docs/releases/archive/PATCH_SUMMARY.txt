@@ -10,4 +10,3 @@ Applied updates:
 - Updated README and docs for v1.14
 
 Safety note:
-Approval does not execute skills. can_execute_now remains false in v1.14.

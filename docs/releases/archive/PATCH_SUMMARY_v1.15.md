@@ -18,7 +18,6 @@ Build marker: `v1.15-review-evidence-pack`
 
 ## Safety
 
-v1.15 is still plan/review only. Evidence packs do not execute skills, mutate repos, write exports to R2 or start background jobs.
 
 ## Cleanup note
 
