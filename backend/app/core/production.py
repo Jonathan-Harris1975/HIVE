@@ -283,26 +283,6 @@ def build_readiness_report(settings: Settings) -> ReadinessReport:
         )
     )
 
-    skills_catalogue_path = Path(__file__).resolve().parents[3] / "skills/catalogue_metadata.json"
-    try:
-        skills_catalogue = json.loads(skills_catalogue_path.read_text(encoding="utf-8"))
-        skills_contract_ok = bool(
-            isinstance(skills_catalogue, dict)
-            and isinstance(skills_catalogue.get("items"), list)
-            and skills_catalogue["items"]
-        )
-    except (OSError, json.JSONDecodeError):
-        skills_contract_ok = False
-    checks.append(
-        _check(
-            "local_skills_catalogue",
-            skills_contract_ok,
-            "The repository-local HIVE skill catalogue is bundled and non-empty.",
-            "The repository-local HIVE skill catalogue is missing, invalid or empty.",
-            required=production,
-        )
-    )
-
     database_ready = settings.database_enabled and bool(settings.sql_database_url)
     database_required = production and settings.production_require_database
     checks.append(

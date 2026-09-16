@@ -825,21 +825,6 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("ZIP_EXTRACT_SUPPORTED_FILENAMES"),
     )
 
-    # Repository-local skill context. Catalogue data is bundled with HIVE and
-    # never imported from object storage or a third-party skill service.
-    skill_context_enabled: bool = Field(
-        True, validation_alias=AliasChoices("SKILL_CONTEXT_ENABLED")
-    )
-    skill_context_max_items: int = Field(
-        2, validation_alias=AliasChoices("SKILL_CONTEXT_MAX_ITEMS")
-    )
-    skill_context_max_chars: int = Field(
-        4000, validation_alias=AliasChoices("SKILL_CONTEXT_MAX_CHARS")
-    )
-    skill_context_risk_ceiling: str = Field(
-        "medium", validation_alias=AliasChoices("SKILL_CONTEXT_RISK_CEILING")
-    )
-
     @field_validator(
         "admin_bearer_token",
         "ops_event_ingest_token",
