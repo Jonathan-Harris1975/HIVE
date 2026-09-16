@@ -28,7 +28,7 @@ async def test_diagnostics_excludes_static_media_ai_search_sources(monkeypatch):
                 "success": True,
                 "result": [
                     {"id": "hive-repositories", "paused": False},
-                    {"id": "hive-skills", "paused": False},
+                    {"id": "hive-audits", "paused": False},
                     {"id": "brand-assets", "paused": True},
                     {"id": "media-index", "paused": False, "source": {"bucket_name": "blog-images"}},
                 ],
@@ -36,7 +36,7 @@ async def test_diagnostics_excludes_static_media_ai_search_sources(monkeypatch):
             })
         if path.endswith('/hive-repositories/stats'):
             return httpx.Response(200, json={"success": True, "result": {"completed": 20, "error": 0}})
-        if path.endswith('/hive-skills/stats'):
+        if path.endswith('/hive-audits/stats'):
             return httpx.Response(200, json={"success": True, "result": {"completed": 227, "error": 1}})
         raise AssertionError(f"excluded AI Search source was queried: {path}")
 
@@ -71,7 +71,7 @@ async def test_search_all_fans_out_and_tags_source_instance(monkeypatch):
                 "success": True,
                 "result": [
                     {"id": "hive-repositories", "paused": False},
-                    {"id": "hive-skills", "paused": False},
+                    {"id": "hive-audits", "paused": False},
                     {"id": "podcastart", "paused": False},
                     {"id": "media-index", "paused": False, "data_source": {"bucket": "blog-images"}},
                 ],
@@ -82,7 +82,7 @@ async def test_search_all_fans_out_and_tags_source_instance(monkeypatch):
             assert body["ai_search_options"]["retrieval"]["max_num_results"] == 2
             assert "max_num_results" not in body
             return httpx.Response(200, json={"success": True, "result": {"data": [{"id": "a", "score": 0.8}]}})
-        if path.endswith('/hive-skills/search'):
+        if path.endswith('/hive-audits/search'):
             return httpx.Response(200, json={"success": True, "result": {"data": [{"id": "b", "score": 0.9}]}})
         raise AssertionError(path)
 
@@ -98,7 +98,7 @@ async def test_search_all_fans_out_and_tags_source_instance(monkeypatch):
     assert result["ok"] is True
     assert result["instance_count"] == 2
     assert [item["id"] for item in result["matches"]] == ["b", "a"]
-    assert result["matches"][0]["_ai_search_instance"] == "hive-skills"
+    assert result["matches"][0]["_ai_search_instance"] == "hive-audits"
 
 
 @pytest.mark.asyncio

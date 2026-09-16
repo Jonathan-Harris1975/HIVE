@@ -1,69 +1,22 @@
-import pytest
-from fastapi import HTTPException
+from fastapi.testclient import TestClient
 
-from app.api.skills import SkillFromFileRequest, skill_from_file
-from app.core.config import Settings
+from app.core.config import get_settings
+from app.main import app
 
 
-def test_skill_from_file_dry_run_requires_hive_skills_folder() -> None:
-    settings = Settings(
-        APP_ENV="test",
-        R2_BUCKET_UPLOADS="uploads",
-        R2_PUBLIC_BASE_URL_UPLOADS="https://uploads.example.invalid",
-        R2_BUCKET_HIVE_SKILLS="hive-skills",
+def test_skill_from_file_route_is_removed(monkeypatch, tmp_path) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("APP_ENV", "test")
+    get_settings.cache_clear()
+    monkeypatch.setitem(app.dependency_overrides, get_settings, get_settings)
+
+    response = TestClient(app).post(
+        "/v1/skills/from-file",
+        json={
+            "title": "Remote descriptor",
+            "object_key": "skills/example.json",
+            "source_lane": "hive_skills",
+        },
     )
 
-    with pytest.raises(HTTPException) as raised:
-        skill_from_file(
-            SkillFromFileRequest(
-                title="Brand fallback hero asset",
-                object_key="uploads/2026/06/blog-fallback-hero.png",
-                source_lane="uploads",
-                description="Use this asset when auditing brand fallback hero images.",
-                repo="HIVE-UI",
-                hive_lane="brand-assets",
-                priority_tier="P2",
-                risk_level="low",
-                tags=["brand-assets", "image"],
-                dry_run=True,
-            ),
-            settings=settings,
-        )
-
-    assert raised.value.status_code == 400
-    assert raised.value.detail["error_code"] == "skill_source_not_hive_skills_folder"
-
-
-def test_skill_from_file_dry_run_uses_reviewed_hive_skills_metadata() -> None:
-    settings = Settings(
-        APP_ENV="test",
-        R2_BUCKET_HIVE_SKILLS="hive-skills",
-    )
-    result = skill_from_file(
-        SkillFromFileRequest(
-            title="Podcast SEO review helper",
-            object_key="skills/S999_podcast-seo-review-helper.json",
-            source_lane="hive_skills",
-            description="Review podcast pages against SEO and freshness rules.",
-            repo="HIVE",
-            hive_lane="podcast-seo",
-            priority_tier="P2",
-            risk_level="low",
-            tags=["podcast", "seo"],
-            dry_run=True,
-        ),
-        settings=settings,
-    )
-
-    assert result["ok"] is True
-    skill = result["skill"]
-    metadata = skill["metadata"]
-    assert skill["title"] == "Podcast SEO review helper"
-    assert metadata["description"] == "Review podcast pages against SEO and freshness rules."
-    assert metadata["source_lane"] == "hive_skills"
-    assert metadata["source_object_key"] == "skills/S999_podcast-seo-review-helper.json"
-    assert metadata["hive_lane"] == "podcast-seo"
-    assert metadata["repos"] == ["HIVE"]
-    assert metadata["created_from_hive_skills_folder_file"] is True
-    assert metadata["descriptor_url"] == "r2://hive-skills/skills/S999_podcast-seo-review-helper.json"
-    assert "uploaded-file" in metadata["tags"]
+    assert response.status_code == 404

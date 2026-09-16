@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from app.main import app
 from app.core.config import get_settings
+from app.main import app
 
 
 def _reset_settings(monkeypatch, tmp_path, **env):
@@ -22,8 +22,6 @@ def test_ecosystem_status_is_mast_friendly(monkeypatch, tmp_path) -> None:
     _reset_settings(
         monkeypatch,
         tmp_path,
-        R2_BUCKET_HIVE_SKILLS="hive-skills",
-        SKILL_REGISTRY_FALLBACK_ENABLED=False,
         VECTORIZE_ENABLED="true",
         VECTORIZE_API_TOKEN="token",
         VECTORIZE_ACCOUNT_ID="account",
@@ -42,24 +40,19 @@ def test_ecosystem_status_is_mast_friendly(monkeypatch, tmp_path) -> None:
     assert body["recommended_mast_probe"] == "/v1/ecosystem/status"
 
 
-def test_skills_list_and_search_return_safe_disabled_d1_response(monkeypatch, tmp_path) -> None:
-    _reset_settings(
-        monkeypatch,
-        tmp_path,
-        R2_BUCKET_HIVE_SKILLS="hive-skills",
-        SKILL_REGISTRY_FALLBACK_ENABLED=False,
-    )
+def test_skills_list_and_search_use_repository_catalogue(monkeypatch, tmp_path) -> None:
+    _reset_settings(monkeypatch, tmp_path)
     client = TestClient(app)
 
     listed = client.get("/v1/skills/list").json()
     searched = client.get("/v1/skills/search", params={"q": "audit"}).json()
 
-    assert listed["ok"] is False
-    assert listed["enabled"] is False
-    assert listed["manifest_hint"] == "r2://hive-skills/index/skills-manifest.json"
-    assert searched["ok"] is False
-    assert searched["enabled"] is False
-    assert searched["manifest_hint"] == "r2://hive-skills/index/skills-manifest.json"
+    assert listed["ok"] is True
+    assert listed["items"]
+    assert listed["shared_bucket_required"] is False
+    assert searched["ok"] is True
+    assert searched["items"]
+    assert searched["catalogue_path"] == "skills/catalogue_metadata.json"
 
 
 def test_ecosystem_search_requires_query(monkeypatch, tmp_path) -> None:

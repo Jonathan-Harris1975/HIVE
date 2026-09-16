@@ -1,41 +1,36 @@
 from __future__ import annotations
 
+from app.core.config import Settings
 from app.core.version import BUILD_STAGE
 from app.services import skill_registry as registry
 
-
-class _SettingsStub:
-    def r2_reference_for_r2_lane(self, lane: str, key: str) -> str:
-        base = "r2://hive-skills"
-        return f"{base}/{key}" if key else base
+SETTINGS = Settings(APP_ENV="test")
 
 
-SETTINGS = _SettingsStub()
-
-
-def _valid_item(skill_id: str = "S194", slug: str = "podcast-seo") -> dict[str, object]:
+def _valid_item(skill_id: str = "HIVE-sk001", slug: str = "ci-log-analysis") -> dict[str, object]:
+    source_uri = f"repo://skills/catalogue_metadata.json#{skill_id}"
     return {
         "id": f"skill:{skill_id}",
-        "lane": "hive_skills",
-        "source_type": "skill_descriptor",
+        "lane": registry.SKILL_LANE,
+        "source_type": "repository_skill",
         "source_id": skill_id,
         "title": slug,
-        "url": f"r2://hive-skills/skills/{skill_id}_{slug}.json",
+        "url": source_uri,
         "metadata": {
             "skill_id": skill_id,
-            "reference_prefix": skill_id,
             "slug": slug,
-            "name": slug,
-            "object_key": f"skills/{skill_id}_{slug}.json",
-            "descriptor_url": f"r2://hive-skills/skills/{skill_id}_{slug}.json",
-            "search_document_id": f"skill:{skill_id}",
+            "description": "Local test capability.",
             "priority_tier": "P0 - Foundation",
-            "hive_lane": "SEO/AEO/GEO",
+            "hive_lane": "CI and deployment diagnostics",
             "risk_level": "low",
-            "repos": ["HIVE", "AIMS"],
-            "tags": ["podcast-seo", "repo-hive", "risk-low"],
-            "catalogue_category": "content-operations",
-            "indexable_text": "Podcast SEO skill for transcript and RSS review.",
+            "repos": ["HIVE"],
+            "tags": ["ci"],
+            "catalogue_category": "CI and deployment diagnostics",
+            "indexable_text": "Local CI diagnostic capability.",
+            "source_path": registry.CATALOGUE_PATH,
+            "source_uri": source_uri,
+            "implementation_paths": ["backend/app/services/repo_health.py"],
+            "external_content_copied": False,
         },
     }
 
@@ -44,31 +39,23 @@ def test_v117_build_marker() -> None:
     assert BUILD_STAGE == "v1.31-production-readiness"
 
 
-def test_v117_integrity_report_clean_registry(monkeypatch) -> None:
-    monkeypatch.setattr(
-        registry,
-        "_skill_records",
-        lambda **kwargs: {"ok": True, "items": [_valid_item()]},
-    )
-
+def test_v117_integrity_report_clean_registry() -> None:
     result = registry.skill_registry_integrity_report(settings=SETTINGS)
 
     assert result["ok"] is True
-    assert result["build_stage_hint"] == "v1.31-production-readiness"
-    assert result["checked_count"] == 1
+    assert result["checked_count"] > 0
     assert result["issue_count"] == 0
     assert result["registry_health"] == 100
+    assert result["external_dependencies"] == []
 
 
 def test_v117_duplicate_and_missing_detection(monkeypatch) -> None:
-    first = _valid_item("S194", "podcast-seo")
-    duplicate = _valid_item("S194", "podcast-seo-copy")
-    broken = _valid_item("S999", "broken-skill")
+    first = _valid_item()
+    duplicate = _valid_item("HIVE-sk001", "ci-log-analysis-copy")
+    broken = _valid_item("HIVE-sk999", "broken-skill")
     broken["metadata"] = {
-        "skill_id": "S999",
+        "skill_id": "HIVE-sk999",
         "slug": "broken-skill",
-        "object_key": "skills/S999_broken-skill.json",
-        "descriptor_url": "https://wrong.example.test/skills/S999_broken-skill.json",
         "priority_tier": "P9 - Weird",
         "risk_level": "extreme",
         "repos": ["UnknownRepo"],
@@ -83,23 +70,15 @@ def test_v117_duplicate_and_missing_detection(monkeypatch) -> None:
 
     assert result["ok"] is True
     assert result["issue_count"] > 0
-    assert result["duplicates"]["skill_ids"][0]["value"] == "s194"
+    assert result["duplicates"]["skill_ids"][0]["value"] == "hive-sk001"
     assert result["missing"]["count"] == 1
     assert result["taxonomy"]["count"] == 1
     assert result["orphans"]["count"] == 1
 
 
-def test_v117_rebuild_index_defaults_to_dry_run(monkeypatch) -> None:
-    called = {}
-
-    def fake_import_skills_manifest(**kwargs):
-        called.update(kwargs)
-        return {"ok": True, "dry_run": kwargs["dry_run"], "prepared_count": 201}
-
-    monkeypatch.setattr(registry, "import_skills_manifest", fake_import_skills_manifest)
-
+def test_v117_rebuild_index_reloads_local_catalogue() -> None:
     result = registry.rebuild_skills_index(settings=SETTINGS)
 
     assert result["ok"] is True
-    assert result["operation"] == "rebuild_skills_index"
-    assert called["dry_run"] is True
+    assert result["operation"] == "reload_local_skills_catalogue"
+    assert result["mutated_external_state"] is False

@@ -5,9 +5,8 @@ from app.services import workflow_graphs
 
 
 class _SettingsStub:
-    def r2_reference_for_r2_lane(self, lane: str, key: str) -> str:
-        base = "r2://hive-skills"
-        return f"{base}/{key}" if key else base
+    execution_adapters_enabled = True
+    execution_adapters_require_approval = True
 
 
 SETTINGS = _SettingsStub()
@@ -25,8 +24,8 @@ def _fake_shared_execution_plan(**kwargs):
         "requires_approval": True,
         "routed_skill_plan": {
             "candidate_skills": [
-                {"skill_id": "S194", "title": "podcast-seo", "risk_level": "low"},
-                {"skill_id": "S198", "title": "sentry-cli", "risk_level": "medium"},
+                {"skill_id": "HIVE-sk003", "title": "audit-report-review", "risk_level": "low"},
+                {"skill_id": "HIVE-sk001", "title": "ci-log-analysis", "risk_level": "medium"},
             ]
         },
     }
@@ -48,9 +47,9 @@ def test_v118_workflow_graph_builds_nodes_and_edges(monkeypatch) -> None:
     monkeypatch.setattr(workflow_graphs, "shared_execution_plan", _fake_shared_execution_plan)
     result = workflow_graphs.build_workflow_graph(
         settings=SETTINGS,
-        task="review podcast SEO workflow",
+        task="review audit evidence workflow",
         repo="AIMS",
-        workflow_preset="podcast_episode_review",
+        workflow_preset="audit_report_review",
         limit=2,
     )
     assert result["ok"] is True

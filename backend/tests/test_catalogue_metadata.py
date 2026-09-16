@@ -11,9 +11,9 @@ def test_catalogue_metadata_files_are_valid() -> None:
     skills = load_skill_catalogue_metadata()
     tasks = load_task_catalogue_metadata()
 
-    assert skills["schema_version"] == "2026-06-22.catalogue-metadata.v1"
+    assert skills["schema_version"] == "2026-09-15.repository-skills.v1"
     assert tasks["schema_version"] == "2026-06-22.catalogue-metadata.v1"
-    assert len(skills["items"]) >= 10
+    assert len(skills["items"]) == 8
     assert len(tasks["items"]) >= 18
 
     status = catalogue_status()
@@ -38,7 +38,7 @@ def test_skill_enrichment_prevents_blank_description() -> None:
     assert enriched["risk_level"] in {"low", "medium", "high"}
 
 
-def test_skill_fallback_rule_covers_unknown_registry_item() -> None:
+def test_unknown_skill_uses_safe_local_default_metadata() -> None:
     item = {
         "id": "skill:future-koyeb-log-helper",
         "source_id": "future-koyeb-log-helper",
@@ -48,8 +48,10 @@ def test_skill_fallback_rule_covers_unknown_registry_item() -> None:
 
     enriched = enrich_skill_item(item)
 
-    assert enriched["description"] == "Analyses logs, failed checks and deployment signals to identify the smallest safe fix."
-    assert enriched["category"] == "CI and deployment diagnostics"
+    assert enriched["description"] == (
+        "Supports operations for HIVE using governed skill metadata and review-gated planning."
+    )
+    assert enriched["category"] == "General operations"
 
 
 def test_task_enrichment_prevents_blank_description() -> None:

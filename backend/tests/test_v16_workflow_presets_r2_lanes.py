@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from app.main import app
 from app.core.config import get_settings
+from app.main import app
 from app.services.workflow_presets import get_workflow_preset
 
 
@@ -23,7 +23,6 @@ def test_v16_health_reports_workflow_and_r2_lane_flags(monkeypatch, tmp_path) ->
         monkeypatch,
         tmp_path,
         R2_BUCKET_AUDITS="audits",
-        R2_BUCKET_HIVE_SKILLS="hive-skills",
     )
     client = TestClient(app)
 
@@ -34,7 +33,7 @@ def test_v16_health_reports_workflow_and_r2_lane_flags(monkeypatch, tmp_path) ->
     assert body["r2_ecosystem_lanes_enabled"] is True
     lanes = body["storage_flags"]["r2"]["ecosystem_lanes_configured"]
     assert "audits" in lanes
-    assert "hive_skills" in lanes
+    assert "hive_skills" not in lanes
 
 
 def test_workflow_presets_endpoint_lists_presets(monkeypatch, tmp_path) -> None:

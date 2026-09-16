@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from app.services.skill_registry import _score_skill_item, _skill_document_to_metadata
+from app.core.config import Settings
+from app.services.skill_registry import _score_skill_item, list_skills_catalogue
 
 
 def test_v19_weighted_skill_search_matches_split_terms() -> None:
@@ -9,7 +10,7 @@ def test_v19_weighted_skill_search_matches_split_terms() -> None:
         "title": "rss-feed-rewriter",
         "source_type": "skill_descriptor",
         "source_id": "S900",
-        "url": "https://example.test/skills/S900.json",
+        "url": "repo://skills/catalogue_metadata.json#HIVE-sk900",
         "metadata": {
             "slug": "rss-feed-rewriter",
             "tags": ["rss", "content", "rewrite", "repo-aims"],
@@ -37,7 +38,7 @@ def test_v19_weighted_skill_search_uses_synonyms() -> None:
         "title": "feed-summary-copy",
         "source_type": "skill_descriptor",
         "source_id": "S901",
-        "url": "https://example.test/skills/S901.json",
+        "url": "repo://skills/catalogue_metadata.json#HIVE-sk901",
         "metadata": {
             "slug": "feed-summary-copy",
             "tags": ["syndication", "content"],
@@ -56,32 +57,10 @@ def test_v19_weighted_skill_search_uses_synonyms() -> None:
     assert set(scored["matched_terms"]) == {"rss", "rewrite"}
 
 
-def test_v19_skill_document_mapping_still_preserves_descriptor_url(monkeypatch, tmp_path) -> None:
-    from app.core.config import get_settings
+def test_v19_local_catalogue_records_have_native_provenance() -> None:
+    result = list_skills_catalogue(settings=Settings(APP_ENV="test"), limit=20)
 
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("APP_ENV", "test")
-    monkeypatch.setenv("R2_BUCKET_HIVE_SKILLS", "hive-skills")
-    get_settings.cache_clear()
-    settings = get_settings()
-
-    mapped = _skill_document_to_metadata(settings, {
-        "document_id": "skill:S902",
-        "reference_prefix": "S902",
-        "name": "podcast-seo",
-        "object_key": "skills/S902_podcast-seo.json",
-        "text": "Podcast SEO and metadata skill.",
-        "metadata": {
-            "skill_id": "S902",
-            "reference_prefix": "S902",
-            "slug": "podcast-seo",
-            "priority_tier": "P0 - Foundation",
-            "hive_lane": "SEO/AEO/GEO",
-            "risk_level": "low",
-            "repos": ["HIVE", "AIMS"],
-        },
-        "tags": ["podcast", "seo"],
-    })
-
-    assert mapped["id"] == "skill:S902"
-    assert mapped["metadata"]["descriptor_url"] == "r2://hive-skills/skills/S902_podcast-seo.json"
+    assert result["ok"] is True
+    assert result["source"] == "repo://skills/catalogue_metadata.json"
+    assert all(item["source_type"] == "repository_skill" for item in result["items"])
+    assert all(item["metadata"]["implementation_paths"] for item in result["items"])

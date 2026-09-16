@@ -2,94 +2,67 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from app.core.config import get_settings
 from app.main import app
-from app.services.skill_registry import _extract_search_documents, _skill_document_to_metadata, _skill_stats_from_items
+from app.services.skill_registry import _skill_stats_from_items
 
 
-def _reset_settings(monkeypatch, tmp_path, **env):
-    from app.core.config import get_settings
-
+def _reset_settings(monkeypatch, tmp_path) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("APP_ENV", "test")
-    monkeypatch.setenv("D1_ENABLED", "false")
-    monkeypatch.setenv("R2_BUCKET_HIVE_SKILLS", "hive-skills")
-    for key, value in env.items():
-        monkeypatch.setenv(key, str(value))
     get_settings.cache_clear()
     monkeypatch.setitem(app.dependency_overrides, get_settings, get_settings)
 
 
-def test_skills_status_exposes_v18_manifest_hints(monkeypatch, tmp_path) -> None:
+def test_skills_status_exposes_local_catalogue(monkeypatch, tmp_path) -> None:
     _reset_settings(monkeypatch, tmp_path)
-    client = TestClient(app)
-
-    body = client.get("/v1/skills/status").json()
+    body = TestClient(app).get("/v1/skills/status").json()
 
     assert body["ok"] is True
     assert body["build_stage_hint"] == "v1.31-production-readiness"
-    assert body["search_documents_url"] == "r2://hive-skills/index/search-documents.json"
-    assert body["shared_manifest_url"] == "r2://hive-skills/manifests/shared-skill-pool-manifest.json"
+    assert body["access_mode"] == "repository-local-read-only"
+    assert body["source_of_truth"] == "skills/catalogue_metadata.json"
+    assert body["shared_bucket_required"] is False
+    assert body["indexed_skill_count"] > 0
 
 
-def test_import_manifest_is_safe_when_d1_disabled(monkeypatch, tmp_path) -> None:
+def test_remote_manifest_import_route_is_removed(monkeypatch, tmp_path) -> None:
     _reset_settings(monkeypatch, tmp_path)
-    client = TestClient(app)
+    response = TestClient(app).post("/v1/skills/import-manifest", json={"dry_run": True})
 
-    body = client.post("/v1/skills/import-manifest", json={"dry_run": True}).json()
-
-    assert body["ok"] is False
-    assert body["enabled"] is False
-    assert body["error_code"] == "d1_disabled"
-    assert body["search_documents_hint"] == "r2://hive-skills/index/search-documents.json"
+    assert response.status_code == 404
 
 
-def test_skill_document_mapping_preserves_categories(monkeypatch, tmp_path) -> None:
+def test_local_catalogue_records_are_prefixed_and_native(monkeypatch, tmp_path) -> None:
     _reset_settings(monkeypatch, tmp_path)
-    from app.core.config import get_settings
+    body = TestClient(app).get("/v1/skills/list", params={"limit": 50}).json()
 
-    settings = get_settings()
-    doc = {
-        "document_id": "skill:S999",
-        "reference_prefix": "S999",
-        "name": "seo-audit-helper",
-        "object_key": "skills/S999_seo-audit-helper.json",
-        "text": "SEO audit helper for RAMS and AIMS.",
-        "metadata": {
-            "skill_id": "S999",
-            "reference_prefix": "S999",
-            "slug": "seo-audit-helper",
-            "priority_tier": "P1 - High",
-            "hive_lane": "SEO/AEO/GEO",
-            "risk_level": "low",
-            "repos": ["HIVE", "RAMS", "AIMS"],
-        },
-        "tags": ["seo", "audit", "repo-rams"],
-    }
-
-    mapped = _skill_document_to_metadata(settings, doc)
-    meta = mapped["metadata"]
-
-    assert mapped["id"] == "skill:S999"
-    assert meta["priority_tier"] == "P1 - High"
-    assert meta["hive_lane"] == "SEO/AEO/GEO"
-    assert meta["risk_level"] == "low"
-    assert meta["catalogue_category"] == "content-operations"
-    assert "RAMS" in meta["repos"]
-    assert meta["descriptor_url"] == "r2://hive-skills/skills/S999_seo-audit-helper.json"
+    assert body["ok"] is True
+    assert body["source"] == "repo://skills/catalogue_metadata.json"
+    assert all(item["source_id"].startswith("HIVE-sk") for item in body["items"])
+    assert all(item["source_type"] == "repository_skill" for item in body["items"])
+    assert all(item["metadata"]["external_content_copied"] is False for item in body["items"])
 
 
-def test_extract_search_documents_and_stats() -> None:
-    docs = _extract_search_documents({"documents": [
-        {"name": "one", "metadata": {"priority_tier": "P0", "hive_lane": "Core", "risk_level": "low", "repos": ["HIVE"]}},
-        {"name": "two", "metadata": {"priority_tier": "P1", "hive_lane": "Audit", "risk_level": "medium", "repos": ["RAMS"]}},
-    ]})
-
-    assert len(docs) == 2
+def test_skill_stats_remain_deterministic() -> None:
     prepared = [
-        {"priority_tier": "P0", "hive_lane": "Core", "risk_level": "low", "repos": ["HIVE"], "catalogue_category": "skill-governance"},
-        {"priority_tier": "P1", "hive_lane": "Audit", "risk_level": "medium", "repos": ["RAMS"], "catalogue_category": "risk-and-audit"},
+        {
+            "priority_tier": "P0 - Foundation",
+            "hive_lane": "Core",
+            "risk_level": "low",
+            "repos": ["HIVE"],
+            "catalogue_category": "skill-governance",
+        },
+        {
+            "priority_tier": "P1 - High",
+            "hive_lane": "Audit",
+            "risk_level": "medium",
+            "repos": ["RAMS"],
+            "catalogue_category": "risk-and-audit",
+        },
     ]
+
     stats = _skill_stats_from_items(prepared)
+
     assert stats["count"] == 2
-    assert stats["by_repo"]["HIVE"] == 1
-    assert stats["by_repo"]["RAMS"] == 1
+    assert stats["by_repo"] == {"HIVE": 1, "RAMS": 1}
