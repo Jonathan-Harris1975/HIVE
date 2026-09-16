@@ -3,12 +3,8 @@ HIVE v1.26.4 Helper Orchestration Patch
 
 Purpose
 -------
-Reduce perceived and real slowness after the latest helper/skill updates while keeping the helper systems available and organised.
 
-Superseded skill-source note
 ----------------------------
-The D1/R2 skill source described in the original v1.26.4 record has been retired.
-Current releases load the bounded catalogue from skills/catalogue_metadata.json only.
 
 Backend changes
 ---------------
@@ -33,11 +29,7 @@ Backend changes
    - Added idx_hive_conversations_updated.
    - Added idx_hive_messages_conversation_role_created.
 
-6. Skill-context defaults are bounded for production.
-   - SKILL_CONTEXT_MAX_ITEMS=2
-   - SKILL_CONTEXT_MAX_CHARS=4000
 
-7. Skill catalogue records have a short in-process cache over the bundled release file.
    - Avoids repeat local JSON parsing during helper-heavy usage.
    - Reloading the index clears this cache and reruns local integrity checks without external writes.
 
@@ -48,7 +40,4 @@ Backend test suite:
 
 Notes
 -----
-- Backend ChatRequest keeps use_skills=true for API compatibility and existing tests.
-- HIVE-UI now sends use_skills=false for ordinary chat unless the operator explicitly enables the Skills toggle.
-- BUILD_STAGE remains v1.26.3-skill-catalogue-cleanup to preserve existing health-contract tests.
 - APP_VERSION is updated to 1.26.4-production in config/env templates.

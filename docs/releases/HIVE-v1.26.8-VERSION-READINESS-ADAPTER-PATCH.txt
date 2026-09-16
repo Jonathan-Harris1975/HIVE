@@ -10,7 +10,6 @@ Updated files:
 - backend/app/services/openrouter.py
 - backend/app/services/execution_adapters.py
 - backend/app/services/execution_reviews.py
-- backend/app/services/skill_registry.py
 - backend/tests/* build-stage expectations
 - HIVE-KOYEB-PRODUCTION-ENV.txt
 - HIVE-v1.26.8-KOYEB-E-MEDIUM-ENV.txt

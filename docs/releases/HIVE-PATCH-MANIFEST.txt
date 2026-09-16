@@ -4,14 +4,11 @@ backend/app/services/catalogue_metadata.py
 backend/tests/test_catalogue_metadata.py
 docs/obsolete-files-delete-manifest.txt
 docs/repository-dust-review.md
-skills/catalogue_metadata.json
 tasks/task_metadata.json
 HIVE-PRODUCTION-SHARED.env
 README.md
-backend/app/api/skills.py
 backend/app/core/version.py
 backend/app/services/execution_reviews.py
-backend/app/services/skill_registry.py
 backend/app/services/workflow_graphs.py
 backend/app/services/workflow_presets.py
 backend/tests/test_env_split.py
@@ -25,8 +22,6 @@ backend/tests/test_v120_to_v122_execution_preview_persistence.py
 backend/tests/test_v15_ingestion_expansion.py
 backend/tests/test_v16_workflow_presets_r2_lanes.py
 backend/tests/test_v17_ecosystem_intelligence.py
-backend/tests/test_v18_skill_registry_import.py
-backend/tests/test_v19_to_v112_skill_intelligence.py
 backend/tests/test_vectorize_foundation.py
 docs/CHANGELOG.md
 docs/production-readiness.md
@@ -37,13 +32,10 @@ HIVE-KOYEB-PRODUCTION-ENV.txt
 HIVE-REPO-HEALTH-KOYEB-ENV-PATCH.txt
 HIVE-v1.24-KOYEB-ENV-PATCH.txt
 HIVE-v1.25-PRODUCTION-EXECUTION-GATES-PATCH.txt
-HIVE-v1.26-R2-WRITE-SKILL-MODELS-PATCH.txt
 HIVE-v1.26.10-CHAT-PERSISTENCE-SYNC-PATCH.txt
 HIVE-v1.26.10-KOYEB-E-MEDIUM-ENV.txt
 HIVE-v1.26.11-CI-BUILD-MARKER-SYNC-PATCH.md
 HIVE-v1.26.11-ENV-SPLIT-PATCH.txt
-HIVE-v1.26.2-FILE-SKILL-APPLY-FLOW-PATCH.txt
-HIVE-v1.26.3-SKILL-CATALOGUE-CLEANUP-PATCH.txt
 HIVE-v1.26.4-HELPER-ORCHESTRATION-PATCH.txt
 HIVE-v1.26.5-PRODUCTION-ENV-GITHUB-ZIP-PATCH.txt
 HIVE-v1.26.7-KOYEB-E-MEDIUM-FASTLANE-ENV-PATCH.txt

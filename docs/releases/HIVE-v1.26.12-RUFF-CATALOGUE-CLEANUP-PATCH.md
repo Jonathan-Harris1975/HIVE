@@ -4,7 +4,6 @@ Date: 22 June 2026
 
 ## Issue
 
-GitHub Actions backend tests passed, but Ruff failed with F841 because `_generated_skill_description()` assigned `title` and never used it.
 
 ## Fix
 
