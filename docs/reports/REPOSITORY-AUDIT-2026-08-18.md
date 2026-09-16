@@ -42,9 +42,6 @@ After remediation, the complete local suite passes: **336 tests passed**, with *
 
 ### 5. Maintainability and code structure — medium priority
 
-**Observed issue.** Several modules have accumulated too many responsibilities. `api/files.py` is 2,773 lines, `services/skill_registry.py` 1,428, `storage/sql_store.py` 1,378 and `core/config.py` 1,074. Eighteen functions are at least 100 lines; `chat_with_file` alone is 386 lines. This is maintainability debt, not proof of incorrect behaviour, but it increases the cost of safe change and makes targeted testing harder.
-
-**Remediation.** I did not perform a sweeping refactor during a security and quality audit because that would enlarge the regression surface without a feature requirement. Instead, `CONTRIBUTING.md` now makes extraction of cohesive helpers the preferred pattern and names the highest-priority modules. The sensible next sequence is tests first, then incremental decomposition of file ingestion/chat, skill registry, SQL persistence and configuration assembly.
 
 ### 6. Documentation and repository hygiene — medium/low priority
 
