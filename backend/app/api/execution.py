@@ -30,6 +30,9 @@ class ExecutionReviewCreateRequest(BaseModel):
     repo: str | None = Field(None, max_length=40)
     workflow_preset: str | None = Field(None, max_length=120)
     requested_by: str | None = Field(None, max_length=120)
+    source_preview_id: str | None = Field(None, max_length=120)
+    source_simulation_id: str | None = Field(None, max_length=120)
+    policy_profile: str | None = Field(None, max_length=80)
     limit: int = Field(5, ge=1, le=25)
     dry_run: bool = True
 
@@ -52,6 +55,16 @@ class ExecutionPreviewSaveRequest(BaseModel):
     approval_state: str | None = Field(None, max_length=40)
     policy_profile: str | None = Field(None, max_length=80)
     requested_by: str | None = Field(None, max_length=120)
+    preview_id: str | None = Field(
+        None,
+        max_length=80,
+        pattern=r"^execution-preview-[0-9a-fA-F-]{36}$",
+    )
+    simulation_id: str | None = Field(
+        None,
+        max_length=84,
+        pattern=r"^execution-simulation-[0-9a-fA-F-]{36}$",
+    )
     limit: int = Field(5, ge=1, le=25)
     dry_run: bool = False
 
@@ -83,6 +96,9 @@ def create_review(
         repo=payload.repo,
         workflow_preset=payload.workflow_preset,
         requested_by=payload.requested_by,
+        source_preview_id=payload.source_preview_id,
+        source_simulation_id=payload.source_simulation_id,
+        policy_profile=payload.policy_profile,
         limit=payload.limit,
         dry_run=payload.dry_run,
     )
@@ -173,6 +189,8 @@ def save_preview(
         approval_state=payload.approval_state,
         requested_by=payload.requested_by,
         policy_profile=payload.policy_profile,
+        preview_id=payload.preview_id,
+        simulation_id=payload.simulation_id,
         dry_run=payload.dry_run,
     )
 
@@ -201,7 +219,7 @@ def workflow_simulation(
     payload: WorkflowSimulationRequest,
     settings: Settings = Depends(get_settings),
 ) -> dict[str, object]:
-    """Run a deterministic pretend-mode simulation of a workflow plan."""
+    """Build a deterministic execution-plan preview without running adapters."""
 
     return simulate_workflow_execution(
         settings=settings,

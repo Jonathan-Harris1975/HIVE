@@ -11,10 +11,12 @@ from app.core.config import Settings, get_settings
 from app.core.security import bearer, require_admin
 from app.services.optimisation_engine import (
     OptimisationEngineError,
+    OptimisationStateError,
     QAEventValidationError,
     ingest_qa_event,
     list_decisions,
     list_experiments,
+    mark_decision_reverted,
     record_decision,
     record_experiment,
     rollback_decision,
@@ -66,12 +68,28 @@ async def get_decisions(
     return {"decisions": list_decisions(settings, decision_type=decision_type)}
 
 
+@router.post("/optimisation/decisions/{decision_id}/revert")
+async def post_revert_decision(
+    decision_id: str, settings: Settings = Depends(get_settings)
+) -> dict[str, object]:
+    """Mark a decision reverted in the ledger; no external state is restored here."""
+
+    try:
+        return mark_decision_reverted(settings, decision_id)
+    except OptimisationStateError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+    except OptimisationEngineError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+
+
 @router.post("/optimisation/decisions/{decision_id}/rollback")
 async def post_rollback_decision(
     decision_id: str, settings: Settings = Depends(get_settings)
 ) -> dict[str, object]:
     try:
         return rollback_decision(settings, decision_id)
+    except OptimisationStateError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     except OptimisationEngineError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
 
