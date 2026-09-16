@@ -1,8 +1,15 @@
 {
   "schema_version": "2026-06-22.catalogue-metadata.v1",
-  "updated_at": "2026-06-22",
+  "updated_at": "2026-09-16",
   "description": "Governed HIVE task metadata for workflow presets, workflow graph nodes, execution policies and operator-visible task cards.",
-  "required_fields": ["id", "title", "description", "category", "risk", "requires_approval"],
+  "required_fields": [
+    "id",
+    "title",
+    "description",
+    "category",
+    "risk",
+    "requires_approval"
+  ],
   "defaults": {
     "type": "task",
     "category": "Operations",
@@ -79,7 +86,7 @@
       "category": "Audit and readiness",
       "risk": "medium",
       "requires_approval": true,
-      "description": "Plans an evidence-led audit review with candidate skills, risk gates and an execution review record.",
+      "description": "Plans an evidence-led audit review with explicit risk gates and an execution review record.",
       "when_to_use": "Use when an audit bundle needs clear findings and a safe improvement plan."
     },
     {
@@ -103,16 +110,6 @@
       "when_to_use": "Use when content needs QA, platform-fit checks or future guardrail improvements."
     },
     {
-      "id": "skills_registry",
-      "type": "workflow_template",
-      "title": "Skills registry workflow",
-      "category": "Skill governance",
-      "risk": "medium",
-      "requires_approval": true,
-      "description": "Plans skill search, routing, registry cleanup and metadata checks without installing or executing skills.",
-      "when_to_use": "Use when the skill catalogue needs routing, integrity or description checks."
-    },
-    {
       "id": "request",
       "type": "workflow_node",
       "title": "Operator request",
@@ -129,18 +126,8 @@
       "category": "Workflow planning",
       "risk": "low",
       "requires_approval": false,
-      "description": "Classifies the requested repo, lane, preset and risk posture before selecting supporting skills.",
+      "description": "Classifies the requested repo, lane, preset and risk posture before evidence gathering.",
       "when_to_use": "Appears when HIVE turns an operator request into a workflow graph."
-    },
-    {
-      "id": "recommend_skills",
-      "type": "workflow_node",
-      "title": "Recommend skills",
-      "category": "Skill routing",
-      "risk": "medium",
-      "requires_approval": true,
-      "description": "Selects bounded candidate skills from the registry for planning only; no skill is installed or run.",
-      "when_to_use": "Use when a workflow needs candidate skills before evidence gathering."
     },
     {
       "id": "collect_evidence",
