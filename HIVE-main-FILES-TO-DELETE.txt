@@ -1,0 +1,5 @@
+Delete these repository-relative paths when applying the updated files:
+
+docs/releases/HIVE-v1.26.3-SKILL-CATALOGUE-CLEANUP-PATCH.txt
+docs/releases/v1.17-registry-integrity.md
+docs/releases/v1.26-r2-write-skill-models.md
