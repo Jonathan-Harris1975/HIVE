@@ -35,7 +35,6 @@ from app.api.repository_improvements import router as repository_improvements_ro
 from app.api.repository_memory import router as repository_memory_router
 from app.api.repository_qa import router as repository_qa_router
 from app.api.runtime import router as runtime_router
-from app.api.skills import router as skills_router
 from app.api.system import router as system_router
 from app.api.vectorize import router as vectorize_router
 from app.api.workflow_graphs import router as workflow_graphs_router
@@ -169,7 +168,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(workflow_graphs_router, prefix="/v1")
     application.include_router(ecosystem_router, prefix="/v1")
     application.include_router(service_actions_router, prefix="/v1")
-    application.include_router(skills_router, prefix="/v1")
     application.include_router(execution_router, prefix="/v1")
     application.include_router(system_router, prefix="/v1")
     application.include_router(ops_events_router, prefix="/v1")
