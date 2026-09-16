@@ -7,8 +7,8 @@ from uuid import uuid4
 
 from app.core.config import Settings
 from app.core.version import BUILD_STAGE
-from app.services.execution_adapters import execution_adapter_policy
 from app.services.catalogue_metadata import enrich_task_item
+from app.services.execution_adapters import execution_adapter_policy
 from app.services.skill_registry import shared_execution_plan
 from app.storage.d1 import D1MetadataStore
 
@@ -26,14 +26,14 @@ WORKFLOW_GRAPH_TEMPLATES: dict[str, dict[str, object]] = {
         "default_repo": "HIVE",
     },
     "content_qa": {
-        "label": "Content QA workflow",
-        "description": "Review social, blog, RSS, podcast or eBook content against brand and QA gates.",
-        "recommended_presets": ["social_content_qa", "podcast_episode_review", "ebook_keyword_review"],
+        "label": "Evidence QA workflow",
+        "description": "Review supplied content or audit evidence against repository quality gates.",
+        "recommended_presets": ["HIVE-sk003"],
         "default_repo": "AIMS",
     },
     "skills_registry": {
         "label": "Skills registry workflow",
-        "description": "Search, recommend, route and review shared skills without installing or executing them.",
+        "description": "Search, recommend, route and review repository-local capabilities.",
         "recommended_presets": [],
         "default_repo": "HIVE",
     },
@@ -791,12 +791,18 @@ def _required_services_for_graph(graph: dict[str, object]) -> list[dict[str, obj
         {"service": "D1", "purpose": "metadata, review records and saved previews", "required": True},
         {"service": "PostgreSQL", "purpose": "conversation/file/chunk memory where relevant", "required": False},
         {"service": "R2", "purpose": "source artefacts/evidence packs where already configured", "required": False},
-        {"service": "Vectorize", "purpose": "semantic retrieval over chunks/skills when available", "required": False},
+        {"service": "Vectorize", "purpose": "semantic retrieval over indexed evidence when available", "required": False},
         {"service": "OpenRouter", "purpose": "answer/summary generation outside preview-only simulation", "required": False},
     ]
     candidate_count = len(graph.get("candidate_skills", []) if isinstance(graph.get("candidate_skills"), list) else [])
     if candidate_count:
-        services.append({"service": "hive-skills R2 lane", "purpose": "skill descriptors and registry metadata", "required": True})
+        services.append(
+            {
+                "service": "Local HIVE catalogue",
+                "purpose": "versioned native-capability metadata",
+                "required": True,
+            }
+        )
     return services
 
 
@@ -851,5 +857,4 @@ def _affected_surfaces(preview: dict[str, object], graph: dict[str, object]) -> 
                 name = str(repo_name)
                 if name not in repos:
                     repos.append(name)
-    buckets = ["hive-skills"] if candidates else []
-    return {"repos": repos[:10], "buckets": buckets}
+    return {"repos": repos[:10], "buckets": []}

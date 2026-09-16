@@ -6,11 +6,12 @@ from typing import Any
 
 from app.core.config import Settings
 from app.core.version import BUILD_STAGE
+from app.services.catalogue_metadata import load_skill_catalogue_metadata
+from app.services.embeddings import CloudflareEmbeddingsClient
 from app.storage.d1 import D1MetadataStore
 from app.storage.r2 import R2Storage
 from app.storage.sql_store import SqlStore
 from app.storage.vectorize import VectorizeClient
-from app.services.embeddings import CloudflareEmbeddingsClient
 
 
 @dataclass(frozen=True)
@@ -44,6 +45,11 @@ def ecosystem_status(settings: Settings) -> dict[str, object]:
     r2 = R2Storage(settings)
     vectorize = VectorizeClient(settings)
     embeddings = CloudflareEmbeddingsClient(settings)
+    local_skills = load_skill_catalogue_metadata()
+    raw_local_skill_items = local_skills.get("items")
+    local_skill_items: list[object] = (
+        raw_local_skill_items if isinstance(raw_local_skill_items, list) else []
+    )
     lanes = settings.r2_ecosystem_lanes
     configured_lanes = [item for item in lanes if item.get("configured")]
     return {
@@ -72,11 +78,12 @@ def ecosystem_status(settings: Settings) -> dict[str, object]:
                 "dimensions": settings.embeddings_dimensions,
             },
             "skills": {
-                "lane": "hive_skills",
-                "configured": bool((settings.internal_r2_lane("hive_skills") or {}).get("bucket")),
-                "access_mode": "private-r2",
-                "public_base_url": None,
-                "storage_uri": settings.r2_reference_for_r2_lane("hive_skills", ""),
+                "lane": "hive_local_skills",
+                "configured": bool(local_skill_items),
+                "access_mode": "repository-local-read-only",
+                "source": "repo://skills/catalogue_metadata.json",
+                "count": len(local_skill_items),
+                "shared_bucket_required": False,
             },
         },
         "recommended_mast_probe": "/v1/ecosystem/status",
@@ -133,29 +140,15 @@ def recent_ecosystem_metadata(*, settings: Settings, lane: str | None = None, li
     }
 
 
-def skills_search(*, settings: Settings, query: str | None = None, limit: int = 25) -> dict[str, object]:
-    """Search/list HIVE skill metadata from D1, with R2 lane hints."""
-
-    q = safe_query(query or "")
-    if q:
-        payload = search_ecosystem_metadata(settings=settings, query=q, lane="hive_skills", limit=limit)
-    else:
-        payload = recent_ecosystem_metadata(settings=settings, lane="hive_skills", limit=limit)
-    payload["lane_public_base_url"] = None
-    payload["lane_storage_uri"] = settings.r2_reference_for_r2_lane("hive_skills", "")
-    payload["manifest_hint"] = settings.r2_reference_for_r2_lane("hive_skills", "index/skills-manifest.json")
-    payload["note"] = "v1.8 searches imported D1 skill metadata. Run POST /v1/skills/import-manifest to index the R2 shared skill pool."
-    return payload
-
-
 def _enrich_metadata_item(settings: Settings, item: dict[str, Any], query: str) -> dict[str, object]:
     metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
     lane = normalise_lane(str(item.get("lane") or "")) or "unknown"
     object_key = metadata.get("object_key") or metadata.get("key") or item.get("source_id")
-    if lane == "hive_skills":
-        public_url = settings.r2_reference_for_r2_lane(lane, str(object_key)) if object_key else settings.r2_reference_for_r2_lane(lane, "")
-    else:
-        public_url = item.get("url") or (settings.public_url_for_r2_lane(lane, str(object_key)) if object_key else settings.public_url_for_r2_lane(lane, ""))
+    public_url = item.get("url") or (
+        settings.public_url_for_r2_lane(lane, str(object_key))
+        if object_key
+        else settings.public_url_for_r2_lane(lane, "")
+    )
     haystack = " ".join(
         str(part or "")
         for part in [item.get("title"), item.get("source_type"), item.get("source_id"), item.get("url"), metadata]

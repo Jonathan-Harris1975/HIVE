@@ -11,7 +11,7 @@ from app.core.version import BUILD_STAGE
 logger = logging.getLogger("uvicorn.error.hive.catalogue_metadata")
 
 
-CATALOGUE_SCHEMA_VERSION = "2026-06-22.catalogue-metadata.v1"
+CATALOGUE_SCHEMA_VERSION = "2026-09-15.repository-skills.v1"
 
 
 def repo_root() -> Path:
@@ -22,6 +22,12 @@ def repo_root() -> Path:
 
 def load_skill_catalogue_metadata() -> dict[str, object]:
     return _load_catalogue_file("skills/catalogue_metadata.json")
+
+
+def clear_catalogue_cache() -> None:
+    """Clear bundled catalogue reads after a local release update."""
+
+    _load_catalogue_file.cache_clear()
 
 
 def load_task_catalogue_metadata() -> dict[str, object]:
@@ -65,12 +71,7 @@ def catalogue_status() -> dict[str, object]:
 
 
 def enrich_skill_item(item: dict[str, Any]) -> dict[str, object]:
-    """Add stable local catalogue metadata to a skill registry item.
-
-    D1/R2 skills are the source of truth for skill availability. This enrichment
-    layer supplies UI/operator metadata only, keeping imported records useful even
-    when upstream descriptors omit a short description.
-    """
+    """Add authoritative repository-local metadata to a HIVE skill record."""
 
     payload = dict(item)
     meta = dict(payload.get("metadata") or {}) if isinstance(payload.get("metadata"), dict) else {}

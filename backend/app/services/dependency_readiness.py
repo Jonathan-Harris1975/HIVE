@@ -1,15 +1,12 @@
 from __future__ import annotations
 
-import json
 import logging
 import threading
 import time
 from dataclasses import asdict, dataclass
-from typing import Any
 
 from app.core.config import Settings
 from app.core.production import build_readiness_report
-from app.services.skill_registry import SEARCH_DOCUMENTS_KEY, SHARED_MANIFEST_KEY
 from app.storage.r2 import R2Storage
 
 logger = logging.getLogger("uvicorn.error.hive.dependency_readiness")
@@ -164,58 +161,6 @@ def _probe_required_r2_lanes(settings: Settings) -> list[DependencyProbe]:
             )
             continue
 
-        if lane_name == "hive_skills":
-            probes.extend(_probe_governed_skill_objects(settings, storage, lane))
-    return probes
-
-
-def _probe_governed_skill_objects(
-    settings: Settings,
-    storage: R2Storage,
-    lane: dict[str, Any],
-) -> list[DependencyProbe]:
-    probes: list[DependencyProbe] = []
-    for key, expected_field in (
-        (SHARED_MANIFEST_KEY, None),
-        (SEARCH_DOCUMENTS_KEY, "documents"),
-    ):
-        try:
-            obj = storage.read_object(
-                key,
-                max_bytes=settings.skill_registry_max_source_bytes,
-                bucket=str(lane["bucket"]),
-                public_base_url=lane.get("public_base_url"),
-                read_only=True,
-            )
-            payload = json.loads(obj.content.decode("utf-8"))
-            if expected_field and not (
-                isinstance(payload, list)
-                or (isinstance(payload, dict) and isinstance(payload.get(expected_field), list))
-            ):
-                raise ValueError("Unexpected governed skills object schema")
-            if not expected_field and not isinstance(payload, (dict, list)):
-                raise ValueError("Unexpected governed manifest schema")
-            probes.append(
-                DependencyProbe(
-                    name=f"hive_skills_object:{key}",
-                    status="ok",
-                    message="The governed JSON object was read and schema-checked.",
-                )
-            )
-        except (RuntimeError, ValueError, OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
-            logger.warning(
-                "Dependency readiness probe failed object_key=%s error_type=%s error=%s",
-                key,
-                type(error).__name__,
-                error,
-            )
-            probes.append(
-                DependencyProbe(
-                    name=f"hive_skills_object:{key}",
-                    status="error",
-                    message="The governed JSON object could not be read and schema-checked.",
-                )
-            )
     return probes
 
 
