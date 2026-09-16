@@ -74,7 +74,7 @@ def create_review(
     """Create a review-gated execution plan record.
 
     Dry-run defaults to true. Live creation stores the review plan in D1 so the
-    future UI can show an approval queue. This never executes a skill.
+    future UI can show an approval queue. This never executes a production action.
     """
 
     return create_execution_review_plan(
