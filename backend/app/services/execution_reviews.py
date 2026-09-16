@@ -72,7 +72,8 @@ def create_execution_review_plan(
                 "source_preview_id": source_preview_id,
                 "message": "The saved execution preview could not be found.",
             }
-        preview_meta = source_preview.get("metadata") if isinstance(source_preview.get("metadata"), dict) else {}
+        preview_meta_raw = source_preview.get("metadata")
+        preview_meta: dict[str, Any] = preview_meta_raw if isinstance(preview_meta_raw, dict) else {}
         mismatch_fields = _source_preview_mismatches(
             preview_meta,
             task=clean_task,

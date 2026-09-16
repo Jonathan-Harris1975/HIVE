@@ -617,7 +617,10 @@ def save_execution_preview(
 
     existing = _get_preview_item(d1, resolved_preview_id)
     if existing:
-        existing_meta = existing.get("metadata") if isinstance(existing.get("metadata"), dict) else {}
+        existing_meta_raw = existing.get("metadata")
+        existing_meta: dict[str, Any] = (
+            existing_meta_raw if isinstance(existing_meta_raw, dict) else {}
+        )
         same_identity = (
             str(existing_meta.get("simulation_id") or "") == resolved_simulation_id
             and str(existing_meta.get("task") or "") == str(metadata.get("task") or "")
