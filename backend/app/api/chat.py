@@ -106,7 +106,7 @@ def build_payload_with_context(
 
     window = ContextWindow()
     window.add("system", build_system_prompt(effective_mode))
-    request_context = {"model_governance": decision.public_payload()}
+    request_context: dict[str, object] = {"model_governance": decision.public_payload()}
 
     if request.conversation_id and request.use_persisted_history and request.db_history_limit > 0:
         for persisted_turn in SqlStore(settings).recent_chat_turns(
