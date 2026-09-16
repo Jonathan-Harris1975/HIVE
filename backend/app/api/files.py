@@ -1795,7 +1795,7 @@ def _selected_skill_context(
         "risk_level": metadata.get("risk_level"),
         "priority_tier": metadata.get("priority_tier"),
         "tags": metadata.get("tags"),
-        "descriptor_url": metadata.get("descriptor_url") or item.get("url"),
+        "source_uri": metadata.get("source_uri") or item.get("url"),
         "lookup_ok": True,
     }
 
@@ -1805,21 +1805,21 @@ def _selected_skill_instruction(selected_skill: dict[str, object] | None) -> str
         return None
     title = str(selected_skill.get("title") or selected_skill.get("id") or "selected skill")
     parts = [
-        "Apply the selected existing HIVE skill to the attached file.",
-        f"Skill: {title}",
+        "Apply the selected repository-local HIVE capability to the attached file.",
+        f"Local capability: {title}",
     ]
     for label, key in [
         ("Description", "description"),
         ("Lane", "hive_lane"),
         ("Risk", "risk_level"),
         ("Priority", "priority_tier"),
-        ("Descriptor", "descriptor_url"),
+        ("Source", "source_uri"),
     ]:
         value = selected_skill.get(key)
         if value:
             parts.append(f"{label}: {value}")
     parts.append(
-        "Use the skill as guidance only. Do not claim the skill executed external tools unless the response explicitly reports an approved execution path."
+        "Use the capability summary as guidance only. It cannot install or execute external code, and production actions still require the approved execution path."
     )
     return "\n".join(parts)
 

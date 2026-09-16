@@ -28,7 +28,7 @@ def search(
     limit: int = Query(25, ge=1, le=100),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, object]:
-    """Search D1 ecosystem metadata across audits/blog/podcast/skills lanes."""
+    """Search D1 ecosystem metadata across configured operational lanes."""
 
     return search_ecosystem_metadata(settings=settings, query=q, lane=lane, limit=limit)
 
