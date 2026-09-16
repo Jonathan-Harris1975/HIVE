@@ -66,7 +66,6 @@ def test_settings_loads_repo_shared_env_file() -> None:
     assert {"art", "blog_images", "brand_assets"}.isdisjoint(
         {item["lane"] for item in settings.r2_all_lanes}
     )
-    assert "hive_skills" not in {item["lane"] for item in settings.r2_all_lanes}
     assert settings.r2_lane("meta") is None
     assert settings.r2_lane("meta_system") is None
     assert "hive.jonathan-harris.online" in settings.effective_allowed_hosts

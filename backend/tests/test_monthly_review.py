@@ -103,18 +103,6 @@ async def test_generate_monthly_review_assembles_all_sections(monkeypatch):
         lambda: {"coding": [{"model_id": "acme/coder", "score": 0.91}]},
     )
     monkeypatch.setattr(
-        monthly_review, "skill_registry_duplicates", lambda **kw: {"ok": True, "count": 0}
-    )
-    monkeypatch.setattr(
-        monthly_review, "skill_registry_missing", lambda **kw: {"ok": True, "count": 0}
-    )
-    monkeypatch.setattr(
-        monthly_review, "skill_registry_orphans", lambda **kw: {"ok": True, "count": 0}
-    )
-    monkeypatch.setattr(
-        monthly_review, "skill_registry_integrity_report", lambda **kw: {"ok": True}
-    )
-    monkeypatch.setattr(
         monthly_review, "success_rate_report", lambda settings: {"ok": True, "rate": 0.9}
     )
     monkeypatch.setattr(monthly_review, "list_experiments", lambda settings: [])
@@ -144,8 +132,8 @@ async def test_generate_monthly_review_assembles_all_sections(monkeypatch):
 
     assert report["ok"] is True
     assert report["period"] == "2026-06"
-    assert report["sections_total"] == 13
-    assert report["sections_ok"] == 13
+    assert report["sections_total"] == 9
+    assert report["sections_ok"] == 9
     assert report["sections"]["cost_and_tokens"]["data"]["totals"]["cost_usd"] == 4.5
     assert report["sections"]["repo_health"]["data"]["status"] == "healthy"
     assert report["report_id"].startswith("monthly-review-2026-06-")
@@ -158,7 +146,7 @@ async def test_generate_monthly_review_isolates_a_failing_section(monkeypatch):
     settings = _settings()
 
     def boom(*_args, **_kwargs):
-        raise RuntimeError("skills index unavailable")
+        raise RuntimeError("optimisation metrics unavailable")
 
     monkeypatch.setattr(
         monthly_review,
@@ -176,13 +164,7 @@ async def test_generate_monthly_review_isolates_a_failing_section(monkeypatch):
         "list_categories",
         lambda: {"coding": [{"model_id": "acme/coder", "score": 0.91}]},
     )
-    monkeypatch.setattr(monthly_review, "skill_registry_duplicates", boom)
-    monkeypatch.setattr(monthly_review, "skill_registry_missing", lambda **kw: {"ok": True})
-    monkeypatch.setattr(monthly_review, "skill_registry_orphans", lambda **kw: {"ok": True})
-    monkeypatch.setattr(
-        monthly_review, "skill_registry_integrity_report", lambda **kw: {"ok": True}
-    )
-    monkeypatch.setattr(monthly_review, "success_rate_report", lambda settings: {"ok": True})
+    monkeypatch.setattr(monthly_review, "success_rate_report", boom)
     monkeypatch.setattr(monthly_review, "list_experiments", lambda settings: [])
     monkeypatch.setattr(monthly_review, "list_decisions", lambda settings: [])
     monkeypatch.setattr(monthly_review, "list_execution_review_plans", lambda **kw: {"ok": True})
@@ -206,8 +188,8 @@ async def test_generate_monthly_review_isolates_a_failing_section(monkeypatch):
 
     report = await monthly_review.generate_monthly_review(settings, period="2026-06")
 
-    assert report["sections"]["skills_duplicates"]["ok"] is False
-    assert "skills index unavailable" in report["sections"]["skills_duplicates"]["error"]
+    assert report["sections"]["optimisation_success_rate"]["ok"] is False
+    assert "optimisation metrics unavailable" in report["sections"]["optimisation_success_rate"]["error"]
     # every other section still generated successfully
     assert report["sections_ok"] == report["sections_total"] - 1
 

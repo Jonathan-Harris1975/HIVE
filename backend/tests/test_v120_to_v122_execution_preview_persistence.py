@@ -61,15 +61,10 @@ def _fake_shared_execution_plan(**kwargs):
         "task": kwargs.get("task"),
         "repo": kwargs.get("repo"),
         "workflow_preset": kwargs.get("workflow_preset"),
-        "execution_mode": "plan_only",
+        "execution_mode": "review_gated_execution",
         "can_execute_now": False,
         "requires_approval": True,
-        "routed_skill_plan": {
-            "candidate_skills": [
-                {"skill_id": "S194", "title": "podcast-seo", "risk_level": "low", "repos": ["AIMS", "Website"]},
-                {"skill_id": "S198", "title": "sentry-cli", "risk_level": "medium", "repos": ["AIMS", "RAMS"]},
-            ]
-        },
+        "risk_level": "medium",
     }
 
 

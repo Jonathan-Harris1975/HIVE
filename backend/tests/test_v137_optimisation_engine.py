@@ -125,8 +125,8 @@ def test_success_rate_report_fails_closed_when_d1_is_unavailable(monkeypatch, se
 def test_ingest_qa_event_records_a_decision(settings):
     payload = {
         "event_id": "qa-evt-001",
-        "category": "skill_review",
-        "subject_id": "skill:acme/formatter",
+        "category": "quality_review",
+        "subject_id": "repo:acme/formatter",
         "qa_score": 0.82,
         "recommendation": "Promote to stable lane",
     }
@@ -169,8 +169,8 @@ def test_ingest_qa_event_rejects_out_of_range_score(settings):
             settings,
             {
                 "event_id": "qa-evt-004",
-                "category": "skill_review",
-                "subject_id": "skill:x",
+                "category": "quality_review",
+                "subject_id": "repo:x",
                 "qa_score": 1.5,
                 "recommendation": "n/a",
             },
@@ -229,8 +229,8 @@ def test_qa_event_http_ingestion_is_visible_via_admin_decisions_and_stats_endpoi
         headers={"Authorization": f"Bearer {'r' * 40}"},
         json={
             "event_id": "qa-evt-http-001",
-            "category": "skill_review",
-            "subject_id": "skill:acme/linter",
+            "category": "quality_review",
+            "subject_id": "repo:acme/linter",
             "qa_score": 0.77,
             "recommendation": "Ship it",
         },
@@ -260,8 +260,8 @@ def test_qa_event_http_ingestion_is_visible_via_admin_decisions_and_stats_endpoi
         headers={"Authorization": f"Bearer {'a' * 48}"},
         json={
             "event_id": "qa-evt-http-002",
-            "category": "skill_review",
-            "subject_id": "skill:x",
+            "category": "quality_review",
+            "subject_id": "repo:x",
             "qa_score": 0.5,
             "recommendation": "n/a",
         },

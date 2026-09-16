@@ -19,15 +19,10 @@ def _fake_shared_execution_plan(**kwargs):
         "task": kwargs.get("task"),
         "repo": kwargs.get("repo"),
         "workflow_preset": kwargs.get("workflow_preset"),
-        "execution_mode": "plan_only",
+        "execution_mode": "review_gated_execution",
         "can_execute_now": False,
         "requires_approval": True,
-        "routed_skill_plan": {
-            "candidate_skills": [
-                {"skill_id": "HIVE-sk003", "title": "audit-report-review", "risk_level": "low"},
-                {"skill_id": "HIVE-sk001", "title": "ci-log-analysis", "risk_level": "medium"},
-            ]
-        },
+        "risk_level": "medium",
     }
 
 
@@ -56,8 +51,8 @@ def test_v118_workflow_graph_builds_nodes_and_edges(monkeypatch) -> None:
     assert result["build_stage_hint"] == BUILD_STAGE
     assert result["execution_mode"] == "review_gated_production_graph"
     assert result["can_execute_now"] is False
-    assert result["node_count"] == 8
-    assert result["edge_count"] == 7
+    assert result["node_count"] == 7
+    assert result["edge_count"] == 6
     assert result["risk_summary"]["highest_risk"] == "medium"
     assert result["nodes"][-1]["status"] == "approval_required"
 

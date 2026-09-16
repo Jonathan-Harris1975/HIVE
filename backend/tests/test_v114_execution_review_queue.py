@@ -61,9 +61,10 @@ def _fake_plan(**kwargs):
         "task": kwargs["task"],
         "repo": kwargs.get("repo"),
         "workflow_preset": kwargs.get("workflow_preset"),
-        "execution_mode": "plan_only",
+        "execution_mode": "review_gated_execution",
         "can_execute_now": False,
-        "routed_skill_plan": {"primary_skill": {"skill_id": "S194", "name": "podcast-seo"}},
+        "risk_level": "medium",
+        "requires_approval": True,
     }
 
 

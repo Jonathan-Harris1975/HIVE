@@ -33,7 +33,6 @@ def test_v16_health_reports_workflow_and_r2_lane_flags(monkeypatch, tmp_path) ->
     assert body["r2_ecosystem_lanes_enabled"] is True
     lanes = body["storage_flags"]["r2"]["ecosystem_lanes_configured"]
     assert "audits" in lanes
-    assert "hive_skills" not in lanes
 
 
 def test_workflow_presets_endpoint_lists_presets(monkeypatch, tmp_path) -> None:

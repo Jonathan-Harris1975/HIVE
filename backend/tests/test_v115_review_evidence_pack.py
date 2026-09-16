@@ -54,14 +54,12 @@ def _fake_plan(**kwargs):
         "task": kwargs["task"],
         "repo": kwargs.get("repo"),
         "workflow_preset": kwargs.get("workflow_preset"),
-        "execution_mode": "plan_only",
+        "execution_mode": "review_gated_execution",
         "can_execute_now": False,
-        "routed_skill_plan": {
-            "primary_skill": {"skill_id": "S194", "name": "podcast-seo", "risk_level": "low"},
-            "candidate_skills": [{"skill_id": "S194", "name": "podcast-seo", "risk_level": "low"}],
-        },
+        "risk_level": "low",
+        "requires_approval": True,
         "shared_steps": [{"step": 1, "name": "approval_gate"}],
-        "guardrails": {"no_auto_install": True},
+        "guardrails": {"dry_run_first": True},
     }
 
 
@@ -102,7 +100,8 @@ def test_evidence_pack_audit_trail_and_exports(monkeypatch):
     assert pack["evidence_pack"]["plan_id"] == plan_id
     assert pack["evidence_pack"]["execution_mode"] == "review_gated_execution"
     assert pack["evidence_pack"]["can_execute_now"] is False
-    assert pack["evidence_pack"]["candidate_count"] == 1
+    assert pack["evidence_pack"]["risk_level"] == "low"
+    assert len(pack["evidence_pack"]["shared_steps"]) == 1
 
     exported = reviews.export_execution_review_pack(settings=_SettingsStub(), plan_id=plan_id, export_format="markdown")
     assert exported["ok"] is True

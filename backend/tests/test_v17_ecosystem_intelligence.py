@@ -35,24 +35,8 @@ def test_ecosystem_status_is_mast_friendly(monkeypatch, tmp_path) -> None:
 
     assert body["ok"] is True
     assert body["build_stage_hint"] == "v1.31-production-readiness"
-    assert body["services"]["skills"]["configured"] is True
     assert body["services"]["vectorize"]["configured"] is True
     assert body["recommended_mast_probe"] == "/v1/ecosystem/status"
-
-
-def test_skills_list_and_search_use_repository_catalogue(monkeypatch, tmp_path) -> None:
-    _reset_settings(monkeypatch, tmp_path)
-    client = TestClient(app)
-
-    listed = client.get("/v1/skills/list").json()
-    searched = client.get("/v1/skills/search", params={"q": "audit"}).json()
-
-    assert listed["ok"] is True
-    assert listed["items"]
-    assert listed["shared_bucket_required"] is False
-    assert searched["ok"] is True
-    assert searched["items"]
-    assert searched["catalogue_path"] == "skills/catalogue_metadata.json"
 
 
 def test_ecosystem_search_requires_query(monkeypatch, tmp_path) -> None:
