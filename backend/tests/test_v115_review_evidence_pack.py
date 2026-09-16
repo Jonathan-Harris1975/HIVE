@@ -108,3 +108,5 @@ def test_evidence_pack_audit_trail_and_exports(monkeypatch):
     assert exported["format"] == "markdown"
     assert exported["storage"] == "inline_response_only"
     assert "HIVE Execution Review Evidence Pack" in exported["export_document"]
+    assert "Source preview: `none`" in exported["export_document"]
+    assert "Source preview verified: `False`" in exported["export_document"]

@@ -96,7 +96,12 @@ def test_v122_workflow_simulation_waits_for_approval(monkeypatch):
     assert result["can_execute_now"] is False
     assert result["adapter_execution_enabled"] is True
     assert result["estimated_cost"]["estimated_model_calls"] == 0
+    assert result["simulation_kind"] == "planning_estimate"
+    assert result["estimate_scope"] == "workflow_plan_only"
+    assert result["required_services"]
+    assert all(isinstance(item, dict) and "service" in item for item in result["required_services"])
     assert result["missing_prerequisites"] == ["human_review_approval"]
+    assert result["rollback_notes"][0].startswith("No rollback is required for this preview")
 
 
 def test_v120_save_and_read_preview(monkeypatch):
@@ -123,3 +128,48 @@ def test_v120_save_and_read_preview(monkeypatch):
     detail = workflow_graphs.get_saved_execution_preview(settings=_SettingsStub(), preview_id=preview_id)
     assert detail["ok"] is True
     assert detail["preview"]["metadata"]["preview_id"] == preview_id
+
+
+def test_save_preview_preserves_the_preview_and_simulation_ids_the_operator_saw(monkeypatch):
+    _FakeD1.store = {}
+    monkeypatch.setattr(workflow_graphs, "D1MetadataStore", _FakeD1)
+    monkeypatch.setattr(workflow_graphs, "shared_execution_plan", _fake_shared_execution_plan)
+
+    planned = workflow_graphs.simulate_workflow_execution(
+        settings=_SettingsStub(),
+        task="review the podcast SEO workflow",
+        repo="AIMS",
+        workflow_preset="podcast_episode_review",
+        policy_profile="review_required",
+    )
+    saved = workflow_graphs.save_execution_preview(
+        settings=_SettingsStub(),
+        task=str(planned["task"]),
+        repo="AIMS",
+        workflow_preset="podcast_episode_review",
+        policy_profile="review_required",
+        preview_id=str(planned["preview_id"]),
+        simulation_id=str(planned["simulation_id"]),
+        dry_run=False,
+    )
+
+    assert saved["ok"] is True
+    assert saved["preview_id"] == planned["preview_id"]
+    assert saved["preview"]["simulation_id"] == planned["simulation_id"]
+    assert saved["preview"]["simulation"]["preview_id"] == planned["preview_id"]
+    assert saved["preview"]["simulation"]["simulation_id"] == planned["simulation_id"]
+    assert saved["preview"]["preview_identity_preserved"] is True
+    assert _FakeD1.store[str(planned["preview_id"])]["source_id"] == planned["preview_id"]
+
+    saved_again = workflow_graphs.save_execution_preview(
+        settings=_SettingsStub(),
+        task=str(planned["task"]),
+        repo="AIMS",
+        workflow_preset="podcast_episode_review",
+        policy_profile="review_required",
+        preview_id=str(planned["preview_id"]),
+        simulation_id=str(planned["simulation_id"]),
+        dry_run=False,
+    )
+    assert saved_again["ok"] is True
+    assert saved_again["already_saved"] is True

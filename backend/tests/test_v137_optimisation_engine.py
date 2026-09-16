@@ -66,10 +66,18 @@ def test_rollback_decision_marks_reverted_and_is_idempotent(settings):
     rolled_back = oe.rollback_decision(settings, decision["decision_id"])
     assert rolled_back["status"] == "reverted"
     assert rolled_back["reverted_at"] is not None
+    assert rolled_back["state_restored"] is False
+    assert rolled_back["revert_semantics"] == "ledger_only"
 
-    # Idempotent: rolling back again doesn't error or change reverted_at meaning.
-    rolled_back_again = oe.rollback_decision(settings, decision["decision_id"])
+    # Idempotent: marking it reverted again doesn't error or claim external restoration.
+    rolled_back_again = oe.mark_decision_reverted(settings, decision["decision_id"])
     assert rolled_back_again["status"] == "reverted"
+    assert rolled_back_again["state_restored"] is False
+
+    stored = oe.get_decision(settings, decision["decision_id"])
+    assert stored is not None
+    assert stored["state_restored"] is False
+    assert stored["revert_semantics"] == "ledger_only"
 
 
 def test_rollback_unknown_decision_raises(settings):
@@ -97,7 +105,11 @@ def test_success_rate_report_reflects_rollbacks_and_experiments(settings):
     stats = oe.success_rate_report(settings)
     assert stats["ok"] is True
     assert stats["decision_count"] == 2
+    assert stats["actioned_count"] == 2
+    assert stats["proposed_count"] == 0
     assert stats["reverted_count"] == 1
+    assert stats["reverted_rate"] == pytest.approx(0.5)
+    assert stats["rollback_rate"] == stats["reverted_rate"]
     assert stats["experiment_count"] == 2
     assert stats["experiment_success_rate"] == pytest.approx(0.5)
 
@@ -122,7 +134,7 @@ def test_success_rate_report_fails_closed_when_d1_is_unavailable(monkeypatch, se
 # ---------------------------------------------------------------------------
 
 
-def test_ingest_qa_event_records_a_decision(settings):
+def test_ingest_qa_event_records_a_proposed_decision(settings):
     payload = {
         "event_id": "qa-evt-001",
         "category": "quality_review",
@@ -137,7 +149,8 @@ def test_ingest_qa_event_records_a_decision(settings):
     assert result["decision_type"] == "rams_qa_event"
     assert result["confidence"] == pytest.approx(0.82)
     assert result["source_event_id"] == "qa-evt-001"
-    assert result["status"] == "applied"
+    assert result["status"] == "proposed"
+    assert result["new_state"]["applied"] is False
 
 
 def test_ingest_qa_event_is_idempotent_on_event_id(settings):
@@ -198,7 +211,24 @@ def test_ingested_qa_event_is_reflected_in_decisions_list_and_stats(settings):
 
     stats = oe.success_rate_report(settings)
     assert stats["decision_count"] == 1
-    assert stats["applied_count"] == 1
+    assert stats["proposed_count"] == 1
+    assert stats["applied_count"] == 0
+    assert stats["actioned_count"] == 0
+
+
+def test_proposed_decision_cannot_be_marked_reverted(settings):
+    decision = oe.record_decision(
+        settings,
+        decision_type="recommendation",
+        description="not yet applied",
+        previous_state=None,
+        new_state={"recommended": True},
+        confidence=0.7,
+        status="proposed",
+    )
+
+    with pytest.raises(oe.OptimisationEngineError, match="cannot be marked reverted"):
+        oe.mark_decision_reverted(settings, decision["decision_id"])
 
 
 # ---------------------------------------------------------------------------
@@ -267,3 +297,36 @@ def test_qa_event_http_ingestion_is_visible_via_admin_decisions_and_stats_endpoi
         },
     )
     assert rejected.status_code == 401
+
+
+def test_revert_http_endpoint_marks_ledger_only(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app.main import create_app
+
+    monkeypatch.setattr("app.services.optimisation_engine.D1MetadataStore", FakeD1Store)
+    settings = Settings(ADMIN_BEARER_TOKEN="a" * 48, REPO_HEALTH_ENABLED=False)
+    client = TestClient(create_app(settings))
+    headers = {"Authorization": f"Bearer {'a' * 48}"}
+
+    created = client.post(
+        "/v1/optimisation/decisions",
+        headers=headers,
+        json={
+            "decision_type": "test",
+            "description": "ledger-only revert",
+            "previous_state": {"value": "before"},
+            "new_state": {"value": "after"},
+            "confidence": 0.8,
+        },
+    )
+    assert created.status_code == 200
+    decision_id = created.json()["decision_id"]
+
+    reverted = client.post(
+        f"/v1/optimisation/decisions/{decision_id}/revert",
+        headers=headers,
+    )
+    assert reverted.status_code == 200
+    assert reverted.json()["status"] == "reverted"
+    assert reverted.json()["state_restored"] is False

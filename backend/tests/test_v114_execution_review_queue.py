@@ -128,3 +128,150 @@ def test_create_list_and_decide_execution_review(monkeypatch):
     detail = reviews.get_execution_review_plan(settings=_SettingsStub(), plan_id=plan_id)
     assert detail["ok"] is True
     assert detail["review"]["metadata"]["status"] == "approved"
+
+
+def test_execution_review_preserves_preview_provenance(monkeypatch):
+    _FakeD1.store = {}
+    monkeypatch.setattr(reviews, "D1MetadataStore", _FakeD1)
+    monkeypatch.setattr(reviews, "shared_execution_plan", _fake_plan)
+
+    _FakeD1.store["execution-preview-123"] = {
+        "id": "execution-preview-123",
+        "lane": "execution_previews",
+        "source_type": "execution_preview",
+        "source_id": "execution-preview-123",
+        "title": "Execution preview: review podcast SEO workflow",
+        "url": None,
+        "metadata": {
+            "preview_id": "execution-preview-123",
+            "simulation_id": "execution-simulation-456",
+            "task": "review podcast SEO workflow",
+            "repo": "AIMS",
+            "workflow_preset": "podcast_episode_review",
+            "policy_profile": "review_required",
+            "approval_state": "pending_review",
+            "status": "preview_saved",
+            "created_at": "2026-09-16T20:00:00+00:00",
+            "simulation": {
+                "risk_summary": {"highest_risk": "medium"},
+                "estimated_cost": {"cost_class": "low"},
+            },
+        },
+        "created_at": "2026-09-16T20:00:00+00:00",
+        "updated_at": "2026-09-16T20:00:00+00:00",
+    }
+
+    created = reviews.create_execution_review_plan(
+        settings=_SettingsStub(),
+        task="review podcast SEO workflow",
+        repo="AIMS",
+        workflow_preset="podcast_episode_review",
+        source_preview_id="execution-preview-123",
+        source_simulation_id="execution-simulation-456",
+        policy_profile="review_required",
+        dry_run=False,
+    )
+    plan_id = created["plan_id"]
+
+    listed = reviews.list_execution_review_plans(settings=_SettingsStub(), status="open")
+    summary = listed["items"][0]
+    assert summary["source_preview_id"] == "execution-preview-123"
+    assert summary["source_simulation_id"] == "execution-simulation-456"
+    assert summary["source_preview_verified"] is True
+    assert summary["policy_profile"] == "review_required"
+
+    evidence = reviews.execution_review_evidence_pack(settings=_SettingsStub(), plan_id=plan_id)
+    pack = evidence["evidence_pack"]
+    assert pack["source_preview_id"] == "execution-preview-123"
+    assert pack["source_simulation_id"] == "execution-simulation-456"
+    assert pack["source_preview_verified"] is True
+    assert pack["source_preview_summary"]["risk_summary"]["highest_risk"] == "medium"
+    assert pack["policy_profile"] == "review_required"
+
+
+def test_execution_review_rejects_preview_provenance_mismatch(monkeypatch):
+    _FakeD1.store = {
+        "execution-preview-123": {
+            "id": "execution-preview-123",
+            "lane": "execution_previews",
+            "source_type": "execution_preview",
+            "source_id": "execution-preview-123",
+            "title": "Execution preview",
+            "url": None,
+            "metadata": {
+                "preview_id": "execution-preview-123",
+                "simulation_id": "execution-simulation-456",
+                "task": "canonical task",
+                "repo": "HIVE",
+                "workflow_preset": None,
+                "policy_profile": "review_required",
+            },
+            "created_at": "2026-09-16T20:00:00+00:00",
+            "updated_at": "2026-09-16T20:00:00+00:00",
+        }
+    }
+    monkeypatch.setattr(reviews, "D1MetadataStore", _FakeD1)
+    monkeypatch.setattr(reviews, "shared_execution_plan", _fake_plan)
+
+    result = reviews.create_execution_review_plan(
+        settings=_SettingsStub(),
+        task="different task",
+        repo="HIVE",
+        source_preview_id="execution-preview-123",
+        source_simulation_id="execution-simulation-456",
+        policy_profile="review_required",
+        dry_run=False,
+    )
+
+    assert result["ok"] is False
+    assert result["error_code"] == "source_preview_mismatch"
+    assert result["mismatch_fields"] == ["task"]
+
+
+def test_execution_review_requires_preview_for_simulation_provenance(monkeypatch):
+    _FakeD1.store = {}
+    monkeypatch.setattr(reviews, "D1MetadataStore", _FakeD1)
+    monkeypatch.setattr(reviews, "shared_execution_plan", _fake_plan)
+
+    result = reviews.create_execution_review_plan(
+        settings=_SettingsStub(),
+        task="review podcast SEO workflow",
+        source_simulation_id="execution-simulation-456",
+        dry_run=False,
+    )
+
+    assert result["ok"] is False
+    assert result["error_code"] == "source_preview_required"
+
+
+def test_execution_review_rejects_non_preview_source_record(monkeypatch):
+    _FakeD1.store = {
+        "execution-preview-123": {
+            "id": "execution-preview-123",
+            "lane": "execution_previews",
+            "source_type": "not_an_execution_preview",
+            "source_id": "execution-preview-123",
+            "title": "Unexpected record",
+            "url": None,
+            "metadata": {
+                "preview_id": "execution-preview-123",
+                "simulation_id": "execution-simulation-456",
+                "task": "review podcast SEO workflow",
+            },
+            "created_at": "2026-09-16T20:00:00+00:00",
+            "updated_at": "2026-09-16T20:00:00+00:00",
+        }
+    }
+    monkeypatch.setattr(reviews, "D1MetadataStore", _FakeD1)
+    monkeypatch.setattr(reviews, "shared_execution_plan", _fake_plan)
+
+    result = reviews.create_execution_review_plan(
+        settings=_SettingsStub(),
+        task="review podcast SEO workflow",
+        source_preview_id="execution-preview-123",
+        source_simulation_id="execution-simulation-456",
+        dry_run=False,
+    )
+
+    assert result["ok"] is False
+    assert result["error_code"] == "source_preview_not_found"
