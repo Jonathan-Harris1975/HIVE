@@ -1196,6 +1196,67 @@ class SqlStore:
             "hive_cost_events",
         ]
 
+    def reset_all_data(self) -> dict[str, object]:
+        """Remove all HIVE application rows while preserving the SQL schema.
+
+        Production PostgreSQL uses one transactional TRUNCATE with CASCADE and
+        identity reset. SQLite uses DELETE statements in a transaction so local
+        development and tests exercise the same public operation safely.
+        """
+
+        if not self.enabled:
+            return {
+                "ok": False,
+                "enabled": False,
+                "message": "SQL database is disabled or not configured.",
+            }
+
+        before = self.table_counts()
+        if not before.get("ok"):
+            return {
+                "ok": False,
+                "enabled": True,
+                "dialect": self.dialect,
+                "message": "Could not inspect SQL tables before reset.",
+                "before": before,
+            }
+
+        tables = self.table_names()
+        try:
+            with self._transaction() as cur:
+                if self.dialect == "postgres":
+                    table_sql = ", ".join(f'"{name}"' for name in tables)
+                    cur.execute(f"TRUNCATE TABLE {table_sql} RESTART IDENTITY CASCADE")
+                elif self.dialect == "sqlite":
+                    for table in reversed(tables):
+                        cur.execute(f'DELETE FROM "{table}"')
+                else:
+                    return {
+                        "ok": False,
+                        "enabled": True,
+                        "dialect": self.dialect,
+                        "message": "Unsupported SQL database dialect.",
+                    }
+        except Exception as exc:  # pragma: no cover - exact driver exceptions vary
+            return {
+                "ok": False,
+                "enabled": True,
+                "dialect": self.dialect,
+                "error": str(exc),
+                "before": before,
+            }
+
+        after = self.table_counts()
+        return {
+            "ok": bool(after.get("ok"))
+            and all(int(value or 0) == 0 for value in dict(after.get("counts") or {}).values()),
+            "enabled": True,
+            "dialect": self.dialect,
+            "tables_cleared": tables,
+            "before": before.get("counts", {}),
+            "after": after.get("counts", {}),
+        }
+
     def _schema_statements(self) -> list[str]:
         # TEXT timestamps keep the schema portable between SQLite and PostgreSQL.
         return [

@@ -273,12 +273,139 @@ class D1MetadataStore:
             "failed": failed,
         }
 
+    def reset_configured_databases(self) -> dict[str, object]:
+        """Purge application rows from the configured ecosystem D1 databases.
+
+        The databases themselves, their schemas and schema-migration ledgers are
+        deliberately preserved. This keeps deployed bindings/UUIDs stable and avoids
+        replaying additive migrations against an already-created schema.
+        """
+
+        if not self.settings.d1_account_id or not self.settings.d1_api_key:
+            return {
+                "ok": False,
+                "enabled": False,
+                "message": "D1 account credentials are not configured.",
+            }
+
+        names = list(dict.fromkeys(
+            item.strip() for item in self.settings.d1_reset_database_names if item.strip()
+        ))
+        if not names:
+            return {
+                "ok": False,
+                "enabled": True,
+                "message": "No D1 reset database names are configured.",
+            }
+
+        results: list[dict[str, object]] = []
+        for name in names:
+            resolved = self._resolve_database_by_name(name)
+            if not resolved.get("ok"):
+                results.append({"database_name": name, **resolved})
+                continue
+            database_id = str(resolved.get("database_id") or "")
+            results.append(self._purge_database(database_id=database_id, database_name=name))
+
+        return {
+            "ok": bool(results) and all(bool(item.get("ok")) for item in results),
+            "enabled": True,
+            "database_names": names,
+            "databases": results,
+        }
+
+    def _resolve_database_by_name(self, name: str) -> dict[str, object]:
+        endpoint = (
+            f"https://api.cloudflare.com/client/v4/accounts/{self.settings.d1_account_id}"
+            "/d1/database"
+        )
+        headers = {"Authorization": f"Bearer {self.settings.d1_api_key}"}
+        try:
+            with httpx.Client(timeout=self.settings.d1_timeout_seconds) as client:
+                response = client.get(endpoint, headers=headers, params={"name": name, "per_page": 10})
+            payload = response.json() if response.content else {}
+        except Exception as exc:  # pragma: no cover - network only
+            return {"ok": False, "message": str(exc), "error_type": type(exc).__name__}
+
+        if response.status_code >= 400 or not isinstance(payload, dict):
+            return {
+                "ok": False,
+                "status_code": response.status_code,
+                "message": _d1_error_message(payload) if isinstance(payload, dict) else response.text,
+            }
+
+        matches = [
+            item for item in payload.get("result", [])
+            if isinstance(item, dict) and str(item.get("name") or "") == name
+        ]
+        if len(matches) != 1:
+            return {
+                "ok": False,
+                "status_code": response.status_code,
+                "message": (
+                    f"Expected exactly one D1 database named {name!r}; found {len(matches)}."
+                ),
+            }
+        database_id = str(matches[0].get("uuid") or "").strip()
+        if not database_id:
+            return {"ok": False, "message": f"D1 database {name!r} did not return a UUID."}
+        return {"ok": True, "database_id": database_id}
+
+    def _purge_database(self, *, database_id: str, database_name: str) -> dict[str, object]:
+        tables_result = self._query_database(
+            database_id,
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'table'
+              AND name NOT LIKE 'sqlite_%'
+              AND name NOT LIKE '_cf_%'
+            ORDER BY name
+            """,
+            [],
+        )
+        if not tables_result.get("ok"):
+            return {"ok": False, "database_name": database_name, "error": tables_result}
+
+        rows = _extract_d1_rows(tables_result.get("result"))
+        tables = [str(row.get("name") or "").strip() for row in rows]
+        tables = [name for name in tables if name]
+        preserved = [name for name in tables if _preserve_d1_table(name)]
+        purge_tables = [name for name in tables if name not in preserved]
+
+        if not purge_tables:
+            return {
+                "ok": True,
+                "database_name": database_name,
+                "tables_cleared": [],
+                "preserved_tables": preserved,
+            }
+
+        delete_sql = ";\n".join(f'DELETE FROM {_quote_identifier(name)}' for name in purge_tables)
+        purge_result = self._query_database(
+            database_id,
+            f"PRAGMA defer_foreign_keys = ON;\n{delete_sql};\nPRAGMA defer_foreign_keys = OFF;",
+            [],
+        )
+        return {
+            "ok": bool(purge_result.get("ok")),
+            "database_name": database_name,
+            "tables_cleared": purge_tables if purge_result.get("ok") else [],
+            "preserved_tables": preserved,
+            "result": purge_result,
+        }
+
     def query(self, sql: str, params: list[Any] | None = None) -> dict[str, object]:
         if not self.enabled:
             return {"ok": False, "message": "D1 metadata store disabled or not configured."}
+        return self._query_database(self.settings.d1_database_id, sql, params)
+
+    def _query_database(
+        self, database_id: str, sql: str, params: list[Any] | None = None
+    ) -> dict[str, object]:
         endpoint = (
             f"https://api.cloudflare.com/client/v4/accounts/{self.settings.d1_account_id}"
-            f"/d1/database/{self.settings.d1_database_id}/query"
+            f"/d1/database/{database_id}/query"
         )
         headers = {
             "Authorization": f"Bearer {self.settings.d1_api_key}",
@@ -333,6 +460,15 @@ def _extract_d1_rows(result: Any) -> list[dict[str, Any]]:
         if isinstance(nested, list):
             return [row for row in nested if isinstance(row, dict)]
     return []
+
+
+def _preserve_d1_table(name: str) -> bool:
+    lowered = name.lower()
+    return lowered == "d1_migrations" or lowered.endswith("_schema_migrations")
+
+
+def _quote_identifier(name: str) -> str:
+    return '"' + name.replace('"', '""') + '"'
 
 
 def _json_or_none(value: Any) -> Any:
