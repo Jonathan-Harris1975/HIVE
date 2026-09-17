@@ -24,7 +24,7 @@ PYTHONPATH=backend APP_ENV=test python -m compileall -q backend/app backend/test
 PYTHONPATH=backend APP_ENV=test python -m pytest backend/tests -q --tb=short \
   --cov=app --cov-report=term-missing --cov-fail-under=74
 PYTHONPATH=backend python -m ruff check backend/app backend/tests scripts --select E4,E7,E9,F
-PYTHONPATH=backend python -m mypy backend/app --no-incremental --show-error-codes
+PYTHONPATH=backend python scripts/mypy_guard.py
 python -m bandit -q -r backend/app -ll
 python -m pip_audit -r requirements.txt
 ```
@@ -48,3 +48,7 @@ Never commit live credentials. `.env`, `.env.*`, private-key/certificate contain
 Do not set `FORWARDED_ALLOW_IPS=*` casually. HIVE defaults Uvicorn to loopback-only trusted proxies. Koyeb authentication throttling has a separate bounded rule for the platform-certified final `X-Forwarded-For` hop.
 
 ## Maintainability
+
+## MyPy baseline governance
+
+`.mypy-baseline.json` is a regression ceiling, not a permanent allowlist. `scripts/mypy_guard.py` already fails CI when a new fingerprint appears or an existing fingerprint count grows, while allowing debt to shrink. When a change removes known typing errors, regenerate the baseline in the same pull request rather than leaving obsolete entries behind. Do not increase the baseline to make a failing build green; fix or explicitly justify the underlying type regression. Review the remaining baseline at least once per quarter and prioritise the highest-count fingerprints.
