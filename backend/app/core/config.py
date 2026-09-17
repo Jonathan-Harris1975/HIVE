@@ -502,6 +502,10 @@ class Settings(BaseSettings):
     d1_database_name: str = Field(
         "database-hive", validation_alias=AliasChoices("D1_DATABASE_NAME", "D1_DATABASE")
     )
+    d1_reset_database_names: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["database-hive", "database-comms-hub"],
+        validation_alias=AliasChoices("D1_RESET_DATABASE_NAMES"),
+    )
     d1_timeout_seconds: int = Field(3, validation_alias=AliasChoices("D1_TIMEOUT_SECONDS"))
     d1_max_attempts: int = Field(1, validation_alias=AliasChoices("D1_MAX_ATTEMPTS"))
 
@@ -874,6 +878,7 @@ class Settings(BaseSettings):
         "allowed_hosts",
         "r2_required_read_lanes",
         "ai_search_excluded_sources",
+        "d1_reset_database_names",
         mode="before",
     )
     @classmethod
