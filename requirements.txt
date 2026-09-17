@@ -15,11 +15,13 @@ anyio==4.14.0
     #   httpx
     #   starlette
     #   watchfiles
+ast-grep-cli==0.45.3
+    # via headroom-ai
 beautifulsoup4==4.15.0
     # via -r requirements.in
-boto3==1.43.41
+boto3==1.43.93
     # via -r requirements.in
-botocore==1.43.41
+botocore==1.43.96
     # via
     #   boto3
     #   s3transfer
@@ -27,8 +29,13 @@ certifi==2026.5.20
     # via
     #   httpcore
     #   httpx
+    #   requests
+charset-normalizer==3.5.1
+    # via requests
 click==8.4.1
-    # via uvicorn
+    # via
+    #   headroom-ai
+    #   uvicorn
 et-xmlfile==2.0.0
     # via openpyxl
 fastapi==0.141.1
@@ -37,26 +44,33 @@ h11==0.16.0
     # via
     #   httpcore
     #   uvicorn
+headroom-ai==0.32.0
+    # via -r requirements.in
 httpcore==1.0.9
     # via httpx
 httptools==0.8.0
     # via uvicorn
-headroom-ai==0.32.0
-    # via -r requirements.in
 httpx==0.28.1
     # via -r requirements.in
 idna==3.18
     # via
     #   anyio
     #   httpx
+    #   requests
 jmespath==1.1.0
     # via
     #   boto3
     #   botocore
 lxml==6.1.1
     # via python-docx
+markdown-it-py==4.2.0
+    # via rich
+mdurl==0.1.2
+    # via markdown-it-py
 openpyxl==3.1.5
     # via -r requirements.in
+opentelemetry-api==1.44.0
+    # via headroom-ai
 psycopg==3.3.4
     # via -r requirements.in
 psycopg-binary==3.3.4
@@ -64,11 +78,14 @@ psycopg-binary==3.3.4
 pydantic==2.13.4
     # via
     #   fastapi
+    #   headroom-ai
     #   pydantic-settings
 pydantic-core==2.46.4
     # via pydantic
 pydantic-settings==2.14.2
     # via -r requirements.in
+pygments==2.21.0
+    # via rich
 pypdf==6.16.1
     # via -r requirements.in
 python-dateutil==2.9.0.post0
@@ -82,7 +99,15 @@ python-dotenv==1.2.2
 python-multipart==0.0.32
     # via -r requirements.in
 pyyaml==6.0.3
-    # via uvicorn
+    # via
+    #   headroom-ai
+    #   uvicorn
+regex==2026.9.10
+    # via tiktoken
+requests==2.34.2
+    # via tiktoken
+rich==15.0.0
+    # via headroom-ai
 s3transfer==0.19.0
     # via boto3
 six==1.17.0
@@ -93,10 +118,15 @@ starlette==1.6.0
     # via
     #   -r requirements.in
     #   fastapi
+tiktoken==0.14.0
+    # via headroom-ai
+tomlkit==0.15.1
+    # via headroom-ai
 typing-extensions==4.15.0
     # via
     #   beautifulsoup4
     #   fastapi
+    #   opentelemetry-api
     #   pydantic
     #   pydantic-core
     #   python-docx
@@ -109,6 +139,7 @@ typing-inspection==0.4.2
 urllib3==2.7.0
     # via
     #   botocore
+    #   requests
 uvicorn==0.50.2
     # via -r requirements.in
 uvloop==0.22.1
