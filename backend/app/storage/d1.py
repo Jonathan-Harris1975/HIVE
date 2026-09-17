@@ -384,9 +384,11 @@ class D1MetadataStore:
         # D1 does not support binding table identifiers. Names come only from sqlite_master
         # and are escaped by _quote_identifier, so this dynamic SQL cannot break out of the
         # quoted identifier context.
-        delete_sql = ";\n".join(  # nosec B608
-            f'DELETE FROM {_quote_identifier(name)}' for name in purge_tables
-        )
+        delete_statements = [
+            f'DELETE FROM {_quote_identifier(name)}'  # nosec B608
+            for name in purge_tables
+        ]
+        delete_sql = ";\n".join(delete_statements)
         purge_result = self._query_database(
             database_id,
             f"PRAGMA defer_foreign_keys = ON;\n{delete_sql};\nPRAGMA defer_foreign_keys = OFF;",
