@@ -499,3 +499,135 @@ def test_sql_store_record_chat_auto_initialises_missing_schema(tmp_path: Path) -
     saved = store.get_conversation("auto-init-conv")
     assert saved["ok"] is True
     assert saved["message_count"] == 2
+
+
+def test_sql_store_reset_all_data_preserves_schema(tmp_path: Path) -> None:
+    db_path = tmp_path / "hive.sqlite3"
+    settings = Settings(
+        APP_ENV="test",
+        DATABASE_ENABLED=True,
+        DATABASE_URL=f"sqlite:///{db_path}",
+    )
+    store = SqlStore(settings)
+    assert store.init_schema()["ok"] is True
+    assert store.record_chat(
+        conversation_id="reset-conversation",
+        mode="general",
+        user_message="before reset",
+        assistant_reply="persisted",
+        model_used="test/model",
+        provider="test",
+        usage={"total_tokens": 2, "cost": 0},
+    )["ok"] is True
+    assert store.record_file(
+        {
+            "object_key": "uploads/reset.txt",
+            "original_name": "reset.txt",
+            "storage": "r2",
+            "bucket": "hive",
+            "size_bytes": 5,
+            "content_type": "text/plain",
+        }
+    )["ok"] is True
+
+    result = store.reset_all_data()
+
+    assert result["ok"] is True
+    assert all(value == 0 for value in result["after"].values())
+    assert set(store.table_names()) == set(store.table_counts()["counts"])
+    assert store.record_chat(
+        conversation_id="after-reset",
+        mode="general",
+        user_message="schema still works",
+        assistant_reply="yes",
+        model_used="test/model",
+        provider="test",
+        usage={"total_tokens": 1, "cost": 0},
+    )["ok"] is True
+
+
+def test_d1_reset_database_names_parse_from_env() -> None:
+    settings = Settings(D1_RESET_DATABASE_NAMES="database-hive,database-comms-hub")
+    assert settings.d1_reset_database_names == ["database-hive", "database-comms-hub"]
+
+
+def test_d1_purge_preserves_schema_migration_ledger(monkeypatch) -> None:
+    settings = Settings(
+        D1_ENABLED=True,
+        D1_ACCOUNT_ID="account",
+        D1_API_KEY="token",
+        D1_DATABASE_ID="hive-id",
+        D1_RESET_DATABASE_NAMES="database-comms-hub",
+    )
+    store = D1MetadataStore(settings)
+    queries: list[str] = []
+
+    def fake_query(database_id: str, sql: str, params=None):
+        queries.append(sql)
+        if "sqlite_master" in sql:
+            return {
+                "ok": True,
+                "result": [{"results": [
+                    {"name": "comms_hub_contacts"},
+                    {"name": "comms_hub_messages"},
+                    {"name": "comms_hub_schema_migrations"},
+                ]}],
+            }
+        return {"ok": True, "result": []}
+
+    monkeypatch.setattr(store, "_query_database", fake_query)
+
+    result = store._purge_database(database_id="comms-id", database_name="database-comms-hub")
+
+    assert result["ok"] is True
+    assert result["preserved_tables"] == ["comms_hub_schema_migrations"]
+    purge_sql = queries[-1]
+    assert 'DELETE FROM "comms_hub_contacts"' in purge_sql
+    assert 'DELETE FROM "comms_hub_messages"' in purge_sql
+    assert 'DELETE FROM "comms_hub_schema_migrations"' not in purge_sql
+    assert "PRAGMA defer_foreign_keys = ON" in purge_sql
+
+
+def test_purge_reset_endpoint_requires_exact_confirmation(monkeypatch) -> None:
+    from fastapi.testclient import TestClient
+
+    from app.main import create_app
+
+    settings = Settings(APP_ENV="test", DATABASE_ENABLED=False, D1_ENABLED=False)
+    application = create_app(settings)
+    client = TestClient(application)
+
+    response = client.post("/v1/db/purge-reset", json={"confirmation": "purge"})
+
+    assert response.status_code == 400
+
+
+def test_purge_reset_endpoint_resets_both_stores(monkeypatch) -> None:
+    from fastapi.testclient import TestClient
+
+    from app.main import create_app
+
+    monkeypatch.setattr(
+        D1MetadataStore,
+        "reset_configured_databases",
+        lambda self: {"ok": True, "databases": [{"database_name": "database-hive"}]},
+    )
+    monkeypatch.setattr(
+        SqlStore,
+        "reset_all_data",
+        lambda self: {"ok": True, "dialect": "postgres", "tables_cleared": ["hive_conversations"]},
+    )
+    settings = Settings(APP_ENV="test", DATABASE_ENABLED=False, D1_ENABLED=False)
+    application = create_app(settings)
+
+    with TestClient(application) as client:
+        response = client.post(
+            "/v1/db/purge-reset",
+            json={"confirmation": "PURGE ALL DATABASES"},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["d1"]["ok"] is True
+    assert payload["sql"]["ok"] is True
