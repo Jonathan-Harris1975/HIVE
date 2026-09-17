@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import threading
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from app.core.config import Settings, get_settings
@@ -12,6 +13,8 @@ from app.storage.d1 import D1MetadataStore
 from app.storage.sql_store import SqlStore
 
 router = APIRouter(tags=["database"], dependencies=[Depends(require_admin)])
+_PURGE_RESET_LOCK = threading.Lock()
+_PURGE_RESET_CONFIRMATION = "PURGE ALL DATABASES"
 
 
 class EcosystemMetadataRequest(BaseModel):
@@ -32,6 +35,10 @@ class TestCleanupRequest(BaseModel):
 
 class ConversationRenameRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=200)
+
+
+class DatabasePurgeResetRequest(BaseModel):
+    confirmation: str = Field(..., min_length=1, max_length=64)
 
 
 @router.get("/db/diagnostics")
@@ -103,6 +110,42 @@ def database_ping_write(settings: Settings = Depends(get_settings)) -> dict[str,
         "sql": sql_result,
         "d1": d1_result,
     }
+
+
+@router.post("/db/purge-reset")
+def purge_reset_databases(
+    payload: DatabasePurgeResetRequest,
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    """Purge HIVE/Koyeb SQL data and the configured ecosystem D1 databases.
+
+    Database services, D1 UUIDs, schemas and D1 schema-migration ledgers are
+    preserved. The explicit confirmation phrase is checked again server-side so
+    this endpoint cannot be triggered by an accidental UI click alone.
+    """
+
+    if payload.confirmation.strip() != _PURGE_RESET_CONFIRMATION:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Confirmation must exactly match {_PURGE_RESET_CONFIRMATION!r}.",
+        )
+    if not _PURGE_RESET_LOCK.acquire(blocking=False):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A database purge/reset is already in progress.",
+        )
+
+    try:
+        d1_result = D1MetadataStore(settings).reset_configured_databases()
+        sql_result = SqlStore(settings).reset_all_data()
+        return {
+            "ok": bool(d1_result.get("ok") and sql_result.get("ok")),
+            "confirmation": "accepted",
+            "d1": d1_result,
+            "sql": sql_result,
+        }
+    finally:
+        _PURGE_RESET_LOCK.release()
 
 
 @router.post("/db/test-cleanup")
