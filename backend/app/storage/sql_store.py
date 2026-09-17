@@ -1229,7 +1229,8 @@ class SqlStore:
                     cur.execute(f"TRUNCATE TABLE {table_sql} RESTART IDENTITY CASCADE")
                 elif self.dialect == "sqlite":
                     for table in reversed(tables):
-                        cur.execute(f'DELETE FROM "{table}"')
+                        # table is sourced only from the fixed table_names() allow-list above.
+                        cur.execute(f'DELETE FROM "{table}"')  # nosec B608
                 else:
                     return {
                         "ok": False,
