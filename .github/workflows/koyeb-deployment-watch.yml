@@ -103,3 +103,61 @@ jobs:
             --header "X-GitHub-Api-Version: 2022-11-28" \
             --data "$payload" \
             "https://api.github.com/repos/${target}/actions/workflows/ecosystem-smoke.yml/dispatches"
+
+
+  open_dependabot_revert:
+    name: Open validated Dependabot revert PR
+    needs: [watch]
+    if: ${{ always() && github.event_name == 'workflow_run' && github.event.workflow_run.head_branch == 'main' && needs.watch.result == 'failure' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Revert only the failed Dependabot merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FAILED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          pr_number="$(gh api \
+            -H 'Accept: application/vnd.github+json' \
+            "/repos/$GITHUB_REPOSITORY/commits/$FAILED_SHA/pulls" \
+            --jq '[.[] | select(.user.login == "dependabot[bot]" and .merged_at != null)] | first | .number // empty')"
+          if [ -z "$pr_number" ]; then
+            echo "Failed deployment SHA $FAILED_SHA is not a merged Dependabot PR; no automatic revert is created."
+            exit 0
+          fi
+
+          base_ref="$(gh pr view "$pr_number" --json baseRefName --jq '.baseRefName')"
+          title="$(gh pr view "$pr_number" --json title --jq '.title')"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch origin "$base_ref" --prune
+          git checkout -B "$base_ref" "origin/$base_ref"
+          git cat-file -e "$FAILED_SHA^{commit}" 2>/dev/null || git fetch origin "$FAILED_SHA"
+
+          branch="automation/revert-dependabot-${pr_number}-${GITHUB_RUN_ID}"
+          git switch -c "$branch"
+          parent_count="$(git rev-list --parents -n 1 "$FAILED_SHA" | awk '{print NF-1}')"
+          if [ "$parent_count" -gt 1 ]; then
+            git revert -m 1 --no-edit "$FAILED_SHA"
+          else
+            git revert --no-edit "$FAILED_SHA"
+          fi
+          git push --set-upstream origin "$branch"
+
+          printf '%s\n\n%s\n\n%s\n' \
+            "This PR automatically reverts Dependabot PR #${pr_number} because the exact deployed SHA \`${FAILED_SHA}\` failed the production validation workflow." \
+            "Original Dependabot PR: #${pr_number} — ${title}" \
+            "The revert is deliberately opened as a PR so the repository's normal CI and required checks validate the recovery before it can merge." \
+            > /tmp/revert-body.md
+          gh pr create \
+            --base "$base_ref" \
+            --head "$branch" \
+            --title "revert: Dependabot PR #${pr_number} after failed deployment validation" \
+            --body-file /tmp/revert-body.md
