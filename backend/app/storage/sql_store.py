@@ -1247,9 +1247,12 @@ class SqlStore:
             }
 
         after = self.table_counts()
+        after_counts = after.get("counts")
+        counts_cleared = isinstance(after_counts, dict) and all(
+            isinstance(value, int) and value == 0 for value in after_counts.values()
+        )
         return {
-            "ok": bool(after.get("ok"))
-            and all(int(value or 0) == 0 for value in dict(after.get("counts") or {}).values()),
+            "ok": bool(after.get("ok")) and counts_cleared,
             "enabled": True,
             "dialect": self.dialect,
             "tables_cleared": tables,
