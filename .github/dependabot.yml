@@ -1,20 +1,37 @@
 version: 2
 updates:
-  # Python dependencies (requirements.txt / requirements-dev.txt).
   - package-ecosystem: "pip"
     directory: "/"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 10
     groups:
-      python-patch-and-minor:
+      fastapi-family:
+        patterns:
+          - "fastapi"
+          - "starlette"
+        update-types:
+          - "patch"
+          - "minor"
+      aws-sdk-family:
+        patterns:
+          - "boto3"
+          - "botocore"
+          - "s3transfer"
+        update-types:
+          - "patch"
+          - "minor"
+      pytest-family:
+        patterns:
+          - "pytest"
+          - "pytest-*"
+          - "coverage"
         update-types:
           - "patch"
           - "minor"
     commit-message:
       prefix: "deps"
 
-  # Base images referenced in the Dockerfile.
   - package-ecosystem: "docker"
     directory: "/"
     schedule:
@@ -22,7 +39,6 @@ updates:
     commit-message:
       prefix: "deps(docker)"
 
-  # Actions used in .github/workflows/*.yml.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
