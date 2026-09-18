@@ -134,7 +134,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         return JSONResponse(
             status_code=500,
-            content={"detail": "Internal server error", "request_id": request_id},
+            content={"code": "internal_server_error", "detail": "Internal server error", "request_id": request_id},
             headers=headers,
         )
 
