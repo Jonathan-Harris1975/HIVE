@@ -84,6 +84,7 @@ class ProductionMiddleware:
     async def _send_too_large(self, send: Send, request_id: str) -> None:
         payload = json.dumps(
             {
+                "code": "request_body_too_large",
                 "detail": "Request body exceeds the configured limit",
                 "request_id": request_id,
                 "max_bytes": self.max_body_bytes,
