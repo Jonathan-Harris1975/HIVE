@@ -136,6 +136,7 @@ def test_request_body_limit_returns_413_before_route_processing() -> None:
 
     assert response.status_code == 413
     payload = response.json()
+    assert payload["code"] == "request_body_too_large"
     assert payload["detail"] == "Request body exceeds the configured limit"
     assert payload["max_bytes"] == 16
     assert response.headers["x-request-id"] == payload["request_id"]
@@ -178,7 +179,11 @@ def test_unhandled_errors_return_safe_request_id_response() -> None:
         response = client.get("/__test-error", headers={"X-Request-ID": "error-case-1"})
 
     assert response.status_code == 500
-    assert response.json() == {"detail": "Internal server error", "request_id": "error-case-1"}
+    assert response.json() == {
+        "code": "internal_server_error",
+        "detail": "Internal server error",
+        "request_id": "error-case-1",
+    }
     assert response.headers["x-request-id"] == "error-case-1"
     assert "sensitive internal detail" not in response.text
 
