@@ -157,11 +157,130 @@ class AiSearchClient:
             "account_configured": bool(self.settings.ai_search_account_id),
             "api_token_configured": bool(self.settings.ai_search_api_token),
             "primary_instance": self.settings.ai_search_instance or None,
+            "manage_source_filter": self.settings.ai_search_manage_source_filter,
+            "r2_prefix": self.settings.ai_search_r2_prefix or None,
             "search_scope": "allowed_available_instances",
             "excluded_sources": sorted(self.excluded_sources),
             "timeout_seconds": self.settings.ai_search_timeout_seconds,
             "top_k": self.settings.ai_search_top_k,
             "missing": self.missing_configuration,
+        }
+
+    async def ensure_primary_source_filter(self) -> dict[str, Any]:
+        """Ensure the primary R2-backed AI Search instance indexes manifests only.
+
+        Cloudflare AI Search otherwise attempts to index every object in an R2
+        source. Repository snapshots are ZIP archives and are intentionally not
+        searchable, so production HIVE manages an R2 ``prefix`` on the primary
+        instance. The update is idempotent and preserves other ``source_params``
+        such as R2 jurisdiction settings.
+        """
+
+        desired_prefix = str(self.settings.ai_search_r2_prefix or "").strip()
+        if not self.settings.ai_search_manage_source_filter:
+            return {
+                "ok": True,
+                "enabled": self.enabled,
+                "managed": False,
+                "changed": False,
+                "reason": "AI Search source-filter management is disabled.",
+            }
+        if not self.enabled:
+            return {
+                "ok": False,
+                "enabled": False,
+                "managed": True,
+                "changed": False,
+                "reason": "AI Search disabled or not configured.",
+            }
+        if not desired_prefix:
+            return {
+                "ok": False,
+                "enabled": True,
+                "managed": True,
+                "changed": False,
+                "reason": "AI_SEARCH_R2_PREFIX is empty; refusing to broaden indexing to the whole bucket.",
+                "error_code": "ai_search_prefix_missing",
+            }
+
+        current = await self._request("GET", self.base_url)
+        if not current.get("ok"):
+            return {
+                **current,
+                "managed": True,
+                "changed": False,
+                "desired_prefix": desired_prefix,
+            }
+
+        raw = current.get("raw")
+        instance = raw.get("result") if isinstance(raw, dict) else None
+        if not isinstance(instance, dict):
+            return {
+                "ok": False,
+                "enabled": True,
+                "managed": True,
+                "changed": False,
+                "desired_prefix": desired_prefix,
+                "reason": "Cloudflare returned an unexpected AI Search instance payload.",
+                "error_code": "ai_search_instance_schema_invalid",
+            }
+
+        instance_type = _normalise_policy_name(instance.get("type"))
+        if instance_type and instance_type != "r2":
+            return {
+                "ok": False,
+                "enabled": True,
+                "managed": True,
+                "changed": False,
+                "desired_prefix": desired_prefix,
+                "reason": "Configured primary AI Search instance is not R2-backed.",
+                "error_code": "ai_search_source_not_r2",
+            }
+
+        expected_source = _normalise_policy_name(self.settings.r2_bucket_repositories)
+        source_tokens = _source_tokens(instance.get("source") or instance.get("data_source"))
+        if source_tokens and expected_source and expected_source not in source_tokens:
+            return {
+                "ok": False,
+                "enabled": True,
+                "managed": True,
+                "changed": False,
+                "desired_prefix": desired_prefix,
+                "reason": "Primary AI Search source does not match the repository R2 bucket.",
+                "error_code": "ai_search_source_bucket_mismatch",
+            }
+
+        source_params_raw = instance.get("source_params")
+        source_params = dict(source_params_raw) if isinstance(source_params_raw, dict) else {}
+        current_prefix = str(source_params.get("prefix") or "").strip().lstrip("/")
+        if current_prefix == desired_prefix:
+            return {
+                "ok": True,
+                "enabled": True,
+                "managed": True,
+                "changed": False,
+                "instance": _instance_id(instance) or self.settings.ai_search_instance,
+                "prefix": desired_prefix,
+            }
+
+        source_params["prefix"] = desired_prefix
+        updated = await self._request(
+            "PUT",
+            self.base_url,
+            json_payload={"source_params": source_params},
+        )
+        return {
+            **updated,
+            "managed": True,
+            "changed": bool(updated.get("ok")),
+            "instance": _instance_id(instance) or self.settings.ai_search_instance,
+            "previous_prefix": current_prefix or None,
+            "prefix": desired_prefix,
+            "reason": (
+                None
+                if updated.get("ok")
+                else "Unable to update the AI Search R2 prefix; the API token requires AI Search:Edit permission."
+            ),
         }
 
     async def list_instances(self) -> dict[str, Any]:
