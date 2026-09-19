@@ -581,6 +581,15 @@ class Settings(BaseSettings):
     ai_search_instance: str = Field(
         "hive-repositories", validation_alias=AliasChoices("AI_SEARCH_INSTANCE")
     )
+    # Production can manage the primary R2-backed AI Search source filter on
+    # startup. This keeps repository ZIP snapshots in the same bucket while
+    # limiting Cloudflare indexing to the JSON manifests prefix.
+    ai_search_manage_source_filter: bool = Field(
+        False, validation_alias=AliasChoices("AI_SEARCH_MANAGE_SOURCE_FILTER")
+    )
+    ai_search_r2_prefix: str = Field(
+        "manifests/", validation_alias=AliasChoices("AI_SEARCH_R2_PREFIX")
+    )
     # Static-media sources are intentionally outside HIVE knowledge retrieval.
     # Keep the policy configurable for deployments whose Cloudflare AI Search
     # instance names or source-bucket metadata differ from the defaults.
@@ -872,6 +881,22 @@ class Settings(BaseSettings):
         if model.startswith("cf/"):
             return f"@{model}"
         return model
+
+    @field_validator("ai_search_r2_prefix", mode="before")
+    @classmethod
+    def normalise_ai_search_r2_prefix(cls, value: object) -> str:
+        """Normalise an R2 object-key prefix for Cloudflare AI Search.
+
+        R2 prefixes are object-key prefixes rather than URL paths, so leading
+        slashes are removed. A trailing slash is added for directory-like
+        prefixes to prevent ``manifests-other/`` from matching ``manifests``.
+        """
+
+        raw = str(value or "").strip().replace("\\", "/").lstrip("/")
+        parts = [part for part in raw.split("/") if part]
+        if any(part in {".", ".."} for part in parts):
+            raise ValueError("AI_SEARCH_R2_PREFIX must not contain path traversal segments")
+        return f"{'/'.join(parts)}/" if parts else ""
 
     @field_validator(
         "cors_origins",
