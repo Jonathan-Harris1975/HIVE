@@ -444,7 +444,7 @@ class Settings(BaseSettings):
     # Optional Cloudflare D1 metadata store. D1 is kept separate from the SQL
     # conversation store so it can be used for ecosystem indexes/cache snapshots.
     d1_enabled: bool = Field(False, validation_alias=AliasChoices("D1_ENABLED"))
-    d1_auto_init: bool = Field(True, validation_alias=AliasChoices("D1_AUTO_INIT"))
+    d1_auto_init: bool = Field(False, validation_alias=AliasChoices("D1_AUTO_INIT"))
     d1_account_id: str = Field(
         "", validation_alias=AliasChoices("D1_ACCOUNT_ID", "CF_ACCOUNT_ID", "R2_ACCOUNT_ID")
     )
