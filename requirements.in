@@ -4,6 +4,8 @@ fastapi==0.141.1
 starlette==1.6.0
 uvicorn[standard]==0.50.2
 httpx==0.28.1
+# Direct security pin: 4.14.2 fixes CVE-2026-63374, CVE-2026-64847 and CVE-2026-63349.
+anyio==4.14.2
 pydantic-settings==2.14.2
 python-multipart==0.0.32
 boto3==1.43.41
