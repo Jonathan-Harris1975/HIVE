@@ -13,10 +13,113 @@ def _settings() -> Settings:
         ai_search_account_id="acct-123",
         ai_search_api_token="token-123",
         ai_search_instance="hive-repositories",
+        ai_search_manage_source_filter=True,
+        ai_search_r2_prefix="manifests/",
+        r2_bucket_repositories="hive-repositories",
         ai_search_max_attempts=1,
         ai_search_timeout_seconds=5,
         ai_search_top_k=8,
     )
+
+
+@pytest.mark.asyncio
+async def test_primary_source_filter_updates_r2_prefix_and_preserves_source_params(monkeypatch):
+    calls: list[tuple[str, str, dict | None]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        body = __import__('json').loads(request.content) if request.content else None
+        calls.append((request.method, path, body))
+        if request.method == "GET" and path.endswith('/ai-search/instances/hive-repositories'):
+            return httpx.Response(200, json={
+                "success": True,
+                "result": {
+                    "id": "hive-repositories",
+                    "type": "r2",
+                    "source": "hive-repositories",
+                    "source_params": {"r2_jurisdiction": "eu"},
+                },
+            })
+        if request.method == "PUT" and path.endswith('/ai-search/instances/hive-repositories'):
+            assert body == {
+                "source_params": {
+                    "r2_jurisdiction": "eu",
+                    "prefix": "manifests/",
+                }
+            }
+            return httpx.Response(200, json={"success": True, "result": {"id": "hive-repositories"}})
+        raise AssertionError(f"unexpected AI Search request: {request.method} {path}")
+
+    original = httpx.AsyncClient
+    class PatchedAsyncClient(original):
+        def __init__(self, *args, **kwargs):
+            kwargs["transport"] = httpx.MockTransport(handler)
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr("app.storage.ai_search.httpx.AsyncClient", PatchedAsyncClient)
+    result = await AiSearchClient(_settings()).ensure_primary_source_filter()
+
+    assert result["ok"] is True
+    assert result["managed"] is True
+    assert result["changed"] is True
+    assert result["prefix"] == "manifests/"
+    assert [method for method, _, _ in calls] == ["GET", "PUT"]
+
+
+@pytest.mark.asyncio
+async def test_primary_source_filter_is_noop_when_prefix_is_already_correct(monkeypatch):
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        return httpx.Response(200, json={
+            "success": True,
+            "result": {
+                "id": "hive-repositories",
+                "type": "r2",
+                "source": "hive-repositories",
+                "source_params": {"prefix": "manifests/"},
+            },
+        })
+
+    original = httpx.AsyncClient
+    class PatchedAsyncClient(original):
+        def __init__(self, *args, **kwargs):
+            kwargs["transport"] = httpx.MockTransport(handler)
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr("app.storage.ai_search.httpx.AsyncClient", PatchedAsyncClient)
+    result = await AiSearchClient(_settings()).ensure_primary_source_filter()
+
+    assert result["ok"] is True
+    assert result["changed"] is False
+    assert result["prefix"] == "manifests/"
+
+
+@pytest.mark.asyncio
+async def test_primary_source_filter_refuses_to_modify_wrong_r2_bucket(monkeypatch):
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        return httpx.Response(200, json={
+            "success": True,
+            "result": {
+                "id": "hive-repositories",
+                "type": "r2",
+                "source": "some-other-bucket",
+                "source_params": {},
+            },
+        })
+
+    original = httpx.AsyncClient
+    class PatchedAsyncClient(original):
+        def __init__(self, *args, **kwargs):
+            kwargs["transport"] = httpx.MockTransport(handler)
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr("app.storage.ai_search.httpx.AsyncClient", PatchedAsyncClient)
+    result = await AiSearchClient(_settings()).ensure_primary_source_filter()
+
+    assert result["ok"] is False
+    assert result["changed"] is False
+    assert result["error_code"] == "ai_search_source_bucket_mismatch"
 
 
 @pytest.mark.asyncio

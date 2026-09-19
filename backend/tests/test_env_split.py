@@ -62,6 +62,8 @@ def test_settings_loads_repo_shared_env_file() -> None:
     assert settings.r2_public_base_url_audits == ""
     assert settings.ai_search_enabled is True
     assert settings.ai_search_instance == "hive-repositories"
+    assert settings.ai_search_manage_source_filter is True
+    assert settings.ai_search_r2_prefix == "manifests/"
     assert settings.ai_search_excluded_sources == ["brand-assets", "podcastart", "blog-images"]
     assert {"art", "blog_images", "brand_assets"}.isdisjoint(
         {item["lane"] for item in settings.r2_all_lanes}
