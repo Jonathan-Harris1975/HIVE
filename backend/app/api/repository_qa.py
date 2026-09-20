@@ -6,7 +6,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.core.config import Settings, get_settings
 from app.core.security import require_admin
-from app.services.repository_manager import RepositoryManagerError
+from app.services.repository_manager import (
+    RepositoryManagerError,
+    get_repository,
+    repository_snapshot_identity,
+)
 from app.services.repository_learning import update_project_dna
 from app.services.repository_memory import RepositoryMemoryUnavailableError, append_history_entry
 from app.services.repository_qa import run_repository_qa
@@ -23,13 +27,15 @@ async def post_run_qa(repository_id: str, settings: Settings = Depends(get_setti
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
 
     payload = report.public_payload()
+    record = get_repository(repository_id)
+    snapshot_identity = repository_snapshot_identity(record.manifest) if record is not None else None
     store = D1MetadataStore(settings)
     try:
         append_history_entry(
             store,
             repository_id=repository_id,
             field_name="qa_history",
-            entry={**payload, "occurred_at": datetime.now(UTC).isoformat()},
+            entry={**payload, "occurred_at": datetime.now(UTC).isoformat(), "snapshot_identity": snapshot_identity},
         )
         update_project_dna(settings, repository_id=repository_id)
     except RepositoryMemoryUnavailableError as error:

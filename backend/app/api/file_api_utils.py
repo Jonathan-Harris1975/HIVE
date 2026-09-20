@@ -5,56 +5,21 @@ from pathlib import Path
 
 from fastapi import HTTPException, status
 
-# Upload media allow-list shared by multipart and base64 upload paths.
-# application/octet-stream is retained for browsers/clients that cannot provide a more
-# specific type; extension and archive inspection still provide defence in depth.
-_ALLOWED_UPLOAD_MIME_PREFIXES: frozenset[str] = frozenset({
-    "text/",
-    "application/json",
-    "application/pdf",
-    "application/vnd.openxmlformats-officedocument",
-    "application/vnd.ms-excel",
-    "application/vnd.ms-powerpoint",
-    "application/vnd.ms-word",
-    "application/msword",
-    "application/zip",
-    "application/x-zip-compressed",
-    "multipart/x-zip",
-    "application/xml",
-    "application/csv",
-    "application/x-yaml",
-    "image/png",
-    "image/jpeg",
-    "image/gif",
-    "image/webp",
-    "image/svg+xml",
-    "application/x-tar",
-    "application/gzip",
-    "application/x-gzip",
-})
-_ALLOWED_UPLOAD_MIME_EXACT: frozenset[str] = frozenset({"application/octet-stream"})
+from app.ingestion.upload_validation import validate_upload_content
+
 
 def _validate_upload_content_type(content_type: str | None) -> None:
-    """Raise HTTP 415 if the upload Content-Type is not in the allow-list.
+    """Backwards-compatible MIME-only guard for callers that do not yet have bytes.
 
-    This guard prevents users from uploading executable/binary files whose
-    presence on R2 or in the ingestion pipeline could cause harm. It is a
-    defence-in-depth measure layered on top of extension filtering and zip
-    inspection — not a replacement for them.
+    Persistence paths use ``validate_upload_content`` in the ingestion layer,
+    which additionally validates filename and content signature.
     """
-    ct = (content_type or "application/octet-stream").strip().split(";")[0].strip().lower()
-    if ct in _ALLOWED_UPLOAD_MIME_EXACT:
-        return
-    for prefix in _ALLOWED_UPLOAD_MIME_PREFIXES:
-        if ct.startswith(prefix):
-            return
-    raise HTTPException(
-        status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-        detail=(
-            f"Unsupported upload media type: '{ct}'. "
-            "Only document, text, image, and archive types are accepted."
-        ),
+    validate_upload_content(
+        filename="upload.txt",
+        content_type=content_type,
+        data=b"validation probe",
     )
+
 
 def _batches(items: list[dict[str, object]], batch_size: int) -> list[list[dict[str, object]]]:
     return [items[index : index + batch_size] for index in range(0, len(items), batch_size)]

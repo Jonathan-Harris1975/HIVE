@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import Response
+from pydantic import BaseModel, Field
 
 from app.core.config import Settings, get_settings
 from app.core.security import require_admin
 from app.services.repository_improvements import (
     RepositoryImprovementError,
+    cancel_improvement_job,
     get_improvement_job,
     improvement_artifact,
     latest_improvement_job,
@@ -16,6 +18,11 @@ from app.services.repository_manager import RepositoryManagerError
 from app.services.repository_memory import RepositoryMemoryUnavailableError
 
 router = APIRouter(tags=["repository-improvements"], dependencies=[Depends(require_admin)])
+
+
+class RepositoryImprovementRunRequest(BaseModel):
+    execution_mode: str = Field("single_pass", pattern="^(single_pass|multi_pass)$")
+    max_work_passes: int | None = Field(None, ge=1, le=8)
 
 
 def _improvement_error_status(error: RepositoryImprovementError) -> int:
@@ -42,11 +49,18 @@ def _improvement_error_status(error: RepositoryImprovementError) -> int:
 @router.post("/repositories/{repository_id}/improvements/run", status_code=status.HTTP_202_ACCEPTED)
 async def post_repository_improvements(
     repository_id: str,
+    request: RepositoryImprovementRunRequest | None = None,
     settings: Settings = Depends(get_settings),
 ) -> dict[str, object]:
     """Queue an isolated, LLM-assisted repository improvement job."""
+    request = request or RepositoryImprovementRunRequest()
     try:
-        return start_improvement_job(settings, repository_id)
+        return start_improvement_job(
+            settings,
+            repository_id,
+            execution_mode=request.execution_mode,
+            max_work_passes=request.max_work_passes,
+        )
     except RepositoryManagerError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
     except RepositoryMemoryUnavailableError as error:
@@ -74,6 +88,18 @@ async def get_repository_improvement(
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown repository improvement job")
     return job
+
+
+@router.post("/repositories/{repository_id}/improvements/jobs/{job_id}/cancel")
+async def cancel_repository_improvement(
+    repository_id: str,
+    job_id: str,
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    try:
+        return cancel_improvement_job(settings, repository_id, job_id)
+    except RepositoryImprovementError as error:
+        raise HTTPException(status_code=_improvement_error_status(error), detail=str(error)) from error
 
 
 @router.get("/repositories/{repository_id}/improvements/jobs/{job_id}/download/{kind}")

@@ -179,7 +179,6 @@ async def upload_file(
     lane: str = Query("uploads", min_length=1, max_length=80),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, object]:
-    _validate_upload_content_type(upload.content_type)
     lane_config = _target_upload_lane(settings, lane)
     try:
         result = await ingest_upload(upload, settings, lane_config=lane_config)

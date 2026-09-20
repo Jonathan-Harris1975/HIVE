@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import json
 from typing import Any, cast
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 
 from app.core.config import Settings, get_settings
+from app.core.governed_repositories import GOVERNED_REPOSITORY_IDS
 from app.core.security import require_admin
 from app.services.repository_manager import (
     RepositoryManagerError,
@@ -120,19 +123,37 @@ def _repository_memory_readiness(
     settings: Settings,
     repository_ids: list[str],
 ) -> dict[str, dict[str, object]]:
-    """Return fail-visible Memory/Intelligence readiness for repository cards."""
+    """Return snapshot-aware Memory/Intelligence readiness for repository cards."""
     readiness = {
         repository_id: {
+            "snapshot_status": "not_loaded",
             "memory_status": "unavailable",
-            "profile_ready": False,
-            "intelligence_ready": False,
             "memory_ready": False,
+            "qa_status": "not_ready",
+            "council_status": "not_ready",
+            "intelligence_status": "not_ready",
+            "intelligence_ready": False,
+            "ai_search_status": "not_ready",
+            "latest_refresh_time": None,
+            "source_fingerprint": None,
+            "indexed_version": None,
+            "last_pipeline_failure": None,
+            "repair_required": True,
             "memory_populated_fields": [],
         }
         for repository_id in repository_ids
     }
     if not repository_ids:
         return readiness
+
+    records = {repository_id: get_repository(repository_id) for repository_id in repository_ids}
+    for repository_id, record in records.items():
+        if record is not None:
+            readiness[repository_id].update(
+                snapshot_status="loaded",
+                source_fingerprint=record.manifest.fingerprint,
+                indexed_version=getattr(record.manifest, "indexed_version", None),
+            )
 
     store = D1MetadataStore(settings)
     if not store.enabled:
@@ -154,52 +175,102 @@ def _repository_memory_readiness(
         metadata = cast(dict[str, Any], raw_metadata) if isinstance(raw_metadata, dict) else {}
         values_by_repository[source_id][source_type] = metadata.get("value")
 
+    def fingerprint_for(entry: object) -> str:
+        if not isinstance(entry, dict):
+            return ""
+        identity = entry.get("snapshot_identity")
+        if isinstance(identity, dict) and identity.get("fingerprint"):
+            return str(identity.get("fingerprint"))
+        context = entry.get("repository_context")
+        if isinstance(context, dict) and context.get("fingerprint"):
+            return str(context.get("fingerprint"))
+        if entry.get("fingerprint"):
+            return str(entry.get("fingerprint"))
+        return ""
+
+    def latest_dict(value: object) -> dict[str, Any] | None:
+        if not isinstance(value, list):
+            return None
+        return next((cast(dict[str, Any], item) for item in reversed(value) if isinstance(item, dict)), None)
+
     for repository_id, values in values_by_repository.items():
+        record = records.get(repository_id)
+        current_fingerprint = record.manifest.fingerprint if record is not None else ""
         populated = sorted(
             field_name
             for field_name, value in values.items()
             if value is not None and value != "" and value != [] and value != {}
         )
-        profile_ready = all(field_name in populated for field_name in SCALAR_FIELDS)
-        qa_history = values.get("qa_history")
-        council_history = values.get("repository_council_history")
-        intelligence_history = values.get("repository_intelligence_history")
-        record = get_repository(repository_id)
-        current_fingerprint = record.manifest.fingerprint if record is not None else ""
+        base_profile_fields = {
+            "project_manifest",
+            "project_dna",
+            "architecture_summary",
+            "coding_standards",
+            "build_profile",
+            "deployment_profile",
+            "environment_schema",
+        }
+        profile_ready = base_profile_fields.issubset(populated)
 
-        latest_qa = next(
-            (entry for entry in reversed(qa_history) if isinstance(entry, dict)),
-            None,
-        ) if isinstance(qa_history, list) else None
-        latest_council = next(
-            (entry for entry in reversed(council_history) if isinstance(entry, dict)),
-            None,
-        ) if isinstance(council_history, list) else None
-        latest_intelligence = next(
-            (entry for entry in reversed(intelligence_history) if isinstance(entry, dict)),
-            None,
-        ) if isinstance(intelligence_history, list) else None
-        intelligence_context: dict[str, object] = {}
-        if isinstance(latest_intelligence, dict):
-            raw_context = latest_intelligence.get("repository_context")
-            if isinstance(raw_context, dict):
-                intelligence_context = {str(key): value for key, value in raw_context.items()}
-        intelligence_ready = bool(
-            isinstance(latest_qa, dict)
-            and latest_qa.get("repository_id") == repository_id
-            and isinstance(latest_council, dict)
-            and latest_council.get("repository_id") == repository_id
-            and isinstance(latest_intelligence, dict)
+        project_manifest = values.get("project_manifest")
+        manifest_fingerprint = fingerprint_for(project_manifest)
+        if not manifest_fingerprint and isinstance(project_manifest, dict):
+            manifest_fingerprint = str(project_manifest.get("fingerprint") or "")
+        snapshot_current = bool(current_fingerprint and manifest_fingerprint == current_fingerprint)
+
+        latest_qa = latest_dict(values.get("qa_history"))
+        latest_council = latest_dict(values.get("repository_council_history"))
+        latest_intelligence = latest_dict(values.get("repository_intelligence_history"))
+        qa_current = bool(current_fingerprint and fingerprint_for(latest_qa) == current_fingerprint)
+        council_current = bool(current_fingerprint and fingerprint_for(latest_council) == current_fingerprint)
+        intelligence_current = bool(
+            current_fingerprint
+            and latest_intelligence is not None
             and latest_intelligence.get("repository_id") == repository_id
-            and intelligence_context.get("repository_id") == repository_id
-            and current_fingerprint
-            and intelligence_context.get("fingerprint") == current_fingerprint
+            and fingerprint_for(latest_intelligence) == current_fingerprint
         )
+
+        index_state = values.get("repository_index_state")
+        index_current = bool(current_fingerprint and fingerprint_for(index_state) == current_fingerprint)
+        raw_index_status = str(index_state.get("status") or "not_ready") if isinstance(index_state, dict) else "not_ready"
+        if index_current:
+            ai_search_status = raw_index_status
+        elif isinstance(index_state, dict):
+            ai_search_status = "stale"
+        else:
+            ai_search_status = "not_ready"
+
+        pipeline_state = values.get("repository_pipeline_state")
+        pipeline_current = bool(current_fingerprint and fingerprint_for(pipeline_state) == current_fingerprint)
+        last_failure = (
+            pipeline_state.get("last_pipeline_failure")
+            if pipeline_current and isinstance(pipeline_state, dict)
+            else None
+        )
+        latest_refresh_time = None
+        if isinstance(project_manifest, dict):
+            identity = project_manifest.get("snapshot_identity")
+            if isinstance(identity, dict):
+                latest_refresh_time = identity.get("refresh_timestamp")
+
+        memory_ready = profile_ready and snapshot_current
+        repair_required = not (memory_ready and qa_current and council_current and intelligence_current)
         readiness[repository_id] = {
-            "memory_status": "ready" if profile_ready else ("partial" if populated else "empty"),
+            "snapshot_status": "current" if snapshot_current else ("stale" if record is not None else "not_loaded"),
+            "memory_status": "ready" if memory_ready else ("stale" if profile_ready else ("partial" if populated else "empty")),
             "profile_ready": profile_ready,
-            "intelligence_ready": intelligence_ready,
-            "memory_ready": profile_ready and intelligence_ready,
+            "memory_ready": memory_ready,
+            "qa_status": "current" if qa_current else ("stale" if latest_qa else "not_ready"),
+            "council_status": "current" if council_current else ("stale" if latest_council else "not_ready"),
+            "intelligence_status": "current" if intelligence_current else ("stale" if latest_intelligence else "not_ready"),
+            "intelligence_ready": intelligence_current,
+            "ai_search_status": ai_search_status,
+            "latest_refresh_time": latest_refresh_time,
+            "source_fingerprint": current_fingerprint or None,
+            "indexed_version": getattr(record.manifest, "indexed_version", None) if record is not None else None,
+            "source_commit_sha": getattr(record.manifest, "source_commit_sha", None) if record is not None else None,
+            "last_pipeline_failure": last_failure,
+            "repair_required": repair_required,
             "memory_populated_fields": populated,
         }
     return readiness
@@ -257,6 +328,8 @@ async def _ingest_repository_content(
         )
 
     payload: dict[str, Any] = manifest.public_payload()
+    record = get_repository(manifest.repository_id)
+    payload["outcome"] = record.ingestion_outcome if record is not None else "success"
     snapshot_persisted = _persist_snapshot_to_r2(content, manifest.repository_id, settings)
     r2_persisted = _persist_manifest_to_r2(payload, settings)
     payload["r2_persisted"] = r2_persisted
@@ -302,6 +375,184 @@ async def upload_repository(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
     except RuntimeError as error:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from error
+
+
+def _safe_ingestion_error(error: Exception) -> str:
+    if isinstance(error, RepositoryManagerError):
+        return str(error)
+    if isinstance(error, HTTPException):
+        return str(error.detail)
+    return "Repository ingestion failed; inspect HIVE server logs for the internal error."
+
+
+@router.post("/repositories/bulk")
+async def upload_repositories_bulk(
+    uploads: list[UploadFile] = File(...),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    """Ingest multiple repository ZIPs independently with bounded concurrency."""
+    if not settings.repository_manager_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Repository Manager disabled",
+        )
+    if not uploads:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one ZIP is required")
+    if len(uploads) > settings.repository_bulk_max_count:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=(
+                f"Repository batch has {len(uploads)} items; "
+                f"limit is {settings.repository_bulk_max_count}"
+            ),
+        )
+
+    upload_limit = int(settings.max_upload_bytes)
+    batch_limit = int(settings.repository_bulk_max_total_bytes)
+    items: list[dict[str, Any]] = []
+    total_bytes = 0
+    for index, upload in enumerate(uploads):
+        filename = upload.filename or f"repository-{index + 1}.zip"
+        if not filename.lower().endswith(".zip"):
+            items.append(
+                {
+                    "index": index,
+                    "filename": filename,
+                    "preflight_error": "Repository upload must be a .zip archive.",
+                }
+            )
+            continue
+        content = await upload.read()
+        total_bytes += len(content)
+        if total_bytes > batch_limit:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"Repository batch exceeds REPOSITORY_BULK_MAX_TOTAL_BYTES ({batch_limit} bytes)",
+            )
+        if len(content) > upload_limit:
+            items.append(
+                {
+                    "index": index,
+                    "filename": filename,
+                    "preflight_error": f"Repository upload exceeds MAX_UPLOAD_BYTES ({upload_limit} bytes)",
+                }
+            )
+            continue
+        items.append(
+            {
+                "index": index,
+                "filename": filename,
+                "content": content,
+                "archive_sha256": hashlib.sha256(content).hexdigest(),
+            }
+        )
+
+    first_by_digest: dict[str, int] = {}
+    for item in items:
+        digest = item.get("archive_sha256")
+        if not isinstance(digest, str):
+            continue
+        if digest in first_by_digest:
+            item["duplicate_of"] = first_by_digest[digest]
+        else:
+            first_by_digest[digest] = int(item["index"])
+
+    semaphore = asyncio.Semaphore(settings.repository_bulk_concurrency)
+    results_by_index: dict[int, dict[str, Any]] = {}
+
+    async def ingest_one(item: dict[str, Any]) -> None:
+        index = int(item["index"])
+        filename = str(item["filename"])
+        if item.get("preflight_error"):
+            results_by_index[index] = {
+                "index": index,
+                "filename": filename,
+                "outcome": "failed",
+                "ok": False,
+                "error": str(item["preflight_error"]),
+                "retryable": True,
+            }
+            return
+        if item.get("duplicate_of") is not None:
+            return
+        async with semaphore:
+            try:
+                payload = await _ingest_repository_content(
+                    cast(bytes, item["content"]),
+                    filename,
+                    settings,
+                )
+                pipeline = payload.get("pipeline")
+                pipeline_ready = isinstance(pipeline, dict) and pipeline.get("required_stages_ready") is True
+                outcome = str(payload.get("outcome") or "success")
+                results_by_index[index] = {
+                    "index": index,
+                    "filename": filename,
+                    "outcome": outcome if pipeline_ready else "failed",
+                    "ok": pipeline_ready,
+                    "repository_id": payload.get("repository_id"),
+                    "fingerprint": payload.get("fingerprint"),
+                    "indexed_version": payload.get("indexed_version"),
+                    "pipeline_status": pipeline.get("status") if isinstance(pipeline, dict) else None,
+                    "retryable": not pipeline_ready,
+                    **(
+                        {}
+                        if pipeline_ready
+                        else {"error": "Repository snapshot was accepted but Memory/Intelligence setup is incomplete."}
+                    ),
+                }
+            except Exception as error:  # noqa: BLE001 - per-item isolation is the contract
+                results_by_index[index] = {
+                    "index": index,
+                    "filename": filename,
+                    "outcome": "failed",
+                    "ok": False,
+                    "error": _safe_ingestion_error(error),
+                    "retryable": True,
+                }
+
+    await asyncio.gather(*(ingest_one(item) for item in items))
+
+    for item in items:
+        duplicate_of = item.get("duplicate_of")
+        if duplicate_of is None:
+            continue
+        index = int(item["index"])
+        source = results_by_index.get(int(duplicate_of), {})
+        if source.get("ok"):
+            results_by_index[index] = {
+                "index": index,
+                "filename": str(item["filename"]),
+                "outcome": "duplicate",
+                "ok": True,
+                "duplicate_of": int(duplicate_of),
+                "repository_id": source.get("repository_id"),
+                "fingerprint": source.get("fingerprint"),
+                "indexed_version": source.get("indexed_version"),
+                "retryable": False,
+            }
+        else:
+            results_by_index[index] = {
+                "index": index,
+                "filename": str(item["filename"]),
+                "outcome": "failed",
+                "ok": False,
+                "duplicate_of": int(duplicate_of),
+                "error": "Duplicate archive matches a batch item that failed ingestion.",
+                "retryable": True,
+            }
+
+    results = [results_by_index[index] for index in range(len(items))]
+    failed_count = sum(1 for item in results if not item.get("ok"))
+    return {
+        "ok": failed_count == 0,
+        "repository_count": len(results),
+        "completed_count": len(results),
+        "failed_count": failed_count,
+        "total_bytes": total_bytes,
+        "concurrency_limit": settings.repository_bulk_concurrency,
+        "results": results,
+    }
 
 
 @router.post("/repositories/{repository_id}/setup")
@@ -399,6 +650,25 @@ async def get_repositories(settings: Settings = Depends(get_settings)) -> dict[s
             {**summary.__dict__, **readiness.get(summary.repository_id, {})}
             for summary in summaries
         ]
+    }
+
+
+@router.get("/repositories/estate/readiness")
+async def get_repository_estate_readiness(
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    repository_ids = list(GOVERNED_REPOSITORY_IDS)
+    readiness = _repository_memory_readiness(settings, repository_ids)
+    repositories_payload = [
+        {"repository_id": repository_id, **readiness[repository_id]}
+        for repository_id in repository_ids
+    ]
+    ready_count = sum(1 for item in repositories_payload if item.get("repair_required") is False)
+    return {
+        "governed_repository_count": len(repository_ids),
+        "ready_count": ready_count,
+        "all_current": ready_count == len(repository_ids),
+        "repositories": repositories_payload,
     }
 
 
