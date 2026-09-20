@@ -13,6 +13,7 @@ from fastapi import UploadFile
 
 from app.core.config import Settings
 from app.ingestion.text_extractors import chunk_text, extract_text_with_metadata
+from app.ingestion.upload_validation import validate_upload_content
 from app.ingestion.zip_ingestion import inspect_zip
 from app.storage.local_blob import LocalBlobStorage
 from app.storage.r2 import R2Storage, sha256_file
@@ -119,6 +120,7 @@ def ingest_bytes_content(
     original_name = _safe_original_name(filename, fallback=fallback_name)
     suffix = Path(original_name).suffix.lower()
     resolved_content_type = content_type or mimetypes.guess_type(original_name)[0]
+    validate_upload_content(filename=original_name, content_type=resolved_content_type, data=data)
     object_key = _human_readable_object_key(file_id, original_name)
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
@@ -149,6 +151,7 @@ async def ingest_upload(
     content_type = upload.content_type or mimetypes.guess_type(original_name)[0]
     object_key = _human_readable_object_key(file_id, original_name)
 
+    data = bytearray()
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         temp_path = Path(tmp.name)
         size = 0
@@ -158,8 +161,16 @@ async def ingest_upload(
                 break
             size += len(chunk)
             if size > settings.max_upload_bytes:
+                temp_path.unlink(missing_ok=True)
                 raise ValueError(f"Upload exceeds max size of {settings.max_upload_bytes} bytes")
+            data.extend(chunk)
             tmp.write(chunk)
+
+    try:
+        validate_upload_content(filename=original_name, content_type=content_type, data=bytes(data))
+    except Exception:
+        temp_path.unlink(missing_ok=True)
+        raise
 
     return _ingest_path(
         temp_path=temp_path,
