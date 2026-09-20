@@ -1,8 +1,19 @@
 from __future__ import annotations
 
 from app.core.config import Settings
+from app.core.redaction import redact_text
 from app.services.connectors.base import ConnectorReport
 from app.storage.r2 import R2Storage
+
+
+def _safe_error(error: Exception, settings: Settings) -> str:
+    return redact_text(
+        error,
+        settings.cf_r2_access_key_id,
+        settings.cf_r2_secret_access_key,
+        settings.r2_read_access_key_id,
+        settings.r2_read_secret_access_key,
+    )
 
 
 async def report(settings: Settings) -> ConnectorReport:
@@ -43,5 +54,5 @@ async def report(settings: Settings) -> ConnectorReport:
             capabilities=(),
             rate_limit=None,
             diagnostics={"bucket": settings.cf_r2_bucket},
-            error=str(error),
+            error=_safe_error(error, settings),
         )
