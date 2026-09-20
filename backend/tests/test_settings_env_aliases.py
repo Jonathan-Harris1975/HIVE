@@ -50,3 +50,8 @@ def test_rams_readiness_bearer_token_aliases_are_supported() -> None:
     settings = Settings(RAMS_API_KEY='rams-token')
 
     assert settings.rams_readiness_bearer_token == 'rams-token'
+
+
+def test_settings_case_matching_policy_is_explicit() -> None:
+    assert Settings.model_config["case_sensitive"] is False
+
