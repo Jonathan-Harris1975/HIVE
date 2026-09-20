@@ -6,6 +6,7 @@ from typing import Any
 import httpx
 
 from app.core.config import Settings
+from app.core.redaction import redact_payload, redact_text
 
 logger = logging.getLogger("uvicorn.error.hive.embeddings")
 
@@ -19,8 +20,14 @@ class CloudflareEmbeddingsClient:
     of raising a vague upstream error.
     """
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
         self.settings = settings
+        self._transport = transport
         self.enabled = bool(
             settings.embeddings_enabled
             and settings.embeddings_provider.lower() == "cloudflare"
@@ -63,18 +70,36 @@ class CloudflareEmbeddingsClient:
         payload = {"text": clean_texts}
         headers = {"Authorization": f"Bearer {self.settings.embeddings_api_token}", "Content-Type": "application/json"}
         timeout = max(1.0, float(self.settings.embeddings_timeout_seconds))
+        secret = self.settings.embeddings_api_token
 
         try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
+            async with httpx.AsyncClient(timeout=timeout, transport=self._transport) as client:
                 response = await client.post(self.endpoint, headers=headers, json=payload)
-            raw = _safe_json(response)
+            raw, json_ok = _safe_json(response)
+            safe_raw = redact_payload(raw, secret)
             if response.status_code >= 400:
                 return {
                     "ok": False,
                     "enabled": True,
                     "status_code": response.status_code,
-                    "error": _cloudflare_error_text(raw) or response.text,
-                    "raw": raw,
+                    "error": redact_text(_cloudflare_error_text(safe_raw) or response.text, secret),
+                    "raw": safe_raw,
+                }
+            if not json_ok:
+                return {
+                    "ok": False,
+                    "enabled": True,
+                    "status_code": response.status_code,
+                    "error": "Embeddings provider returned malformed JSON.",
+                    "raw": safe_raw,
+                }
+            if not isinstance(raw, dict):
+                return {
+                    "ok": False,
+                    "enabled": True,
+                    "status_code": response.status_code,
+                    "error": f"Unexpected embeddings response type: {type(raw).__name__}.",
+                    "raw": safe_raw,
                 }
             vectors = _extract_vectors(raw)
             if len(vectors) != len(clean_texts):
@@ -83,7 +108,7 @@ class CloudflareEmbeddingsClient:
                     "enabled": True,
                     "status_code": response.status_code,
                     "error": f"Embedding count mismatch: expected {len(clean_texts)}, got {len(vectors)}.",
-                    "raw": raw,
+                    "raw": safe_raw,
                 }
             return {
                 "ok": True,
@@ -92,18 +117,23 @@ class CloudflareEmbeddingsClient:
                 "count": len(vectors),
                 "dimensions": len(vectors[0]) if vectors else 0,
                 "vectors": vectors,
-                "raw": raw,
+                "raw": safe_raw,
             }
-        except Exception as exc:  # pragma: no cover - network errors vary
-            logger.warning("Cloudflare embeddings request failed error_type=%s error=%s", type(exc).__name__, exc)
-            return {"ok": False, "enabled": True, "error": str(exc), "type": type(exc).__name__}
+        except Exception as exc:  # provider/network exceptions degrade the optional integration
+            safe_error = redact_text(exc, secret)
+            logger.warning(
+                "Cloudflare embeddings request failed error_type=%s error=%s",
+                type(exc).__name__,
+                safe_error,
+            )
+            return {"ok": False, "enabled": True, "error": safe_error, "type": type(exc).__name__}
 
 
-def _safe_json(response: httpx.Response) -> Any:
+def _safe_json(response: httpx.Response) -> tuple[Any, bool]:
     try:
-        return response.json()
-    except Exception:
-        return {"text": response.text}
+        return response.json(), True
+    except (TypeError, ValueError):
+        return {"text": response.text}, False
 
 
 def _cloudflare_error_text(payload: Any) -> str | None:
