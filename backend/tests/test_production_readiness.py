@@ -254,3 +254,31 @@ def test_committed_production_database_requirement_matches_documentation() -> No
     assert "PRODUCTION_REQUIRE_DATABASE=true" in shared_env
     assert "PRODUCTION_REQUIRE_DATABASE=true" in production_docs
     assert "PRODUCTION_REQUIRE_DATABASE=false" not in production_docs
+
+
+def test_production_readiness_rejects_repository_work_scope_above_twelve_percent() -> None:
+    settings = _production_settings(REPOSITORY_IMPROVEMENT_MAX_CHANGE_RATIO=0.13)
+
+    report = build_readiness_report(settings)
+
+    assert report.ready is False
+    assert any(item.name == "repository_improvement_scope" for item in report.errors)
+
+
+def test_production_readiness_requires_bulk_capacity_for_all_governed_repositories() -> None:
+    settings = _production_settings(REPOSITORY_BULK_MAX_COUNT=7)
+
+    report = build_readiness_report(settings)
+
+    assert report.ready is False
+    assert any(item.name == "repository_bulk_ingestion" for item in report.errors)
+
+
+def test_production_readiness_accepts_default_repository_scope_and_bulk_limits() -> None:
+    report = build_readiness_report(_production_settings())
+
+    scope = next(item for item in report.checks if item.name == "repository_improvement_scope")
+    bulk = next(item for item in report.checks if item.name == "repository_bulk_ingestion")
+    assert scope.status == "ok"
+    assert "12% per pass" in scope.message
+    assert bulk.status == "ok"

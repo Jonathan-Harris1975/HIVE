@@ -196,6 +196,7 @@ def test_improvement_routes_are_registered() -> None:
     assert "/v1/repositories/{repository_id}/improvements/latest" in paths
     assert "/v1/repositories/{repository_id}/improvements/jobs/{job_id}" in paths
     assert "/v1/repositories/{repository_id}/improvements/jobs/{job_id}/download/{kind}" in paths
+    assert "/v1/repositories/{repository_id}/improvements/jobs/{job_id}/cancel" in paths
 
 
 def _orchestration_settings(tmp_path: Path) -> Settings:
@@ -406,3 +407,141 @@ async def test_council_accepts_result_within_five_percent_without_second_run(mon
     assert len(job["orchestration"]["council_runs"]) == 1
     assert job["orchestration"]["council_runs"][0]["accepted_under_5_percent_rule"] is True
     assert not any(model == "council/premium" for _stage, _iteration, model in calls)
+
+
+def test_work_scope_budget_is_twelve_percent_with_absolute_ceiling(tmp_path: Path) -> None:
+    root = tmp_path / "repo-scope"
+    root.mkdir()
+    for index in range(25):
+        (root / f"file_{index}.py").write_text(f"VALUE = {index}\n", encoding="utf-8")
+    (root / ".env.production").write_text("SECRET=value\n", encoding="utf-8")
+    (root / "logo.png").write_bytes(b"\x89PNG")
+    (root / "node_modules").mkdir()
+    (root / "node_modules" / "dep.js").write_text("x", encoding="utf-8")
+    settings = Settings(  # type: ignore[call-arg]
+        _env_file=None,
+        app_env="test",
+        repository_improvement_max_change_ratio=0.12,
+        repository_improvement_max_change_files=100,
+    )
+    intelligence = {"repository_context": {"implicated_files": []}}
+
+    scope = repository_improvements._work_scope_budget(settings, root, intelligence)
+
+    assert scope["eligible_file_count"] == 25
+    assert scope["configured_ratio"] == 0.12
+    assert scope["percentage_limit"] == 3
+    assert scope["effective_file_limit"] == 3
+
+
+def test_work_scope_rejects_model_response_over_dynamic_limit() -> None:
+    payload = {
+        "changes": [
+            {"path": "a.py", "action": "replace", "content": "a=1\n"},
+            {"path": "b.py", "action": "replace", "content": "b=1\n"},
+        ]
+    }
+    with pytest.raises(repository_improvements.RepositoryImprovementError, match="work-pass maximum is 1"):
+        repository_improvements._validated_changes(payload, max_change_files=1)
+
+
+@pytest.mark.asyncio
+async def test_multi_pass_can_exceed_single_pass_scope_without_raising_pass_limit(monkeypatch, tmp_path: Path) -> None:
+    root = tmp_path / "repo-multipass"
+    root.mkdir()
+    for index in range(10):
+        (root / f"file_{index}.py").write_text(f"VALUE = {index}\n", encoding="utf-8")
+    record = _record(root)
+    settings = Settings(  # type: ignore[call-arg]
+        _env_file=None,
+        app_env="test",
+        d1_enabled=False,
+        repository_temp_dir=str(tmp_path / "runtime"),
+        openrouter_api_key="test-key",
+        production_require_r2=False,
+        cheap_model="loop/cheap",
+        balanced_model="loop/balanced",
+        code_model="loop/code",
+        audit_model="council/audit",
+        premium_model="council/premium",
+        repository_improvement_max_loops=1,
+        repository_improvement_max_council_runs=0,
+        repository_improvement_success_threshold=0.95,
+        repository_improvement_near_threshold_tolerance=0.05,
+        repository_improvement_max_change_ratio=0.12,
+        repository_improvement_max_change_files=100,
+        repository_improvement_max_work_passes=3,
+    )
+    intelligence = {
+        "repository_id": "HIVE",
+        "repository_context": {"repository_id": "HIVE", "fingerprint": "fingerprint-1"},
+        "summary": {"headline": "Two-file repair", "finding_count": 2, "qa_score": 0.7},
+        "findings": [
+            {"title": "Repair first", "details": {"path": "file_0.py"}},
+            {"title": "Repair second", "details": {"path": "file_1.py"}},
+        ],
+    }
+
+    monkeypatch.setattr(repository_improvements, "get_repository", lambda _repository_id: record)
+    monkeypatch.setattr(repository_improvements, "is_rehydrated", lambda _record: False)
+    monkeypatch.setattr(repository_improvements, "_extract_latest_intelligence", lambda *_args: intelligence)
+    monkeypatch.setattr(
+        repository_improvements.ModelRouter,
+        "progressive_models_for_task",
+        lambda *_args, **_kwargs: ["loop/cheap"],
+    )
+    monkeypatch.setattr(
+        repository_improvements.ModelRouter,
+        "council_models_for_task",
+        lambda *_args, **_kwargs: [],
+    )
+
+    async def fake_model(*_args, orchestration=None, **_kwargs):
+        work_pass = int(orchestration["work_pass"])
+        path = "file_0.py" if work_pass == 1 else "file_1.py"
+        return (
+            {
+                "summary": f"work pass {work_pass}",
+                "changes": [
+                    {
+                        "path": path,
+                        "action": "replace",
+                        "content": f"VALUE = 'fixed-{work_pass}'\n",
+                        "rationale": "bounded pass repair",
+                    }
+                ],
+                "remaining_findings": [] if work_pass == 2 else ["Repair second"],
+                "remaining_risks": [],
+            },
+            "loop/cheap",
+        )
+
+    def fake_qa(_repository_id, workspace, **_kwargs):
+        first = Path(workspace, "file_0.py").read_text(encoding="utf-8")
+        second = Path(workspace, "file_1.py").read_text(encoding="utf-8")
+        score = 1.0 if "fixed-1" in first and "fixed-2" in second else 0.9
+        return SimpleNamespace(public_payload=lambda: _qa_payload(score))
+
+    monkeypatch.setattr(repository_improvements, "_run_model", fake_model)
+    monkeypatch.setattr(repository_improvements, "run_repository_qa_for_workdir", fake_qa)
+    monkeypatch.setattr(repository_improvements, "_store_artifact", lambda *_args, name, **_kwargs: (f"key/{name}", True))
+    monkeypatch.setattr(repository_improvements, "D1MetadataStore", lambda _settings: SimpleNamespace(enabled=False))
+
+    job_id = "job-multipass"
+    repository_improvements._JOBS.clear()
+    await repository_improvements._run_job(
+        settings,
+        job_id,
+        "HIVE",
+        execution_mode="multi_pass",
+        max_work_passes=2,
+    )
+    job = repository_improvements._JOBS[job_id]
+
+    assert job["status"] == "completed"
+    assert job["change_count"] == 2
+    assert len(job["work_pass_ledger"]) == 2
+    assert all(item["work_scope"]["effective_file_limit"] == 1 for item in job["work_pass_ledger"])
+    assert all(item["work_scope"]["files_modified"] <= 1 for item in job["work_pass_ledger"])
+    assert job["cumulative_work_scope"]["files_modified"] == 2
+    assert job["orchestration"]["accepted_work_pass"] == 2

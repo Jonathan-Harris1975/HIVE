@@ -441,13 +441,16 @@ def test_repository_memory_readiness_requires_profile_and_persisted_intelligence
 
         def list_metadata(self, *, lane, limit):
             assert lane == repositories.LANE
+            identity = {"repository_id": "HIVE", "fingerprint": "hive-fingerprint"}
             values = {
                 **{field: {"generated": True} for field in repositories.SCALAR_FIELDS},
-                "qa_history": [{"repository_id": "HIVE", "score": 1.0}],
-                "repository_council_history": [{"repository_id": "HIVE", "overall_score": 1.0}],
+                "project_manifest": {"repository_id": "HIVE", "fingerprint": "hive-fingerprint", "snapshot_identity": identity},
+                "qa_history": [{"repository_id": "HIVE", "score": 1.0, "snapshot_identity": identity}],
+                "repository_council_history": [{"repository_id": "HIVE", "overall_score": 1.0, "snapshot_identity": identity}],
                 "repository_intelligence_history": [
                     {
                         "repository_id": "HIVE",
+                        "snapshot_identity": identity,
                         "repository_context": {"repository_id": "HIVE", "fingerprint": "hive-fingerprint"},
                     }
                 ],
@@ -465,7 +468,7 @@ def test_repository_memory_readiness_requires_profile_and_persisted_intelligence
             }
 
     monkeypatch.setattr(repositories, "D1MetadataStore", FakeStore)
-    hive_record = SimpleNamespace(manifest=SimpleNamespace(fingerprint="hive-fingerprint"))
+    hive_record = SimpleNamespace(manifest=SimpleNamespace(fingerprint="hive-fingerprint", indexed_version=1, source_commit_sha=None))
     monkeypatch.setattr(repositories, "get_repository", lambda repository_id: hive_record if repository_id == "HIVE" else None)
     result = repositories._repository_memory_readiness(SimpleNamespace(), ["HIVE", "AIMS"])
 
