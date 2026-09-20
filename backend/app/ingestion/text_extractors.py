@@ -363,7 +363,7 @@ def _safe_limit(max_chars: int | None) -> int | None:
         return None
     try:
         value = int(max_chars)
-    except Exception:
+    except (TypeError, ValueError):
         return None
     return max(1, value)
 
