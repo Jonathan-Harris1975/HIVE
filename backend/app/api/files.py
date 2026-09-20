@@ -26,7 +26,6 @@ from app.api.file_api_utils import (
     _storage_error_hint,
     _text_preview_supported,
     _validate_object_key,
-    _validate_upload_content_type,
 )
 from app.core.config import Settings, get_settings
 from app.core.security import require_admin

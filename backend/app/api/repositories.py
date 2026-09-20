@@ -22,7 +22,7 @@ from app.services.repository_manager import (
     reindex_repository,
     repository_diff,
 )
-from app.services.repository_memory import ALL_FIELDS, LANE, SCALAR_FIELDS, repository_memory_item_id
+from app.services.repository_memory import ALL_FIELDS, LANE, SCALAR_FIELDS as SCALAR_FIELDS, repository_memory_item_id
 from app.storage.r2 import R2Storage
 from app.storage.d1 import D1MetadataStore
 from app.services.repository_pipeline import run_repository_pipeline
