@@ -113,7 +113,7 @@ def _production_settings_with_r2_lane(**overrides: object) -> Settings:
         "APP_VERSION": "test-production",
         "ADMIN_BEARER_TOKEN": "a" * 48,
         "CORS_ORIGINS": "https://hive-ui.pages.dev",
-        "ALLOWED_HOSTS": "testserver,*.koyeb.app",
+        "ALLOWED_HOSTS": "testserver,liable-loreen-jonathanharris-57884580.koyeb.app",
         "PRODUCTION_REQUIRE_OPENROUTER": False,
         "PRODUCTION_REQUIRE_R2": False,
         "PRODUCTION_REQUIRE_DATABASE": False,

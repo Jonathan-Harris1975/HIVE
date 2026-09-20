@@ -16,7 +16,7 @@ def _production_settings(**overrides: object) -> Settings:
         "APP_VERSION": "test-production",
         "ADMIN_BEARER_TOKEN": "a" * 48,
         "CORS_ORIGINS": "https://hive-ui.pages.dev",
-        "ALLOWED_HOSTS": "testserver,*.koyeb.app",
+        "ALLOWED_HOSTS": "testserver,liable-loreen-jonathanharris-57884580.koyeb.app",
         "PRODUCTION_REQUIRE_OPENROUTER": False,
         "PRODUCTION_REQUIRE_R2": False,
         "PRODUCTION_REQUIRE_DATABASE": False,
@@ -59,6 +59,40 @@ def test_production_readiness_rejects_wildcard_allowed_hosts() -> None:
     assert any(item.name == "allowed_hosts" for item in report.errors)
 
 
+
+
+
+def test_production_readiness_rejects_provider_wide_host_wildcard() -> None:
+    settings = _production_settings(ALLOWED_HOSTS="hive.jonathan-harris.online,*.koyeb.app")
+
+    report = build_readiness_report(settings)
+
+    assert report.ready is False
+    check = next(item for item in report.errors if item.name == "allowed_hosts")
+    assert "*.koyeb.app" in check.message
+
+
+def test_trusted_host_accepts_exact_hive_hosts_and_rejects_unrelated_koyeb_host() -> None:
+    settings = _production_settings(
+        ALLOWED_HOSTS=(
+            "hive.jonathan-harris.online,"
+            "liable-loreen-jonathanharris-57884580.koyeb.app"
+        )
+    )
+    app = create_app(settings)
+
+    with TestClient(app) as client:
+        approved = client.get(
+            "/livez",
+            headers={"Host": "liable-loreen-jonathanharris-57884580.koyeb.app"},
+        )
+        unrelated = client.get(
+            "/livez",
+            headers={"Host": "unrelated-service.koyeb.app"},
+        )
+
+    assert approved.status_code == 200
+    assert unrelated.status_code == 400
 
 def test_production_readiness_requires_dedicated_ops_event_token() -> None:
     settings = _production_settings(

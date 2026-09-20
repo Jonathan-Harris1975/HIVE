@@ -140,3 +140,22 @@ def test_stored_inflight_refresh_is_failed_cleanly_after_restart(monkeypatch) ->
     assert current["status"] == "failed"
     assert "restarted" in str(current["error"]).lower()
     assert current.get("finished_at")
+
+
+def test_refresh_job_persistence_failure_is_observable(monkeypatch, caplog) -> None:
+    class FailingStore:
+        enabled = True
+
+        def upsert_metadata(self, **_kwargs):
+            return {"ok": False, "error": "temporary metadata outage"}
+
+    monkeypatch.setattr(repository_refresh, "D1MetadataStore", lambda _settings: FailingStore())
+
+    with caplog.at_level("WARNING", logger="uvicorn.error.hive.repository_refresh"):
+        repository_refresh._persist_job(_settings(), {"job_id": "observability-job"})
+
+    assert any(
+        "repository_refresh_persistence_failed" in record.message
+        and "observability-job" in record.message
+        for record in caplog.records
+    )

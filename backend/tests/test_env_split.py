@@ -71,6 +71,8 @@ def test_settings_loads_repo_shared_env_file() -> None:
     assert settings.r2_lane("meta") is None
     assert settings.r2_lane("meta_system") is None
     assert "hive.jonathan-harris.online" in settings.effective_allowed_hosts
+    assert "liable-loreen-jonathanharris-57884580.koyeb.app" in settings.effective_allowed_hosts
+    assert "*.koyeb.app" not in settings.effective_allowed_hosts
     assert settings.aims_operational_health_url == "https://zeroth-kara-jonathanharris-3296ed37.koyeb.app/readyz"
     assert settings.aims_ui_health_url == "https://chat.jonathan-harris.online/livez"
     assert settings.aims_ui_readiness_url == "https://chat.jonathan-harris.online/readyz"
@@ -82,3 +84,15 @@ def test_start_script_does_not_trust_all_forwarded_headers_by_default() -> None:
     text = Path("scripts/start.sh").read_text()
     assert 'FORWARDED_ALLOW_IPS="${FORWARDED_ALLOW_IPS:-127.0.0.1}"' in text
     assert 'FORWARDED_ALLOW_IPS="${FORWARDED_ALLOW_IPS:-*}"' not in text
+
+
+def test_canonical_settings_module_is_the_only_repository_config_module() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    config_modules = sorted(
+        path.relative_to(repo_root).as_posix()
+        for path in repo_root.rglob("config.py")
+        if ".venv" not in path.parts and "site-packages" not in path.parts
+    )
+
+    assert config_modules == ["backend/app/core/config.py"]
+    assert not (repo_root / "config.py").exists()
