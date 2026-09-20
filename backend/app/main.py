@@ -79,6 +79,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         loaded_count = model_registry.load_registry_from_store(d1_store)
         if loaded_count:
             logger.info("HIVE Model Registry restored from D1 entries=%s", loaded_count)
+        reconciliation = model_registry.reconcile_pending(d1_store)
+        if reconciliation.get("attempted_count"):
+            logger.info(
+                "HIVE Model Registry reconciliation attempted=%s reconciled=%s pending=%s",
+                reconciliation.get("attempted_count"),
+                reconciliation.get("reconciled_count"),
+                reconciliation.get("pending_count"),
+            )
         seeded_count = model_registry.seed_from_json(active_settings.model_registry_seed_json)
         if seeded_count:
             logger.info("HIVE Model Registry seeded entries=%s", seeded_count)
