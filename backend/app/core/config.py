@@ -5,6 +5,8 @@ from urllib.parse import quote, unquote
 from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
+from app.core.governed_repositories import DEFAULT_GITHUB_SOURCES_JSON
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -448,8 +450,20 @@ class Settings(BaseSettings):
     repository_max_uncompressed_bytes: int = Field(
         512 * 1024 * 1024, validation_alias=AliasChoices("REPOSITORY_MAX_UNCOMPRESSED_BYTES")
     )
+    repository_bulk_max_count: int = Field(
+        8, ge=1, le=32, validation_alias=AliasChoices("REPOSITORY_BULK_MAX_COUNT")
+    )
+    repository_bulk_max_total_bytes: int = Field(
+        800 * 1024 * 1024,
+        ge=1,
+        validation_alias=AliasChoices("REPOSITORY_BULK_MAX_TOTAL_BYTES"),
+    )
+    repository_bulk_concurrency: int = Field(
+        2, ge=1, le=8, validation_alias=AliasChoices("REPOSITORY_BULK_CONCURRENCY")
+    )
 
-    # Repository improvement orchestration. Iterative model loops are always
+    # Repository improvement orchestration. Model self-improvement/council
+    # attempts are distinct from operator-selected repository work passes.
     # exhausted before expert council review, with strict cost/run ceilings.
     repository_improvement_max_loops: int = Field(
         4, ge=1, le=4, validation_alias=AliasChoices("REPOSITORY_IMPROVEMENT_MAX_LOOPS")
@@ -463,6 +477,18 @@ class Settings(BaseSettings):
     repository_improvement_near_threshold_tolerance: float = Field(
         0.05, ge=0.0, le=0.10,
         validation_alias=AliasChoices("REPOSITORY_IMPROVEMENT_NEAR_THRESHOLD_TOLERANCE"),
+    )
+    repository_improvement_max_change_ratio: float = Field(
+        0.12, ge=0.01, le=0.50,
+        validation_alias=AliasChoices("REPOSITORY_IMPROVEMENT_MAX_CHANGE_RATIO"),
+    )
+    repository_improvement_max_change_files: int = Field(
+        100, ge=1, le=500,
+        validation_alias=AliasChoices("REPOSITORY_IMPROVEMENT_MAX_CHANGE_FILES"),
+    )
+    repository_improvement_max_work_passes: int = Field(
+        4, ge=1, le=8,
+        validation_alias=AliasChoices("REPOSITORY_IMPROVEMENT_MAX_WORK_PASSES"),
     )
 
     # Optional SQL persistence. HIVE v1 works without this; enable when you want
@@ -737,10 +763,7 @@ class Settings(BaseSettings):
         False, validation_alias=AliasChoices("REPOSITORY_GITHUB_REFRESH_ENABLED")
     )
     repository_github_sources_json: str = Field(
-        '{"HIVE":"Jonathan-Harris1975/HIVE","HIVE-UI":"Jonathan-Harris1975/HIVE-UI",'
-        '"AIMS":"Jonathan-Harris1975/AIMS","AIMS-UI":"Jonathan-Harris1975/AIMS-UI",'
-        '"RAMS":"Jonathan-Harris1975/RAMS","MAST":"Jonathan-Harris1975/MAST",'
-        '"IRS":"Jonathan-Harris1975/IRS","Website":"Jonathan-Harris1975/jonathan-harris-website"}',
+        DEFAULT_GITHUB_SOURCES_JSON,
         validation_alias=AliasChoices("REPOSITORY_GITHUB_SOURCES_JSON"),
     )
     repository_github_branch: str = Field(

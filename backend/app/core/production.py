@@ -5,6 +5,7 @@ from dataclasses import asdict, dataclass
 from urllib.parse import urlparse
 
 from app.core.config import Settings
+from app.core.governed_repositories import GOVERNED_REPOSITORY_ID_SET
 
 
 @dataclass(frozen=True)
@@ -311,7 +312,7 @@ def build_readiness_report(settings: Settings) -> ReadinessReport:
 
     refresh_sources_valid = False
     refresh_source_count = 0
-    required_refresh_ids = {"HIVE", "HIVE-UI", "AIMS", "AIMS-UI", "RAMS", "MAST", "IRS", "Website"}
+    required_refresh_ids = GOVERNED_REPOSITORY_ID_SET
     try:
         refresh_sources = json.loads(settings.repository_github_sources_json or "{}")
         refresh_sources_valid = bool(
@@ -351,6 +352,46 @@ def build_readiness_report(settings: Settings) -> ReadinessReport:
                 "REPOSITORY_GITHUB_SOURCES_JSON catalogue, GITHUB_TOKEN and REPOSITORY_GITHUB_BRANCH."
             ),
             required=production and settings.repository_github_refresh_enabled,
+        )
+    )
+
+    repository_bulk_ready = bool(
+        settings.repository_bulk_max_count >= len(GOVERNED_REPOSITORY_ID_SET)
+        and settings.repository_bulk_max_total_bytes >= settings.max_upload_bytes
+        and 1 <= settings.repository_bulk_concurrency <= settings.repository_bulk_max_count
+    )
+    checks.append(
+        _check(
+            "repository_bulk_ingestion",
+            repository_bulk_ready,
+            "Repository bulk-ingestion limits can accept the governed estate with bounded concurrency.",
+            (
+                "Repository bulk-ingestion limits must allow at least the eight governed repositories, "
+                "a batch at least as large as one upload, and bounded concurrency no greater than the batch count."
+            ),
+            required=production and settings.repository_manager_enabled,
+        )
+    )
+
+    repository_scope_ready = bool(
+        0 < settings.repository_improvement_max_change_ratio <= 0.12
+        and settings.repository_improvement_max_change_files >= 1
+        and 1 <= settings.repository_improvement_max_work_passes <= 8
+    )
+    checks.append(
+        _check(
+            "repository_improvement_scope",
+            repository_scope_ready,
+            (
+                "Repository improvement work scope is bounded independently of Council quality tolerance "
+                f"({settings.repository_improvement_max_change_ratio:.0%} per pass, "
+                f"absolute ceiling {settings.repository_improvement_max_change_files} files)."
+            ),
+            (
+                "Repository improvement work scope must be positive, no greater than 12% per pass, "
+                "and use a finite absolute file ceiling/work-pass cap."
+            ),
+            required=production and settings.repository_manager_enabled,
         )
     )
 
