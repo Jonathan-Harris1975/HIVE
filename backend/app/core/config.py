@@ -10,6 +10,10 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
+        # pydantic-settings 2.15 applies case sensitivity consistently to init and
+        # config-file sources; HIVE intentionally keeps environment-style aliases
+        # case-insensitive across settings sources.
+        case_sensitive=False,
         extra="ignore",
         populate_by_name=True,
     )
