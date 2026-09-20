@@ -9,10 +9,13 @@ import threading
 import time
 import tomllib
 import uuid
+import zipfile
 from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 
 from app.core.config import Settings
+from app.core.governed_repositories import GOVERNED_REPOSITORY_ALIASES
 from app.ingestion.zip_ingestion import UnsafeZipError, extract_zip_safely
 
 # Phase 1 - Repository Intelligence.
@@ -31,19 +34,6 @@ from app.ingestion.zip_ingestion import UnsafeZipError, extract_zip_safely
 
 _REGISTRY_LOCK = threading.Lock()
 _REGISTRY: dict[str, "RepositoryRecord"] = {}
-
-_GOVERNED_REPOSITORY_IDS = {
-    "hive": "HIVE",
-    "hive-ui": "HIVE-UI",
-    "aims": "AIMS",
-    "aims-ui": "AIMS-UI",
-    "rams": "RAMS",
-    "mast": "MAST",
-    "irs": "IRS",
-    "website": "Website",
-    "jonathan-harris-website": "Website",
-    "shared": "Shared",
-}
 
 _LANGUAGE_BY_SUFFIX: dict[str, str] = {
     ".py": "Python",
@@ -154,6 +144,7 @@ class RepositoryManifest:
     created_at: float
     updated_at: float
     indexed_version: int
+    source_commit_sha: str | None = None
 
     def public_payload(self) -> dict[str, object]:
         payload = asdict(self)
@@ -168,6 +159,7 @@ class RepositoryRecord:
     manifest: RepositoryManifest
     files_index: dict[str, str]  # relative path -> sha256, used for incremental reindex
     last_accessed_at: float
+    ingestion_outcome: str = "success"
 
 
 @dataclass(frozen=True)
@@ -181,6 +173,17 @@ class RepositorySummary:
     updated_at: float
     indexed_version: int
     rehydrated: bool = False
+
+
+def repository_snapshot_identity(manifest: RepositoryManifest) -> dict[str, object]:
+    return {
+        "repository_id": manifest.repository_id,
+        "source_filename": manifest.source_filename,
+        "fingerprint": manifest.fingerprint,
+        "indexed_version": manifest.indexed_version,
+        "refresh_timestamp": datetime.fromtimestamp(manifest.updated_at, tz=UTC).isoformat(),
+        "source_commit_sha": manifest.source_commit_sha,
+    }
 
 
 def _repository_temp_root(settings: Settings) -> Path:
@@ -203,7 +206,7 @@ def repository_id_from_filename(source_filename: str) -> str:
     slug = re.sub(r"[^A-Za-z0-9._-]+", "-", stem).strip("-._")
     if not slug:
         raise RepositoryManagerError("Repository filename does not contain a usable repository id")
-    return _GOVERNED_REPOSITORY_IDS.get(slug.lower(), slug)
+    return GOVERNED_REPOSITORY_ALIASES.get(slug.lower(), slug)
 
 
 def _collapse_single_root_directory(workdir: Path) -> str | None:
@@ -409,9 +412,10 @@ def register_repository(
             max_files=max_files,
             max_uncompressed_bytes=max_uncompressed_bytes,
         )
-    except UnsafeZipError as error:
+    except (UnsafeZipError, zipfile.BadZipFile) as error:
         shutil.rmtree(staging_dir, ignore_errors=True)
-        raise RepositoryManagerError(str(error)) from error
+        message = str(error) if isinstance(error, UnsafeZipError) else "Invalid ZIP archive"
+        raise RepositoryManagerError(message) from error
     finally:
         tmp_zip_path.unlink(missing_ok=True)
 
@@ -422,6 +426,8 @@ def register_repository(
     )
     identity_filename = f"{wrapper_name}.zip" if use_wrapper_identity else source_filename
     repository_id = repository_id_from_filename(identity_filename)
+    commit_match = re.search(r"-([0-9a-f]{7,40})$", wrapper_name or "", flags=re.IGNORECASE)
+    source_commit_sha = commit_match.group(1).lower() if commit_match else None
 
     files_index = _build_file_index(staging_dir)
     fingerprint = _fingerprint_from_index(files_index)
@@ -448,6 +454,7 @@ def register_repository(
         created_at=created_at,
         updated_at=now,
         indexed_version=indexed_version,
+        source_commit_sha=source_commit_sha or (previous.manifest.source_commit_sha if previous else None),
     )
 
     workdir = root / repository_id
@@ -456,12 +463,18 @@ def register_repository(
     shutil.rmtree(workdir, ignore_errors=True)
     staging_dir.replace(workdir)
 
+    ingestion_outcome = (
+        "success"
+        if previous is None
+        else ("unchanged" if previous_fingerprint == fingerprint else "updated")
+    )
     record = RepositoryRecord(
         repository_id=repository_id,
         workdir=workdir,
         manifest=manifest,
         files_index=files_index,
         last_accessed_at=now,
+        ingestion_outcome=ingestion_outcome,
     )
     with _REGISTRY_LOCK:
         _REGISTRY[repository_id] = record
@@ -580,6 +593,7 @@ def reindex_repository(repository_id: str) -> RepositoryManifest:
         created_at=record.manifest.created_at,
         updated_at=now,
         indexed_version=version,
+        source_commit_sha=record.manifest.source_commit_sha,
     )
 
     with _REGISTRY_LOCK:
@@ -789,6 +803,7 @@ def rehydrate_registry_from_r2(settings: "Settings") -> int:  # noqa: F821 (forw
                 created_at=float(data.get("created_at", 0)),
                 updated_at=float(data.get("updated_at", 0)),
                 indexed_version=int(data.get("indexed_version", 1)),
+                source_commit_sha=(str(data.get("source_commit_sha")) if data.get("source_commit_sha") else None),
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning(

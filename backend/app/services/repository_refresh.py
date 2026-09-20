@@ -12,6 +12,7 @@ from typing import Any, Awaitable, Callable, cast
 import httpx
 
 from app.core.config import Settings
+from app.core.governed_repositories import GOVERNED_REPOSITORY_ID_SET
 from app.storage.d1 import D1MetadataStore
 
 logger = logging.getLogger("uvicorn.error.hive.repository_refresh")
@@ -23,16 +24,8 @@ _JOB_LOCK = threading.RLock()
 _JOBS: dict[str, dict[str, Any]] = {}
 _TASKS: dict[str, asyncio.Task[None]] = {}
 _MAX_JOBS = 20
-_REQUIRED_GOVERNED_REPOSITORIES = frozenset({
-    "HIVE",
-    "HIVE-UI",
-    "AIMS",
-    "AIMS-UI",
-    "RAMS",
-    "MAST",
-    "IRS",
-    "Website",
-})
+_REQUIRED_GOVERNED_REPOSITORIES = GOVERNED_REPOSITORY_ID_SET
+
 
 IngestCallback = Callable[[bytes, str, str], Awaitable[dict[str, Any]]]
 
@@ -272,8 +265,10 @@ async def _run_refresh_job(
     try:
         for repository_id, slug in sources.items():
             started = _now_iso()
+            stage = "download"
             try:
                 content = await download_github_archive(settings, slug)
+                stage = "ingestion"
                 payload = await ingest(content, f"{repository_id}-main.zip", repository_id)
                 raw_pipeline = payload.get("pipeline")
                 pipeline: dict[str, Any] = (
@@ -285,6 +280,10 @@ async def _run_refresh_job(
                     if isinstance(raw_intelligence, dict)
                     else {}
                 )
+                memory = pipeline.get("memory_seed") if isinstance(pipeline.get("memory_seed"), dict) else {}
+                qa = pipeline.get("qa") if isinstance(pipeline.get("qa"), dict) else {}
+                council = pipeline.get("council") if isinstance(pipeline.get("council"), dict) else {}
+                ai_search = pipeline.get("ai_search") if isinstance(pipeline.get("ai_search"), dict) else {}
                 ok = bool(pipeline.get("required_stages_ready") is True)
                 results.append(
                     {
@@ -293,8 +292,24 @@ async def _run_refresh_job(
                         "ok": ok,
                         "started_at": started,
                         "finished_at": _now_iso(),
+                        "download_status": "success",
+                        "ingestion_status": "success" if ok else "setup_incomplete",
+                        "current_fingerprint": payload.get("fingerprint"),
+                        "indexed_version": payload.get("indexed_version"),
+                        "source_commit_sha": payload.get("source_commit_sha"),
+                        "memory_status": "ready" if memory.get("ok") is True else "failed",
+                        "qa_status": "ready" if qa.get("ok") is True else "failed",
+                        "council_status": "ready" if council.get("ok") is True else "failed",
+                        "intelligence_status": "current" if intelligence.get("ok") is True else "failed",
+                        "ai_search_status": (
+                            "ready"
+                            if ai_search.get("ok") is True
+                            else ("not_configured" if ai_search.get("skipped") else "failed")
+                        ),
                         "pipeline_status": pipeline.get("status"),
                         "finding_count": intelligence.get("finding_count"),
+                        "error": None if ok else "Repository Memory/Intelligence setup did not reach ready state.",
+                        "retryable": not ok,
                     }
                 )
             except Exception as exc:  # noqa: BLE001
@@ -305,7 +320,16 @@ async def _run_refresh_job(
                         "ok": False,
                         "started_at": started,
                         "finished_at": _now_iso(),
+                        "download_status": "failed" if stage == "download" else "success",
+                        "ingestion_status": "not_started" if stage == "download" else "failed",
+                        "current_fingerprint": None,
+                        "memory_status": "not_ready",
+                        "qa_status": "not_ready",
+                        "council_status": "not_ready",
+                        "intelligence_status": "not_ready",
+                        "ai_search_status": "not_ready",
                         "error": str(exc),
+                        "retryable": True,
                     }
                 )
             _set_job(settings, job_id, results=list(results), completed_count=len(results))

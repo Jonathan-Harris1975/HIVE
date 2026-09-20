@@ -42,7 +42,7 @@ logger = logging.getLogger("uvicorn.error.hive.repository_pipeline")
 def _seed_repository_memory(settings: Settings, manifest: RepositoryManifest) -> dict[str, Any]:
     """Populate every scalar Repository Memory field from the uploaded snapshot."""
     try:
-        from app.services.repository_manager import get_repository
+        from app.services.repository_manager import get_repository, repository_snapshot_identity
         from app.services.repository_memory import set_memory_field
         from app.services.repository_profile import build_repository_memory_profile
         from app.storage.d1 import D1MetadataStore
@@ -71,6 +71,8 @@ def _seed_repository_memory(settings: Settings, manifest: RepositoryManifest) ->
                 "created_at": manifest.created_at,
                 "updated_at": manifest.updated_at,
                 "indexed_version": manifest.indexed_version,
+                "source_commit_sha": manifest.source_commit_sha,
+                "snapshot_identity": repository_snapshot_identity(manifest),
             },
             **build_repository_memory_profile(record),
         }
@@ -169,6 +171,61 @@ async def _index_in_ai_search(settings: Settings, manifest: RepositoryManifest) 
         return {"ok": False, "error": str(exc)}
 
 
+def _persist_pipeline_state(
+    settings: Settings,
+    manifest: RepositoryManifest,
+    pipeline: dict[str, Any],
+) -> dict[str, Any]:
+    try:
+        from app.services.repository_manager import repository_snapshot_identity
+        from app.services.repository_memory import set_memory_field
+        from app.storage.d1 import D1MetadataStore
+
+        store = D1MetadataStore(settings)
+        identity = repository_snapshot_identity(manifest)
+        ai_search = pipeline.get("ai_search") if isinstance(pipeline.get("ai_search"), dict) else {}
+        index_state = {
+            "snapshot_identity": identity,
+            "status": (
+                "ready"
+                if ai_search.get("ok") is True
+                else ("not_configured" if ai_search.get("skipped") else "failed")
+            ),
+            "details": ai_search,
+        }
+        set_memory_field(
+            store,
+            repository_id=manifest.repository_id,
+            field_name="repository_index_state",
+            content=index_state,
+        )
+        failed_stages = list(pipeline.get("failed_stages") or [])
+        pipeline_state = {
+            "snapshot_identity": identity,
+            "status": pipeline.get("status"),
+            "required_stages_ready": pipeline.get("required_stages_ready") is True,
+            "failed_stages": failed_stages,
+            "last_pipeline_failure": (
+                ", ".join(str(item) for item in failed_stages) if failed_stages else None
+            ),
+            "repair_required": pipeline.get("required_stages_ready") is not True,
+        }
+        set_memory_field(
+            store,
+            repository_id=manifest.repository_id,
+            field_name="repository_pipeline_state",
+            content=pipeline_state,
+        )
+        return {"ok": True, "index_state": index_state, "pipeline_state": pipeline_state}
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Repository pipeline state persistence failed repository_id=%s error=%s",
+            manifest.repository_id,
+            exc,
+        )
+        return {"ok": False, "error": str(exc)}
+
+
 # ---------------------------------------------------------------------------
 # Main pipeline entry point
 # ---------------------------------------------------------------------------
@@ -260,4 +317,7 @@ async def run_repository_pipeline(
         )
 
     pipeline["required_stages_ready"] = not required_failed
+    pipeline["state_persistence"] = await asyncio.to_thread(
+        _persist_pipeline_state, settings, manifest, pipeline
+    )
     return pipeline

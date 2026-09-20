@@ -34,6 +34,8 @@ SCALAR_FIELDS = (
     "build_profile",
     "deployment_profile",
     "environment_schema",
+    "repository_index_state",
+    "repository_pipeline_state",
 )
 
 HISTORY_FIELDS = (

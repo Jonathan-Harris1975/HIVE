@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import re
 import shutil
 import tempfile
@@ -37,11 +38,10 @@ _JOB_LOCK = threading.RLock()
 _JOBS: dict[str, dict[str, Any]] = {}
 _TASKS: dict[str, asyncio.Task[None]] = {}
 _MAX_JOBS = 30
-_TERMINAL_STATUSES = {"completed", "failed"}
+_TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
 
 _MAX_CONTEXT_FILES = 18
 _MAX_CONTEXT_CHARS = 140_000
-_MAX_CHANGE_FILES = 24
 _MAX_GENERATED_CHARS = 800_000
 _MAX_FILE_CHARS = 240_000
 
@@ -83,6 +83,14 @@ _SENSITIVE_NAMES = {
     ".env.production",
     "id_rsa",
     "id_ed25519",
+    "credentials.json",
+    "secrets.json",
+}
+_BINARY_ASSET_SUFFIXES = {
+    ".7z", ".avi", ".bin", ".bmp", ".class", ".dll", ".dmg", ".doc", ".docx",
+    ".exe", ".gif", ".gz", ".ico", ".jar", ".jpeg", ".jpg", ".mov", ".mp3",
+    ".mp4", ".o", ".obj", ".pdf", ".png", ".so", ".tar", ".webp", ".woff",
+    ".woff2", ".xls", ".xlsx", ".zip",
 }
 _PATH_LIKE_RE = re.compile(
     r"(?:^|[\s'\"`])([A-Za-z0-9_.@+-]+(?:/[A-Za-z0-9_.@+\-]+)+\.[A-Za-z0-9]+)"
@@ -125,7 +133,13 @@ def _normalise_relative_path(raw_path: object) -> str:
     path = Path(value)
     if not value or path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
         raise RepositoryImprovementError(f"Model returned an unsafe repository path: {raw_path!r}")
-    if path.name.lower() in _SENSITIVE_NAMES or any(part == ".git" for part in path.parts):
+    lowered_name = path.name.lower()
+    if (
+        lowered_name in _SENSITIVE_NAMES
+        or lowered_name.startswith(".env.")
+        or path.suffix.lower() in {".pem", ".key", ".p12", ".pfx"}
+        or any(part == ".git" for part in path.parts)
+    ):
         raise RepositoryImprovementError(f"Model attempted to modify a protected path: {value}")
     return path.as_posix()
 
@@ -346,6 +360,12 @@ def _model_request(
     )
 
     stage = str((orchestration or {}).get("stage") or "self_improvement")
+    work_scope = (orchestration or {}).get("work_scope")
+    effective_file_limit = (
+        int(work_scope.get("effective_file_limit"))
+        if isinstance(work_scope, dict) and work_scope.get("effective_file_limit") is not None
+        else 1
+    )
     if stage == "council":
         system = (
             "You are HIVE's expert repository review council. Review the best candidate produced by the "
@@ -381,6 +401,9 @@ def _model_request(
                         "rationale": "Which Intelligence finding this change addresses.",
                     }
                 ],
+                "remaining_findings": [
+                    "Any Repository Intelligence finding not addressed by this pass."
+                ],
                 "remaining_risks": [
                     "Anything that still requires native CI, deployment or human verification."
                 ],
@@ -390,7 +413,7 @@ def _model_request(
                 "Only modify files needed to address the supplied findings.",
                 "Never write .env, private keys, credentials, tokens or generated dependency/vendor directories.",
                 "Preserve public API and deployment contracts unless evidence requires a compatible migration.",
-                f"Return no more than {_MAX_CHANGE_FILES} file changes.",
+                f"Return no more than {effective_file_limit} file changes in this work pass.",
                 "If no safe code change is justified, return an empty changes array and explain why in remaining_risks.",
             ],
         },
@@ -441,13 +464,13 @@ def _parse_json_object(text: str) -> dict[str, Any]:
     return cast(dict[str, Any], parsed)
 
 
-def _validated_changes(payload: dict[str, Any]) -> list[dict[str, Any]]:
+def _validated_changes(payload: dict[str, Any], *, max_change_files: int) -> list[dict[str, Any]]:
     raw_changes = payload.get("changes")
     if not isinstance(raw_changes, list):
         raise RepositoryImprovementError("Coding model response is missing a changes array")
-    if len(raw_changes) > _MAX_CHANGE_FILES:
+    if len(raw_changes) > max_change_files:
         raise RepositoryImprovementError(
-            f"Coding model proposed {len(raw_changes)} files; maximum is {_MAX_CHANGE_FILES}"
+            f"Coding model proposed {len(raw_changes)} files; work-pass maximum is {max_change_files}"
         )
 
     changes: list[dict[str, Any]] = []
@@ -850,6 +873,85 @@ def _ignored_workspace_path(relative: Path) -> bool:
     )
 
 
+def _explicit_binary_finding_paths(intelligence: dict[str, Any]) -> set[str]:
+    context = intelligence.get("repository_context")
+    if not isinstance(context, dict):
+        return set()
+    raw = context.get("implicated_files")
+    if not isinstance(raw, list):
+        return set()
+    return {str(item).replace("\\", "/").lstrip("/") for item in raw if isinstance(item, str)}
+
+
+def _eligible_modifiable_files(root: Path, intelligence: dict[str, Any]) -> dict[str, Path]:
+    explicitly_implicated = _explicit_binary_finding_paths(intelligence)
+    eligible: dict[str, Path] = {}
+    for relative, path in _workspace_files(root).items():
+        rel = Path(relative)
+        lowered_name = rel.name.lower()
+        if (
+            lowered_name in _SENSITIVE_NAMES
+            or lowered_name.startswith(".env.")
+            or rel.suffix.lower() in {".pem", ".key", ".p12", ".pfx"}
+        ):
+            continue
+        if rel.suffix.lower() in _BINARY_ASSET_SUFFIXES and relative not in explicitly_implicated:
+            continue
+        eligible[relative] = path
+    return eligible
+
+
+def _work_scope_budget(
+    settings: Settings,
+    root: Path,
+    intelligence: dict[str, Any],
+) -> dict[str, Any]:
+    eligible_count = len(_eligible_modifiable_files(root, intelligence))
+    ratio = float(settings.repository_improvement_max_change_ratio)
+    ratio_limit = max(1, math.floor(eligible_count * ratio)) if eligible_count else 1
+    absolute_limit = max(1, int(settings.repository_improvement_max_change_files))
+    effective_limit = min(ratio_limit, absolute_limit)
+    return {
+        "eligible_file_count": eligible_count,
+        "configured_ratio": ratio,
+        "percentage_limit": ratio_limit,
+        "absolute_file_ceiling": absolute_limit,
+        "effective_file_limit": effective_limit,
+    }
+
+
+def _work_scope_usage(
+    scope: dict[str, Any],
+    changed: list[str],
+    deleted: list[str],
+) -> dict[str, Any]:
+    modified_count = len(set(changed) | set(deleted))
+    eligible_count = int(scope.get("eligible_file_count") or 0)
+    actual_ratio = (modified_count / eligible_count) if eligible_count else (1.0 if modified_count else 0.0)
+    return {
+        **scope,
+        "files_modified": modified_count,
+        "percentage_actually_modified": round(actual_ratio, 6),
+    }
+
+
+def _findings_for_work_pass(
+    intelligence: dict[str, Any],
+    work_pass: int,
+    total_passes: int,
+) -> dict[str, Any]:
+    """Return a deterministic coherent slice of findings for one work pass."""
+    findings = intelligence.get("findings")
+    if not isinstance(findings, list) or total_passes <= 1 or len(findings) <= 1:
+        return intelligence
+    chunk = max(1, math.ceil(len(findings) / total_passes))
+    start = min(len(findings), (work_pass - 1) * chunk)
+    selected = findings[start : start + chunk]
+    if not selected:
+        selected = findings[-chunk:]
+    return {**intelligence, "findings": selected}
+
+
 def _workspace_files(root: Path) -> dict[str, Path]:
     files: dict[str, Path] = {}
     for path in root.rglob("*"):
@@ -893,6 +995,7 @@ def _workspace_diff(source: Path, candidate: Path) -> tuple[list[str], list[str]
 def _bounded_history(history: list[dict[str, Any]], *, limit: int = 8) -> list[dict[str, Any]]:
     return [
         {
+            "work_pass": item.get("work_pass"),
             "stage": item.get("stage"),
             "iteration": item.get("iteration"),
             "model": item.get("model"),
@@ -926,7 +1029,13 @@ def _store_artifact(
     return key, True
 
 
-async def _run_job(settings: Settings, job_id: str, repository_id: str) -> None:
+async def _run_job(
+    settings: Settings,
+    job_id: str,
+    repository_id: str,
+    execution_mode: str = "single_pass",
+    max_work_passes: int = 1,
+) -> None:
     job_root = _jobs_root(settings) / job_id
     staging = job_root / "workspace"
     job_root.mkdir(parents=True, exist_ok=True)
@@ -989,182 +1098,269 @@ async def _run_job(settings: Settings, job_id: str, repository_id: str) -> None:
         )
 
         outcomes: list[dict[str, Any]] = []
+        work_pass_ledger: list[dict[str, Any]] = []
         best_score = baseline_qa_score
         selected_payload: dict[str, Any] | None = None
         selected_model: str | None = None
         selected_validation: dict[str, Any] | None = None
         accepted_stage: str | None = None
         accepted_iteration: int | None = None
+        accepted_work_pass: int | None = None
         accepted_under_tolerance = False
 
-        async def run_attempt(
-            *,
-            stage: str,
-            iteration: int,
-            model: str,
-            allow_near_threshold: bool,
-        ) -> bool:
-            nonlocal best_score
-            nonlocal selected_payload
-            nonlocal selected_model
-            nonlocal selected_validation
-            nonlocal accepted_stage
-            nonlocal accepted_iteration
-            nonlocal accepted_under_tolerance
+        normalised_mode = execution_mode.strip().lower()
+        if normalised_mode not in {"single_pass", "multi_pass"}:
+            raise RepositoryImprovementError("execution_mode must be single_pass or multi_pass")
+        configured_pass_cap = max(1, int(settings.repository_improvement_max_work_passes))
+        requested_passes = max(1, int(max_work_passes))
+        total_work_passes = 1 if normalised_mode == "single_pass" else min(requested_passes, configured_pass_cap)
 
-            attempt_root = job_root / f"{stage}-{iteration}-workspace"
-            shutil.rmtree(attempt_root, ignore_errors=True)
-            shutil.copytree(staging, attempt_root, dirs_exist_ok=False)
-            _set_job(
-                settings,
-                job_id,
-                stage=f"{stage}_{iteration}",
-                orchestration={
+        for work_pass in range(1, total_work_passes + 1):
+            pass_baseline = job_root / f"work-pass-{work_pass}-baseline-workspace"
+            shutil.rmtree(pass_baseline, ignore_errors=True)
+            shutil.copytree(staging, pass_baseline, dirs_exist_ok=False)
+            work_scope = _work_scope_budget(settings, pass_baseline, intelligence)
+            pass_start_score = best_score
+            pass_outcomes_start = len(outcomes)
+            pass_selected_validation: dict[str, Any] | None = None
+            pass_intelligence = _findings_for_work_pass(intelligence, work_pass, total_work_passes)
+
+            async def run_attempt(
+                *,
+                stage: str,
+                iteration: int,
+                model: str,
+                allow_near_threshold: bool,
+            ) -> bool:
+                nonlocal best_score
+                nonlocal selected_payload
+                nonlocal selected_model
+                nonlocal selected_validation
+                nonlocal pass_selected_validation
+                nonlocal accepted_stage
+                nonlocal accepted_iteration
+                nonlocal accepted_work_pass
+                nonlocal accepted_under_tolerance
+
+                attempt_root = job_root / f"work-pass-{work_pass}-{stage}-{iteration}-workspace"
+                shutil.rmtree(attempt_root, ignore_errors=True)
+                shutil.copytree(staging, attempt_root, dirs_exist_ok=False)
+                _set_job(
+                    settings,
+                    job_id,
+                    stage=f"work_pass_{work_pass}_{stage}_{iteration}",
+                    progress={
+                        "execution_mode": normalised_mode,
+                        "work_pass": work_pass,
+                        "max_work_passes": total_work_passes,
+                        "attempt_stage": stage,
+                        "attempt_iteration": iteration,
+                    },
+                    orchestration={
+                        "target_qa_score": round(target_score, 3),
+                        "near_threshold_tolerance": round(tolerance, 3),
+                        "work_pass": work_pass,
+                        "max_work_passes": total_work_passes,
+                        "work_scope": work_scope,
+                        "self_improvement_max_loops": settings.repository_improvement_max_loops,
+                        "council_max_runs": settings.repository_improvement_max_council_runs,
+                        "outcomes": outcomes,
+                    },
+                )
+
+                context_files = _read_context_files(record, pass_intelligence, root=staging)
+                orchestration_context = {
+                    "stage": stage,
+                    "iteration": iteration,
+                    "work_pass": work_pass,
+                    "max_work_passes": total_work_passes,
+                    "execution_mode": normalised_mode,
+                    "work_scope": work_scope,
                     "target_qa_score": round(target_score, 3),
                     "near_threshold_tolerance": round(tolerance, 3),
-                    "self_improvement_max_loops": settings.repository_improvement_max_loops,
-                    "council_max_runs": settings.repository_improvement_max_council_runs,
-                    "outcomes": outcomes,
-                },
-            )
+                    "best_qa_score": round(best_score, 3),
+                    "previous_attempts": _bounded_history(outcomes),
+                    "previous_work_passes": work_pass_ledger[-3:],
+                    "policy": (
+                        "Repository work passes are independent from model self-improvement loops and Council review. "
+                        "This pass must stay inside its work-scope budget. Security/build regressions are never tolerable."
+                    ),
+                }
+                outcome: dict[str, Any] = {
+                    "work_pass": work_pass,
+                    "stage": stage,
+                    "iteration": iteration,
+                    "model": model,
+                    "status": "running",
+                    "accepted": False,
+                    "accepted_under_near_threshold_tolerance": False,
+                    # Backwards compatibility for persisted consumers.
+                    "accepted_under_5_percent_rule": False,
+                }
+                try:
+                    model_payload, model_used = await _run_model(
+                        settings,
+                        repository_id,
+                        pass_intelligence,
+                        context_files,
+                        model=model,
+                        orchestration=orchestration_context,
+                    )
+                    outcome["model"] = model_used or model
+                    changes = _validated_changes(
+                        model_payload,
+                        max_change_files=int(work_scope["effective_file_limit"]),
+                    )
+                    outcome["proposed_change_count"] = len(changes)
+                    if not changes:
+                        outcome.update(status="no_safe_changes", reason="model_returned_empty_change_set")
+                        outcomes.append(outcome)
+                        shutil.rmtree(attempt_root, ignore_errors=True)
+                        return False
 
-            context_files = _read_context_files(record, intelligence, root=staging)
-            orchestration_context = {
-                "stage": stage,
-                "iteration": iteration,
-                "target_qa_score": round(target_score, 3),
-                "near_threshold_tolerance": round(tolerance, 3),
-                "best_qa_score": round(best_score, 3),
-                "previous_attempts": _bounded_history(outcomes),
-                "policy": (
-                    "Self-improvement loops must run before council review. "
-                    "Security/build regressions are never tolerable. Minor non-blocking content issues may remain "
-                    "for the monthly audit once the quality gate is met."
-                ),
-            }
-            outcome: dict[str, Any] = {
-                "stage": stage,
-                "iteration": iteration,
-                "model": model,
-                "status": "running",
-                "accepted": False,
-                "accepted_under_5_percent_rule": False,
-            }
-            try:
-                model_payload, model_used = await _run_model(
-                    settings,
-                    repository_id,
-                    intelligence,
-                    context_files,
-                    model=model,
-                    orchestration=orchestration_context,
-                )
-                outcome["model"] = model_used or model
-                changes = _validated_changes(model_payload)
-                outcome["proposed_change_count"] = len(changes)
-                if not changes:
-                    outcome.update(status="no_safe_changes", reason="model_returned_empty_change_set")
-                    outcomes.append(outcome)
-                    shutil.rmtree(attempt_root, ignore_errors=True)
-                    return False
+                    _apply_changes(attempt_root, changes)
+                    attempt_changed, attempt_deleted = _workspace_diff(staging, attempt_root)
+                    if not attempt_changed and not attempt_deleted:
+                        outcome.update(status="no_effect", reason="model_changes_did_not_modify_workspace")
+                        outcomes.append(outcome)
+                        shutil.rmtree(attempt_root, ignore_errors=True)
+                        return False
 
-                _apply_changes(attempt_root, changes)
-                attempt_changed, attempt_deleted = _workspace_diff(staging, attempt_root)
-                if not attempt_changed and not attempt_deleted:
-                    outcome.update(status="no_effect", reason="model_changes_did_not_modify_workspace")
-                    outcomes.append(outcome)
-                    shutil.rmtree(attempt_root, ignore_errors=True)
-                    return False
+                    pass_changed, pass_deleted = _workspace_diff(pass_baseline, attempt_root)
+                    pass_change_count = len(set(pass_changed) | set(pass_deleted))
+                    if pass_change_count > int(work_scope["effective_file_limit"]):
+                        raise RepositoryImprovementError(
+                            f"Work pass {work_pass} would modify {pass_change_count} files; "
+                            f"maximum is {work_scope['effective_file_limit']}"
+                        )
 
-                validation = _validate_candidate(
-                    repository_id=repository_id,
-                    root=attempt_root,
-                    record=record,
-                    intelligence=intelligence,
-                    target_score=target_score,
-                    tolerance=tolerance,
-                )
-                candidate_score = float(validation["score"])
-                outcome.update(
-                    status="validated",
-                    qa_score=candidate_score,
-                    score_delta=round(candidate_score - baseline_qa_score, 3),
-                    hard_blockers=list(validation["hard_blockers"]),
-                    new_warning_checks=list(validation["new_warning_checks"]),
-                    changed_files=attempt_changed,
-                    deleted_files=attempt_deleted,
-                    meets_target=bool(validation["meets_target"]),
-                    within_tolerance=bool(validation["within_tolerance"]),
-                )
+                    validation = _validate_candidate(
+                        repository_id=repository_id,
+                        root=attempt_root,
+                        record=record,
+                        intelligence=intelligence,
+                        target_score=target_score,
+                        tolerance=tolerance,
+                    )
+                    candidate_score = float(validation["score"])
+                    outcome.update(
+                        status="validated",
+                        qa_score=candidate_score,
+                        score_delta=round(candidate_score - pass_start_score, 3),
+                        hard_blockers=list(validation["hard_blockers"]),
+                        new_warning_checks=list(validation["new_warning_checks"]),
+                        changed_files=attempt_changed,
+                        deleted_files=attempt_deleted,
+                        work_scope=_work_scope_usage(work_scope, pass_changed, pass_deleted),
+                        meets_target=bool(validation["meets_target"]),
+                        within_tolerance=bool(validation["within_tolerance"]),
+                    )
 
-                promotable = bool(validation["eligible"]) and candidate_score + 0.001 >= best_score
-                if promotable:
-                    shutil.rmtree(staging, ignore_errors=True)
-                    shutil.move(str(attempt_root), str(staging))
-                    best_score = candidate_score
-                    selected_payload = model_payload
-                    selected_model = str(model_used or model)
-                    selected_validation = validation
-                    outcome["promoted"] = True
-                else:
-                    outcome["promoted"] = False
-                    shutil.rmtree(attempt_root, ignore_errors=True)
+                    promotable = bool(validation["eligible"]) and candidate_score + 0.001 >= best_score
+                    if promotable:
+                        shutil.rmtree(staging, ignore_errors=True)
+                        shutil.move(str(attempt_root), str(staging))
+                        best_score = candidate_score
+                        selected_payload = model_payload
+                        selected_model = str(model_used or model)
+                        selected_validation = validation
+                        pass_selected_validation = validation
+                        outcome["promoted"] = True
+                    else:
+                        outcome["promoted"] = False
+                        shutil.rmtree(attempt_root, ignore_errors=True)
 
-                accepted = promotable and bool(validation["meets_target"])
-                accepted_by_tolerance = (
-                    promotable
-                    and allow_near_threshold
-                    and bool(validation["within_tolerance"])
-                )
-                if accepted or accepted_by_tolerance:
-                    accepted_stage = stage
-                    accepted_iteration = iteration
-                    accepted_under_tolerance = accepted_by_tolerance
-                    outcome["accepted"] = True
-                    outcome["accepted_under_5_percent_rule"] = accepted_by_tolerance
+                    accepted = promotable and bool(validation["meets_target"])
+                    accepted_by_tolerance = (
+                        promotable
+                        and allow_near_threshold
+                        and bool(validation["within_tolerance"])
+                    )
+                    if accepted or accepted_by_tolerance:
+                        accepted_stage = stage
+                        accepted_iteration = iteration
+                        accepted_work_pass = work_pass
+                        accepted_under_tolerance = accepted_by_tolerance
+                        outcome["accepted"] = True
+                        outcome["accepted_under_near_threshold_tolerance"] = accepted_by_tolerance
+                        outcome["accepted_under_5_percent_rule"] = accepted_by_tolerance
+                        outcome["status"] = (
+                            "accepted_near_threshold" if accepted_by_tolerance else "accepted_target_met"
+                        )
+                        outcomes.append(outcome)
+                        return True
+
                     outcome["status"] = (
-                        "accepted_near_threshold" if accepted_by_tolerance else "accepted_target_met"
+                        "promoted_below_target" if promotable else "rejected_by_validation"
                     )
                     outcomes.append(outcome)
-                    return True
+                    return False
+                except Exception as exc:  # noqa: BLE001
+                    outcome.update(status="attempt_failed", error=str(exc))
+                    outcomes.append(outcome)
+                    shutil.rmtree(attempt_root, ignore_errors=True)
+                    return False
 
-                outcome["status"] = (
-                    "promoted_below_target" if promotable else "rejected_by_validation"
-                )
-                outcomes.append(outcome)
-                return False
-            except Exception as exc:  # noqa: BLE001
-                outcome.update(status="attempt_failed", error=str(exc))
-                outcomes.append(outcome)
-                shutil.rmtree(attempt_root, ignore_errors=True)
-                return False
-
-        # Self-improvement phase: cheaper/smaller candidates first, bounded at four.
-        for iteration, model in enumerate(loop_models, start=1):
-            if await run_attempt(
-                stage="self_improvement",
-                iteration=iteration,
-                model=model,
-                allow_near_threshold=False,
-            ):
-                break
-
-        # Council phase only begins after every configured self-improvement loop
-        # failed to meet the target. The hard ceiling is two review runs.
-        if accepted_stage is None:
-            for iteration, model in enumerate(council_models, start=1):
+            for iteration, model in enumerate(loop_models, start=1):
                 if await run_attempt(
-                    stage="council",
+                    stage="self_improvement",
                     iteration=iteration,
                     model=model,
-                    allow_near_threshold=True,
+                    allow_near_threshold=False,
                 ):
                     break
 
+            if accepted_stage is None:
+                for iteration, model in enumerate(council_models, start=1):
+                    if await run_attempt(
+                        stage="council",
+                        iteration=iteration,
+                        model=model,
+                        allow_near_threshold=True,
+                    ):
+                        break
+
+            pass_changed, pass_deleted = _workspace_diff(pass_baseline, staging)
+            pass_attempts = outcomes[pass_outcomes_start:]
+            pass_scope_usage = _work_scope_usage(work_scope, pass_changed, pass_deleted)
+            pass_ledger = {
+                "work_pass": work_pass,
+                "status": "accepted" if accepted_work_pass == work_pass else ("progressed" if pass_changed or pass_deleted else "blocked"),
+                "changed_files": pass_changed,
+                "deleted_files": pass_deleted,
+                "work_scope": pass_scope_usage,
+                "models_used": [str(item.get("model")) for item in pass_attempts if item.get("model")],
+                "attempts": pass_attempts,
+                "qa_result": pass_selected_validation.get("qa") if pass_selected_validation else None,
+                "security_result": pass_selected_validation.get("security_validation") if pass_selected_validation else None,
+            }
+            work_pass_ledger.append(pass_ledger)
+            shutil.rmtree(pass_baseline, ignore_errors=True)
+            _set_job(
+                settings,
+                job_id,
+                progress={
+                    "execution_mode": normalised_mode,
+                    "completed_work_passes": work_pass,
+                    "max_work_passes": total_work_passes,
+                    "accepted": accepted_work_pass is not None,
+                },
+                work_pass_ledger=work_pass_ledger,
+            )
+
+            if accepted_work_pass is not None:
+                break
+            if normalised_mode == "single_pass":
+                break
+            if not pass_changed and not pass_deleted:
+                break
+
         if accepted_stage is None or selected_payload is None or selected_validation is None:
+            tolerance_percent = round(tolerance * 100, 2)
             raise RepositoryImprovementError(
-                "Repository improvement exhausted self-improvement loops and the bounded council review "
-                "without meeting the quality threshold or its permitted 5% council tolerance."
+                "Repository improvement exhausted the configured work passes, self-improvement loops and bounded "
+                f"Council review without meeting the quality threshold or its permitted {tolerance_percent}% "
+                "near-threshold tolerance."
             )
 
         changed, deleted = _workspace_diff(record.workdir, staging)
@@ -1192,19 +1388,37 @@ async def _run_job(settings: Settings, job_id: str, repository_id: str) -> None:
         if native_ci_risk not in remaining_risks:
             remaining_risks.append(native_ci_risk)
         if accepted_under_tolerance:
+            tolerance_percent = round(tolerance * 100, 2)
             monthly_audit_risk = (
-                "Accepted under the configured 5% near-threshold rule after council review; minor non-blocking "
-                "issues may remain and should be revisited by the monthly audit."
+                f"Accepted under the configured {tolerance_percent:g}% near-threshold tolerance after Council review; "
+                "minor non-blocking issues may remain and should be revisited by the monthly audit."
             )
             if monthly_audit_risk not in remaining_risks:
                 remaining_risks.append(monthly_audit_risk)
+
+        raw_remaining_findings = selected_payload.get("remaining_findings")
+        remaining_findings = (
+            [str(item) for item in raw_remaining_findings]
+            if isinstance(raw_remaining_findings, list)
+            else []
+        )
+        cumulative_scope = _work_scope_usage(
+            _work_scope_budget(settings, record.workdir, intelligence),
+            changed,
+            deleted,
+        )
 
         self_improvement_outcomes = [
             item for item in outcomes if item.get("stage") == "self_improvement"
         ]
         council_outcomes = [item for item in outcomes if item.get("stage") == "council"]
         orchestration_report = {
-            "protocol": "loop_first_bounded_council_v1",
+            "protocol": "work_passes_loop_first_bounded_council_v2",
+            "execution_mode": normalised_mode,
+            "max_work_passes": total_work_passes,
+            "work_passes_run": len(work_pass_ledger),
+            "work_pass_ledger": work_pass_ledger,
+            "accepted_work_pass": accepted_work_pass,
             "target_qa_score": round(target_score, 3),
             "near_threshold_tolerance": round(tolerance, 3),
             "self_improvement_max_loops": settings.repository_improvement_max_loops,
@@ -1214,6 +1428,7 @@ async def _run_job(settings: Settings, job_id: str, repository_id: str) -> None:
             "council_runs": council_outcomes,
             "accepted_stage": accepted_stage,
             "accepted_iteration": accepted_iteration,
+            "accepted_under_near_threshold_tolerance": accepted_under_tolerance,
             "accepted_under_5_percent_rule": accepted_under_tolerance,
             "final_qa_score": qa_after.get("score"),
         }
@@ -1225,6 +1440,11 @@ async def _run_job(settings: Settings, job_id: str, repository_id: str) -> None:
             "summary": summary,
             "changed_files": changed,
             "deleted_files": deleted,
+            "cumulative_change_count": len(set(changed) | set(deleted)),
+            "cumulative_work_scope": cumulative_scope,
+            "work_pass_ledger": work_pass_ledger,
+            "remaining_findings": remaining_findings,
+            "remaining_external_ci_verification": [native_ci_risk],
             "remaining_risks": remaining_risks,
             "static_validation": qa_after,
             "security_validation": security_validation,
@@ -1268,6 +1488,8 @@ async def _run_job(settings: Settings, job_id: str, repository_id: str) -> None:
                     "deleted_files": deleted,
                     "remaining_risks": remaining_risks,
                     "qa_score_after": qa_after.get("score"),
+                    "cumulative_work_scope": cumulative_scope,
+                    "work_pass_ledger": work_pass_ledger,
                     "orchestration": orchestration_report,
                 },
             )
@@ -1294,7 +1516,12 @@ async def _run_job(settings: Settings, job_id: str, repository_id: str) -> None:
             change_count=len(changed) + len(deleted),
             remaining_risks=remaining_risks,
             qa_score_after=qa_after.get("score"),
+            accepted_under_near_threshold_tolerance=accepted_under_tolerance,
             accepted_under_5_percent_rule=accepted_under_tolerance,
+            cumulative_work_scope=cumulative_scope,
+            work_pass_ledger=work_pass_ledger,
+            remaining_findings=remaining_findings,
+            remaining_external_ci_verification=[native_ci_risk],
             orchestration=orchestration_report,
             artifacts={
                 "changed_files": {
@@ -1313,6 +1540,17 @@ async def _run_job(settings: Settings, job_id: str, repository_id: str) -> None:
                 "updated_repository": str(full_zip),
             },
         )
+    except asyncio.CancelledError:
+        _set_job(
+            settings,
+            job_id,
+            status="cancelled",
+            stage="cancelled",
+            finished_at=_now_iso(),
+            ok=False,
+            error="Repository improvement cancelled by operator.",
+        )
+        raise
     except Exception as exc:  # noqa: BLE001
         logger.exception(
             "Repository improvement failed repository_id=%s job_id=%s", repository_id, job_id
@@ -1334,7 +1572,13 @@ async def _run_job(settings: Settings, job_id: str, repository_id: str) -> None:
         if settings.production_require_r2:
             shutil.rmtree(job_root, ignore_errors=True)
 
-def start_improvement_job(settings: Settings, repository_id: str) -> dict[str, Any]:
+def start_improvement_job(
+    settings: Settings,
+    repository_id: str,
+    *,
+    execution_mode: str = "single_pass",
+    max_work_passes: int | None = None,
+) -> dict[str, Any]:
     if not settings.repository_manager_enabled:
         raise RepositoryImprovementError("Repository Manager is disabled")
     if not settings.openrouter_api_key.strip():
@@ -1358,6 +1602,16 @@ def start_improvement_job(settings: Settings, repository_id: str) -> dict[str, A
             f"Repository improvement job {active} is already running for {repository_id}"
         )
 
+    normalised_mode = execution_mode.strip().lower()
+    if normalised_mode not in {"single_pass", "multi_pass"}:
+        raise RepositoryImprovementError("execution_mode must be single_pass or multi_pass")
+    configured_cap = int(settings.repository_improvement_max_work_passes)
+    requested_passes = 1 if normalised_mode == "single_pass" else int(max_work_passes or configured_cap)
+    if requested_passes < 1 or requested_passes > configured_cap:
+        raise RepositoryImprovementError(
+            f"max_work_passes must be between 1 and {configured_cap}"
+        )
+
     job_id = uuid.uuid4().hex
     payload = _set_job(
         settings,
@@ -1367,10 +1621,20 @@ def start_improvement_job(settings: Settings, repository_id: str) -> dict[str, A
         stage="queued",
         created_at=_now_iso(),
         source_fingerprint=record.manifest.fingerprint,
+        execution_mode=normalised_mode,
+        max_work_passes=requested_passes,
+        progress={"completed_work_passes": 0, "max_work_passes": requested_passes},
         ok=None,
     )
     task = asyncio.create_task(
-        _run_job(settings, job_id, repository_id), name=f"repository-improvement-{job_id}"
+        _run_job(
+            settings,
+            job_id,
+            repository_id,
+            execution_mode=normalised_mode,
+            max_work_passes=requested_passes,
+        ),
+        name=f"repository-improvement-{job_id}",
     )
     with _JOB_LOCK:
         _TASKS[job_id] = task
@@ -1381,6 +1645,32 @@ def start_improvement_job(settings: Settings, repository_id: str) -> dict[str, A
 
     task.add_done_callback(forget_task)
     return payload
+
+
+def cancel_improvement_job(
+    settings: Settings,
+    repository_id: str,
+    job_id: str,
+) -> dict[str, Any]:
+    job = get_improvement_job(settings, repository_id, job_id)
+    if job is None:
+        raise RepositoryImprovementError("Unknown repository improvement job")
+    if str(job.get("status")) in _TERMINAL_STATUSES:
+        return job
+    with _JOB_LOCK:
+        task = _TASKS.get(job_id)
+        if task is not None and not task.done():
+            task.cancel()
+    return _set_job(
+        settings,
+        job_id,
+        status="cancelled",
+        stage="cancelled",
+        finished_at=_now_iso(),
+        ok=False,
+        error="Repository improvement cancelled by operator.",
+    )
+
 
 
 def improvement_artifact(

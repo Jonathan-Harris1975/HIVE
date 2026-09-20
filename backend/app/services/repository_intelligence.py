@@ -7,7 +7,11 @@ from typing import Any
 from app.core.config import Settings
 from app.services.repository_council import run_and_record_council
 from app.services.repository_learning import update_project_dna
-from app.services.repository_manager import RepositoryManagerError, get_repository
+from app.services.repository_manager import (
+    RepositoryManagerError,
+    get_repository,
+    repository_snapshot_identity,
+)
 from app.services.repository_memory import append_history_entry
 from app.services.repository_profile import build_repository_memory_profile
 from app.services.repository_qa import run_repository_qa
@@ -177,11 +181,9 @@ def _repository_context(repository_id: str, findings: list[dict[str, Any]]) -> d
     # working tree every time Intelligence runs. Do not source these fields from
     # another repository's persisted Memory record: repository identity must be
     # impossible to leak across tabs/selections.
+    snapshot_identity = repository_snapshot_identity(record.manifest)
     return {
-        "repository_id": repository_id,
-        "source_filename": record.manifest.source_filename,
-        "fingerprint": record.manifest.fingerprint,
-        "indexed_version": record.manifest.indexed_version,
+        **snapshot_identity,
         "file_count": record.manifest.file_count,
         "total_bytes": record.manifest.total_bytes,
         "languages": record.manifest.languages,
@@ -285,6 +287,12 @@ def run_repository_intelligence(settings: Settings, repository_id: str) -> dict[
     """Run QA + Council once, merge their evidence and persist the report."""
     occurred_at = _now_iso()
     store = D1MetadataStore(settings)
+    record = get_repository(repository_id)
+    snapshot_identity = (
+        repository_snapshot_identity(record.manifest)
+        if record is not None
+        else {"repository_id": repository_id}
+    )
 
     qa_report = run_repository_qa(repository_id)
     qa_payload = qa_report.public_payload()
@@ -293,7 +301,7 @@ def run_repository_intelligence(settings: Settings, repository_id: str) -> dict[
         store,
         repository_id=repository_id,
         field_name="qa_history",
-        entry={**qa_payload, "occurred_at": occurred_at},
+        entry={**qa_payload, "occurred_at": occurred_at, "snapshot_identity": snapshot_identity},
     )
 
     warning_checks = [
@@ -311,6 +319,7 @@ def run_repository_intelligence(settings: Settings, repository_id: str) -> dict[
                 "summary": f"{len(warning_checks)} QA warning check(s) detected.",
                 "checks": warning_checks,
                 "occurred_at": occurred_at,
+                "snapshot_identity": snapshot_identity,
             },
         )
 
@@ -333,6 +342,7 @@ def run_repository_intelligence(settings: Settings, repository_id: str) -> dict[
     consolidated = {
         "repository_id": repository_id,
         "occurred_at": occurred_at,
+        "snapshot_identity": snapshot_identity,
         "summary": summary,
         "repository_context": repository_context,
         "findings": findings,
@@ -351,6 +361,7 @@ def run_repository_intelligence(settings: Settings, repository_id: str) -> dict[
         entry={
             "repository_id": repository_id,
             "occurred_at": occurred_at,
+            "snapshot_identity": snapshot_identity,
             "summary": summary,
             "repository_context": repository_context,
             "findings": findings,

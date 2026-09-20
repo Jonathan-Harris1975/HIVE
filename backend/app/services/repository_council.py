@@ -7,7 +7,11 @@ from pathlib import Path
 from typing import Any
 
 from app.core.config import Settings
-from app.services.repository_manager import RepositoryManagerError, get_repository
+from app.services.repository_manager import (
+    RepositoryManagerError,
+    get_repository,
+    repository_snapshot_identity,
+)
 from app.services.repository_memory import append_history_entry, get_memory_field
 from app.services.repository_qa import run_repository_qa
 from app.storage.d1 import D1MetadataStore
@@ -253,11 +257,15 @@ def run_and_record_council(
         settings, repository_id, weights=weights, qa_payload=qa_payload
     )
     store = D1MetadataStore(settings)
+    record = get_repository(repository_id)
+    entry = report.public_payload()
+    if record is not None:
+        entry = {**entry, "snapshot_identity": repository_snapshot_identity(record.manifest)}
     append_history_entry(
         store,
         repository_id=repository_id,
         field_name="repository_council_history",
-        entry=report.public_payload(),
+        entry=entry,
     )
     return report
 
