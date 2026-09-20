@@ -28,7 +28,7 @@ python -m piptools compile --output-file=requirements.txt --strip-extras require
 python scripts/verify_dependency_lock.py --compile
 ```
 
-The focused September 2026 dependency refresh moves Uvicorn to `0.53.0`, pypdf to `6.19.0`, and the compiled Pydantic resolution to `2.13.5` / `pydantic-core 2.46.5`. The earlier pypdf `6.16.1` pin was already on the patched side of the August 2026 XForm resource-consumption advisory; that advisory was not active in HIVE's prior lock.
+The focused September 2026 dependency refresh uses Uvicorn `0.53.0`, pypdf `6.19.0`, `pydantic-settings 2.15.0`, and `boto3`/`botocore 1.43.98`; the compiled Pydantic resolution remains `2.13.5` / `pydantic-core 2.46.5`. HIVE explicitly keeps settings-source matching case-insensitive, matching its existing environment-alias contract under the pydantic-settings 2.15 source-handling changes. The earlier pypdf `6.16.1` pin was already on the patched side of the August 2026 XForm resource-consumption advisory; that advisory was not active in HIVE's prior lock.
 
 ## Core production capabilities
 
