@@ -156,12 +156,15 @@ def _ranked_from_mapping(data: dict[str, object]) -> RankedModel | None:
     lifecycle = str(data.get("lifecycle_status") or "active")
     if lifecycle not in LIFECYCLE_STATUSES:
         lifecycle = "active"
+    score_raw: Any = data.get("score") or 0.0
     try:
-        score = float(data.get("score") or 0.0)
+        score = float(score_raw)
     except (TypeError, ValueError):
         score = 0.0
+
+    registered_at_raw: Any = data.get("registered_at") or time.time()
     try:
-        registered_at = float(data.get("registered_at") or time.time())
+        registered_at = float(registered_at_raw)
     except (TypeError, ValueError):
         registered_at = time.time()
     return RankedModel(
