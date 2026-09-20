@@ -101,13 +101,16 @@ def build_readiness_report(settings: Settings) -> ReadinessReport:
     )
 
     allowed_hosts = settings.effective_allowed_hosts
-    wildcard_host = "*" in allowed_hosts
+    wildcard_hosts = [host for host in allowed_hosts if "*" in host]
     checks.append(
         _check(
             "allowed_hosts",
-            not (production and settings.trusted_hosts_enabled and wildcard_host),
-            "Trusted hosts are restricted.",
-            "ALLOWED_HOSTS still permits every host. Set the Koyeb hostname and any custom API domain.",
+            not (production and settings.trusted_hosts_enabled and wildcard_hosts),
+            "Trusted hosts are restricted to explicitly configured exact hostnames.",
+            (
+                "Production ALLOWED_HOSTS must contain exact hostnames only; "
+                f"wildcard entries are not permitted: {', '.join(wildcard_hosts)}"
+            ),
             required=production and settings.trusted_hosts_enabled,
         )
     )

@@ -603,11 +603,14 @@ class Settings(BaseSettings):
     ai_search_max_attempts: int = Field(2, validation_alias=AliasChoices("AI_SEARCH_MAX_ATTEMPTS"))
     ai_search_top_k: int = Field(8, validation_alias=AliasChoices("AI_SEARCH_TOP_K"))
 
-    # Phase 3 - Model Registry. Optional JSON seed so ranked models per
-    # category survive process restarts without requiring D1; the in-memory
-    # ModelRegistry always takes precedence once populated at runtime.
+    # Phase 3 - Model Registry. Optional JSON seed plus a small local write-ahead
+    # reconciliation journal for accepted mutations that could not reach D1.
     model_registry_seed_json: str = Field(
         "", validation_alias=AliasChoices("MODEL_REGISTRY_SEED_JSON")
+    )
+    model_registry_reconciliation_path: str = Field(
+        "local-data/model-registry-pending.json",
+        validation_alias=AliasChoices("MODEL_REGISTRY_RECONCILIATION_PATH"),
     )
 
     # Phase 4 - Provider Framework. OpenRouter is always discovered when
