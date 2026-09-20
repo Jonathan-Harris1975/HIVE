@@ -15,7 +15,7 @@ APP_ENV=production
 APP_VERSION=1.31-production
 ADMIN_BEARER_TOKEN=<unique random value, at least 32 characters>
 CORS_ORIGINS=https://<your-hive-ui-domain>
-ALLOWED_HOSTS=<your-service>.koyeb.app
+ALLOWED_HOSTS=hive.jonathan-harris.online,liable-loreen-jonathanharris-57884580.koyeb.app
 API_DOCS_ENABLED=false
 SECURITY_HEADERS_ENABLED=true
 REQUEST_LOGGING_ENABLED=true
@@ -24,6 +24,7 @@ PRODUCTION_REQUIRE_OPENROUTER=true
 PRODUCTION_REQUIRE_R2=true
 PRODUCTION_REQUIRE_DATABASE=true
 MAX_REQUEST_BODY_BYTES=146800640
+MODEL_REGISTRY_RECONCILIATION_PATH=local-data/model-registry-pending.json
 WEB_CONCURRENCY=1
 UVICORN_LIMIT_CONCURRENCY=32
 UVICORN_BACKLOG=128
@@ -33,6 +34,10 @@ FORWARDED_ALLOW_IPS=127.0.0.1
 ```
 
 Add the existing OpenRouter, R2 and production database secrets. Production now requires durable database persistence: `PRODUCTION_REQUIRE_DATABASE=true` is authoritative and deployment readiness must fail closed if the configured database cannot be verified. The development example may keep this flag disabled for local work, but production must not override it to `false`.
+
+Production `ALLOWED_HOSTS` accepts exact hostnames only. Provider-wide patterns such as `*.koyeb.app` and the global `*` wildcard fail the production preflight. The committed Koyeb hostname is the exact HIVE service hostname already used by the repository's production smoke scripts.
+
+Model Registry mutations remain available in memory during a temporary D1 outage. Failed durable writes are recorded in `MODEL_REGISTRY_RECONCILIATION_PATH`, surfaced as `persistence_state=pending`, restored on process restart, and retried automatically at startup or through the authenticated `POST /v1/model-registry/reconcile` endpoint.
 
 `FORWARDED_ALLOW_IPS` deliberately uses Uvicorn's loopback-only trust boundary. HIVE's authentication limiter handles Koyeb separately: when `KOYEB_PUBLIC_DOMAIN` is present, it validates and uses only the final `X-Forwarded-For` address, which Koyeb documents as the certified connecting client IP.
 
