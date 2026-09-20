@@ -1,3 +1,0 @@
-Delete these files from the original repository when applying this changed-files bundle:
-
-config.py
