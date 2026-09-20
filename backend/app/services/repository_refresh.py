@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 import threading
 import uuid
@@ -12,6 +13,8 @@ import httpx
 
 from app.core.config import Settings
 from app.storage.d1 import D1MetadataStore
+
+logger = logging.getLogger("uvicorn.error.hive.repository_refresh")
 
 _REFRESH_LANE = "repository_refresh"
 _REFRESH_SOURCE_TYPE = "repository_refresh_job"
@@ -133,7 +136,7 @@ def _persist_job(settings: Settings, payload: dict[str, Any]) -> None:
     if not store.enabled:
         return
     try:
-        store.upsert_metadata(
+        result = store.upsert_metadata(
             item_id=f"repository-refresh:{payload['job_id']}",
             lane=_REFRESH_LANE,
             source_type=_REFRESH_SOURCE_TYPE,
@@ -142,10 +145,30 @@ def _persist_job(settings: Settings, payload: dict[str, Any]) -> None:
             url=None,
             metadata=payload,
         )
-    except Exception:
+        if not result.get("ok"):
+            logger.warning(
+                "repository_refresh_persistence_failed job_id=%s error=%s",
+                payload.get("job_id"),
+                result.get("error") or "D1 metadata write returned ok=false",
+                extra={
+                    "event": "repository_refresh_persistence_failed",
+                    "job_id": str(payload.get("job_id") or ""),
+                },
+            )
+    except Exception as exc:  # noqa: BLE001 - refresh execution remains fail-open
         # The refresh job still runs if observability persistence has a transient
         # fault; the API's in-process state remains authoritative for this run.
-        return
+        logger.warning(
+            "repository_refresh_persistence_failed job_id=%s error_type=%s error=%s",
+            payload.get("job_id"),
+            type(exc).__name__,
+            exc,
+            extra={
+                "event": "repository_refresh_persistence_failed",
+                "job_id": str(payload.get("job_id") or ""),
+                "error_type": type(exc).__name__,
+            },
+        )
 
 
 def _set_job(settings: Settings, job_id: str, **changes: Any) -> dict[str, Any]:
@@ -169,7 +192,18 @@ def _stored_job(settings: Settings, job_id: str) -> dict[str, Any] | None:
         return None
     try:
         result = store.list_metadata(lane=_REFRESH_LANE, limit=_MAX_JOBS)
-    except Exception:
+    except Exception as exc:  # noqa: BLE001 - callers can fall back to in-process state
+        logger.warning(
+            "repository_refresh_persistence_read_failed job_id=%s error_type=%s error=%s",
+            job_id,
+            type(exc).__name__,
+            exc,
+            extra={
+                "event": "repository_refresh_persistence_read_failed",
+                "job_id": job_id,
+                "error_type": type(exc).__name__,
+            },
+        )
         return None
     raw_items = result.get("items")
     if not result.get("ok") or not isinstance(raw_items, list):
