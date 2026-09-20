@@ -79,7 +79,7 @@ The production image:
 
 ## Dependency maintenance
 
-`requirements.in` contains the reviewed direct versions and `requirements.txt` is the compiled runtime set. Regenerate it with `python -m piptools compile --output-file=requirements.txt --strip-extras requirements.in`, then run `python scripts/verify_dependency_lock.py --compile`, `pip check`, the full Python 3.11-3.14 test matrix, `pip-audit`, and the Docker runtime smoke gate. The September 2026 refresh uses Uvicorn 0.53.0 and pypdf 6.19.0; the compiled Pydantic resolution is 2.13.5 / pydantic-core 2.46.5. The previous pypdf 6.16.1 pin was already patched for the August 2026 XForm resource-consumption advisory. The repository does not maintain a second `requirements.lock` file.
+`requirements.in` contains the reviewed direct versions and `requirements.txt` is the compiled runtime set. Regenerate it with `python -m piptools compile --output-file=requirements.txt --strip-extras requirements.in`, then run `python scripts/verify_dependency_lock.py --compile`, `pip check`, the full Python 3.11-3.14 test matrix, `pip-audit`, and the Docker runtime smoke gate. The September 2026 refresh uses Uvicorn 0.53.0, pypdf 6.19.0, pydantic-settings 2.15.0, and boto3/botocore 1.43.98; the compiled Pydantic resolution remains 2.13.5 / pydantic-core 2.46.5. Settings-source matching is explicitly case-insensitive to preserve HIVE's environment-alias contract with pydantic-settings 2.15. The previous pypdf 6.16.1 pin was already patched for the August 2026 XForm resource-consumption advisory. The repository does not maintain a second `requirements.lock` file.
 
 ## Production environment split
 

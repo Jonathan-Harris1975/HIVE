@@ -11,7 +11,8 @@
 - Added deterministic R2 connector/storage regression tests for success, empty results, pagination, auth/access failures, transient network failures, malformed SDK responses, domain translation and credential redaction.
 - Added deterministic Workers AI embeddings tests for vector extraction, malformed/missing JSON, non-2xx/auth rejection, timeout/connect failures, unexpected response types, degraded behaviour and token-safe logging.
 - Redacted configured R2/embeddings credentials from connector/provider exception paths and rejected malformed R2 list response structures explicitly.
-- Updated Uvicorn to `0.53.0`, pypdf to `6.19.0`, and the compiled Pydantic resolution to `2.13.5` / `pydantic-core 2.46.5`.
+- Updated Uvicorn to `0.53.0`, pypdf to `6.19.0`, pydantic-settings to `2.15.0`, boto3/botocore to `1.43.98`, and retained the compatible compiled Pydantic resolution at `2.13.5` / `pydantic-core 2.46.5`.
+- Made HIVE's case-insensitive settings-source policy explicit for pydantic-settings 2.15 compatibility.
 - Reconciled README, operations, deployment, production-readiness and roadmap documentation with the current provider/storage behaviour and deterministic-vs-live test contract.
 
 
