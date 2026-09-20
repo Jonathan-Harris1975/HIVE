@@ -260,14 +260,26 @@ class R2Storage:
                 if continuation:
                     request["ContinuationToken"] = continuation
                 response = self.client(read_only=read_only).list_objects_v2(**request)
+                if not isinstance(response, dict):
+                    raise RuntimeError(
+                        f"R2 list returned unexpected response type: {type(response).__name__}"
+                    )
+                common_prefixes = response.get("CommonPrefixes", [])
+                contents = response.get("Contents", [])
+                if not isinstance(common_prefixes, list) or not isinstance(contents, list):
+                    raise RuntimeError("R2 list returned malformed collection fields")
 
-                for common in response.get("CommonPrefixes", []):
+                for common in common_prefixes:
+                    if not isinstance(common, dict):
+                        raise RuntimeError("R2 list returned malformed CommonPrefixes entry")
                     common_prefix = common.get("Prefix")
                     if common_prefix and common_prefix not in seen_prefixes:
                         seen_prefixes.add(common_prefix)
                         prefixes.append(common_prefix)
 
-                for item in response.get("Contents", []):
+                for item in contents:
+                    if not isinstance(item, dict):
+                        raise RuntimeError("R2 list returned malformed Contents entry")
                     key = item.get("Key")
                     if not key:
                         continue
