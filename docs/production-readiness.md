@@ -31,6 +31,12 @@ UVICORN_BACKLOG=128
 UVICORN_TIMEOUT_KEEP_ALIVE=10
 UVICORN_TIMEOUT_GRACEFUL_SHUTDOWN=30
 FORWARDED_ALLOW_IPS=127.0.0.1
+REPOSITORY_BULK_MAX_COUNT=8
+REPOSITORY_BULK_MAX_TOTAL_BYTES=838860800
+REPOSITORY_BULK_CONCURRENCY=2
+REPOSITORY_IMPROVEMENT_MAX_CHANGE_RATIO=0.12
+REPOSITORY_IMPROVEMENT_MAX_CHANGE_FILES=100
+REPOSITORY_IMPROVEMENT_MAX_WORK_PASSES=4
 ```
 
 Add the existing OpenRouter, R2 and production database secrets. Production now requires durable database persistence: `PRODUCTION_REQUIRE_DATABASE=true` is authoritative and deployment readiness must fail closed if the configured database cannot be verified. The development example may keep this flag disabled for local work, but production must not override it to `false`.
@@ -79,7 +85,9 @@ The production image:
 
 ## Dependency maintenance
 
-`requirements.in` contains the reviewed direct versions and `requirements.txt` is the compiled runtime set. Regenerate it with `python -m piptools compile --output-file=requirements.txt --strip-extras requirements.in`, then run `python scripts/verify_dependency_lock.py --compile`, `pip check`, the full Python 3.11-3.14 test matrix, `pip-audit`, and the Docker runtime smoke gate. The September 2026 refresh uses Uvicorn 0.53.0, pypdf 6.19.0, pydantic-settings 2.15.0, and boto3/botocore 1.43.98; the compiled Pydantic resolution remains 2.13.5 / pydantic-core 2.46.5. Settings-source matching is explicitly case-insensitive to preserve HIVE's environment-alias contract with pydantic-settings 2.15. The previous pypdf 6.16.1 pin was already patched for the August 2026 XForm resource-consumption advisory. The repository does not maintain a second `requirements.lock` file.
+`requirements.in` contains the reviewed direct versions and `requirements.txt` is the compiled runtime set. Regenerate it with `python -m piptools compile --generate-hashes --output-file=requirements.txt --strip-extras requirements.in`, then run `python scripts/verify_dependency_lock.py --compile`, `pip check`, the full Python 3.11-3.14 test matrix, `pip-audit`, and the Docker runtime smoke gate. The September 2026 refresh uses Uvicorn 0.53.0, pypdf 6.19.0, pydantic-settings 2.15.0, and boto3/botocore 1.43.98; the compiled Pydantic resolution remains 2.13.5 / pydantic-core 2.46.5. Settings-source matching is explicitly case-insensitive to preserve HIVE's environment-alias contract with pydantic-settings 2.15. The previous pypdf 6.16.1 pin was already patched for the August 2026 XForm resource-consumption advisory. The repository does not maintain a second `requirements.lock` file.
+
+Production repository readiness also verifies the complete canonical eight-repository GitHub catalogue when governed refresh is enabled, bulk-ingestion capacity for all eight repositories, and a separate per-pass improvement scope no greater than 12%. See [`repository-management.md`](repository-management.md).
 
 ## Production environment split
 

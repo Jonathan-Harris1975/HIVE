@@ -288,7 +288,7 @@ rather than replaced.
 extraction into a per-process temp working directory (reusing the existing
 `zip_ingestion` path-traversal guards), fingerprinting, manifest generation
 (language + dependency detection), incremental re-indexing, an in-process
-registry, and TTL-based cleanup. Extraction is never permanent.
+registry, TTL-based cleanup, and a first-class bounded-concurrency bulk-ingestion route. One canonical governed-repository definition supplies the eight repository identities used by ingestion, GitHub refresh and readiness. Extraction is never permanent.
 
 **Phase 2 - Repository Memory** (`services/repository_memory.py`,
 `storage/ai_search.py`): Project DNA, architecture summary, coding standards,
@@ -347,9 +347,13 @@ improvement worker uses a bounded loop-first orchestration policy. Up to four
 progressively governed coding-model attempts are validated and only the best
 non-regressing candidate is carried forward. Expert council review is unreachable
 until those loops fail the configured QA target and is capped at two runs. Council
-results within the configured 5 percentage-point tolerance may be accepted only
-when build/security/new-warning gates remain clean. Every attempt, model, QA score,
-promotion and acceptance decision is persisted in the improvement report. Explicit
+results within the configured near-threshold tolerance may be accepted only
+when build/security/new-warning gates remain clean. That quality tolerance is distinct
+from the repository work-scope budget: each work pass may change at most the configured
+12% of eligible files (subject to an absolute ceiling). Operator-selected multi-pass
+execution can safely continue from the previous accepted candidate without raising the
+per-pass budget. Every work pass, attempt, model, QA score, promotion and acceptance
+decision is persisted in the improvement report. Explicit
 model escalation disables OpenRouter's implicit free fallback so internal repository
 content cannot escape onto a free route when a paid model ID is unavailable.
 
