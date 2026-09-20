@@ -85,10 +85,14 @@ R2 and embeddings integrations are deliberately defensive:
 | Endpoint | Purpose |
 |---|---|
 | `GET /v1/models` | Model catalogue/groups |
-| `POST /v1/repositories` | Register a repository ZIP |
+| `POST /v1/repositories` | Register one repository ZIP |
+| `POST /v1/repositories/bulk` | Register multiple repository ZIPs with independent outcomes |
+| `POST /v1/repositories/refresh-all` | Refresh the configured governed repositories |
+| `GET /v1/repositories/estate/readiness` | Snapshot/Memory/Intelligence readiness for the eight-repository estate |
 | `GET /v1/repositories/{id}/memory` | Repository Memory |
 | `POST /v1/repositories/{id}/qa` | Static Repository QA |
 | `POST /v1/repositories/{id}/council` | Repository Council |
+| `POST /v1/repositories/{id}/improvements/run` | Start single- or multi-pass bounded remediation |
 | `GET /v1/model-registry/{category}` | Model category registry |
 | `GET /v1/providers`, `GET /v1/providers/health` | Provider discovery/health |
 | `POST /v1/ai-council/run` | Model/provider Council run |
