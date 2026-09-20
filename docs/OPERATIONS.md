@@ -1,7 +1,7 @@
 # HIVE production operations
 
 **Status:** Paid Koyeb production service  
-**Last reviewed:** 22 June 2026
+**Last reviewed:** 20 September 2026
 
 Use `/livez` for process liveness, `/readyz` for public dependency readiness and authenticated `/v1/runtime/readiness` for detailed checks. MAST is monitored as a Worker through its durable R2 heartbeat, not through a public URL.
 
@@ -22,3 +22,12 @@ Before publishing an artifact, HIVE runs its non-executing Repository QA checks 
 HIVE static QA deliberately does not install repository dependencies or execute repository-owned build/test commands. Every completed improvement therefore carries a mandatory remaining-verification item requiring the repository's normal CI/release suite before deployment. The downloadable `HIVE-IMPROVEMENT-REPORT.json` records the source fingerprint, coding model, changed/deleted files, static validation result and remaining verification work.
 
 No additional secret is introduced by this workflow. It uses the existing `OPENROUTER_API_KEY`, D1 configuration and repository R2 credentials.
+
+
+## R2 and embeddings degraded-mode operations
+
+R2 connector diagnostics are intentionally non-throwing. Invalid credentials, access denial, transient SDK/network errors and malformed list responses must surface as unhealthy/redacted diagnostics; they must not print configured access keys or secret keys. Use authenticated `/v1/connectors` and `/v1/runtime/readiness` to distinguish an optional degraded integration from a production-required readiness failure.
+
+Workers AI embeddings are optional unless the deployment policy makes the dependent retrieval path mandatory. Timeout, connection failure, non-2xx, malformed JSON, unexpected response types and vector-count mismatch return a degraded result. Exception and provider text is redacted against the configured embeddings token before logging/return. Ordinary CI uses deterministic mocked-provider tests; live-provider smoke checks are separate and use deployment-managed credentials only.
+
+For dependency maintenance, update `requirements.in`, regenerate `requirements.txt` with `python -m piptools compile --output-file=requirements.txt --strip-extras requirements.in`, then run `python scripts/verify_dependency_lock.py --compile`, the full test/static/security gates and the Docker smoke gate.

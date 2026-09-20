@@ -370,3 +370,8 @@ Use a dedicated random token of at least 32 characters. Do not reuse `ADMIN_BEAR
 ## Environment split
 
 Paste only `HIVE-KOYEB-SECRETS-ONLY.env` into Koyeb. The repo-committed `HIVE-PRODUCTION-SHARED.env` contains the non-secret production defaults and is loaded by `scripts/start.sh` without overriding existing Koyeb values.
+
+
+## Provider/storage verification after deployment
+
+After the normal `/livez` and `/readyz` checks, use authenticated `/v1/runtime/readiness` and `/v1/connectors` to verify R2/provider state without exposing secrets. R2 access denial or transient storage failure should appear as unhealthy/degraded diagnostics rather than crash the service. Workers AI embeddings failures (timeout, non-2xx, malformed response or connection error) degrade the optional semantic path and redact the configured API token from adapter errors/logs. Run live-provider smoke checks only with deployment-managed credentials; deterministic CI tests do not require Cloudflare credentials.

@@ -49,7 +49,7 @@
 ## v0.3 Search
 
 - [ ] Embedding worker
-- [ ] Cloudflare Workers AI embeddings bridge
+- [x] Cloudflare Workers AI embeddings bridge
 - [ ] Vectorize upsert/query integration
 - [ ] Source-cited RAG answers
 
@@ -96,7 +96,7 @@ The endpoint returns `stage`, `timings`, and `error_code:"chat_with_file_timeout
 - [x] Summarise total and by-model token/cost usage.
 - [x] List Cloudflare D1 ecosystem metadata records by lane.
 
-Next persistence step: add embeddings/Vectorize on top of the now-stable chunk records rather than sending large files directly to the model.
+Embeddings/Vectorize retrieval is now implemented on top of the stable chunk records; SQL chunks remain the source of truth and semantic retrieval is optional/degradable.
 
 
 ## Completed v1.1 persistence hardening
