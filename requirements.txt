@@ -42,7 +42,7 @@ httpcore==1.0.9
     # via httpx
 httptools==0.8.0
     # via uvicorn
-headroom-ai==0.32.0
+headroom-ai==0.37.0
     # via -r requirements.in
 httpx==0.28.1
     # via -r requirements.in
