@@ -11,8 +11,11 @@ from app.services.model_registry import (
     LIFECYCLE_STATUSES,
     ModelRegistryError,
     get_default_model,
+    get_persistence_state,
     get_ranked_models,
     list_categories,
+    persistence_diagnostics,
+    reconcile_pending,
     register_model,
     remove_model,
 )
@@ -42,7 +45,14 @@ async def get_categories() -> dict[str, object]:
 
 @router.get("/model-registry")
 async def get_registry() -> dict[str, object]:
-    return {"registry": list_categories()}
+    return {"registry": list_categories(), "persistence": persistence_diagnostics()}
+
+
+@router.post("/model-registry/reconcile")
+async def post_reconcile_model_registry(
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    return reconcile_pending(D1MetadataStore(settings))
 
 
 @router.get("/model-registry/{category}")
@@ -118,11 +128,15 @@ async def post_register_model(
         )
     except ModelRegistryError as error:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+    persistence = get_persistence_state(category, body.model_id)
     return {
         "category": category,
         "default_model": ranked[0].model_id if ranked else None,
         "model_count": len(ranked),
-        "persisted": store.enabled,
+        "persisted": persistence["state"] == "durable",
+        "persistence_state": persistence["state"],
+        "persistence_pending": persistence["state"] == "pending",
+        "persistence_error": persistence["error"],
     }
 
 
@@ -142,4 +156,13 @@ async def delete_registered_model(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"{model_id!r} not registered in category {category!r}",
         )
-    return {"category": category, "model_id": model_id, "removed": True, "persisted": store.enabled}
+    persistence = get_persistence_state(category, model_id)
+    return {
+        "category": category,
+        "model_id": model_id,
+        "removed": True,
+        "persisted": persistence["state"] == "durable",
+        "persistence_state": persistence["state"],
+        "persistence_pending": persistence["state"] == "pending",
+        "persistence_error": persistence["error"],
+    }
