@@ -63,3 +63,9 @@ REPOSITORY_IMPROVEMENT_NEAR_THRESHOLD_TOLERANCE=0.05
 Production readiness requires the governed GitHub refresh catalogue to contain exactly the canonical eight repositories when refresh is enabled. It also verifies that bulk capacity can accept the estate and that the repository work-scope configuration cannot exceed 12% per pass.
 
 If a repository shows `stale`, `not_ready`, or `repair_required=true`, first compare its current fingerprint with the Memory/Intelligence fingerprint. Re-run repository setup/reindex for the current accepted snapshot or re-upload/refresh the governed source as appropriate. Do not copy an older intelligence record forward merely to clear readiness. Failed bulk/refresh items are independent and may be retried without discarding successful sibling results.
+
+## Repository UI progressive-disclosure contract
+
+The HIVE-UI repository workspace may present repository metadata, diagnostics, dependency information, diff controls, improvement execution settings, QA evidence, Council evidence, learning data, and history through collapsed disclosure sections. This is a presentation-only hierarchy: collapsing a section must not suppress, defer, or alter repository registration, Memory, Intelligence, QA, Council, refresh, diff, reindex, setup, or improvement API behaviour.
+
+Primary repository health and readiness state should remain visible without expansion. Detailed diagnostics and destructive or infrequent actions may be placed behind explicit "More information & actions" or equivalent disclosure controls. The existing `/v1/repositories` API contracts remain authoritative; no backend API change is required for this UI organisation.
