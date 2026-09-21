@@ -53,7 +53,10 @@ async def post_repository_improvements(
     settings: Settings = Depends(get_settings),
 ) -> dict[str, object]:
     """Queue an isolated, LLM-assisted repository improvement job."""
-    request = request or RepositoryImprovementRunRequest()
+    request = request or RepositoryImprovementRunRequest(
+        execution_mode="single_pass",
+        max_work_passes=None,
+    )
     try:
         return start_improvement_job(
             settings,

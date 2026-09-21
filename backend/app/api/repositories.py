@@ -124,7 +124,7 @@ def _repository_memory_readiness(
     repository_ids: list[str],
 ) -> dict[str, dict[str, object]]:
     """Return snapshot-aware Memory/Intelligence readiness for repository cards."""
-    readiness = {
+    readiness: dict[str, dict[str, object]] = {
         repository_id: {
             "snapshot_status": "not_loaded",
             "memory_status": "unavailable",
