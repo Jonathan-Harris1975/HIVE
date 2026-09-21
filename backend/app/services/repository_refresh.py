@@ -280,10 +280,20 @@ async def _run_refresh_job(
                     if isinstance(raw_intelligence, dict)
                     else {}
                 )
-                memory = pipeline.get("memory_seed") if isinstance(pipeline.get("memory_seed"), dict) else {}
-                qa = pipeline.get("qa") if isinstance(pipeline.get("qa"), dict) else {}
-                council = pipeline.get("council") if isinstance(pipeline.get("council"), dict) else {}
-                ai_search = pipeline.get("ai_search") if isinstance(pipeline.get("ai_search"), dict) else {}
+                raw_memory = pipeline.get("memory_seed")
+                memory: dict[str, Any] = (
+                    cast(dict[str, Any], raw_memory) if isinstance(raw_memory, dict) else {}
+                )
+                raw_qa = pipeline.get("qa")
+                qa: dict[str, Any] = cast(dict[str, Any], raw_qa) if isinstance(raw_qa, dict) else {}
+                raw_council = pipeline.get("council")
+                council: dict[str, Any] = (
+                    cast(dict[str, Any], raw_council) if isinstance(raw_council, dict) else {}
+                )
+                raw_ai_search = pipeline.get("ai_search")
+                ai_search: dict[str, Any] = (
+                    cast(dict[str, Any], raw_ai_search) if isinstance(raw_ai_search, dict) else {}
+                )
                 ok = bool(pipeline.get("required_stages_ready") is True)
                 results.append(
                     {

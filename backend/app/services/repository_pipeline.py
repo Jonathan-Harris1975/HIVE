@@ -27,7 +27,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Any
+from typing import Any, cast
 
 from app.core.config import Settings
 from app.services.repository_manager import RepositoryManifest
@@ -183,7 +183,10 @@ def _persist_pipeline_state(
 
         store = D1MetadataStore(settings)
         identity = repository_snapshot_identity(manifest)
-        ai_search = pipeline.get("ai_search") if isinstance(pipeline.get("ai_search"), dict) else {}
+        raw_ai_search = pipeline.get("ai_search")
+        ai_search: dict[str, Any] = (
+            cast(dict[str, Any], raw_ai_search) if isinstance(raw_ai_search, dict) else {}
+        )
         index_state = {
             "snapshot_identity": identity,
             "status": (

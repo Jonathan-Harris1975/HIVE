@@ -361,10 +361,11 @@ def _model_request(
 
     stage = str((orchestration or {}).get("stage") or "self_improvement")
     work_scope = (orchestration or {}).get("work_scope")
+    raw_effective_file_limit = (
+        work_scope.get("effective_file_limit") if isinstance(work_scope, dict) else None
+    )
     effective_file_limit = (
-        int(work_scope.get("effective_file_limit"))
-        if isinstance(work_scope, dict) and work_scope.get("effective_file_limit") is not None
-        else 1
+        int(raw_effective_file_limit) if raw_effective_file_limit is not None else 1
     )
     if stage == "council":
         system = (
