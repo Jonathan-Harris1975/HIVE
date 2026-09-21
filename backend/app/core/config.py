@@ -487,7 +487,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("REPOSITORY_IMPROVEMENT_MAX_CHANGE_FILES"),
     )
     repository_improvement_max_work_passes: int = Field(
-        4, ge=1, le=8,
+        8, ge=1, le=8,
         validation_alias=AliasChoices("REPOSITORY_IMPROVEMENT_MAX_WORK_PASSES"),
     )
 
