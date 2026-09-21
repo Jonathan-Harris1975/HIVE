@@ -1353,18 +1353,29 @@ async def _run_job(
                 break
             if normalised_mode == "single_pass":
                 break
-            if not pass_changed and not pass_deleted:
-                break
-
-        if accepted_stage is None or selected_payload is None or selected_validation is None:
-            tolerance_percent = round(tolerance * 100, 2)
-            raise RepositoryImprovementError(
-                "Repository improvement exhausted the configured work passes, self-improvement loops and bounded "
-                f"Council review without meeting the quality threshold or its permitted {tolerance_percent}% "
-                "near-threshold tolerance."
-            )
+            # A blocked pass must not terminate a multi-pass run. Each pass can
+            # receive a different finding slice/model attempt, so later passes
+            # may still make safe progress even when this pass made no changes.
 
         changed, deleted = _workspace_diff(record.workdir, staging)
+        target_met = accepted_stage is not None
+        if not target_met:
+            # Quality thresholds describe the desired end state, not whether
+            # safe, validated repository work should be thrown away. Preserve
+            # and package the best promoted workspace after all requested
+            # passes have run. The report explicitly records that more work is
+            # still required.
+            if not changed and not deleted or selected_payload is None or selected_validation is None:
+                tolerance_percent = round(tolerance * 100, 2)
+                raise RepositoryImprovementError(
+                    "Repository improvement completed all configured work passes but produced no safe validated "
+                    f"repository changes. Target {target_score:.0%}; permitted near-threshold tolerance "
+                    f"{tolerance_percent}%."
+                )
+            accepted_stage = "best_validated_progress"
+            accepted_iteration = None
+            accepted_work_pass = len(work_pass_ledger)
+
         if not changed and not deleted:
             raise RepositoryImprovementError(
                 "Accepted repository improvement produced no repository modifications"
@@ -1431,6 +1442,7 @@ async def _run_job(
             "accepted_iteration": accepted_iteration,
             "accepted_under_near_threshold_tolerance": accepted_under_tolerance,
             "accepted_under_5_percent_rule": accepted_under_tolerance,
+            "quality_target_met": target_met,
             "final_qa_score": qa_after.get("score"),
         }
         report = {
@@ -1446,6 +1458,7 @@ async def _run_job(
             "work_pass_ledger": work_pass_ledger,
             "remaining_findings": remaining_findings,
             "remaining_external_ci_verification": [native_ci_risk],
+            "quality_target_met": target_met,
             "remaining_risks": remaining_risks,
             "static_validation": qa_after,
             "security_validation": security_validation,
@@ -1519,6 +1532,7 @@ async def _run_job(
             qa_score_after=qa_after.get("score"),
             accepted_under_near_threshold_tolerance=accepted_under_tolerance,
             accepted_under_5_percent_rule=accepted_under_tolerance,
+            quality_target_met=target_met,
             cumulative_work_scope=cumulative_scope,
             work_pass_ledger=work_pass_ledger,
             remaining_findings=remaining_findings,
