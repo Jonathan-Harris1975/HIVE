@@ -28,14 +28,19 @@ jobs:
           KOYEB_TOKEN: ${{ secrets.KOYEB_TOKEN }}
           KOYEB_SERVICE: ${{ secrets.KOYEB_SERVICE }}
         run: |
-          if [ -n "${KOYEB_TOKEN:-}" ] && [ -n "${KOYEB_SERVICE:-}" ]; then
-            echo "configured=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::HIVE deployment watcher is not configured; deployment attestation and downstream smoke dispatch are skipped."
+          set -euo pipefail
+          missing=()
+          for name in KOYEB_TOKEN KOYEB_SERVICE; do
+            if [ -z "${!name:-}" ]; then
+              missing+=("$name")
+            fi
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            printf '::error::HIVE production deployment verification cannot run. Missing required configuration: %s\n' "${missing[*]}"
+            exit 1
           fi
+          echo "configured=true" >> "$GITHUB_OUTPUT"
       - name: Install verified Koyeb CLI
-        if: steps.deployment_config.outputs.configured == 'true'
         env:
           KOYEB_CLI_VERSION: "5.10.2"
         run: |
@@ -59,7 +64,6 @@ jobs:
           install -m 0755 "$workdir/koyeb" "$HOME/.local/bin/koyeb"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Watch production deployment
-        if: steps.deployment_config.outputs.configured == 'true'
         env:
           KOYEB_TOKEN: ${{ secrets.KOYEB_TOKEN }}
           KOYEB_SERVICE: ${{ secrets.KOYEB_SERVICE }}
@@ -71,14 +75,12 @@ jobs:
           EXPECTED_DEPLOYMENT_AFTER: ${{ github.event.workflow_run.created_at || '' }}
         run: python scripts/watch_koyeb_deployment.py
       - name: Record exact-SHA production deployment attestation
-        if: steps.deployment_config.outputs.configured == 'true'
         env:
           DEPLOYED_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
           printf '{"repository":"%s","sha":"%s","workflow_run":"%s","service":"HIVE","status":"production-deployment-green"}\n' \
             "$GITHUB_REPOSITORY" "$DEPLOYED_SHA" "$GITHUB_RUN_ID" > deployment-attestation.json
       - name: Retain production deployment evidence
-        if: steps.deployment_config.outputs.configured == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: hive-deployment-attestation-${{ github.event.workflow_run.head_sha || github.sha }}
@@ -86,7 +88,6 @@ jobs:
           if-no-files-found: error
           retention-days: 90
       - name: Trigger central ecosystem smoke
-        if: steps.deployment_config.outputs.configured == 'true'
         env:
           ECOSYSTEM_SMOKE_DISPATCH_TOKEN: ${{ secrets.ECOSYSTEM_SMOKE_DISPATCH_TOKEN }}
           ECOSYSTEM_SMOKE_REPOSITORY: ${{ vars.ECOSYSTEM_SMOKE_REPOSITORY }}
