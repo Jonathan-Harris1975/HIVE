@@ -633,14 +633,36 @@ class Settings(BaseSettings):
     ai_search_max_attempts: int = Field(2, validation_alias=AliasChoices("AI_SEARCH_MAX_ATTEMPTS"))
     ai_search_top_k: int = Field(8, validation_alias=AliasChoices("AI_SEARCH_TOP_K"))
 
-    # Phase 3 - Model Registry. Optional JSON seed plus a small local write-ahead
-    # reconciliation journal for accepted mutations that could not reach D1.
+    # Phase 3 - Model Registry. Optional JSON seed plus an externally durable,
+    # private R2 operation log for mutations that could not reach D1.
     model_registry_seed_json: str = Field(
         "", validation_alias=AliasChoices("MODEL_REGISTRY_SEED_JSON")
     )
-    model_registry_reconciliation_path: str = Field(
-        "local-data/model-registry-pending.json",
-        validation_alias=AliasChoices("MODEL_REGISTRY_RECONCILIATION_PATH"),
+    model_registry_pending_r2_lane: str = Field(
+        "meta_system",
+        validation_alias=AliasChoices("MODEL_REGISTRY_PENDING_R2_LANE"),
+    )
+    model_registry_pending_r2_prefix: str = Field(
+        "state/hive/model-registry-pending",
+        validation_alias=AliasChoices("MODEL_REGISTRY_PENDING_R2_PREFIX"),
+    )
+    model_registry_pending_max_bytes: int = Field(
+        1024 * 1024,
+        ge=4096,
+        le=16 * 1024 * 1024,
+        validation_alias=AliasChoices("MODEL_REGISTRY_PENDING_MAX_BYTES"),
+    )
+    model_registry_pending_max_operations: int = Field(
+        5000,
+        ge=1,
+        le=50_000,
+        validation_alias=AliasChoices("MODEL_REGISTRY_PENDING_MAX_OPERATIONS"),
+    )
+    model_registry_pending_lease_seconds: int = Field(
+        120,
+        ge=15,
+        le=900,
+        validation_alias=AliasChoices("MODEL_REGISTRY_PENDING_LEASE_SECONDS"),
     )
 
     # Phase 4 - Provider Framework. OpenRouter is always discovered when

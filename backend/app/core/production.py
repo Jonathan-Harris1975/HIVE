@@ -286,6 +286,25 @@ def build_readiness_report(settings: Settings) -> ReadinessReport:
         )
     )
 
+    pending_lane = configured_lanes.get(settings.model_registry_pending_r2_lane.strip().lower())
+    model_registry_pending_ready = bool(
+        settings.model_registry_pending_r2_prefix.strip()
+        and pending_lane
+        and pending_lane.get("writable")
+    )
+    checks.append(
+        _check(
+            "model_registry_pending_store",
+            not settings.d1_enabled or model_registry_pending_ready,
+            "Model Registry has an externally durable R2 reconciliation store.",
+            (
+                "D1-backed Model Registry requires a writable R2 pending-operation lane and "
+                "MODEL_REGISTRY_PENDING_R2_PREFIX."
+            ),
+            required=production and settings.d1_enabled,
+        )
+    )
+
     database_ready = settings.database_enabled and bool(settings.sql_database_url)
     database_required = production and settings.production_require_database
     checks.append(
