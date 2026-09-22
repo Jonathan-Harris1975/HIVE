@@ -10,7 +10,7 @@
    - Run the formal Council cycle monthly, before the consolidated monthly review.
    - Trigger an out-of-cycle review within one working day when OpenRouter announces a retirement, changes a configured alias, materially changes price/provider coverage, or internal quality deteriorates.
    - Keep one named service owner and one Council approver for each production route: `cheap`, `fast`, `reasoning`, `coding`, `long_context`, `audit` and `premium`.
-   - Treat the D1 Model Registry as the runtime authority. Environment model IDs are last-known-good standalone fallbacks, not permanent rankings.
+   - Treat the D1 Model Registry as the primary runtime authority. During a D1 outage, only operations already protected by the private R2 pending-operation log may overlay it; environment model IDs remain last-known-good standalone fallbacks, not permanent rankings.
 
 2. **Check OpenRouter before every approval or renewal.**
 

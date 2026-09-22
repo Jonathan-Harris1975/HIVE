@@ -24,7 +24,11 @@ PRODUCTION_REQUIRE_OPENROUTER=true
 PRODUCTION_REQUIRE_R2=true
 PRODUCTION_REQUIRE_DATABASE=true
 MAX_REQUEST_BODY_BYTES=146800640
-MODEL_REGISTRY_RECONCILIATION_PATH=local-data/model-registry-pending.json
+MODEL_REGISTRY_PENDING_R2_LANE=meta_system
+MODEL_REGISTRY_PENDING_R2_PREFIX=state/hive/model-registry-pending
+MODEL_REGISTRY_PENDING_MAX_BYTES=1048576
+MODEL_REGISTRY_PENDING_MAX_OPERATIONS=5000
+MODEL_REGISTRY_PENDING_LEASE_SECONDS=120
 WEB_CONCURRENCY=1
 UVICORN_LIMIT_CONCURRENCY=32
 UVICORN_BACKLOG=128
@@ -43,7 +47,9 @@ Add the existing OpenRouter, R2 and production database secrets. Production now 
 
 Production `ALLOWED_HOSTS` accepts exact hostnames only. Provider-wide patterns such as `*.koyeb.app` and the global `*` wildcard fail the production preflight. The committed Koyeb hostname is the exact HIVE service hostname already used by the repository's production smoke scripts.
 
-Model Registry mutations remain available in memory during a temporary D1 outage. Failed durable writes are recorded in `MODEL_REGISTRY_RECONCILIATION_PATH`, surfaced as `persistence_state=pending`, restored on process restart, and retried automatically at startup or through the authenticated `POST /v1/model-registry/reconcile` endpoint.
+Model Registry mutations remain available during a temporary D1 outage only when the intended operation has first been written to the private R2 lane named by `MODEL_REGISTRY_PENDING_R2_LANE`. The `meta_system` bucket and write credentials are mandatory when production D1 is enabled. Pending objects are stored beneath `MODEL_REGISTRY_PENDING_R2_PREFIX`, surfaced as `persistence_state=pending`, loaded by a fresh instance with no prior filesystem, and retried automatically at startup or through authenticated `POST /v1/model-registry/reconcile`.
+
+If D1 and the R2 fallback both fail, the mutation is rejected with a service-unavailable response and is not exposed in memory. Per-operation conditional R2 claims prevent concurrent instances from intentionally reconciling the same operation; D1 upsert/delete semantics provide an additional idempotency layer. Newer operations for one model supersede stale registration/deletion intents, and R2 work is removed only after D1 accepts the matching operation. Container-local disk is not part of this durability contract.
 
 `FORWARDED_ALLOW_IPS` deliberately uses Uvicorn's loopback-only trust boundary. HIVE's authentication limiter handles Koyeb separately: when `KOYEB_PUBLIC_DOMAIN` is present, it validates and uses only the final `X-Forwarded-For` address, which Koyeb documents as the certified connecting client IP.
 
@@ -82,6 +88,9 @@ The production image:
 - uses one worker by default for the Koyeb e-medium/eco-medium footprint;
 - applies concurrency, backlog, keep-alive, and graceful-shutdown limits;
 - includes request IDs, bounded request bodies, API security headers, and safe request completion logs.
+- is scanned after build/boot for fixable High/Critical OS and library vulnerabilities, with a retained human-readable report.
+
+The automatic `main` deployment watcher also fails closed when `KOYEB_TOKEN` or `KOYEB_SERVICE` is missing. It retains an exact-SHA production attestation only after the bounded Koyeb watcher succeeds; alert delivery does not weaken that result.
 
 ## Dependency maintenance
 

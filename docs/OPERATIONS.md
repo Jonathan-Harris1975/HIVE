@@ -1,13 +1,15 @@
 # HIVE production operations
 
 **Status:** Paid Koyeb production service  
-**Last reviewed:** 20 September 2026
+**Last reviewed:** 22 September 2026
 
 Use `/livez` for process liveness, `/readyz` for public dependency readiness and authenticated `/v1/runtime/readiness` for detailed checks. MAST is monitored as a Worker through its durable R2 heartbeat, not through a public URL.
 
 HIVE is also the ecosystem alert inbox. GitHub, Koyeb, Cloudflare Pages and runtime services post bounded redacted events to `/v1/ops/events`; HIVE-UI reads them from `/v1/system/ops-events`. See [`OPERATIONAL_ALERTING.md`](OPERATIONAL_ALERTING.md).
 
 Routine operations: review readiness, repository health and operational events; verify the scoped R2 read credentials; retain release identifiers; and never weaken production gates to clear a dashboard warning. Roll back HIVE and HIVE-UI as a coordinated pair when an API contract changes.
+
+Model Registry reconciliation uses private R2 objects in the `meta_system` lane. During a D1 incident, a mutation may report `pending` only after that external write succeeds. If both stores are unavailable, the mutation is rejected. A replacement instance reloads and overlays R2 pending operations before reconciliation; local Koyeb disk is irrelevant. Use authenticated `POST /v1/model-registry/reconcile`, then confirm `pending_count=0` and the intended D1 state before closing the incident.
 
 ## Repository Intelligence and controlled improvements
 
@@ -33,3 +35,5 @@ R2 connector diagnostics are intentionally non-throwing. Invalid credentials, ac
 Workers AI embeddings are optional unless the deployment policy makes the dependent retrieval path mandatory. Timeout, connection failure, non-2xx, malformed JSON, unexpected response types and vector-count mismatch return a degraded result. Exception and provider text is redacted against the configured embeddings token before logging/return. Ordinary CI uses deterministic mocked-provider tests; live-provider smoke checks are separate and use deployment-managed credentials only.
 
 For dependency maintenance, update `requirements.in`, regenerate `requirements.txt` with `python -m piptools compile --generate-hashes --output-file=requirements.txt --strip-extras requirements.in`, then run `python scripts/verify_dependency_lock.py --compile`, the full test/static/security gates and the Docker smoke gate.
+
+CI additionally scans the built `hive:ci` image with a pinned Trivy action. Fixable High/Critical OS or library findings block release; unfixed findings remain reviewable under the documented `ignore-unfixed` policy, and the table report is retained for 90 days.

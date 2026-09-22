@@ -1,7 +1,7 @@
 # HIVE operational alerting
 
 **Status:** Production-ready contract  
-**Last reviewed:** 22 June 2026
+**Last reviewed:** 22 September 2026
 
 HIVE is the central, redacted operational-event inbox for the ecosystem. It accepts trusted events from GitHub Actions, Koyeb deployment watchers, Cloudflare Pages watchers and runtime services, then exposes them to the authenticated HIVE-UI Ops page. This supplements provider email and does not depend on an email being noticed.
 
@@ -33,9 +33,13 @@ Add these GitHub Actions secrets to every governed repository:
 
 Koyeb-backed repositories also require `KOYEB_TOKEN` and `KOYEB_SERVICE` for the post-CI deployment watcher. `KOYEB_SERVICE` should be the exact `app/service` reference or service identifier accepted by the Koyeb CLI.
 
+For HIVE's automatic `main` watcher these values are mandatory. If either is absent, the workflow lists only the missing variable name and exits non-zero; exact-SHA verification, retained attestation and downstream smoke cannot be presented as green. Run `PYTHONPATH=backend python -m pytest backend/tests/test_release_workflow_contracts.py -q` for deterministic checks without live provider credentials.
+
 ## Failure behaviour
 
 Notification jobs are `continue-on-error`: alert delivery can never turn a successful build red or hide the original failing job. Watchers use provider APIs/CLIs, bounded polling and stable event IDs so retries do not create a confetti storm of duplicates.
+
+The deployment watcher itself is not non-blocking. Its Koyeb configuration check and expected-SHA watch are mandatory release verification; only the separate alert transport may fail without replacing the underlying result.
 
 ## Operator response
 

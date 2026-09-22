@@ -301,7 +301,10 @@ table under `lane="repository_memory"`. `hive-repositories` remains the determin
 per category (coding, reasoning, planning, vision, research, fast, cheap,
 creative, long_context). `ModelRouter.select_model` prefers the top-ranked
 "coding" model once the registry is populated, falling back to the static
-`code_model` setting otherwise — additive, not a breaking change.
+`code_model` setting otherwise — additive, not a breaking change. D1 is the
+primary registry store. A failed D1 mutation is accepted as pending only after
+its latest-operation-wins intent is stored in private R2; a fresh instance
+reloads that operation log, and conditional claims coordinate reconcilers.
 
 **Phase 4 - Provider Framework** (`services/providers/`): a uniform adapter
 shape (models, pricing, context, tool/structured-output support, health,
