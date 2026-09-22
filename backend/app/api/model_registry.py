@@ -10,6 +10,7 @@ from app.services.model_registry import (
     CONFIDENCE_LEVELS,
     LIFECYCLE_STATUSES,
     ModelRegistryError,
+    ModelRegistryPersistenceError,
     get_default_model,
     get_persistence_state,
     get_ranked_models,
@@ -126,6 +127,11 @@ async def post_register_model(
             lifecycle_status=body.lifecycle_status,
             store=store,
         )
+    except ModelRegistryPersistenceError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(error),
+        ) from error
     except ModelRegistryError as error:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
     persistence = get_persistence_state(category, body.model_id)
@@ -149,6 +155,11 @@ async def delete_registered_model(
     store = D1MetadataStore(settings)
     try:
         removed = remove_model(category, model_id, store=store)
+    except ModelRegistryPersistenceError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(error),
+        ) from error
     except ModelRegistryError as error:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
     if not removed:
