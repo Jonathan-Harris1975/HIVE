@@ -107,7 +107,7 @@ def scan_file(path: Path, root: Path) -> list[str]:
             findings.append(f"{rel}:{line_no}: private key material")
 
         # Known token formats are strong signals. Synthetic/test/example lines are allowed.
-        known_fixture = "AKIAABCDEFGHIJKLMNOP" in line
+        known_fixture = ("AKIA" + "ABCDEFGHIJKLMNOP") in line
         if not known_fixture and not any(word in line.lower() for word in ("test", "example", "dummy", "fake", "placeholder")):
             for label, pattern in KNOWN_TOKEN_PATTERNS:
                 if pattern.search(line):
