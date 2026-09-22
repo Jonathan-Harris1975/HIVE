@@ -166,6 +166,8 @@ markupsafe==3.0.3
     # via headroom-ai dependency graph
 mdurl==0.1.2
     # via headroom-ai dependency graph
+msgpack==1.2.1
+    # via -r requirements.in
 multidict==6.8.0
     # via headroom-ai dependency graph
 openai==2.54.0

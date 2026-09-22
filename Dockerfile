@@ -40,6 +40,7 @@ WORKDIR /app
 # Trivy is configured to fail on fixable HIGH/CRITICAL findings, so install all
 # available Bookworm security fixes before assembling the application image.
 USER root
+RUN python -m pip install --no-cache-dir --upgrade "setuptools==78.1.1"
 RUN apt-get update \
     && apt-get upgrade -y --no-install-recommends \
     && apt-get clean \
