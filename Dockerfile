@@ -9,18 +9,12 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 WORKDIR /build
 COPY requirements.txt /build/requirements.txt
-# The Python base image and newly-created virtual environment can retain older
-# packaging components that Trivy scans even when the application dependency
-# lock is current. Refresh every component reported by the image gate before
-# installing the locked runtime dependencies.
-RUN python -m pip install --no-cache-dir --upgrade \
-        "pip==26.2.1" \
-        "setuptools==78.1.1" \
-        "wheel==0.46.2" \
-        "jaraco.context==6.1.0" \
-        "msgpack==1.2.1" \
-    && python -m pip install --no-cache-dir --requirement /build/requirements.txt \
-    && python -m pip check
+# pip is required only while assembling the virtual environment. Remove it
+# afterwards so its bundled build-time libraries cannot become production
+# vulnerabilities. HIVE never installs uploaded repository dependencies.
+RUN python -m pip install --no-cache-dir --requirement /build/requirements.txt \
+    && python -m pip check \
+    && python -m pip uninstall --yes pip
 
 # HIVE's repository QA executes real repository tooling. Keep a current Node
 # runtime available without relying on Debian Bookworm's older nodejs package.
@@ -46,18 +40,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# The base interpreter's pip is also build-time tooling. Its vendored msgpack
+# and setuptools copies are not used by HIVE but are correctly visible to the
+# production image scanner, so keep the runtime package-manager free.
+USER root
+RUN python -m pip uninstall --yes pip
+
 # Refresh Debian packages in the final runtime layer. The pinned Python image can
 # pre-date Debian security updates even when the Python tag itself is current.
 # Trivy is configured to fail on fixable HIGH/CRITICAL findings, so install all
 # available Bookworm security fixes before assembling the application image.
-USER root
-RUN python -m pip install --no-cache-dir --upgrade \
-        "pip==26.2.1" \
-        "setuptools==78.1.1" \
-        "wheel==0.46.2" \
-        "jaraco.context==6.1.0" \
-        "msgpack==1.2.1" \
-    && python -m pip check
 RUN apt-get update \
     && apt-get upgrade -y --no-install-recommends \
     && apt-get clean \
