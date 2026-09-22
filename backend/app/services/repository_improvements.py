@@ -1381,6 +1381,11 @@ async def _run_job(
                 "Accepted repository improvement produced no repository modifications"
             )
 
+        if selected_payload is None or selected_validation is None:
+            raise RepositoryImprovementError(
+                "Accepted repository improvement is missing its model payload or validation result"
+            )
+
         qa_after = cast(dict[str, Any], selected_validation["qa"])
         security_validation = cast(
             dict[str, Any], selected_validation["security_validation"]
