@@ -30,16 +30,16 @@ The remaining sign-off items are not known code failures. They are validation ga
 - Added structured logging for D1 registration, deletion, load, and reconciliation failures.
 - Added persistence telemetry counters for attempts, successes, failures, and reconciliation outcomes.
 - Added explicit per-model persistence states, including durable and pending/reconciliation states.
-- Added a local write-ahead reconciliation journal, configurable through `MODEL_REGISTRY_RECONCILIATION_PATH`.
-- Journal writes are atomic and use restrictive file permissions where supported.
-- Every D1 mutation journals the latest intended state before attempting the durable write.
-- A successful D1 write clears the matching journal entry only after durability succeeds.
+- Added a private R2 pending-operation log in the governed `meta_system` lane, configured through the `MODEL_REGISTRY_PENDING_R2_*` settings.
+- Operation objects are size-bounded, stored beneath a private prefix and partitioned by a hash of the model key.
+- Every configured D1 mutation records the latest intended state in R2 before attempting the primary write.
+- A successful D1 write clears matching current/older R2 operations only after durability succeeds.
 - Newer mutations for the same model supersede older pending intents, preventing stale retries from overwriting later state.
 - Pending deletes mask stale D1 rows during restart/reload, so a failed durable delete does not silently resurrect a model in the in-memory registry.
 - Startup now loads D1 state, overlays pending operations, and runs reconciliation before applying seed data.
 - Reconciliation is idempotent and serialised; an operation identifier check prevents an older concurrent reconciliation attempt from clearing a newer mutation.
-- If journal creation itself fails, the mutation is rejected before D1 or in-memory state is changed.
-- If D1 succeeds but journal cleanup fails, the operation remains visibly pending rather than being falsely reported as fully durable.
+- If the configured R2 operation write fails, the mutation is rejected before D1 or in-memory state is changed.
+- If D1 succeeds but R2 cleanup fails, the idempotent operation remains visibly pending rather than being falsely reported as fully reconciled.
 
 ### API contract
 
@@ -71,8 +71,8 @@ Coverage includes:
 - API pending-state reporting;
 - newer successful mutation superseding an older pending mutation;
 - concurrent reconciliation serialisation;
-- journal creation failure;
-- D1 success followed by journal-cleanup failure.
+- R2 pending-operation write failure;
+- D1 success followed by R2 operation-cleanup failure.
 
 ## 3. Production TrustedHost policy tightened
 

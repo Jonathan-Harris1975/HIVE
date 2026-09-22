@@ -17,7 +17,7 @@ HIVE-UI (Cloudflare)
       -> model registry, repository memory/QA/council and reconciliation services
 ```
 
-The FastAPI application is assembled under `backend/app`. API routers live in `backend/app/api`, provider/domain services in `backend/app/services`, ingestion logic in `backend/app/ingestion`, and storage adapters in `backend/app/storage`. Repository and model-registry state is persisted where configured; model-registry writes that cannot be durably committed are recorded for reconciliation rather than silently discarded.
+The FastAPI application is assembled under `backend/app`. API routers live in `backend/app/api`, provider/domain services in `backend/app/services`, ingestion logic in `backend/app/ingestion`, and storage adapters in `backend/app/storage`. Repository and model-registry state is persisted where configured. Model-registry writes that D1 cannot commit are accepted only after the intended operation is stored in the private R2 `meta_system` lane, so pending work survives complete Koyeb instance and filesystem replacement.
 
 ## Supported runtime and dependency lock
 
@@ -51,7 +51,7 @@ Important configuration groups include:
 - **Authentication/network:** `ADMIN_BEARER_TOKEN`, `CORS_ORIGINS`, `ALLOWED_HOSTS`, trusted-host and forwarded-proxy settings.
 - **R2:** `CF_R2_ACCOUNT_ID`, `CF_R2_ACCESS_KEY_ID`, `CF_R2_SECRET_ACCESS_KEY`, `CF_R2_BUCKET`, optional read-only multi-bucket credentials, endpoint/timeouts/retry limits, and lane-specific bucket names.
 - **Embeddings:** `EMBEDDINGS_ENABLED`, `EMBEDDINGS_PROVIDER`, `EMBEDDINGS_ACCOUNT_ID`, `EMBEDDINGS_API_TOKEN`, `EMBEDDINGS_MODEL`, dimensions, timeout and batch-size settings.
-- **Persistence:** production database settings, optional D1, model-registry reconciliation path.
+- **Persistence:** production database settings, optional D1, and the private R2 Model Registry pending-operation lane/prefix.
 - **Retrieval/providers:** OpenRouter, Vectorize, AI Search and optional compatible-provider settings.
 
 Never put live provider/storage/database credentials in repository files, browser-exposed variables, logs or test fixtures. Deterministic tests use mocks/stubs only.
@@ -117,9 +117,13 @@ PYTHONPATH=backend python -m ruff check backend/app backend/tests scripts --sele
 PYTHONPATH=backend python scripts/mypy_guard.py
 python -m bandit -q -r backend/app -ll
 python -m pip_audit -r requirements.txt
+docker build --target runtime -t hive:ci .
+trivy image --ignore-unfixed --vuln-type os,library --severity HIGH,CRITICAL --exit-code 1 hive:ci
 ```
 
 Focused deterministic R2/embeddings coverage is in `backend/tests/test_r2_embeddings_regression.py`. Those tests must remain credential-free and network-free. Live-provider smoke tests, when deliberately run against a controlled environment, are separate from ordinary CI and must use deployment-managed secrets.
+
+The Docker CI job boots the production image, then the immutably pinned Trivy gate scans that actual image. Fixable High/Critical OS or library findings fail CI; `ignore-unfixed` is limited to issues with no upstream remediation, and the readable table report is retained for 90 days. The normal pytest suite includes deterministic contracts for both this image gate and the fail-closed Koyeb watcher.
 
 Run locally with:
 
@@ -129,6 +133,6 @@ PYTHONPATH=backend uvicorn app.main:app --host 0.0.0.0 --port 8080
 
 ## Deployment and security
 
-Use the root `Dockerfile` for the production image and `/readyz` for the external deployment health check; the image uses `/livez` internally. Production must retain exact allowed-host restrictions, HTTPS/CORS policy, bounded request/upload/extraction limits, scoped storage permissions, dependency/secret scanning and server-side credential handling.
+Use the root `Dockerfile` for the production image and `/readyz` for the external deployment health check; the image uses `/livez` internally. The automatic post-CI watcher requires `KOYEB_TOKEN` and `KOYEB_SERVICE`; missing configuration fails the production verification job, and exact-SHA evidence is written only after the bounded Koyeb watch succeeds. Production must retain exact allowed-host restrictions, HTTPS/CORS policy, bounded request/upload/extraction limits, scoped storage permissions, dependency/secret/image scanning and server-side credential handling.
 
 See `SECURITY.md`, `docs/OPERATIONS.md`, `docs/production-readiness.md`, `docs/koyeb-deployment.md`, `docs/cloudflare-decisions.md`, `docs/model-policy.md` and `CONTRIBUTING.md`.

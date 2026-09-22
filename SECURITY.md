@@ -1,7 +1,7 @@
 # HIVE security policy
 
 **Status:** Production-controlled  
-**Last reviewed:** 18 August 2026
+**Last reviewed:** 22 September 2026
 
 ## Supported release
 
@@ -11,7 +11,7 @@ The current `main` branch and latest production deployment are supported.
 
 HIVE is a private operator API. Production requests use a strong bearer token, HTTPS-only origins and trusted-host validation. Provider, database and storage secrets are held by Koyeb and are never returned to HIVE-UI. The Cloudflare Pages proxy stores the backend token, while the browser receives only a signed, `HttpOnly` operator session.
 
-The `hive` upload bucket is the only write-enabled storage lane. Additional R2 buckets are accessed with a separate read-only credential. File reads, extraction, ZIP traversal, request bodies, chunk counts and model context are bounded.
+R2 writes are limited to governed private lanes required by HIVE, including uploads, repository artefacts and the internal `meta_system` operation/heartbeat lane. Other ecosystem buckets use scoped read access. Model Registry pending operations use hashed object-key partitions, bounded payloads and private R2 storage; credentials are never included in keys, diagnostics or response payloads. File reads, extraction, ZIP traversal, request bodies, chunk counts and model context are bounded.
 
 
 ## Authentication and proxy boundary
@@ -29,3 +29,5 @@ The development sentinel token is accepted only from loopback peers (plus the co
 - Never place secrets in repository files, screenshots, logs or client-side environment variables.
 
 Report suspected vulnerabilities privately to the repository owner. Include the affected endpoint, reproduction steps and impact without publishing live credentials.
+
+CI scans the actual production image for OS and application-library vulnerabilities with an immutable Trivy action reference. Fixable `HIGH` and `CRITICAL` findings fail the Docker job. `ignore-unfixed` applies only where no upstream fix exists; it is not permission to suppress findings broadly, and the human-readable report is retained for 90 days.
