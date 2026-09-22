@@ -155,6 +155,12 @@ jobs:
           ignore-unfixed: true
           vuln-type: os,library
           severity: CRITICAL,HIGH
+      - name: Print production image vulnerability report
+        if: always()
+        run: |
+          if [ -f trivy-hive-image.txt ]; then
+            cat trivy-hive-image.txt
+          fi
       - name: Retain production image vulnerability report
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
