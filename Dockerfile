@@ -1,4 +1,4 @@
-FROM python:3.14.7-slim-bookworm@sha256:9ab8d9c8514b44f90cf0029dd42fdd7e9e211e639c8b995304cc04568dee900f AS builder
+FROM python:3.14.7-slim-bookworm@sha256:bf5a06313080f516be80f78839d992270e7877dde4e2c345a41b84f862fbc28b AS builder
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -13,7 +13,7 @@ RUN python -m pip install --requirement /build/requirements.txt
 
 # HIVE's repository QA executes real repository tooling. Keep a current Node
 # runtime available without relying on Debian Bookworm's older nodejs package.
-FROM node:22.23.2-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS node_runtime
+FROM node:22.23.2-bookworm-slim@sha256:48e4b67d85f87bd551df43704e24d252f56cc5f8e9718841aace50f19948f0f9 AS node_runtime
 
 # Node 22.23.2 bundles npm 10.9.8, whose bundled dependencies trigger the
 # production Trivy HIGH/CRITICAL gate. npm 11.19.1 supports this Node release
@@ -22,7 +22,7 @@ FROM node:22.23.2-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b8
 RUN npm install --global npm@11.19.1 \
     && npm cache clean --force
 
-FROM python:3.14.7-slim-bookworm@sha256:9ab8d9c8514b44f90cf0029dd42fdd7e9e211e639c8b995304cc04568dee900f AS runtime
+FROM python:3.14.7-slim-bookworm@sha256:bf5a06313080f516be80f78839d992270e7877dde4e2c345a41b84f862fbc28b AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
