@@ -2,15 +2,14 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import threading
 import time
 import uuid
 from dataclasses import asdict, dataclass, replace
-from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 if TYPE_CHECKING:
+    from app.core.config import Settings
     from app.storage.d1 import D1MetadataStore
 
 logger = logging.getLogger("uvicorn.error.hive.model_registry")
@@ -25,14 +24,12 @@ logger = logging.getLogger("uvicorn.error.hive.model_registry")
 #
 # Persistence: the registry remains an in-memory cache for fast reads on the
 # request path. When D1 is configured, mutations are mirrored to the existing
-# hive_ecosystem_metadata table. If D1 is temporarily unavailable, the accepted
-# mutation is written to a small local reconciliation journal before it is made
-# visible in memory. On process restart the journal is overlaid on any D1 state,
-# preventing a failed delete from silently resurrecting and preserving failed
-# registrations until D1 recovers. Reconciliation is idempotent and serialised.
+# hive_ecosystem_metadata table. Each configured mutation is first represented
+# in a private R2 operation log. If D1 is temporarily unavailable, that external
+# operation remains pending and is overlaid after a completely fresh instance
+# starts. Reconciliation uses cross-instance claims and idempotent D1 writes.
 
 LANE = "model_registry"
-DEFAULT_RECONCILIATION_PATH = Path("local-data/model-registry-pending.json")
 
 CATEGORIES: tuple[str, ...] = (
     "coding",
@@ -51,7 +48,13 @@ _RECONCILE_LOCK = threading.Lock()
 _REGISTRY: dict[str, list["RankedModel"]] = {category: [] for category in CATEGORIES}
 _PENDING: dict[str, "PendingOperation"] = {}
 _PERSISTENCE_STATE: dict[str, dict[str, object]] = {}
-_ACTIVE_JOURNAL_PATH: Path | None = None
+_PENDING_STORE_DIAGNOSTICS: dict[str, object] = {
+    "backend": "r2",
+    "enabled": False,
+    "lane": "meta_system",
+    "bucket_configured": False,
+    "prefix": "state/hive/model-registry-pending",
+}
 _METRICS: dict[str, int] = {
     "persistence_attempts": 0,
     "persistence_successes": 0,
@@ -67,7 +70,27 @@ class ModelRegistryError(ValueError):
 
 
 class ModelRegistryPersistenceError(ModelRegistryError):
-    """Raised only when a failed D1 mutation cannot be journalled safely."""
+    """Raised when neither D1 nor the external pending store can protect a mutation."""
+
+
+class DurablePendingStore(Protocol):
+    enabled: bool
+
+    def safe_config(self) -> dict[str, object]: ...
+
+    def persist(self, operation: dict[str, object]) -> None: ...
+
+    def load(self) -> list[dict[str, object]]: ...
+
+    def claim(self, operation: dict[str, object]) -> bool: ...
+
+    def complete(self, operation: dict[str, object]) -> None: ...
+
+    def record_failure(self, operation: dict[str, object]) -> None: ...
+
+    def release_claim(self, operation: dict[str, object]) -> None: ...
+
+    def discard(self, operation: dict[str, object]) -> None: ...
 
 
 #: Confidence levels for a model's benchmark/latency/cost figures, mirroring
@@ -192,110 +215,102 @@ def _metadata_for_ranked(ranked: RankedModel) -> dict[str, object]:
     return asdict(ranked)
 
 
-# ---------- reconciliation journal ----------
+# ---------- externally durable reconciliation operations ----------
 
 
-def _journal_path(store: "D1MetadataStore | None") -> Path:
-    settings = getattr(store, "settings", None)
-    configured = getattr(settings, "model_registry_reconciliation_path", "")
-    path = Path(str(configured).strip()) if str(configured or "").strip() else DEFAULT_RECONCILIATION_PATH
-    return path
+def _set_pending_store_diagnostics(value: dict[str, object]) -> None:
+    with _LOCK:
+        _PENDING_STORE_DIAGNOSTICS.clear()
+        _PENDING_STORE_DIAGNOSTICS.update(value)
 
 
-def _set_active_journal_path(path: Path) -> None:
-    global _ACTIVE_JOURNAL_PATH
-    _ACTIVE_JOURNAL_PATH = path
+def _resolve_pending_store(
+    store: "D1MetadataStore | None",
+    pending_store: DurablePendingStore | None = None,
+) -> DurablePendingStore | None:
+    if pending_store is not None:
+        _set_pending_store_diagnostics(pending_store.safe_config())
+        return pending_store
+    injected = getattr(store, "model_registry_pending_store", None)
+    if injected is not None:
+        _set_pending_store_diagnostics(injected.safe_config())
+        return injected
+    settings: "Settings | None" = getattr(store, "settings", None)
+    if settings is None:
+        return None
+    from app.storage.model_registry_pending import R2ModelRegistryPendingStore
+
+    resolved = R2ModelRegistryPendingStore(settings)
+    _set_pending_store_diagnostics(resolved.safe_config())
+    return resolved
 
 
-def _write_pending_journal_locked(path: Path) -> None:
-    payload = {
-        "version": 1,
-        "pending": [asdict(item) for item in sorted(_PENDING.values(), key=lambda op: op.queued_at)],
-    }
+def _pending_from_mapping(item: dict[str, object]) -> PendingOperation | None:
+    action = str(item.get("action") or "")
+    category = str(item.get("category") or "")
+    model_id = str(item.get("model_id") or "")
+    operation_id = str(item.get("operation_id") or "")
+    if (
+        action not in {"upsert", "delete"}
+        or category not in CATEGORIES
+        or not model_id
+        or not operation_id
+    ):
+        return None
+    raw_queued_at = item.get("queued_at")
+    raw_attempts = item.get("attempts")
+    raw_model = item.get("model")
     try:
-        if not _PENDING:
-            path.unlink(missing_ok=True)
-            return
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temp_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-        temp_path.write_text(json.dumps(payload, sort_keys=True, ensure_ascii=False), encoding="utf-8")
-        try:
-            temp_path.chmod(0o600)
-        except OSError:
-            pass
-        os.replace(temp_path, path)
-    except OSError as exc:
+        queued_at = float(raw_queued_at) if isinstance(raw_queued_at, (int, float, str)) else 0.0
+        attempts = int(raw_attempts) if isinstance(raw_attempts, (int, float, str)) else 0
+    except (TypeError, ValueError):
+        return None
+    if queued_at <= 0:
+        return None
+    return PendingOperation(
+        operation_id=operation_id,
+        action=action,
+        category=category,
+        model_id=model_id,
+        queued_at=queued_at,
+        model=cast(dict[str, object], raw_model) if isinstance(raw_model, dict) else None,
+        attempts=max(0, attempts),
+        last_error=str(item["last_error"]) if item.get("last_error") is not None else None,
+    )
+
+
+def _load_pending_store(pending_store: DurablePendingStore | None) -> int:
+    if pending_store is None or not pending_store.enabled:
+        return 0
+    try:
+        raw_operations = pending_store.load()
+    except Exception as exc:  # noqa: BLE001 - fail closed instead of losing accepted work
         logger.error(
-            "model_registry_journal_write_failed path=%s error=%s",
-            path,
-            exc,
-            extra={
-                "event": "model_registry_journal_write_failed",
-                "path": str(path),
-                "error": str(exc),
-            },
+            "model_registry_pending_store_load_failed error_type=%s",
+            type(exc).__name__,
+            extra={"event": "model_registry_pending_store_load_failed"},
         )
         raise ModelRegistryPersistenceError(
-            f"Model Registry persistence failed and reconciliation journal could not be written: {exc}"
+            "Model Registry durable pending operations could not be loaded"
         ) from exc
 
-
-def _load_pending_journal(path: Path) -> int:
-    _set_active_journal_path(path)
-    if not path.exists():
-        return 0
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError, ValueError) as exc:
-        logger.error(
-            "model_registry_journal_load_failed path=%s error=%s",
-            path,
-            exc,
-            extra={
-                "event": "model_registry_journal_load_failed",
-                "path": str(path),
-                "error": str(exc),
-            },
-        )
-        return 0
-
-    pending = raw.get("pending") if isinstance(raw, dict) else None
-    if not isinstance(pending, list):
-        logger.error(
-            "model_registry_journal_invalid path=%s",
-            path,
-            extra={"event": "model_registry_journal_invalid", "path": str(path)},
-        )
-        return 0
-
-    loaded = 0
-    with _LOCK:
-        for item in pending:
-            if not isinstance(item, dict):
-                continue
-            action = str(item.get("action") or "")
-            category = str(item.get("category") or "")
-            model_id = str(item.get("model_id") or "")
-            operation_id = str(item.get("operation_id") or "")
-            if action not in {"upsert", "delete"} or category not in CATEGORIES or not model_id:
-                continue
-            try:
-                queued_at = float(item.get("queued_at") or time.time())
-                attempts = int(item.get("attempts") or 0)
-            except (TypeError, ValueError):
-                continue
-            operation = PendingOperation(
-                operation_id=operation_id or uuid.uuid4().hex,
-                action=action,
-                category=category,
-                model_id=model_id,
-                queued_at=queued_at,
-                model=item.get("model") if isinstance(item.get("model"), dict) else None,
-                attempts=max(0, attempts),
-                last_error=(
-                    str(item["last_error"]) if item.get("last_error") is not None else None
-                ),
+    latest: dict[str, PendingOperation] = {}
+    for item in raw_operations:
+        operation = _pending_from_mapping(item)
+        if operation is None:
+            raise ModelRegistryPersistenceError(
+                "Model Registry durable pending store contains an invalid operation"
             )
+        current = latest.get(operation.key)
+        if current is None or (operation.queued_at, operation.operation_id) > (
+            current.queued_at,
+            current.operation_id,
+        ):
+            latest[operation.key] = operation
+
+    with _LOCK:
+        _PENDING.clear()
+        for operation in latest.values():
             _PENDING[operation.key] = operation
             _PERSISTENCE_STATE[operation.key] = {
                 "state": "pending",
@@ -303,79 +318,67 @@ def _load_pending_journal(path: Path) -> int:
                 "error": operation.last_error,
                 "updated_at": operation.queued_at,
             }
-            loaded += 1
-    if loaded:
+    if latest:
         logger.warning(
-            "model_registry_pending_restored count=%s path=%s",
-            loaded,
-            path,
-            extra={
-                "event": "model_registry_pending_restored",
-                "count": loaded,
-                "path": str(path),
-            },
+            "model_registry_pending_restored count=%s backend=r2",
+            len(latest),
+            extra={"event": "model_registry_pending_restored", "count": len(latest)},
         )
-    return loaded
+    return len(latest)
 
 
-def _record_pending(
+def _new_pending_operation(
     *,
-    store: "D1MetadataStore | None",
     action: str,
     category: str,
     model_id: str,
     model: RankedModel | None,
-    error: str | None,
 ) -> PendingOperation:
-    """Atomically journal the latest desired mutation before touching D1.
-
-    Replacing an older pending operation for the same model prevents a stale
-    reconciliation retry from winning after a newer user action. If the journal
-    cannot be written, process state is rolled back and the mutation is rejected
-    before it can be exposed in memory.
-    """
-    operation = PendingOperation(
+    return PendingOperation(
         operation_id=uuid.uuid4().hex,
         action=action,
         category=category,
         model_id=model_id,
         queued_at=time.time(),
         model=_metadata_for_ranked(model) if model is not None else None,
-        attempts=0,
-        last_error=error,
     )
-    path = _journal_path(store)
-    _set_active_journal_path(path)
+
+
+def _record_pending(
+    pending_store: DurablePendingStore,
+    operation: PendingOperation,
+) -> None:
+    try:
+        pending_store.persist(asdict(operation))
+    except Exception as exc:  # noqa: BLE001 - caller may still commit directly to D1
+        logger.error(
+            "model_registry_pending_store_write_failed action=%s category=%s model_id=%s error_type=%s",
+            operation.action,
+            operation.category,
+            operation.model_id,
+            type(exc).__name__,
+            extra={
+                "event": "model_registry_pending_store_write_failed",
+                "action": operation.action,
+                "category": operation.category,
+                "model_id": operation.model_id,
+            },
+        )
+        raise ModelRegistryPersistenceError(
+            "Model Registry durable R2 fallback could not accept the operation"
+        ) from exc
     with _LOCK:
-        previous_pending = _PENDING.get(operation.key)
-        previous_state = _PERSISTENCE_STATE.get(operation.key)
         _PENDING[operation.key] = operation
         _PERSISTENCE_STATE[operation.key] = {
             "state": "pending",
-            "action": action,
-            "error": error,
+            "action": operation.action,
+            "error": operation.last_error,
             "updated_at": operation.queued_at,
         }
-        try:
-            _write_pending_journal_locked(path)
-        except ModelRegistryPersistenceError:
-            if previous_pending is None:
-                _PENDING.pop(operation.key, None)
-            else:
-                _PENDING[operation.key] = previous_pending
-            if previous_state is None:
-                _PERSISTENCE_STATE.pop(operation.key, None)
-            else:
-                _PERSISTENCE_STATE[operation.key] = previous_state
-            raise
-    return operation
 
 
-def _clear_pending_if_current(operation: PendingOperation, path: Path) -> bool:
+def _set_durable_state(operation: PendingOperation) -> None:
     with _LOCK:
-        current = _PENDING.get(operation.key)
-        if current is None or current.operation_id != operation.operation_id:
-            return False
         _PENDING.pop(operation.key, None)
         _PERSISTENCE_STATE[operation.key] = {
             "state": "durable",
@@ -383,32 +386,50 @@ def _clear_pending_if_current(operation: PendingOperation, path: Path) -> bool:
             "error": None,
             "updated_at": time.time(),
         }
-        try:
-            _write_pending_journal_locked(path)
-        except ModelRegistryPersistenceError as exc:
-            # D1 already accepted this exact operation. Keep the same operation
-            # pending so a later idempotent reconciliation can safely repeat the
-            # durable write and clean up the journal.
-            restored = replace(
-                operation,
-                last_error=f"D1 durable; reconciliation journal cleanup failed: {exc}",
-            )
-            _PENDING[operation.key] = restored
-            _PERSISTENCE_STATE[operation.key] = {
-                "state": "pending",
-                "action": operation.action,
-                "error": restored.last_error,
-                "updated_at": time.time(),
-            }
-            return False
-        return True
 
 
-def _update_pending_failure(operation: PendingOperation, path: Path, error: str) -> None:
+def _clear_pending_if_current(
+    operation: PendingOperation,
+    pending_store: DurablePendingStore,
+) -> bool:
     with _LOCK:
         current = _PENDING.get(operation.key)
         if current is None or current.operation_id != operation.operation_id:
-            return
+            return False
+    try:
+        pending_store.complete(asdict(operation))
+    except Exception as exc:  # noqa: BLE001 - D1 is durable; retain safe idempotent work
+        error = f"D1 durable; R2 pending-operation cleanup failed ({type(exc).__name__})"
+        restored = replace(operation, last_error=error)
+        with _LOCK:
+            current = _PENDING.get(operation.key)
+            if current is not None and current.operation_id == operation.operation_id:
+                _PENDING[operation.key] = restored
+                _PERSISTENCE_STATE[operation.key] = {
+                    "state": "pending",
+                    "action": operation.action,
+                    "error": error,
+                    "updated_at": time.time(),
+                }
+        return False
+
+    with _LOCK:
+        current = _PENDING.get(operation.key)
+        if current is None or current.operation_id != operation.operation_id:
+            return False
+        _set_durable_state(operation)
+    return True
+
+
+def _update_pending_failure(
+    operation: PendingOperation,
+    pending_store: DurablePendingStore,
+    error: str,
+) -> PendingOperation:
+    with _LOCK:
+        current = _PENDING.get(operation.key)
+        if current is None or current.operation_id != operation.operation_id:
+            return operation
         updated = replace(current, attempts=current.attempts + 1, last_error=error)
         _PENDING[operation.key] = updated
         _PERSISTENCE_STATE[operation.key] = {
@@ -417,13 +438,16 @@ def _update_pending_failure(operation: PendingOperation, path: Path, error: str)
             "error": error,
             "updated_at": time.time(),
         }
-        try:
-            _write_pending_journal_locked(path)
-        except ModelRegistryPersistenceError:
-            # The pre-write journal already contains this same desired operation,
-            # so recovery remains safe. Keep the richer failure detail in memory
-            # even when the diagnostic update cannot be flushed to disk.
-            return
+    try:
+        pending_store.record_failure(asdict(updated))
+    except Exception as exc:  # noqa: BLE001 - the original operation remains durable
+        logger.error(
+            "model_registry_pending_diagnostic_update_failed operation_id=%s error_type=%s",
+            operation.operation_id,
+            type(exc).__name__,
+            extra={"event": "model_registry_pending_diagnostic_update_failed"},
+        )
+    return updated
 
 
 # ---------- D1 persistence ----------
@@ -552,6 +576,55 @@ def _set_not_configured_state(category: str, model_id: str, action: str) -> None
         }
 
 
+def _persist_or_queue_mutation(
+    *,
+    store: "D1MetadataStore | None",
+    pending_store: DurablePendingStore | None,
+    action: str,
+    category: str,
+    model_id: str,
+    model: RankedModel | None,
+    failure_message: str,
+) -> None:
+    if not _store_enabled(store):
+        _set_not_configured_state(category, model_id, action)
+        return
+
+    assert store is not None
+    resolved_pending_store = _resolve_pending_store(store, pending_store)
+    operation = _new_pending_operation(
+        action=action,
+        category=category,
+        model_id=model_id,
+        model=model,
+    )
+    queued = bool(resolved_pending_store is not None and resolved_pending_store.enabled)
+    if queued:
+        assert resolved_pending_store is not None
+        _record_pending(resolved_pending_store, operation)
+
+    if action == "delete":
+        persisted, error = _delete_persisted_model_now(store, category, model_id)
+    else:
+        if model is None:
+            raise ModelRegistryPersistenceError("Model Registry upsert payload is missing")
+        persisted, error = _persist_model_now(store, model)
+
+    if persisted:
+        if queued:
+            assert resolved_pending_store is not None
+            _clear_pending_if_current(operation, resolved_pending_store)
+        else:
+            _set_durable_state(operation)
+        return
+
+    if not queued or resolved_pending_store is None:
+        raise ModelRegistryPersistenceError(
+            f"{failure_message}; durable R2 fallback is unavailable"
+        )
+    _update_pending_failure(operation, resolved_pending_store, error or failure_message)
+
+
 # ---------- public mutation API ----------
 
 
@@ -570,11 +643,12 @@ def register_model(
     expiration_date: str | None = None,
     lifecycle_status: str = "active",
     store: "D1MetadataStore | None" = None,
+    pending_store: DurablePendingStore | None = None,
 ) -> list[RankedModel]:
     """Register or re-score a model and mirror the mutation durably when configured.
 
-    D1 failure remains fail-open for runtime availability, but it is never silent:
-    the mutation is journalled as pending before it becomes visible in memory.
+    D1 failure remains available only when the mutation was first written to the
+    external R2 operation log. If both durable paths fail, the mutation is rejected.
     """
     _require_known_category(category)
     if not model_id:
@@ -604,28 +678,15 @@ def register_model(
         lifecycle_status=lifecycle_status,
     )
 
-    if _store_enabled(store):
-        assert store is not None
-        pending = _record_pending(
-            store=store,
-            action="upsert",
-            category=category,
-            model_id=model_id,
-            model=ranked,
-            error=None,
-        )
-        path = _journal_path(store)
-        persisted, error = _persist_model_now(store, ranked)
-        if persisted:
-            _clear_pending_if_current(pending, path)
-        else:
-            _update_pending_failure(
-                pending,
-                path,
-                error or "unknown D1 persistence failure",
-            )
-    else:
-        _set_not_configured_state(category, model_id, "upsert")
+    _persist_or_queue_mutation(
+        store=store,
+        pending_store=pending_store,
+        action="upsert",
+        category=category,
+        model_id=model_id,
+        model=ranked,
+        failure_message="D1 Model Registry persistence failed",
+    )
 
     with _LOCK:
         existing = [m for m in _REGISTRY[category] if m.model_id != model_id]
@@ -635,35 +696,28 @@ def register_model(
         return list(existing)
 
 
-def remove_model(category: str, model_id: str, *, store: "D1MetadataStore | None" = None) -> bool:
+def remove_model(
+    category: str,
+    model_id: str,
+    *,
+    store: "D1MetadataStore | None" = None,
+    pending_store: DurablePendingStore | None = None,
+) -> bool:
     _require_known_category(category)
     with _LOCK:
         exists = any(m.model_id == model_id for m in _REGISTRY[category])
     if not exists:
         return False
 
-    if _store_enabled(store):
-        assert store is not None
-        pending = _record_pending(
-            store=store,
-            action="delete",
-            category=category,
-            model_id=model_id,
-            model=None,
-            error=None,
-        )
-        path = _journal_path(store)
-        persisted, error = _delete_persisted_model_now(store, category, model_id)
-        if persisted:
-            _clear_pending_if_current(pending, path)
-        else:
-            _update_pending_failure(
-                pending,
-                path,
-                error or "unknown D1 deletion failure",
-            )
-    else:
-        _set_not_configured_state(category, model_id, "delete")
+    _persist_or_queue_mutation(
+        store=store,
+        pending_store=pending_store,
+        action="delete",
+        category=category,
+        model_id=model_id,
+        model=None,
+        failure_message="D1 Model Registry deletion failed",
+    )
 
     with _LOCK:
         before = len(_REGISTRY[category])
@@ -678,6 +732,7 @@ def set_model_lifecycle(
     expiration_date: str | None = None,
     canonical_slug: str | None = None,
     store: "D1MetadataStore | None" = None,
+    pending_store: DurablePendingStore | None = None,
 ) -> int:
     """Update matching registry entries without deleting their audit history."""
     if lifecycle_status not in LIFECYCLE_STATUSES:
@@ -700,28 +755,15 @@ def set_model_lifecycle(
                 changed_by_key[_item_id(category, item.model_id)] = changed
 
     for changed in changed_by_key.values():
-        if _store_enabled(store):
-            assert store is not None
-            pending = _record_pending(
-                store=store,
-                action="upsert",
-                category=changed.category,
-                model_id=changed.model_id,
-                model=changed,
-                error=None,
-            )
-            path = _journal_path(store)
-            persisted, error = _persist_model_now(store, changed)
-            if persisted:
-                _clear_pending_if_current(pending, path)
-            else:
-                _update_pending_failure(
-                    pending,
-                    path,
-                    error or "unknown D1 lifecycle persistence failure",
-                )
-        else:
-            _set_not_configured_state(changed.category, changed.model_id, "upsert")
+        _persist_or_queue_mutation(
+            store=store,
+            pending_store=pending_store,
+            action="upsert",
+            category=changed.category,
+            model_id=changed.model_id,
+            model=changed,
+            failure_message="D1 Model Registry lifecycle persistence failed",
+        )
 
     with _LOCK:
         for category in CATEGORIES:
@@ -760,18 +802,16 @@ def _overlay_pending_locked() -> None:
             _REGISTRY[ranked.category] = existing
 
 
-def load_registry_from_store(store: "D1MetadataStore | None") -> int:
-    """Rehydrate the registry from D1, then overlay locally journalled mutations.
-
-    D1 outages at startup remain fail-open, but are logged. Pending mutations are
-    still applied from the reconciliation journal so a failed delete cannot silently
-    reappear merely because the process restarted.
-    """
-    path = _journal_path(store)
+def load_registry_from_store(
+    store: "D1MetadataStore | None",
+    pending_store: DurablePendingStore | None = None,
+) -> int:
+    """Rehydrate D1 state, then overlay the externally durable R2 operation log."""
+    resolved_pending_store = _resolve_pending_store(store, pending_store)
     with _LOCK:
         _PENDING.clear()
         _PERSISTENCE_STATE.clear()
-    _load_pending_journal(path)
+    _load_pending_store(resolved_pending_store)
 
     result: dict[str, object] | None = None
     if _store_enabled(store):
@@ -802,7 +842,9 @@ def load_registry_from_store(store: "D1MetadataStore | None") -> int:
         for category in CATEGORIES:
             _REGISTRY[category] = []
 
-        for row in (result or {}).get("items", []):
+        raw_items = (result or {}).get("items", [])
+        rows = raw_items if isinstance(raw_items, list) else []
+        for row in rows:
             if not isinstance(row, dict):
                 continue
             metadata_raw = row.get("metadata") or {}
@@ -829,8 +871,11 @@ def load_registry_from_store(store: "D1MetadataStore | None") -> int:
     return count
 
 
-def reconcile_pending(store: "D1MetadataStore | None") -> dict[str, object]:
-    """Retry queued D1 mutations once, safely and idempotently."""
+def reconcile_pending(
+    store: "D1MetadataStore | None",
+    pending_store: DurablePendingStore | None = None,
+) -> dict[str, object]:
+    """Claim and retry queued D1 mutations once, safely and idempotently."""
     if not _store_enabled(store):
         return {
             "ok": False,
@@ -839,16 +884,54 @@ def reconcile_pending(store: "D1MetadataStore | None") -> dict[str, object]:
             "reconciled_count": 0,
         }
     assert store is not None
-    path = _journal_path(store)
-    _set_active_journal_path(path)
+    resolved_pending_store = _resolve_pending_store(store, pending_store)
+    if resolved_pending_store is None or not resolved_pending_store.enabled:
+        pending_count = pending_reconciliation_count()
+        return {
+            "ok": pending_count == 0,
+            "enabled": True,
+            "durable_store_enabled": False,
+            "attempted_count": 0,
+            "reconciled_count": 0,
+            "failed_count": pending_count,
+            "pending_count": pending_count,
+        }
 
     with _RECONCILE_LOCK:
         with _LOCK:
             snapshot = list(_PENDING.values())
         reconciled = 0
         failed = 0
+        claimed_count = 0
+        claim_skipped_count = 0
         for operation in snapshot:
             _bump_metric("reconciliation_attempts")
+            try:
+                claimed = resolved_pending_store.claim(asdict(operation))
+            except Exception as exc:  # noqa: BLE001 - retain pending work for a later retry
+                failed += 1
+                _bump_metric("reconciliation_failures")
+                logger.error(
+                    "model_registry_reconciliation_claim_failed operation_id=%s error_type=%s",
+                    operation.operation_id,
+                    type(exc).__name__,
+                    extra={"event": "model_registry_reconciliation_claim_failed"},
+                )
+                continue
+            if not claimed:
+                claim_skipped_count += 1
+                continue
+            claimed_count += 1
+            with _LOCK:
+                current = _PENDING.get(operation.key)
+            if current is None or current.operation_id != operation.operation_id:
+                try:
+                    resolved_pending_store.release_claim(asdict(operation))
+                except Exception:  # noqa: BLE001 - the bounded claim expires automatically
+                    pass
+                claim_skipped_count += 1
+                continue
+
             if operation.action == "delete":
                 success, error = _delete_persisted_model_now(
                     store, operation.category, operation.model_id
@@ -861,7 +944,7 @@ def reconcile_pending(store: "D1MetadataStore | None") -> dict[str, object]:
                     success, error = _persist_model_now(store, ranked)
 
             if success:
-                if _clear_pending_if_current(operation, path):
+                if _clear_pending_if_current(operation, resolved_pending_store):
                     reconciled += 1
                     _bump_metric("reconciliation_successes")
                     logger.info(
@@ -894,14 +977,28 @@ def reconcile_pending(store: "D1MetadataStore | None") -> dict[str, object]:
                                 "model_id": operation.model_id,
                             },
                         )
+                    else:
+                        try:
+                            resolved_pending_store.release_claim(asdict(operation))
+                        except Exception:  # noqa: BLE001 - the bounded claim expires automatically
+                            pass
             else:
                 failed += 1
                 _bump_metric("reconciliation_failures")
-                _update_pending_failure(
+                updated = _update_pending_failure(
                     operation,
-                    path,
+                    resolved_pending_store,
                     error or "unknown D1 reconciliation failure",
                 )
+                try:
+                    resolved_pending_store.release_claim(asdict(updated))
+                except Exception as exc:  # noqa: BLE001 - lease expiry provides bounded recovery
+                    logger.error(
+                        "model_registry_reconciliation_claim_release_failed operation_id=%s error_type=%s",
+                        operation.operation_id,
+                        type(exc).__name__,
+                        extra={"event": "model_registry_reconciliation_claim_release_failed"},
+                    )
                 logger.error(
                     "model_registry_reconciliation_failed action=%s category=%s model_id=%s error=%s",
                     operation.action,
@@ -921,7 +1018,10 @@ def reconcile_pending(store: "D1MetadataStore | None") -> dict[str, object]:
         return {
             "ok": failed == 0,
             "enabled": True,
+            "durable_store_enabled": True,
             "attempted_count": len(snapshot),
+            "claimed_count": claimed_count,
+            "claim_skipped_count": claim_skipped_count,
             "reconciled_count": reconciled,
             "failed_count": failed,
             "pending_count": pending,
@@ -975,14 +1075,25 @@ def persistence_diagnostics() -> dict[str, object]:
     with _LOCK:
         return {
             "pending_count": len(_PENDING),
-            "pending": [asdict(item) for item in sorted(_PENDING.values(), key=lambda op: op.queued_at)],
+            "pending": [
+                {
+                    "operation_id": item.operation_id,
+                    "action": item.action,
+                    "category": item.category,
+                    "model_id": item.model_id,
+                    "queued_at": item.queued_at,
+                    "attempts": item.attempts,
+                    "last_error": item.last_error,
+                }
+                for item in sorted(_PENDING.values(), key=lambda op: op.queued_at)
+            ],
             "metrics": dict(_METRICS),
-            "journal_path": str(_ACTIVE_JOURNAL_PATH or DEFAULT_RECONCILIATION_PATH),
+            "durable_pending_store": dict(_PENDING_STORE_DIAGNOSTICS),
         }
 
 
 def clear_registry(*, preserve_pending: bool = False) -> None:
-    """Clear process state. `preserve_pending=True` simulates a process restart in tests."""
+    """Clear process memory without deleting externally durable pending operations."""
     with _LOCK:
         for category in CATEGORIES:
             _REGISTRY[category] = []
@@ -992,11 +1103,6 @@ def clear_registry(*, preserve_pending: bool = False) -> None:
         _PERSISTENCE_STATE.clear()
         for name in _METRICS:
             _METRICS[name] = 0
-        path = _ACTIVE_JOURNAL_PATH or DEFAULT_RECONCILIATION_PATH
-        try:
-            path.unlink(missing_ok=True)
-        except OSError:
-            logger.warning("Unable to remove Model Registry reconciliation journal path=%s", path)
 
 
 def seed_from_json(seed_json: str) -> int:
