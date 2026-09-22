@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import json
+import threading
 from concurrent.futures import ThreadPoolExecutor
-from types import SimpleNamespace
 
 import pytest
 
@@ -104,11 +104,14 @@ class _FakeD1Store:
     persistence, backed by an in-memory dict instead of a real D1 HTTP
     call, so registry restart-survival can be tested without network."""
 
-    def __init__(self) -> None:
+    def __init__(self, rows=None) -> None:
         self.enabled = True
-        self._rows: dict[str, dict[str, object]] = {}
+        self._rows: dict[str, dict[str, object]] = rows if rows is not None else {}
+        self.upsert_calls = 0
+        self.delete_calls = 0
 
     def upsert_metadata(self, *, item_id, lane, source_type, source_id, title, url, metadata):
+        self.upsert_calls += 1
         self._rows[item_id] = {
             "id": item_id,
             "lane": lane,
@@ -123,6 +126,7 @@ class _FakeD1Store:
         return {"ok": True, "count": len(items), "items": items}
 
     def delete_metadata_ids(self, item_ids):
+        self.delete_calls += 1
         for item_id in item_ids:
             self._rows.pop(item_id, None)
         return {"ok": True, "deleted_count": len(item_ids)}
@@ -324,22 +328,114 @@ def test_model_router_uses_registry_categories_beyond_coding():
     assert router.select_model(TaskType.AUDIT) == "ranked-reasoning"
 
 
+class _FakeDurablePendingStore:
+    def __init__(self, *, fail_persist: bool = False, fail_complete: bool = False):
+        self.enabled = True
+        self.fail_persist = fail_persist
+        self.fail_complete = fail_complete
+        self.operations: dict[str, dict[str, object]] = {}
+        self.claims: set[str] = set()
+        self._lock = threading.Lock()
+
+    def safe_config(self):
+        return {
+            "backend": "fake-r2",
+            "enabled": self.enabled,
+            "lane": "meta_system",
+            "bucket_configured": True,
+            "prefix": "state/hive/model-registry-pending",
+        }
+
+    def persist(self, operation):
+        if self.fail_persist:
+            raise RuntimeError("durable fallback unavailable")
+        with self._lock:
+            self.operations[str(operation["operation_id"])] = dict(operation)
+
+    def load(self):
+        with self._lock:
+            return [dict(operation) for operation in self.operations.values()]
+
+    @staticmethod
+    def _order(operation):
+        return float(operation["queued_at"]), str(operation["operation_id"])
+
+    @staticmethod
+    def _key(operation):
+        return str(operation["category"]), str(operation["model_id"])
+
+    def claim(self, operation):
+        operation_id = str(operation["operation_id"])
+        with self._lock:
+            if operation_id not in self.operations or operation_id in self.claims:
+                return False
+            related = [
+                candidate
+                for candidate in self.operations.values()
+                if self._key(candidate) == self._key(operation)
+            ]
+            latest = max(related, key=self._order)
+            if latest["operation_id"] != operation_id:
+                return False
+            self.claims.add(operation_id)
+            return True
+
+    def complete(self, operation):
+        if self.fail_complete:
+            raise RuntimeError("durable cleanup unavailable")
+        cutoff = self._order(operation)
+        operation_id = str(operation["operation_id"])
+        with self._lock:
+            stale = [
+                key
+                for key, candidate in self.operations.items()
+                if self._key(candidate) == self._key(operation) and self._order(candidate) <= cutoff
+            ]
+            for key in stale:
+                self.operations.pop(key, None)
+                self.claims.discard(key)
+            self.claims.discard(operation_id)
+
+    def record_failure(self, operation):
+        self.persist(operation)
+
+    def release_claim(self, operation):
+        with self._lock:
+            self.claims.discard(str(operation["operation_id"]))
+
+    def discard(self, operation):
+        with self._lock:
+            operation_id = str(operation["operation_id"])
+            self.operations.pop(operation_id, None)
+            self.claims.discard(operation_id)
+
+
 class _FlakyD1Store(_FakeD1Store):
-    def __init__(self, journal_path, *, fail_upserts: int = 0, fail_deletes: int = 0):
-        super().__init__()
-        self.settings = SimpleNamespace(model_registry_reconciliation_path=str(journal_path))
+    def __init__(
+        self,
+        _legacy_path=None,
+        *,
+        fail_upserts: int = 0,
+        fail_deletes: int = 0,
+        pending_store=None,
+        rows=None,
+    ):
+        super().__init__(rows=rows)
+        self.model_registry_pending_store = pending_store or _FakeDurablePendingStore()
         self.fail_upserts = fail_upserts
         self.fail_deletes = fail_deletes
 
     def upsert_metadata(self, **kwargs):
         if self.fail_upserts > 0:
             self.fail_upserts -= 1
+            self.upsert_calls += 1
             return {"ok": False, "error": "temporary d1 outage"}
         return super().upsert_metadata(**kwargs)
 
     def delete_metadata_ids(self, item_ids):
         if self.fail_deletes > 0:
             self.fail_deletes -= 1
+            self.delete_calls += 1
             return {"ok": False, "error": "temporary d1 outage"}
         return super().delete_metadata_ids(item_ids)
 
@@ -355,7 +451,7 @@ def test_registration_d1_failure_is_visible_and_queued(tmp_path, caplog):
     assert state["state"] == "pending"
     assert "temporary d1 outage" in str(state["error"])
     assert registry.pending_reconciliation_count() == 1
-    assert (tmp_path / "registry-pending.json").exists()
+    assert len(store.model_registry_pending_store.operations) == 1
     assert any("model_registry_persistence_failed" in record.message for record in caplog.records)
 
 
@@ -388,42 +484,61 @@ def test_reconciliation_recovers_after_temporary_d1_outage_and_is_idempotent(tmp
     assert second["reconciled_count"] == 0
     assert registry.get_persistence_state("reasoning", "recover-me")["state"] == "durable"
     assert "model-registry:reasoning:recover-me" in store._rows
-    assert not (tmp_path / "registry-pending.json").exists()
+    assert store.model_registry_pending_store.operations == {}
 
 
-def test_pending_registration_survives_restart_reload_before_reconciliation(tmp_path):
-    store = _FlakyD1Store(tmp_path / "registry-pending.json", fail_upserts=1)
+def test_pending_registration_survives_new_instance_without_previous_filesystem(tmp_path):
+    durable_store = _FakeDurablePendingStore()
+    store = _FlakyD1Store(
+        tmp_path / "first-instance-does-not-survive.json",
+        fail_upserts=1,
+        pending_store=durable_store,
+    )
     registry.register_model("planning", "restart-model", score=0.93, store=store)
 
-    registry.clear_registry(preserve_pending=True)
+    registry.clear_registry()
     assert registry.get_default_model("planning") is None
 
-    loaded = registry.load_registry_from_store(store)
+    fresh_store = _FlakyD1Store(
+        tmp_path / "different-empty-filesystem.json",
+        pending_store=durable_store,
+        rows=store._rows,
+    )
+    loaded = registry.load_registry_from_store(fresh_store)
 
     assert loaded == 0
     assert registry.get_default_model("planning") == "restart-model"
     assert registry.get_persistence_state("planning", "restart-model")["state"] == "pending"
 
 
-def test_pending_delete_masks_stale_d1_row_after_restart_then_reconciles(tmp_path):
-    store = _FlakyD1Store(tmp_path / "registry-pending.json")
+def test_pending_delete_survives_filesystem_replacement_and_masks_stale_d1(tmp_path):
+    durable_store = _FakeDurablePendingStore()
+    store = _FlakyD1Store(
+        tmp_path / "first-instance.json",
+        pending_store=durable_store,
+    )
     registry.register_model("vision", "stale-after-delete", score=0.84, store=store)
     store.fail_deletes = 1
     assert registry.remove_model("vision", "stale-after-delete", store=store) is True
     assert "model-registry:vision:stale-after-delete" in store._rows
 
-    registry.clear_registry(preserve_pending=True)
-    loaded = registry.load_registry_from_store(store)
+    registry.clear_registry()
+    fresh_store = _FlakyD1Store(
+        tmp_path / "fresh-instance.json",
+        pending_store=durable_store,
+        rows=store._rows,
+    )
+    loaded = registry.load_registry_from_store(fresh_store)
 
     assert loaded == 1
     assert registry.get_default_model("vision") is None
     assert registry.get_persistence_state("vision", "stale-after-delete")["state"] == "pending"
 
-    result = registry.reconcile_pending(store)
+    result = registry.reconcile_pending(fresh_store)
 
     assert result["reconciled_count"] == 1
     assert result["pending_count"] == 0
-    assert "model-registry:vision:stale-after-delete" not in store._rows
+    assert "model-registry:vision:stale-after-delete" not in fresh_store._rows
 
 
 def test_persistence_diagnostics_tracks_success_failure_and_recovery(tmp_path):
@@ -458,6 +573,30 @@ async def test_model_registry_api_exposes_pending_persistence_state(tmp_path, mo
     assert "temporary d1 outage" in str(response["persistence_error"])
 
 
+@pytest.mark.asyncio
+async def test_model_registry_api_returns_503_when_both_durable_paths_are_unavailable(
+    tmp_path, monkeypatch
+):
+    from app.api import model_registry as registry_api
+
+    store = _FlakyD1Store(
+        tmp_path / "unused.json",
+        fail_upserts=1,
+        pending_store=_FakeDurablePendingStore(fail_persist=True),
+    )
+    monkeypatch.setattr(registry_api, "D1MetadataStore", lambda settings: store)
+
+    with pytest.raises(registry_api.HTTPException) as caught:
+        await registry_api.post_register_model(
+            "coding",
+            registry_api.RegisterModelRequest(model_id="reject-me", score=0.9),
+            Settings(),
+        )
+
+    assert caught.value.status_code == 503
+    assert registry.get_default_model("coding") is None
+
+
 def test_newer_success_supersedes_older_pending_mutation(tmp_path):
     store = _FlakyD1Store(tmp_path / "registry-pending.json", fail_upserts=1)
     registry.register_model("coding", "superseded-model", score=0.2, store=store)
@@ -482,17 +621,93 @@ def test_concurrent_reconciliation_is_serialised_and_idempotent(tmp_path):
     assert sum(int(result["reconciled_count"]) for result in results) == 1
     assert registry.pending_reconciliation_count() == 0
     assert "model-registry:reasoning:concurrent-model" in store._rows
+    assert store.upsert_calls == 2  # one failed mutation plus one claimed reconciliation
 
 
-def test_journal_failure_rejects_mutation_before_d1_or_memory_visibility(tmp_path, monkeypatch):
-    store = _FlakyD1Store(tmp_path / "registry-pending.json")
+def test_newer_delete_wins_over_stale_pending_registration_after_replacement(tmp_path):
+    durable_store = _FakeDurablePendingStore()
+    store = _FlakyD1Store(
+        tmp_path / "discarded-instance.json",
+        fail_upserts=1,
+        fail_deletes=1,
+        pending_store=durable_store,
+    )
+    registry.register_model("cheap", "latest-operation", score=0.7, store=store)
+    assert registry.remove_model("cheap", "latest-operation", store=store) is True
 
-    def fail_journal(_path):
-        raise registry.ModelRegistryPersistenceError("journal unavailable")
+    registry.clear_registry()
+    fresh_store = _FlakyD1Store(
+        tmp_path / "new-instance.json",
+        pending_store=durable_store,
+        rows=store._rows,
+    )
+    registry.load_registry_from_store(fresh_store)
 
-    monkeypatch.setattr(registry, "_write_pending_journal_locked", fail_journal)
+    assert registry.get_default_model("cheap") is None
+    assert registry.get_persistence_state("cheap", "latest-operation")["action"] == "delete"
+    assert registry.reconcile_pending(fresh_store)["reconciled_count"] == 1
+    assert "model-registry:cheap:latest-operation" not in fresh_store._rows
 
-    with pytest.raises(registry.ModelRegistryPersistenceError, match="journal unavailable"):
+
+def test_newer_registration_wins_over_stale_pending_delete_after_replacement(tmp_path):
+    durable_store = _FakeDurablePendingStore()
+    store = _FlakyD1Store(
+        tmp_path / "discarded-instance.json",
+        pending_store=durable_store,
+    )
+    registry.register_model("vision", "latest-operation", score=0.4, store=store)
+    store.fail_deletes = 1
+    registry.remove_model("vision", "latest-operation", store=store)
+    store.fail_upserts = 1
+    registry.register_model("vision", "latest-operation", score=0.98, store=store)
+
+    registry.clear_registry()
+    fresh_store = _FlakyD1Store(
+        tmp_path / "new-instance.json",
+        pending_store=durable_store,
+        rows=store._rows,
+    )
+    registry.load_registry_from_store(fresh_store)
+
+    assert registry.get_default_model("vision") == "latest-operation"
+    assert registry.get_ranked_models("vision")[0].score == 0.98
+    assert registry.get_persistence_state("vision", "latest-operation")["action"] == "upsert"
+    assert registry.reconcile_pending(fresh_store)["reconciled_count"] == 1
+    assert fresh_store._rows["model-registry:vision:latest-operation"]["metadata"]["score"] == 0.98
+
+
+def test_pending_operation_is_removed_only_after_successful_reconciliation(tmp_path):
+    durable_store = _FakeDurablePendingStore()
+    store = _FlakyD1Store(
+        tmp_path / "unused.json",
+        fail_upserts=2,
+        pending_store=durable_store,
+    )
+    registry.register_model("research", "retain-until-durable", score=0.82, store=store)
+    operation_ids = set(durable_store.operations)
+
+    failed = registry.reconcile_pending(store)
+
+    assert failed["ok"] is False
+    assert failed["pending_count"] == 1
+    assert set(durable_store.operations) == operation_ids
+
+    recovered = registry.reconcile_pending(store)
+
+    assert recovered["ok"] is True
+    assert recovered["reconciled_count"] == 1
+    assert durable_store.operations == {}
+
+
+def test_d1_and_durable_fallback_failure_rejects_before_memory_visibility(tmp_path):
+    durable_store = _FakeDurablePendingStore(fail_persist=True)
+    store = _FlakyD1Store(
+        tmp_path / "unused-local-path.json",
+        fail_upserts=1,
+        pending_store=durable_store,
+    )
+
+    with pytest.raises(registry.ModelRegistryPersistenceError, match="durable R2 fallback"):
         registry.register_model("planning", "unsafe-model", score=0.9, store=store)
 
     assert registry.get_default_model("planning") is None
@@ -500,25 +715,18 @@ def test_journal_failure_rejects_mutation_before_d1_or_memory_visibility(tmp_pat
     assert "model-registry:planning:unsafe-model" not in store._rows
 
 
-def test_d1_success_with_journal_cleanup_failure_remains_pending(tmp_path, monkeypatch):
-    store = _FlakyD1Store(tmp_path / "registry-pending.json")
-    original_writer = registry._write_pending_journal_locked
-    calls = 0
-
-    def fail_second_write(path):
-        nonlocal calls
-        calls += 1
-        if calls == 2:
-            raise registry.ModelRegistryPersistenceError("journal cleanup unavailable")
-        return original_writer(path)
-
-    monkeypatch.setattr(registry, "_write_pending_journal_locked", fail_second_write)
+def test_d1_success_with_r2_cleanup_failure_remains_safely_pending(tmp_path):
+    durable_store = _FakeDurablePendingStore(fail_complete=True)
+    store = _FlakyD1Store(
+        tmp_path / "unused-local-path.json",
+        pending_store=durable_store,
+    )
 
     registry.register_model("research", "cleanup-pending", score=0.81, store=store)
 
     state = registry.get_persistence_state("research", "cleanup-pending")
     assert state["state"] == "pending"
-    assert "journal cleanup" in str(state["error"]).lower()
+    assert "r2 pending-operation cleanup" in str(state["error"]).lower()
     assert registry.pending_reconciliation_count() == 1
     assert registry.get_default_model("research") == "cleanup-pending"
     assert "model-registry:research:cleanup-pending" in store._rows

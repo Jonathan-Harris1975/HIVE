@@ -246,6 +246,40 @@ def test_production_readiness_accepts_140_mib_body_limit_for_100_mib_base64_uplo
     assert report.ready is True
 
 
+def test_production_d1_requires_writable_r2_model_registry_fallback() -> None:
+    settings = _production_settings(
+        D1_ENABLED=True,
+        D1_ACCOUNT_ID="test-account",
+        D1_DATABASE_ID="test-database",
+        D1_API_KEY="test-api-key",
+    )
+
+    report = build_readiness_report(settings)
+
+    check = next(item for item in report.checks if item.name == "model_registry_pending_store")
+    assert check.status == "error"
+    assert check.required is True
+
+
+def test_production_d1_accepts_private_writable_r2_model_registry_fallback() -> None:
+    settings = _production_settings(
+        D1_ENABLED=True,
+        D1_ACCOUNT_ID="test-account",
+        D1_DATABASE_ID="test-database",
+        D1_API_KEY="test-api-key",
+        CF_R2_ENDPOINT_URL="https://test.r2.invalid",
+        CF_R2_ACCESS_KEY_ID="test-access",
+        CF_R2_SECRET_ACCESS_KEY="test-secret",
+        R2_BUCKET_META_SYSTEM="metasystem",
+        R2_MULTI_BUCKET_WRITE_ENABLED=True,
+    )
+
+    report = build_readiness_report(settings)
+
+    check = next(item for item in report.checks if item.name == "model_registry_pending_store")
+    assert check.status == "ok"
+
+
 def test_committed_production_database_requirement_matches_documentation() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     shared_env = (repo_root / "HIVE-PRODUCTION-SHARED.env").read_text(encoding="utf-8")
