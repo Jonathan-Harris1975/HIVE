@@ -35,6 +35,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# Refresh Debian packages in the final runtime layer. The pinned Python image can
+# pre-date Debian security updates even when the Python tag itself is current.
+# Trivy is configured to fail on fixable HIGH/CRITICAL findings, so install all
+# available Bookworm security fixes before assembling the application image.
+USER root
+RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
 # The official Python slim image already includes the CA certificate bundle.
 # Keep the runtime build package-manager free: installing git here is unnecessary
 # for HIVE's static repository QA and can fail on overlay-backed remote builders
