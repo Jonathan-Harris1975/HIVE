@@ -60,7 +60,7 @@ openpyxl==3.1.5
     # via -r requirements.in
 psycopg==3.3.4
     # via -r requirements.in
-psycopg-binary==3.3.4
+psycopg-binary==3.3.6
     # via psycopg
 pydantic==2.13.5
     # via
