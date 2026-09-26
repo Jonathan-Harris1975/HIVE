@@ -46,7 +46,7 @@ headroom-ai==0.37.0
     # via -r requirements.in
 httpx==0.28.1
     # via -r requirements.in
-idna==3.18
+idna==3.20
     # via
     #   anyio
     #   httpx
