@@ -1,0 +1,4 @@
+ignored:
+  # HIVE deliberately upgrades Debian Bookworm packages in the final runtime
+  # layer so the production image receives security fixes before Trivy gates it.
+  - DL3005

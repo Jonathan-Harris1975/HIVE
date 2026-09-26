@@ -1,0 +1,45 @@
+HIVE CI SECURITY/QUALITY SETUP
+==============================
+
+Weekly schedule
+---------------
+GitHub scheduled security/quality and Advanced CodeQL checks run Sunday at 01:00 UTC.
+Renovate is constrained to Sunday 01:00-02:00 Europe/London.
+Normal push and pull-request CI continues to run immediately.
+
+CI-specific secrets
+-------------------
+No new repository secrets are required for the added CI scanners.
+OpenSSF Scorecard uses the workflow-provided GITHUB_TOKEN.
+CodeQL uses GitHub's workflow token/security-events permission.
+
+Existing deployment/operations configuration (not introduced by this CI work)
+-----------------------------------------------------------------------------
+The existing Koyeb deployment watcher still requires its existing KOYEB_TOKEN and KOYEB_SERVICE secrets.
+Existing operations/ecosystem-smoke secrets and variables remain unchanged.
+
+Dependency management
+---------------------
+Mend Renovate GitHub App is the dependency update owner.
+Dependabot configuration is retained for repository/security posture visibility, but all update entries have open-pull-requests-limit: 0 so it does not create dependency PRs.
+Renovate updates are manually approved for HIVE. This includes Python, Docker and GitHub Actions updates.
+HIVE uses requirements.in as the direct production dependency source and requirements.txt as its compiled production lock. CI continues to enforce that the compiled lock matches requirements.in through scripts/verify_dependency_lock.py --compile. Any dependency PR must therefore include all generated/associated dependency files needed to pass that gate.
+
+Added controls
+--------------
+- Advanced GitHub CodeQL for Python and GitHub Actions.
+- Direct pinned Trivy CLI for filesystem/IaC and production Docker image scanning.
+- Direct pinned Gitleaks full-history scan with redacted diagnostic artifact on findings.
+- Direct pinned actionlint.
+- Direct pinned Hadolint for Dockerfile.
+- Direct pinned ShellCheck for HIVE operational shell scripts.
+- Direct pinned Lychee link checking.
+- Direct OpenSSF Scorecard CLI.
+
+Supply-chain rule
+-----------------
+Native GitHub capabilities and approved GitHub Apps are preferred. Non-native scanners are installed and executed by repository-owned workflow code rather than third-party Action wrappers. Tool releases are version-pinned and checksum-verified where practical.
+
+One-time GitHub CodeQL transition
+---------------------------------
+HIVE's supplied repository was marked as using GitHub CodeQL Default Setup. This update replaces that marker workflow with Advanced Setup for Python and GitHub Actions. In GitHub Security > Code security, disable CodeQL Default Setup before/when merging this workflow so only one CodeQL ownership model is active. Do not leave Default and Advanced Setup running in parallel.

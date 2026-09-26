@@ -1,0 +1,58 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended"
+  ],
+  "dependencyDashboard": true,
+  "timezone": "Europe/London",
+  "schedule": [
+    "after 1am and before 2am on sunday"
+  ],
+  "rangeStrategy": "replace",
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": [
+      "after 1am and before 2am on sunday"
+    ],
+    "automerge": false
+  },
+  "packageRules": [
+    {
+      "description": "Let pip-compile own the production lock instead of pip_requirements",
+      "matchManagers": [
+        "pip_requirements"
+      ],
+      "matchFileNames": [
+        "requirements.txt"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "Keep Python dependency updates manually approved",
+      "matchManagers": [
+        "pip_requirements",
+        "pip-compile"
+      ],
+      "automerge": false
+    },
+    {
+      "description": "Keep Docker base image updates manually approved",
+      "matchManagers": [
+        "dockerfile"
+      ],
+      "automerge": false
+    },
+    {
+      "description": "Keep GitHub Actions updates manually approved",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "automerge": false
+    }
+  ],
+  "pip-compile": {
+    "managerFilePatterns": [
+      "/(^|/)requirements\\.txt$/"
+    ]
+  }
+}
