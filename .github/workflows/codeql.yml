@@ -26,10 +26,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Initialise CodeQL
-        uses: github/codeql-action/init@fca7ace96b7d713c703587a094ac8a073e7a7e13 # v4.31.9
+        uses: github/codeql-action/init@v4 # v4.31.9
         with:
           languages: ${{ matrix.language }}
       - name: Analyse
-        uses: github/codeql-action/analyze@fca7ace96b7d713c703587a094ac8a073e7a7e13 # v4.31.9
+        uses: github/codeql-action/analyze@v4 # v4.31.9
         with:
           category: /language:${{ matrix.language }}
