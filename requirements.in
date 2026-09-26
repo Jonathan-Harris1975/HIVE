@@ -15,7 +15,7 @@ openpyxl==3.1.5
 beautifulsoup4==4.15.0
 # Direct security pin: 2.9.0 fixes CVE-2026-85999 and CVE-2026-86000.
 soupsieve==2.9
-headroom-ai==0.37.0
+headroom-ai==0.39.0
 # Direct security pin: 1.2.1 fixes GHSA-6v7p-g79w-8964.
 msgpack==1.2.1
 psycopg[binary]==3.3.4
