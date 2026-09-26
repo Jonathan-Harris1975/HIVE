@@ -53,12 +53,12 @@ def test_ci_scans_the_built_hive_image_and_retains_the_report() -> None:
     evidence = _step(text, "Retain production image vulnerability report")
 
     assert "docker build --target runtime -t hive:ci" in text
-    assert re.search(r"aquasecurity/trivy-action@[0-9a-f]{40}", scan)
-    assert "image-ref: hive:ci" in scan
-    assert "vuln-type: os,library" in scan
-    assert "severity: CRITICAL,HIGH" in scan
-    assert 'exit-code: "1"' in scan
-    assert "ignore-unfixed: true" in scan
+    assert ".ci-tools/bin/trivy image hive:ci" in scan
+    assert "--pkg-types os,library" in scan
+    assert "--severity CRITICAL,HIGH" in scan
+    assert "--exit-code 1" in scan
+    assert "--ignore-unfixed" in scan
+    assert "--output trivy-hive-image.txt" in scan
     assert "trivy-hive-image.txt" in evidence
     assert "if: always()" in evidence
 
