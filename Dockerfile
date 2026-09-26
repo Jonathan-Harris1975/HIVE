@@ -1,4 +1,4 @@
-FROM python:3.14.7-slim-bookworm@sha256:bf5a06313080f516be80f78839d992270e7877dde4e2c345a41b84f862fbc28b AS builder
+FROM python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 AS builder
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -27,7 +27,7 @@ FROM node:22.23.2-bookworm-slim@sha256:48e4b67d85f87bd551df43704e24d252f56cc5f8e
 RUN npm install --global npm@11.19.1 \
     && npm cache clean --force
 
-FROM python:3.14.7-slim-bookworm@sha256:bf5a06313080f516be80f78839d992270e7877dde4e2c345a41b84f862fbc28b AS runtime
+FROM python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
