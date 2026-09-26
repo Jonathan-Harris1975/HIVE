@@ -123,7 +123,7 @@ jobs:
             hive:ci
           trap 'docker logs hive-ci-api || true; docker rm -f hive-ci-api || true' EXIT
           started=false
-          for i in {1..30}; do
+          for _ in {1..30}; do
             if curl -fsS http://127.0.0.1:8000/livez >/tmp/livez.json; then
               started=true
               break

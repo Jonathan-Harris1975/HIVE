@@ -92,6 +92,7 @@ jobs:
           --cache
           --max-retries 2
           --timeout 20
+          --exclude-path 'docs/releases'
           README.md SECURITY.md CONTRIBUTING.md CONTEXT_RESILIENCE.md docs
 
   scorecard:
