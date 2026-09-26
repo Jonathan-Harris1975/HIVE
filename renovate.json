@@ -14,7 +14,7 @@
     "schedule": [
       "after 1am and before 2am on sunday"
     ],
-    "automerge": false
+    "automerge": true
   },
   "packageRules": [
     {
@@ -25,7 +25,7 @@
       "matchFileNames": [
         "requirements.txt"
       ],
-      "enabled": false
+      "enabled": true
     },
     {
       "description": "Keep Python dependency updates manually approved",
@@ -33,21 +33,21 @@
         "pip_requirements",
         "pip-compile"
       ],
-      "automerge": false
+      "automerge": true
     },
     {
       "description": "Keep Docker base image updates manually approved",
       "matchManagers": [
         "dockerfile"
       ],
-      "automerge": false
+      "automerge": true
     },
     {
       "description": "Keep GitHub Actions updates manually approved",
       "matchManagers": [
         "github-actions"
       ],
-      "automerge": false
+      "automerge": true
     }
   ],
   "pip-compile": {
