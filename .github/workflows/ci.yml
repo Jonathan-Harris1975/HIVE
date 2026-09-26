@@ -145,16 +145,18 @@ jobs:
           assert 'model_registry' in runtime
           assert 'providers' in runtime
           PY2
+      - name: Install pinned Trivy CLI
+        run: python scripts/install_ci_tools.py trivy
       - name: Scan built production image for fixable high-severity vulnerabilities
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          image-ref: hive:ci
-          format: table
-          output: trivy-hive-image.txt
-          exit-code: "1"
-          ignore-unfixed: true
-          vuln-type: os,library
-          severity: CRITICAL,HIGH
+        run: >-
+          .ci-tools/bin/trivy image hive:ci
+          --format table
+          --output trivy-hive-image.txt
+          --exit-code 1
+          --ignore-unfixed
+          --pkg-types os,library
+          --severity CRITICAL,HIGH
+          --no-progress
       - name: Print production image vulnerability report
         if: always()
         run: |

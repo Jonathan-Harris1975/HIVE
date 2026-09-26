@@ -1,17 +1,35 @@
-name: CodeQL configuration
+name: CodeQL
 
 on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 1 * * 0'
   workflow_dispatch:
 
 permissions:
   contents: read
+  security-events: write
+  packages: read
 
 jobs:
-  default-setup:
-    name: CodeQL managed by GitHub default setup
+  analyze:
+    name: CodeQL (${{ matrix.language }})
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python, actions]
     steps:
-      - name: Confirm CodeQL ownership
-        run: |
-          echo "CodeQL scanning for this repository is managed by GitHub default setup."
-          echo "Do not add a second advanced CodeQL analysis workflow while default setup is enabled."
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Initialise CodeQL
+        uses: github/codeql-action/init@fca7ace96b7d713c703587a094ac8a073e7a7e13 # v4.31.9
+        with:
+          languages: ${{ matrix.language }}
+      - name: Analyse
+        uses: github/codeql-action/analyze@fca7ace96b7d713c703587a094ac8a073e7a7e13 # v4.31.9
+        with:
+          category: /language:${{ matrix.language }}

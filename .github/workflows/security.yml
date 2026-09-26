@@ -1,0 +1,122 @@
+name: Security and repository quality
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '0 1 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hive-security-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SCORECARD_VERSION: '5.5.0'
+
+jobs:
+  repository_security:
+    name: Trivy, Gitleaks and actionlint
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout repository with full history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Install pinned CI tools
+        run: python scripts/install_ci_tools.py trivy gitleaks actionlint
+      - name: Trivy filesystem vulnerability and misconfiguration scan
+        run: >-
+          .ci-tools/bin/trivy fs .
+          --scanners vuln,misconfig
+          --severity HIGH,CRITICAL
+          --ignore-unfixed
+          --exit-code 1
+          --no-progress
+      - name: Gitleaks full-history secret scan
+        id: gitleaks
+        continue-on-error: true
+        run: >-
+          .ci-tools/bin/gitleaks git .
+          --redact
+          --no-banner
+          --report-format json
+          --report-path gitleaks-report.json
+          --exit-code 1
+      - name: Upload redacted Gitleaks diagnostic report
+        if: always() && hashFiles('gitleaks-report.json') != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: gitleaks-redacted-diagnostic-${{ github.run_id }}
+          path: gitleaks-report.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Enforce Gitleaks result
+        if: steps.gitleaks.outcome == 'failure'
+        run: |
+          echo 'Gitleaks detected potential secrets. Download the redacted diagnostic artifact for rule, file, commit, line and fingerprint metadata.' >&2
+          exit 1
+      - name: Validate GitHub Actions workflows
+        run: .ci-tools/bin/actionlint -color
+
+  container_and_shell_quality:
+    name: Hadolint and ShellCheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install pinned Docker and shell linters
+        run: python scripts/install_ci_tools.py hadolint shellcheck
+      - name: Lint Dockerfile
+        run: .ci-tools/bin/hadolint Dockerfile
+      - name: Lint operational shell scripts
+        run: .ci-tools/bin/shellcheck scripts/start.sh scripts/production_smoke.sh scripts/smoke.sh
+
+  link_integrity:
+    name: Lychee link integrity
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install pinned Lychee
+        run: python scripts/install_ci_tools.py lychee
+      - name: Check repository links
+        run: >-
+          .ci-tools/bin/lychee
+          --no-progress
+          --cache
+          --max-retries 2
+          --timeout 20
+          README.md SECURITY.md CONTRIBUTING.md CONTEXT_RESILIENCE.md docs
+
+  scorecard:
+    name: OpenSSF Scorecard
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+    steps:
+      - name: Install pinned Scorecard CLI from source
+        env:
+          GOBIN: ${{ runner.temp }}/scorecard-bin
+        run: |
+          set -euo pipefail
+          mkdir -p "$GOBIN"
+          go install "github.com/ossf/scorecard/v5@v${SCORECARD_VERSION}"
+          "$GOBIN/scorecard" version
+      - name: Run OpenSSF Scorecard
+        env:
+          GITHUB_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SCORECARD_BIN: ${{ runner.temp }}/scorecard-bin/scorecard
+        run: |
+          set -euo pipefail
+          "$SCORECARD_BIN" --repo="github.com/${GITHUB_REPOSITORY}" --format=json --show-details > scorecard.json
+          cat scorecard.json
