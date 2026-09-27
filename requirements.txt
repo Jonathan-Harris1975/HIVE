@@ -148,7 +148,7 @@ hf-xet==1.6.0
     # via headroom-ai dependency graph
 huggingface-hub==1.21.0
     # via headroom-ai dependency graph
-importlib-metadata==8.9.0
+importlib-metadata==9.0.1
     # via headroom-ai dependency graph
 jinja2==3.1.6
     # via headroom-ai dependency graph
