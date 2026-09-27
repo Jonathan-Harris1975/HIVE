@@ -6,7 +6,7 @@
 #
 #    pip-compile --output-file=requirements.txt --strip-extras requirements.in
 #
-annotated-doc==0.0.4
+annotated-doc==0.0.5
     # via fastapi
 annotated-types==0.7.0
     # via pydantic
