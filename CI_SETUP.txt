@@ -43,3 +43,4 @@ Native GitHub capabilities and approved GitHub Apps are preferred. Non-native sc
 One-time GitHub CodeQL transition
 ---------------------------------
 HIVE's supplied repository was marked as using GitHub CodeQL Default Setup. This update replaces that marker workflow with Advanced Setup for Python and GitHub Actions. In GitHub Security > Code security, disable CodeQL Default Setup before/when merging this workflow so only one CodeQL ownership model is active. Do not leave Default and Advanced Setup running in parallel.
+Renovate lets pip-compile own requirements.txt; direct pip_requirements updates to that generated file are disabled to avoid duplicate/conflicting dependency PRs.
