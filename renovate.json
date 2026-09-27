@@ -33,21 +33,21 @@
         "pip_requirements",
         "pip-compile"
       ],
-      "automerge": true
+      "automerge": false
     },
     {
       "description": "Keep Docker base image updates manually approved",
       "matchManagers": [
         "dockerfile"
       ],
-      "automerge": true
+      "automerge": false
     },
     {
       "description": "Keep GitHub Actions updates manually approved",
       "matchManagers": [
         "github-actions"
       ],
-      "automerge": true
+      "automerge": false
     }
   ],
   "pip-compile": {
