@@ -202,7 +202,7 @@ tomlkit==0.15.1
     # via headroom-ai dependency graph
 tqdm==4.70.1
     # via headroom-ai dependency graph
-typer==0.25.1
+typer==0.27.2
     # via headroom-ai dependency graph
 yarl==1.25.1
     # via headroom-ai dependency graph
