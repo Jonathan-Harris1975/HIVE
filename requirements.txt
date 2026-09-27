@@ -170,7 +170,7 @@ msgpack==1.2.1
     # via -r requirements.in
 multidict==6.8.0
     # via headroom-ai dependency graph
-openai==2.54.0
+openai==3.19.2
     # via headroom-ai dependency graph
 opentelemetry-api==1.44.0
     # via headroom-ai dependency graph
