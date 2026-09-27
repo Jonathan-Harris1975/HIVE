@@ -146,7 +146,7 @@ fsspec==2026.7.0
     # via headroom-ai dependency graph
 hf-xet==1.6.0
     # via headroom-ai dependency graph
-huggingface-hub==1.21.0
+huggingface-hub==1.33.0
     # via headroom-ai dependency graph
 importlib-metadata==8.9.0
     # via headroom-ai dependency graph
