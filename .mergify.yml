@@ -6,7 +6,7 @@ pull_request_rules:
       - -closed
     actions:
       comment:
-        message: "Closing because this autonomous PR has been explicitly marked as superseded by a newer authoritative repair."
+        message: "Closing because a newer authoritative repair supersedes this autonomous PR."
       close:
 
   - name: close explicitly obsolete autonomous pull requests
@@ -16,5 +16,20 @@ pull_request_rules:
       - -closed
     actions:
       comment:
-        message: "Closing because revalidation has explicitly marked this autonomous PR as obsolete."
+        message: "Closing because revalidation shows this autonomous repair is no longer required."
       close:
+
+  - name: merge fully validated autonomous repair
+    conditions:
+      - base = main
+      - label = autonomy:repair
+      - -label = autonomy:human-hold
+      - -label = autonomy:superseded
+      - -label = autonomy:obsolete
+      - title ~= ^\[autonomy\] Repair
+      - check-success = Autonomous repair marker gate
+      - "#check-failure = 0"
+      - "#check-pending = 0"
+    actions:
+      merge:
+        method: squash

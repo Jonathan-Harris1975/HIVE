@@ -3,8 +3,8 @@ HIVE CI SECURITY/QUALITY SETUP
 
 Weekly schedule
 ---------------
-GitHub scheduled security/quality and Advanced CodeQL checks run Sunday at 01:00 UTC.
-Renovate is constrained to Sunday 01:00-02:00 Europe/London.
+GitHub scheduled security/quality and Advanced CodeQL checks run Sunday at 00:00 UTC.
+Renovate is constrained to Sunday 00:00-02:30 Europe/London.
 Normal push and pull-request CI continues to run immediately.
 
 CI-specific secrets
@@ -72,3 +72,17 @@ AUTONOMY REPAIR GITHUB APP — REQUIRED FOR ZERO-TOUCH PR CI
 - This App token is used only for repair branch push, lifecycle labels and PR creation. Kilo then repairs inside the PR; existing CI/security/rulesets decide whether it may progress.
 - Do not substitute `GITHUB_TOKEN`: GitHub deliberately makes PR workflow runs created/updated with `GITHUB_TOKEN` wait for maintainer approval.
 
+AUTONOMOUS REPAIR AUTHENTICATION
+- Required repository variable: AUTONOMY_REPAIR_APP_ID
+- Required repository secret: the GitHub App private-key secret referenced by `.github/workflows/autonomous-repair.yml`
+- The installed Autonomy Repair GitHub App needs Contents read/write, Pull requests read/write and Issues read/write for this repository.
+- Repair PRs are created with the GitHub App installation token, not GITHUB_TOKEN, so pull_request workflows start without the manual approval loop applied to workflow-created GITHUB_TOKEN PRs.
+- Mergify auto-merges an autonomy:repair PR only after the Autonomous repair marker gate succeeds and no active checks remain failed or pending. Kilo Code Review remains useful when it runs, but is not a mandatory named check because bot-generated PR review behaviour can vary. GitHub branch protection/rulesets remain authoritative.
+- The old Renovate-specific deployment-revert PR path has been removed where present so a failed deployment produces one repair path rather than competing recovery PRs.
+
+AUTONOMOUS MERGE SETTINGS
+- Kilo Code Review should remain enabled for repository pull requests with REVIEW.md guidance, but autonomous merging does not depend on that named check being present.
+- Mergify must have repository access. `.mergify.yml` auto-merges only validated `autonomy:repair` PRs after the repair-marker gate succeeds and all active checks are clear.
+- Protect `main` with the repository's normal required checks. At minimum, the aggregate release/CI gate, the Autonomous repair marker gate, the repository security checks, and Kilo/Socket checks that are configured as merge gates should be required.
+- Keep GitHub's workflow-approval security policy enabled; App-created repair PRs no longer depend on the workflow `GITHUB_TOKEN`.
+- Enable GitHub's automatic deletion of head branches after merge to keep autonomous repair branches tidy.
