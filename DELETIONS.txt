@@ -1,3 +1,0 @@
-Delete these paths from the repository when applying this update:
-
-.github/ISSUE_TEMPLATE/autonomous-repair.yml
