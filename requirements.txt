@@ -117,7 +117,7 @@ soupsieve==2.10
     # via
     #   -r requirements.in
     #   beautifulsoup4
-starlette==1.6.0
+starlette==1.7.0
     # via
     #   -r requirements.in
     #   fastapi
