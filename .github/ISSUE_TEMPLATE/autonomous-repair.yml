@@ -1,1 +1,27 @@
-
+name: Autonomous repair
+description: Evidence-led repair task for Kilo/Council automation
+title: "[autonomy] "
+labels: ["autonomous-repair"]
+body:
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Failure evidence
+      description: Workflow, deployment, commit SHA, logs or exact failing check.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Required outcome
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Guardrails
+      value: |
+        Do not weaken tests, security scanners, required checks, branch/ruleset protections, workflow permissions or secret handling.
+        Deliver changes by pull request and pass the repository's normal CI/security/deployment gates.
+    validations:
+      required: true
