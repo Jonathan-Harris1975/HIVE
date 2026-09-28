@@ -125,7 +125,7 @@ tiktoken==0.14.0
     # via headroom-ai
 tomlkit==0.15.1
     # via headroom-ai
-typing-extensions==4.15.0
+typing-extensions==4.16.0
     # via
     #   beautifulsoup4
     #   fastapi
