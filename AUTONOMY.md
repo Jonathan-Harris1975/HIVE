@@ -31,3 +31,11 @@ Minor/digest/patch dependency automation remains owned by the committed Renovate
 
 GitHub repository setting **Allow GitHub Actions to create and approve pull requests** must permit PR creation for this workflow. Branch/ruleset protections and required checks remain authoritative.
 
+## Trusted PR creator
+
+Autonomous repair PRs must be created with the dedicated `Autonomy Repair Bot` GitHub App installation token, not the workflow `GITHUB_TOKEN`.
+
+GitHub deliberately places pull-request workflow runs created or updated by `GITHUB_TOKEN` into an approval-required state. Using a GitHub App installation token removes that manual approval dependency while preserving the normal target-repository CI/security gates.
+
+The repair App has only the repository permissions needed to create the branch/PR and lifecycle labels. It does not receive merge or deployment authority.
+
