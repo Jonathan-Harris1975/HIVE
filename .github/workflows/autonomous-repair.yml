@@ -8,8 +8,7 @@ on:
 
 permissions:
   actions: read
-  contents: write
-  pull-requests: write
+  contents: read
 
 concurrency:
   group: autonomous-repair-${{ github.event.workflow_run.id || github.run_id }}
@@ -23,9 +22,68 @@ jobs:
            github.event.workflow_run.head_branch == github.event.repository.default_branch) }}
     runs-on: ubuntu-latest
     steps:
+      - name: Mint autonomous repair GitHub App token
+        id: app_token
+        env:
+          APP_ID: ${{ vars.AUTONOMY_REPAIR_APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.AUTONOMY_REPAIR_APP_PRIVATE_KEY }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -n "${APP_ID:-}" || {
+            echo "::error::Repository variable AUTONOMY_REPAIR_APP_ID is required."
+            exit 1
+          }
+          test -n "${APP_PRIVATE_KEY:-}" || {
+            echo "::error::Repository secret AUTONOMY_REPAIR_APP_PRIVATE_KEY is required."
+            exit 1
+          }
+
+          key_file="${RUNNER_TEMP}/autonomy-repair-app.pem"
+          printf '%s\n' "$APP_PRIVATE_KEY" > "$key_file"
+          chmod 600 "$key_file"
+
+          b64url() {
+            openssl base64 -A | tr '+/' '-_' | tr -d '='
+          }
+
+          now="$(date +%s)"
+          iat="$((now - 60))"
+          exp="$((now + 540))"
+          header="$(printf '%s' '{"alg":"RS256","typ":"JWT"}' | b64url)"
+          payload="$(printf '{"iat":%s,"exp":%s,"iss":"%s"}' "$iat" "$exp" "$APP_ID" | b64url)"
+          unsigned="${header}.${payload}"
+          signature="$(printf '%s' "$unsigned" | openssl dgst -sha256 -sign "$key_file" -binary | b64url)"
+          jwt="${unsigned}.${signature}"
+
+          installation_id="$(
+            curl --fail-with-body --silent --show-error \
+              --header "Accept: application/vnd.github+json" \
+              --header "Authorization: Bearer ${jwt}" \
+              --header "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/repos/${REPO}/installation" |
+              jq -er '.id'
+          )"
+
+          app_token="$(
+            curl --fail-with-body --silent --show-error \
+              --request POST \
+              --header "Accept: application/vnd.github+json" \
+              --header "Authorization: Bearer ${jwt}" \
+              --header "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/app/installations/${installation_id}/access_tokens" |
+              jq -er '.token'
+          )"
+
+          rm -f "$key_file"
+          echo "::add-mask::${app_token}"
+          printf 'token=%s\n' "$app_token" >> "$GITHUB_OUTPUT"
+
       - name: Create a repair PR for Kilo
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
           REPO: ${{ github.repository }}
           EVENT_NAME: ${{ github.event_name }}
           RUN_ID: ${{ github.event.workflow_run.id }}
