@@ -161,7 +161,7 @@ jobs:
           Main-branch CI/deployment verification failed.
 
           Failed workflow: **${RUN_NAME}**
-          Failed commit: `${HEAD_SHA}`
+          Failed commit: \`${HEAD_SHA}\`
           Failed run: ${RUN_URL}
 
           This PR is deliberately blocked by the **Autonomous repair marker gate** until the underlying defect is fixed and `.autonomy/repair-requests/${RUN_ID}.md` is removed.
