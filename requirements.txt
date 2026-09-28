@@ -8,7 +8,7 @@ annotated-doc==0.0.5
     # via fastapi
 annotated-types==0.8.0
     # via pydantic
-anyio==4.15.1
+anyio==4.14.2
     # via
     #   -r requirements.in
     #   httpx
@@ -18,9 +18,9 @@ ast-grep-cli==0.45.3
     # via headroom-ai
 beautifulsoup4==4.15.0
     # via -r requirements.in
-boto3==1.43.102
+boto3==1.43.98
     # via -r requirements.in
-botocore==1.43.103
+botocore==1.43.98
     # via
     #   boto3
     #   s3transfer
@@ -43,7 +43,7 @@ h11==0.16.0
     # via
     #   httpcore
     #   uvicorn
-headroom-ai==0.38.0
+headroom-ai==0.37.0
     # via -r requirements.in
 httpcore==1.0.9
     # via httpx
@@ -72,16 +72,16 @@ openpyxl==3.1.5
     # via -r requirements.in
 opentelemetry-api==1.45.0
     # via headroom-ai
-psycopg==3.3.6
+psycopg==3.3.4
     # via -r requirements.in
-psycopg-binary==3.3.6
+psycopg-binary==3.3.4
     # via psycopg
 pydantic==2.13.5
     # via
     #   fastapi
     #   headroom-ai
     #   pydantic-settings
-pydantic-core==2.49.0
+pydantic-core==2.46.5
     # via pydantic
 pydantic-settings==2.15.0
     # via -r requirements.in
@@ -93,7 +93,7 @@ python-dateutil==2.9.0.post0
     # via botocore
 python-docx==1.2.0
     # via -r requirements.in
-python-dotenv==1.2.3
+python-dotenv==1.2.2
     # via
     #   pydantic-settings
     #   uvicorn
@@ -109,15 +109,15 @@ requests==2.34.2
     # via tiktoken
 rich==15.0.0
     # via headroom-ai
-s3transfer==0.19.2
+s3transfer==0.19.0
     # via boto3
 six==1.17.0
     # via python-dateutil
-soupsieve==2.10
+soupsieve==2.9
     # via
     #   -r requirements.in
     #   beautifulsoup4
-starlette==1.7.0
+starlette==1.6.0
     # via
     #   -r requirements.in
     #   fastapi
@@ -134,16 +134,16 @@ typing-extensions==4.16.0
     #   pydantic-core
     #   python-docx
     #   typing-inspection
-typing-inspection==0.4.4
+typing-inspection==0.4.2
     # via
     #   fastapi
     #   pydantic
     #   pydantic-settings
-urllib3==2.8.0
+urllib3==2.7.0
     # via
     #   botocore
     #   requests
-uvicorn==0.54.0
+uvicorn==0.53.0
     # via -r requirements.in
 uvloop==0.22.1
     # via uvicorn
