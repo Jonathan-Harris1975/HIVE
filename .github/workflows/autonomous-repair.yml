@@ -1,0 +1,62 @@
+name: Autonomous CI/deployment repair intake
+
+on:
+  workflow_run:
+    workflows: ["CI", "Koyeb production deployment watch"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  issues: write
+
+jobs:
+  open_repair_issue:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'failure' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create one evidence-led repair issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_NAME: ${{ github.event.workflow_run.name }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh label create autonomous-repair --repo "$REPO" --color "5319E7" --description "Automated CI/deployment repair intake" --force
+          gh label create autonomy:superseded --repo "$REPO" --color "B60205" --description "Superseded by a newer authoritative repair" --force
+          gh label create autonomy:obsolete --repo "$REPO" --color "D4C5F9" --description "Revalidation shows the repair is no longer required" --force
+          gh label create autonomy:human-hold --repo "$REPO" --color "FBCA04" --description "Automation must stop for human action" --force
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "Configuration smoke test only; no issue created."
+            exit 0
+          fi
+          title="[autonomy] $RUN_NAME failed at $HEAD_SHA"
+          existing="$(gh issue list --repo "$REPO" --state open --label autonomous-repair --search "$HEAD_SHA in:title" --json number --jq '.[0].number // empty')"
+          if [ -n "$existing" ]; then
+            echo "Repair issue #$existing already tracks this failing SHA."
+            exit 0
+          fi
+          body="$(cat <<EOF
+          Automated repair intake for a failed repository workflow.
+
+          - Workflow: $RUN_NAME
+          - Commit: $HEAD_SHA
+          - Run: $RUN_URL
+          - Run ID: $RUN_ID
+
+          @kilocode-bot please diagnose this failure. If the root cause is a repository code, dependency-manifest, lockfile, build or deployment-configuration defect, prepare the smallest safe pull request that fixes the underlying cause.
+
+          Guardrails:
+          - Do not weaken tests, CodeQL, Trivy, Gitleaks, required checks, branch/ruleset protections, workflow permissions or secret handling.
+          - Do not add broad security suppressions or allowlists merely to make CI green.
+          - Do not merge or deploy directly. Return the change as a pull request for the full repository gates.
+          - If credentials, platform administration, destructive data changes or a security-policy decision are required, stop at diagnosis and request human action.
+          EOF
+          )"
+          gh issue create --repo "$REPO" --title "$title" --body "$body" --label autonomous-repair
