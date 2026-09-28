@@ -44,3 +44,12 @@ One-time GitHub CodeQL transition
 ---------------------------------
 HIVE's supplied repository was marked as using GitHub CodeQL Default Setup. This update replaces that marker workflow with Advanced Setup for Python and GitHub Actions. In GitHub Security > Code security, disable CodeQL Default Setup before/when merging this workflow so only one CodeQL ownership model is active. Do not leave Default and Advanced Setup running in parallel.
 Renovate lets pip-compile own requirements.txt; direct pip_requirements updates to that generated file are disabled to avoid duplicate/conflicting dependency PRs.
+
+AUTONOMOUS PROVING-GROUP SETUP
+- Scheduled window: Sunday 00:00 UTC; 2.5 hours reserved before the next repository starts.
+- KiloConnect + Kilo Code Bot: authorise both GitHub integrations for this repository. Failed CI/deployment-watch runs create one deduplicated repair issue mentioning @kilocode-bot.
+- Kilo may prepare dependency-manifest/lockfile/build fixes when evidence requires them, but all changes remain PR-only and must pass existing gates.
+- Mergify config handles explicit superseded/obsolete PR cleanup only; it is not the merge authority.
+- GitHub native branch/ruleset protections remain authoritative. Native Merge Queue can be enabled after required checks are confirmed stable.
+- R2 Council ingestion/publishing is deferred to the HIVE Council implementation; no R2 credentials are introduced by this phase.
+- Codecov and OWASP ZAP are intentionally NOT enabled.

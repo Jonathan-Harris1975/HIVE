@@ -1,0 +1,20 @@
+pull_request_rules:
+  - name: close explicitly superseded autonomous pull requests
+    conditions:
+      - label = autonomy:superseded
+      - -merged
+      - -closed
+    actions:
+      comment:
+        message: "Closing because this autonomous PR has been explicitly marked as superseded by a newer authoritative repair."
+      close:
+
+  - name: close explicitly obsolete autonomous pull requests
+    conditions:
+      - label = autonomy:obsolete
+      - -merged
+      - -closed
+    actions:
+      comment:
+        message: "Closing because revalidation has explicitly marked this autonomous PR as obsolete."
+      close:

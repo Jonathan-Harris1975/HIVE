@@ -5,30 +5,42 @@
   ],
   "dependencyDashboard": true,
   "timezone": "Europe/London",
-  "schedule": ["after 3am and before 4am on sunday"],
+  "schedule": [
+    "after 12:00am and before 2:30am on sunday"
+  ],
   "rangeStrategy": "replace",
   "platformAutomerge": true,
   "minimumReleaseAge": "3 days",
   "vulnerabilityAlerts": {
     "automerge": true,
     "minimumReleaseAge": "0 days",
-    "labels": ["security"]
+    "labels": [
+      "security"
+    ]
   },
   "lockFileMaintenance": {
     "enabled": true,
-    "schedule": ["after 3am and before 4am on sunday"],
+    "schedule": [
+      "after 12:00am and before 2:30am on sunday"
+    ],
     "automerge": true
   },
   "packageRules": [
     {
       "description": "Automerge patch, minor and digest updates (npm and GitHub Actions) once the stability window and required checks pass",
-      "matchUpdateTypes": ["patch", "minor", "digest"],
+      "matchUpdateTypes": [
+        "patch",
+        "minor",
+        "digest"
+      ],
       "automerge": true,
       "automergeType": "pr"
     },
     {
       "description": "Keep major updates under manual review",
-      "matchUpdateTypes": ["major"],
+      "matchUpdateTypes": [
+        "major"
+      ],
       "automerge": false
     }
   ]
