@@ -117,7 +117,7 @@ soupsieve==2.10
     # via
     #   -r requirements.in
     #   beautifulsoup4
-starlette==1.6.0
+starlette==1.7.0
     # via
     #   -r requirements.in
     #   fastapi
@@ -125,7 +125,7 @@ tiktoken==0.14.0
     # via headroom-ai
 tomlkit==0.15.1
     # via headroom-ai
-typing-extensions==4.15.0
+typing-extensions==4.16.0
     # via
     #   beautifulsoup4
     #   fastapi
