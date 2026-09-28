@@ -47,9 +47,13 @@ Renovate lets pip-compile own requirements.txt; direct pip_requirements updates 
 
 AUTONOMOUS PROVING-GROUP SETUP
 - Scheduled window: Sunday 00:00 UTC; 2.5 hours reserved before the next repository starts.
-- KiloConnect + Kilo Code Bot: authorise both GitHub integrations for this repository. Failed CI/deployment-watch runs create one deduplicated repair issue mentioning @kilocode-bot.
+- KiloConnect + Kilo Code Bot: authorise both GitHub integrations for this repository. Failed default-branch CI/deployment-watch runs create one deduplicated repair PR and invoke @kilocode-bot in PR context.
 - Kilo may prepare dependency-manifest/lockfile/build fixes when evidence requires them, but all changes remain PR-only and must pass existing gates.
 - Mergify config handles explicit superseded/obsolete PR cleanup only; it is not the merge authority.
 - GitHub native branch/ruleset protections remain authoritative. Native Merge Queue can be enabled after required checks are confirmed stable.
 - R2 Council ingestion/publishing is deferred to the HIVE Council implementation; no R2 credentials are introduced by this phase.
 - Codecov and OWASP ZAP are intentionally NOT enabled.
+
+- GitHub Actions must be allowed to create pull requests in repository Actions settings for the autonomous repair-PR workflow.
+- Enable Kilo Code Reviews for this repository and enable REVIEW.md guidance in the Kilo Code Reviews configuration.
+- Kilo Code Reviewer is review-only; the repair PR also invokes @kilocode-bot in PR context for implementation. Bot-generated PR review behaviour must be verified in Kilo settings because Kilo documents bot-created PRs as ignored by default by automatic Code Reviews.

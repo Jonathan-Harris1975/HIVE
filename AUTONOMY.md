@@ -20,3 +20,14 @@ GitHub is authoritative for PR state. Mergify housekeeping is permitted only fro
 - `autonomy:human-hold`
 
 Never close a PR solely because of age. The future HIVE Repository Council will reconcile lineage and R2 history.
+
+## Main-branch repair PR loop
+
+If an ordinary CI or deployment-verification workflow fails on the default branch, `.github/workflows/autonomous-repair.yml` creates one deduplicated repair PR rather than an issue. The PR contains an unresolved marker under `.autonomy/repair-requests/` and asks `@kilocode-bot` to diagnose and implement the smallest safe correction in PR context.
+
+The marker must be removed only after the underlying defect is fixed. This prevents the placeholder PR from being mistaken for a completed repair.
+
+Minor/digest/patch dependency automation remains owned by the committed Renovate policy. Kilo is the repair path for repository/code/configuration defects exposed by CI; it does not replace the independent CI/security gates.
+
+GitHub repository setting **Allow GitHub Actions to create and approve pull requests** must permit PR creation for this workflow. Branch/ruleset protections and required checks remain authoritative.
+
