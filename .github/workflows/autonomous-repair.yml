@@ -18,7 +18,8 @@ jobs:
   create_repair_pr:
     if: >-
       ${{ github.event_name == 'workflow_dispatch' ||
-          github.event.workflow_run.head_branch == github.event.repository.default_branch }}
+          (github.event.workflow_run.head_branch == github.event.repository.default_branch &&
+           github.event.workflow_run.head_repository.full_name == github.repository) }}
     runs-on: ubuntu-latest
     steps:
       - name: Mint autonomous repair GitHub App token
@@ -164,7 +165,7 @@ jobs:
           Failed commit: \`${HEAD_SHA}\`
           Failed run: ${RUN_URL}
 
-          This PR is deliberately blocked by the **Autonomous repair marker gate** until the underlying defect is fixed and `.autonomy/repair-requests/${RUN_ID}.md` is removed.
+          This PR is deliberately blocked by the **Autonomous repair marker gate** until the underlying defect is fixed and .autonomy/repair-requests/${RUN_ID}.md is removed.
           EOF
           )"
 
