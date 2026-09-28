@@ -1,4 +1,4 @@
-name: Autonomous CI/deployment repair intake
+name: Autonomous main-branch repair PR
 
 on:
   workflow_run:
@@ -8,15 +8,22 @@ on:
 
 permissions:
   actions: read
-  contents: read
-  issues: write
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: autonomous-repair-${{ github.event.workflow_run.id || github.run_id }}
+  cancel-in-progress: false
 
 jobs:
-  open_repair_issue:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'failure' }}
+  create_repair_pr:
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch' ||
+          (github.event.workflow_run.conclusion == 'failure' &&
+           github.event.workflow_run.head_branch == github.event.repository.default_branch) }}
     runs-on: ubuntu-latest
     steps:
-      - name: Create one evidence-led repair issue
+      - name: Create a repair PR for Kilo
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -25,38 +32,94 @@ jobs:
           RUN_NAME: ${{ github.event.workflow_run.name }}
           RUN_URL: ${{ github.event.workflow_run.html_url }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         shell: bash
         run: |
           set -euo pipefail
-          gh label create autonomous-repair --repo "$REPO" --color "5319E7" --description "Automated CI/deployment repair intake" --force
-          gh label create autonomy:superseded --repo "$REPO" --color "B60205" --description "Superseded by a newer authoritative repair" --force
-          gh label create autonomy:obsolete --repo "$REPO" --color "D4C5F9" --description "Revalidation shows the repair is no longer required" --force
-          gh label create autonomy:human-hold --repo "$REPO" --color "FBCA04" --description "Automation must stop for human action" --force
+
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-            echo "Configuration smoke test only; no issue created."
+            echo "Manual dispatch validates workflow permissions only; no repair PR is created."
             exit 0
           fi
-          title="[autonomy] $RUN_NAME failed at $HEAD_SHA"
-          existing="$(gh issue list --repo "$REPO" --state open --label autonomous-repair --search "$HEAD_SHA in:title" --json number --jq '.[0].number // empty')"
+
+          gh label create autonomy:repair --repo "$REPO" --color "0E8A16" --description "Autonomous repair PR awaiting a validated fix" --force
+          gh label create autonomy:superseded --repo "$REPO" --color "B60205" --description "Superseded by a newer authoritative repair" --force
+          gh label create autonomy:obsolete --repo "$REPO" --color "D4C5F9" --description "Repair is no longer required" --force
+          gh label create autonomy:human-hold --repo "$REPO" --color "FBCA04" --description "Automation must stop for human action" --force
+
+          existing="$(gh pr list --repo "$REPO" --state open --label autonomy:repair --search "$HEAD_SHA in:body" --json number --jq '.[0].number // empty')"
           if [ -n "$existing" ]; then
-            echo "Repair issue #$existing already tracks this failing SHA."
+            echo "Repair PR #$existing already tracks failed SHA $HEAD_SHA."
             exit 0
           fi
+
+          # A newer default-branch failure supersedes older autonomous repair PRs,
+          # except anything explicitly placed on human hold.
+          while read -r old_pr; do
+            [ -n "$old_pr" ] || continue
+            on_hold="$(gh pr view "$old_pr" --repo "$REPO" --json labels --jq '[.labels[].name] | any(. == "autonomy:human-hold")')"
+            if [ "$on_hold" != "true" ]; then
+              gh pr edit "$old_pr" --repo "$REPO" --add-label autonomy:superseded
+            fi
+          done < <(gh pr list --repo "$REPO" --state open --label autonomy:repair --json number --jq '.[].number')
+
+          workdir="$(mktemp -d)"
+          trap 'rm -rf "$workdir"' EXIT
+          git clone --quiet "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" "$workdir/repo"
+          cd "$workdir/repo"
+          git checkout --quiet "$HEAD_SHA"
+
+          branch="autonomy/repair-${RUN_ID}"
+          git checkout -b "$branch"
+          mkdir -p .autonomy/repair-requests
+          request=".autonomy/repair-requests/${RUN_ID}.md"
+          cat > "$request" <<EOF
+          # Autonomous repair request
+
+          This marker intentionally keeps the repair PR from being considered complete until the underlying failure is fixed.
+
+          - Failed workflow: ${RUN_NAME}
+          - Failed commit: ${HEAD_SHA}
+          - Failed run: ${RUN_URL}
+          - Run ID: ${RUN_ID}
+
+          ## Required outcome
+
+          Diagnose and fix the smallest repository code, dependency-manifest, lockfile, build or deployment-configuration defect that caused the failed main-branch workflow.
+
+          When the underlying defect is fixed and local/repository checks pass, delete this repair-request file in the same PR.
+
+          ## Guardrails
+
+          Do not weaken tests, CodeQL, Trivy, Gitleaks, required checks, branch/ruleset protections, workflow permissions, secret handling or security policy merely to obtain a green result.
+          Do not add broad suppressions or allowlists.
+          Do not merge or deploy directly.
+          If credentials, destructive data changes, platform administration or a security-policy decision are required, leave this marker in place and add the label autonomy:human-hold.
+          EOF
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$request"
+          git commit --quiet -m "chore: open autonomous repair request for run ${RUN_ID}"
+          git push --quiet origin "$branch"
+
           body="$(cat <<EOF
-          Automated repair intake for a failed repository workflow.
+          Main-branch CI/deployment verification failed and this PR exists solely to carry the repair through the normal PR path.
 
-          - Workflow: $RUN_NAME
-          - Commit: $HEAD_SHA
-          - Run: $RUN_URL
-          - Run ID: $RUN_ID
+          Failed workflow: **${RUN_NAME}**
+          Failed commit: \`${HEAD_SHA}\`
+          Failed run: ${RUN_URL}
 
-          @kilocode-bot please diagnose this failure. If the root cause is a repository code, dependency-manifest, lockfile, build or deployment-configuration defect, prepare the smallest safe pull request that fixes the underlying cause.
+          @kilocode-bot please diagnose the failed workflow and implement the smallest safe fix in this PR context. Repository/configuration changes such as package.json, lockfiles, dependency metadata, build configuration or minor code corrections are permitted when the evidence requires them.
 
-          Guardrails:
-          - Do not weaken tests, CodeQL, Trivy, Gitleaks, required checks, branch/ruleset protections, workflow permissions or secret handling.
-          - Do not add broad security suppressions or allowlists merely to make CI green.
-          - Do not merge or deploy directly. Return the change as a pull request for the full repository gates.
-          - If credentials, platform administration, destructive data changes or a security-policy decision are required, stop at diagnosis and request human action.
+          Before considering the repair complete:
+          1. Fix the underlying cause rather than weakening the failing measurement.
+          2. Run the relevant repository checks.
+          3. Remove \`.autonomy/repair-requests/${RUN_ID}.md\` only after the underlying defect is fixed.
+          4. Keep the change narrowly scoped.
+          5. Do not merge or deploy directly; the repository gates remain authoritative.
           EOF
           )"
-          gh issue create --repo "$REPO" --title "$title" --body "$body" --label autonomous-repair
+
+          pr_url="$(gh pr create --repo "$REPO" --base "$DEFAULT_BRANCH" --head "$branch" --title "[autonomy] Repair ${RUN_NAME} failure (${RUN_ID})" --body "$body" --label autonomy:repair)"
+          echo "Created repair PR: $pr_url"
