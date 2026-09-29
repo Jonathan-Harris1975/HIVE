@@ -58,14 +58,15 @@ jobs:
           signature="$(printf '%s' "$unsigned" | openssl dgst -sha256 -sign "$key_file" -binary | b64url)"
           jwt="${unsigned}.${signature}"
 
-          installation_id="$(
+          installation="$(
             curl --fail-with-body --silent --show-error \
               --header "Accept: application/vnd.github+json" \
               --header "Authorization: Bearer ${jwt}" \
               --header "X-GitHub-Api-Version: 2022-11-28" \
-              "https://api.github.com/repos/${REPO}/installation" |
-              jq -er '.id'
+              "https://api.github.com/repos/${REPO}/installation"
           )"
+          installation_id="$(jq -er '.id' <<< "$installation")"
+          repair_app_slug="$(jq -er '.app_slug' <<< "$installation")"
 
           app_token="$(
             curl --fail-with-body --silent --show-error \
@@ -80,6 +81,7 @@ jobs:
           rm -f "$key_file"
           echo "::add-mask::${app_token}"
           printf 'token=%s\n' "$app_token" >> "$GITHUB_OUTPUT"
+          printf 'repair_app_login=%s[bot]\n' "$repair_app_slug" >> "$GITHUB_OUTPUT"
 
       - name: Check out trusted default-branch automation only
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -92,6 +94,9 @@ jobs:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           READ_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          REPAIR_APP_LOGIN: ${{ steps.app_token.outputs.repair_app_login }}
+          KILO_REPAIR_PR_LOGIN: ${{ vars.KILO_REPAIR_PR_LOGIN }}
           CURRENT_RUN_ID: ${{ github.run_id }}
           REQUIRED_WORKFLOWS: "CI|CodeQL|Security and repository quality"
         run: python .github/scripts/trusted_automation.py
