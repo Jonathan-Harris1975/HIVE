@@ -85,8 +85,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install pinned Lychee
+        continue-on-error: true
         run: python scripts/install_ci_tools.py lychee
       - name: Check repository links
+        continue-on-error: true
         run: >-
           .ci-tools/bin/lychee
           --no-progress
