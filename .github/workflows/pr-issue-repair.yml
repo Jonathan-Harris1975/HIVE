@@ -2,7 +2,7 @@ name: Autonomous PR issue repair
 
 on:
   workflow_run:
-    workflows: ["CI", "Koyeb production deployment watch", "Renovate dependency lock sync", "CodeQL", "Security and repository quality"]
+    workflows: ["CI", "Koyeb production deployment watch", "CodeQL", "Security and repository quality"]
     types: [completed]
   issue_comment:
     types: [created]
@@ -16,6 +16,7 @@ permissions:
   contents: read
   issues: write
   pull-requests: read
+  security-events: read
 
 concurrency:
   group: kilo-pr-repair-${{ github.repository }}
@@ -36,4 +37,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           KILO_REPAIR_TRIGGER_URL: ${{ secrets.KILO_REPAIR_TRIGGER_URL }}
+          KILO_REPAIR_PR_LOGIN: ${{ vars.KILO_REPAIR_PR_LOGIN }}
         run: python3 .github/scripts/pr_repair_router.py
