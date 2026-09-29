@@ -23,7 +23,7 @@ Never close a PR solely because of age. The future HIVE Repository Council will 
 
 ## Main-branch repair PR loop
 
-If an ordinary CI, CodeQL/security or deployment-verification workflow fails on the default branch, `.github/workflows/autonomous-repair.yml` creates one deduplicated repair **carrier PR** rather than an issue. The carrier contains an unresolved marker under `.autonomy/repair-requests/` and asks `@kilocode-bot` to diagnose and implement the smallest safe correction in PR context.
+If an ordinary CI/security/deployment-verification workflow genuinely fails on the default branch, or a successful CodeQL analysis reports open policy-safe findings, `.github/workflows/autonomous-repair.yml` creates one deduplicated repair **carrier PR** rather than an issue. The carrier contains an unresolved marker under `.autonomy/repair-requests/` and sends the exact `@kilocode-bot fix it` implementation command with bounded evidence, so no human reply is required to start Kilo.
 
 Kilo GitHub implementation mode may update the carrier branch or create its own implementation branch/PR. If it updates the carrier, the marker is removed only after the underlying defect is fixed. If Kilo opens a separate implementation PR, the carrier marker stays as lifecycle evidence and a successful default-branch rerun marks the carrier obsolete. This prevents an evidence-only carrier from being mistaken for a completed repair.
 
@@ -42,16 +42,17 @@ The repair App has only the repository permissions needed to create the branch/P
 Successful default-branch reruns automatically mark open repair PRs for the same workflow as `autonomy:obsolete` (unless they are on human hold), allowing Mergify to close stale repair carriers safely. This prevents a Kilo-created replacement PR or a manual correction from leaving the original repair PR behind.
 ## CodeQL and security handoff
 
-- CodeQL has an explicit open-alert gate: open CodeQL alerts on the current main ref or same-repository pull request fail the CodeQL workflow instead of remaining a green-but-alerting scan.
-- Main-branch CodeQL or repository-security failures enter the same carrier lifecycle and are labelled `autonomy:security-repair`.
-- If CodeQL/security fails on a trusted autonomous carrier or Kilo implementation PR, the workflow re-invokes `@kilocode-bot` from that PR context. Kilo may update the current branch when its integration supports that, or create one linked replacement implementation PR; repeated unbounded PR chains are not acceptable.
+- CodeQL analysis success and CodeQL findings are separate states. Open findings are reported by a successful **CodeQL finding triage** job and are not converted into a synthetic exit-code failure. A broken CodeQL analysis still fails normally.
+- On the default branch, policy-safe open CodeQL findings enter the carrier lifecycle and are labelled `autonomy:security-repair`; protected governance/secret paths remain on `autonomy:human-hold`.
+- On trusted PRs, `.github/scripts/trusted_automation.py` extracts bounded CodeQL/check evidence and automatically sends `@kilocode-bot fix it`. If Kilo Code Review itself asks for that reply, trusted automation posts it automatically; no operator reply is required.
+- Genuine CI/security scan failures remain failures. Safe failed-step/check annotations can be handed to Kilo, while Gitleaks/credential/protected-policy evidence is never passed for autonomous editing and moves to `autonomy:human-hold`.
 - Kilo may repair code/configuration, but it must not dismiss CodeQL alerts, weaken queries/tests, broaden suppressions, change secret allowlists or make security-policy decisions. If no safe repository code change is justified, the carrier marker stays and the work moves to `autonomy:human-hold`.
 
 ## Trusted automation admission and native merge
 
 `.github/workflows/trusted-automation.yml` is a default-branch control plane for verified automation PRs. It never checks out or executes PR code. The installed Autonomous Repair Bot GitHub App therefore also requires **Actions: Read and write** so it can approve an `action_required` workflow run, or safely re-request the same run when GitHub requires that path. Contents, Pull requests and Issues remain read/write; Metadata is read-only.
 
-Admission is fail-closed. Exact same-repository Mend Renovate PRs are recognised from the `renovate[bot]` identity and Renovate body marker. Kilo implementation PRs are recognised only after the exact `kilo-code-bot[bot]` PR URL is linked from an autonomous repair carrier. Unknown/unlinked bot PRs are not admitted. Fork secrets and fork write tokens remain disabled.
+Admission is fail-closed. Exact same-repository Mend Renovate PRs are recognised from the `renovate[bot]` identity and Renovate body marker. Kilo implementation PRs are recognised only when linked from an autonomous repair carrier or a trusted Renovate source PR that automation explicitly handed to Kilo. Unknown/unlinked bot PRs are not admitted. Fork secrets and fork write tokens remain disabled.
 
 Renovate's committed policy remains authoritative: PRs can run CI automatically, but native auto-approval/auto-merge is requested only when the PR itself reports `Automerge: Enabled.`. Major/manual updates remain human decisions. A linked Kilo implementation PR can progress only when the current head SHA has successful repository CI, CodeQL, repository-security checks and no pending/failing current checks. Sensitive governance/security-path changes are labelled `autonomy:human-hold`.
 

@@ -2,7 +2,7 @@ name: Autonomous main-branch repair PR
 
 on:
   workflow_run:
-    workflows: ["CI", "Koyeb production deployment watch", "CodeQL", "Security and repository quality"]
+    workflows: ["CI", "Koyeb production deployment watch", "Renovate dependency lock sync", "CodeQL", "Security and repository quality"]
     types: [completed]
   workflow_dispatch:
 
@@ -19,12 +19,7 @@ jobs:
     if: >-
       ${{
         github.event_name == 'workflow_dispatch' ||
-        github.event.workflow_run.head_branch == github.event.repository.default_branch ||
-        (
-          github.event.workflow_run.conclusion == 'failure' &&
-          (github.event.workflow_run.name == 'CodeQL' || github.event.workflow_run.name == 'Security and repository quality') &&
-          github.event.workflow_run.pull_requests[0].number != null
-        )
+        github.event.workflow_run.head_branch == github.event.repository.default_branch
       }}
     runs-on: ubuntu-latest
     steps:
@@ -80,7 +75,7 @@ jobs:
           echo "::add-mask::${app_token}"
           printf 'token=%s\n' "$app_token" >> "$GITHUB_OUTPUT"
 
-      - name: Create or continue one repair PR and invoke Kilo in PR context
+      - name: Create or continue one repair PR and start Kilo Cloud Agent
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           REPO: ${{ github.repository }}
@@ -91,8 +86,8 @@ jobs:
           RUN_URL: ${{ github.event.workflow_run.html_url }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
-          SOURCE_PR: ${{ github.event.workflow_run.pull_requests[0].number }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          KILO_REPAIR_TRIGGER_URL: ${{ secrets.KILO_REPAIR_TRIGGER_URL }}
         shell: bash
         run: |
           set -euo pipefail
@@ -113,44 +108,38 @@ jobs:
             security_workflow=true
           fi
 
-          # A security check can fail again on an existing autonomous repair PR.
-          # Hand that failure back to Kilo on the same PR rather than opening a
-          # nested PR/fork, which also avoids the untrusted-fork approval path.
-          if [ "$HEAD_BRANCH" != "$DEFAULT_BRANCH" ]; then
-            if [ "$RUN_CONCLUSION" != "failure" ] || [ "$security_workflow" != "true" ] || [ -z "${SOURCE_PR:-}" ]; then
-              exit 0
-            fi
-            pr_meta="$(gh pr view "$SOURCE_PR" --repo "$REPO" --json author,labels)"
-            labels="$(printf '%s' "$pr_meta" | jq -r '[.labels[].name] | join(",")')"
-            pr_author="$(printf '%s' "$pr_meta" | jq -r '.author.login // ""')"
-            trusted_repair=false
-            case ",$labels," in
-              *,autonomy:repair,*) trusted_repair=true ;;
-            esac
-            case "$pr_author" in
-              kilo-code-bot|kilo-code-bot\[bot\]) trusted_repair=true ;;
-            esac
-            if [ "$trusted_repair" != "true" ]; then
-              echo "PR #$SOURCE_PR is neither an autonomous repair carrier nor a Kilo implementation PR; no Kilo handoff."
-              exit 0
-            fi
-            marker="<!-- autonomy-security-handoff:${RUN_ID} -->"
-            already="$(gh api --paginate "repos/${REPO}/issues/${SOURCE_PR}/comments" --jq ".[] | select(.body | contains(\"${marker}\")) | .id" | head -1)"
+          dispatch_kilo() {
+            local repair_pr="$1" marker already payload status
+            marker="<!-- kilo-main-repair:${RUN_ID} -->"
+            already="$(gh api --paginate "repos/${REPO}/issues/${repair_pr}/comments" \
+              --jq ".[] | select(.body | contains(\"${marker}\")) | .id" | head -1)"
             if [ -n "$already" ]; then
-              echo "Security handoff for run $RUN_ID already posted to PR #$SOURCE_PR."
-              exit 0
+              echo "Kilo was already dispatched for run $RUN_ID."
+              return
             fi
-            gh pr edit "$SOURCE_PR" --repo "$REPO" --add-label autonomy:security-repair
-          handoff_body="$(cat <<EOF
-          ${marker}
-          @kilocode-bot the security workflow failed on PR #${SOURCE_PR}: ${RUN_URL}
-
-          Continue the smallest safe remediation from this PR context. If your GitHub implementation mode can update this PR branch, do that. Otherwise create exactly one replacement implementation PR against ${DEFAULT_BRANCH}, link it back to PR #${SOURCE_PR}, and avoid repeated PR chains. Do not dismiss CodeQL alerts, weaken queries/tests, add broad suppressions or alter secret allowlists. If no safe repository code change is appropriate, explain why and leave any autonomous repair carrier marker in place for autonomy:human-hold.
-          EOF
-          )"
-          gh pr comment "$SOURCE_PR" --repo "$REPO" --body "$handoff_body"
-            exit 0
-          fi
+            if [[ "${KILO_REPAIR_TRIGGER_URL:-}" != https://*.kilo.ai/* ]]; then
+              echo "::error::Configure KILO_REPAIR_TRIGGER_URL with this repository's Kilo Cloud Agent webhook trigger."
+              exit 1
+            fi
+            local carrier_url="https://github.com/${REPO}/pull/${repair_pr}"
+            payload="$(jq -n --arg repo "$REPO" --arg pr "$carrier_url" \
+              --arg sha "$HEAD_SHA" --arg run "$RUN_URL" --arg workflow "$RUN_NAME" \
+              '{repository:$repo,carrier_pr:$pr,failed_sha:$sha,failed_run:$run,workflow:$workflow,
+                task:("Investigate the failed workflow " + $workflow + " at " + $run +
+                ". Repair the smallest verified code/manifest/lockfile defect on a new branch. " +
+                "Open one implementation PR against the default branch and include " + $pr +
+                " in its PR body. Do not merge or deploy, dismiss alerts, weaken security checks, " +
+                "change allowlists, or expose credentials. If no safe code fix exists, report the blocker.")}')"
+            status="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 30 \
+              --request POST \
+              --header 'Content-Type: application/json' --data "$payload" \
+              "$KILO_REPAIR_TRIGGER_URL")"
+            if [[ "$status" != 2?? ]]; then
+              echo "::error::Kilo Cloud Agent trigger returned HTTP $status for run $RUN_ID."
+              exit 1
+            fi
+            gh pr comment "$repair_pr" --repo "$REPO" --body "$marker Kilo Cloud Agent repair requested for $RUN_URL."
+          }
 
           if [ "$RUN_CONCLUSION" = "success" ]; then
             while read -r old_pr; do
@@ -175,6 +164,7 @@ jobs:
           existing="$(gh pr list --repo "$REPO" --state open --label autonomy:repair --search "$HEAD_SHA in:body" --json number --jq '.[0].number // empty')"
           if [ -n "$existing" ]; then
             echo "Repair PR #$existing already tracks failed SHA $HEAD_SHA."
+            dispatch_kilo "$existing"
             exit 0
           fi
 
@@ -228,7 +218,7 @@ jobs:
           Failed commit: \`${HEAD_SHA}\`
           Failed run: ${RUN_URL}
 
-          This carrier PR is deliberately blocked by the **Autonomous repair marker gate**. If Kilo can safely update this branch, the marker is removed only after the defect is fixed. If Kilo opens a separate implementation PR, this marker remains as lifecycle evidence until a successful default-branch rerun marks the carrier obsolete.
+          This carrier PR is blocked by the **Autonomous repair marker gate**. Kilo Cloud Agent is asked to open one linked implementation PR. The marker stays until a successful default-branch rerun marks this carrier obsolete.
           EOF
           )"
 
@@ -241,9 +231,5 @@ jobs:
             --body "$body" --label "$labels")"
           echo "Created repair PR: $pr_url"
 
-          if [ "$security_workflow" = "true" ]; then
-            kilo_instruction="@kilocode-bot diagnose the linked CodeQL/security failure and implement the smallest safe fix. If your GitHub implementation mode can update this carrier branch, do so and remove the repair marker only after the security finding is genuinely cleared. Otherwise create exactly one implementation PR against $DEFAULT_BRANCH, link it back to this carrier, and leave the carrier marker untouched. Prefer a same-repository branch when supported. Do not dismiss alerts, weaken CodeQL queries/tests, add broad suppressions, change Gitleaks allowlists or expose secrets. If no safe repository code change is appropriate, explain why so the carrier can be placed on autonomy:human-hold."
-          else
-            kilo_instruction="@kilocode-bot diagnose the failed workflow linked in this carrier PR and implement the smallest safe fix. If your GitHub implementation mode can update this carrier branch, do so and remove the repair marker after the relevant checks genuinely pass. Otherwise create exactly one implementation PR against $DEFAULT_BRANCH, link it back to this carrier, and leave the carrier marker untouched. Prefer a same-repository branch when supported. Changes to package.json, lockfiles, dependency metadata, build configuration or minor code are allowed when required. Do not weaken security/test gates and do not merge or deploy directly."
-          fi
-          gh pr comment "$pr_url" --body "$kilo_instruction"
+          repair_pr="${pr_url##*/}"
+          dispatch_kilo "$repair_pr"
