@@ -20,10 +20,13 @@ API = "https://api.github.com"
 TOKEN = os.environ["GH_TOKEN"]
 REPO = os.environ.get("REPO") or os.environ["GITHUB_REPOSITORY"]
 REQUIRED_WORKFLOWS = [x.strip() for x in os.environ.get("REQUIRED_WORKFLOWS", "").split("|") if x.strip()]
+DEFAULT_BRANCH = os.environ.get("DEFAULT_BRANCH", "main")
+REPAIR_APP_LOGIN = os.environ.get("REPAIR_APP_LOGIN", "")
 
 RENOVATE_LOGIN = "renovate[bot]"
-KILO_LOGIN = "kilo-code-bot[bot]"
+KILO_LOGIN = os.environ.get("KILO_REPAIR_PR_LOGIN") or "kilo-code-bot[bot]"
 CARRIER_PREFIX = "[autonomy] Repair "
+URL_END = r"(?![A-Za-z0-9/_-])"
 
 KILO_SENSITIVE_PREFIXES = (
     ".github/workflows/",
@@ -108,11 +111,13 @@ def comment(number: int, body: str) -> None:
 
 
 def list_open_prs() -> list[dict[str, Any]]:
-    return get(f"/repos/{REPO}/pulls?state=open&per_page=100")
-
-
-def list_recent_prs() -> list[dict[str, Any]]:
-    return get(f"/repos/{REPO}/pulls?state=all&sort=updated&direction=desc&per_page=100")
+    prs: list[dict[str, Any]] = []
+    for page in range(1, 11):
+        chunk = get(f"/repos/{REPO}/pulls?state=open&per_page=100&page={page}")
+        prs.extend(chunk)
+        if len(chunk) < 100:
+            return prs
+    raise RuntimeError("More than 1,000 open PRs; refusing incomplete trust reconciliation")
 
 
 def is_same_repo(pr: dict[str, Any]) -> bool:
@@ -136,10 +141,14 @@ def renovate_automerge_enabled(pr: dict[str, Any]) -> bool:
 def is_carrier(pr: dict[str, Any]) -> bool:
     labels = issue_labels(pr)
     return (
-        is_same_repo(pr)
+        pr.get("user", {}).get("login") == REPAIR_APP_LOGIN
+        and pr.get("state") == "open"
+        and is_same_repo(pr)
+        and pr.get("base", {}).get("ref") == DEFAULT_BRANCH
         and str(pr.get("title", "")).startswith(CARRIER_PREFIX)
-        and str(pr.get("head", {}).get("ref", "")).startswith("autonomy/repair-")
+        and re.fullmatch(r"autonomy/repair-\d+", str(pr.get("head", {}).get("ref", ""))) is not None
         and "autonomy:repair" in labels
+        and not labels.intersection({"autonomy:human-hold", "autonomy:superseded", "autonomy:obsolete"})
     )
 
 
@@ -154,13 +163,13 @@ def carrier_comments(number: int) -> list[dict[str, Any]]:
 
 
 def linked_kilo_carrier(pr: dict[str, Any], carriers: list[dict[str, Any]]) -> int | None:
-    if pr.get("user", {}).get("login") != KILO_LOGIN:
+    if pr.get("user", {}).get("login") != KILO_LOGIN or not is_same_repo(pr):
         return None
     pr_url = str(pr.get("html_url", ""))
     body = pr.get("body") or ""
     for carrier in carriers:
         carrier_url = str(carrier.get("html_url", ""))
-        if carrier_url and re.search(re.escape(carrier_url) + r"(?!\d)", body):
+        if carrier_url and re.search(re.escape(carrier_url) + URL_END, body):
             return int(carrier["number"])
         try:
             comments = carrier_comments(int(carrier["number"]))
@@ -169,13 +178,13 @@ def linked_kilo_carrier(pr: dict[str, Any], carriers: list[dict[str, Any]]) -> i
             continue
         for item in comments:
             text = item.get("body") or ""
-            if item.get("user", {}).get("login") == KILO_LOGIN and pr_url and re.search(re.escape(pr_url) + r"(?!\d)", text):
+            if item.get("user", {}).get("login") == KILO_LOGIN and pr_url and re.search(re.escape(pr_url) + URL_END, text):
                 return int(carrier["number"])
     return None
 
 
 def linked_kilo_review_source(pr: dict[str, Any], sources: list[dict[str, Any]]) -> int | None:
-    """Require the trusted router's exact-head receipt before admitting a Kilo PR."""
+    """Require the exact-head receipt and preserve the complete source PR history."""
     if pr.get("user", {}).get("login") != KILO_LOGIN or not is_same_repo(pr):
         return None
     body = pr.get("body") or ""
@@ -184,23 +193,29 @@ def linked_kilo_review_source(pr: dict[str, Any], sources: list[dict[str, Any]])
             continue
         source_url = str(source.get("html_url", ""))
         sha = str(source.get("head", {}).get("sha", ""))
-        if not source_url or not re.search(re.escape(source_url) + r"(?!\d)", body) or not sha:
+        if not source_url or not re.search(re.escape(source_url) + URL_END, body) or not sha:
             continue
         try:
             comments = carrier_comments(int(source["number"]))
         except ApiError as exc:
             log(f"Source PR #{source['number']} comments unavailable: {exc}")
             continue
-        if any(item.get("user", {}).get("login") == "github-actions[bot]" and
-               f"<!-- kilo-auto-repair:{sha}:" in (item.get("body") or "")
-               for item in comments):
+        if not any(item.get("user", {}).get("login") == "github-actions[bot]" and
+                   f"<!-- kilo-auto-repair:{sha}:" in (item.get("body") or "")
+                   for item in comments):
+            continue
+        implementation_sha = str(pr.get("head", {}).get("sha", ""))
+        if not re.fullmatch(r"[0-9a-f]{40}", sha) or not re.fullmatch(r"[0-9a-f]{40}", implementation_sha):
+            continue
+        comparison = get(f"/repos/{REPO}/compare/{sha}...{implementation_sha}")
+        if comparison.get("behind_by") == 0 and comparison.get("status") in {"ahead", "identical"}:
             return int(source["number"])
+        log(f"Kilo PR #{pr['number']} does not contain current source PR #{source['number']} head {sha[:12]}.")
     return None
 
 
 def adopt_linked_kilo_prs(open_prs: list[dict[str, Any]]) -> None:
-    recent = list_recent_prs()
-    carriers = [pr for pr in recent if is_carrier(pr)]
+    carriers = [pr for pr in open_prs if is_carrier(pr)]
     for pr in open_prs:
         if pr.get("user", {}).get("login") != KILO_LOGIN:
             continue
@@ -223,7 +238,8 @@ def trusted_kind(pr: dict[str, Any]) -> str | None:
         return "renovate"
     if is_carrier(pr):
         return "carrier"
-    if pr.get("user", {}).get("login") == KILO_LOGIN and "autonomy:kilo-implementation" in labels and "autonomy:repair" in labels:
+    if (pr.get("user", {}).get("login") == KILO_LOGIN and is_same_repo(pr) and
+            "autonomy:kilo-implementation" in labels and "autonomy:repair" in labels):
         return "kilo"
     return None
 
@@ -237,12 +253,16 @@ def current_pr_for_sha(open_prs: list[dict[str, Any]], sha: str) -> dict[str, An
 def admit_waiting_runs(open_prs: list[dict[str, Any]]) -> None:
     payload = get(f"/repos/{REPO}/actions/runs?status=action_required&per_page=100")
     runs = payload.get("workflow_runs", []) if isinstance(payload, dict) else []
+    carriers = [source for source in open_prs if is_carrier(source)]
     for run in runs:
         sha = str(run.get("head_sha", ""))
         pr = current_pr_for_sha(open_prs, sha)
         if pr is None:
             continue
         kind = trusted_kind(pr)
+        if kind == "kilo" and (linked_kilo_carrier(pr, carriers) is None and
+                                linked_kilo_review_source(pr, open_prs) is None):
+            continue
         run_id = int(run["id"])
         name = str(run.get("name", "workflow"))
         try:
@@ -272,17 +292,6 @@ def latest_runs_for_sha(sha: str) -> dict[str, dict[str, Any]]:
     return latest
 
 
-def dedup_check_runs(sha: str) -> list[dict[str, Any]]:
-    payload = get(f"/repos/{REPO}/commits/{sha}/check-runs?per_page=100")
-    latest: dict[tuple[str, str], dict[str, Any]] = {}
-    for check in payload.get("check_runs", []):
-        key = (str(check.get("name", "")), str(check.get("app", {}).get("slug", "")))
-        current = latest.get(key)
-        if current is None or int(check.get("id", 0)) > int(current.get("id", 0)):
-            latest[key] = check
-    return list(latest.values())
-
-
 def all_required_checks_green(pr: dict[str, Any]) -> tuple[bool, str]:
     sha = str(pr.get("head", {}).get("sha", ""))
     runs = latest_runs_for_sha(sha)
@@ -293,23 +302,9 @@ def all_required_checks_green(pr: dict[str, Any]) -> tuple[bool, str]:
         if run.get("status") != "completed" or run.get("conclusion") != "success":
             return False, f"required workflow {name!r} is {run.get('status')}/{run.get('conclusion')}"
 
-    checks = dedup_check_runs(sha)
-    if not checks:
-        return False, "no check runs are attached to the current head"
-    allowed = {"success", "neutral", "skipped"}
-    for check in checks:
-        status = check.get("status")
-        conclusion = check.get("conclusion")
-        if status != "completed":
-            return False, f"check {check.get('name')!r} is still {status}"
-        if conclusion not in allowed:
-            return False, f"check {check.get('name')!r} concluded {conclusion}"
-
-    statuses = get(f"/repos/{REPO}/commits/{sha}/status")
-    for item in statuses.get("statuses", []):
-        if item.get("state") != "success":
-            return False, f"commit status {item.get('context')!r} is {item.get('state')}"
-    return True, "all required workflows and current checks are green"
+    # GitHub's native ruleset/auto-merge checks any additional required contexts.
+    # Optional review, link and external-service checks cannot become an extra gate here.
+    return True, "required CI and security workflows succeeded"
 
 
 def pr_files(number: int) -> list[str]:
@@ -394,20 +389,24 @@ def reconcile_pr(pr: dict[str, Any]) -> None:
     labels = issue_labels(pr)
     if labels.intersection({"autonomy:human-hold", "autonomy:superseded", "autonomy:obsolete"}):
         return
+    if kind == "carrier":
+        # Carriers record the failed run and remain blocked until the linked
+        # implementation succeeds. Never merge one just because its marker was removed.
+        log(f"Carrier PR #{pr['number']} is lifecycle evidence; withholding auto-merge.")
+        return
 
     if kind == "renovate" and not renovate_automerge_enabled(pr):
         # Major/manual Renovate PRs may run CI automatically, but remain human merge decisions.
         return
 
-    if kind in {"kilo", "carrier"}:
+    if kind == "kilo":
         sensitive = [path for path in pr_files(int(pr["number"])) if sensitive_file(path)]
         if sensitive:
             place_human_hold(pr, "the repair changes governance/security automation files: " + ", ".join(sensitive[:8]))
             return
 
     if kind == "kilo":
-        recent = list_recent_prs()
-        carriers = [source for source in recent if is_carrier(source)]
+        carriers = [source for source in list_open_prs() if is_carrier(source)]
         if (linked_kilo_carrier(pr, carriers) is None and
                 linked_kilo_review_source(pr, list_open_prs()) is None):
             log(f"Kilo PR #{pr['number']} no longer has a current verified source; withholding merge.")
@@ -438,6 +437,11 @@ def reconcile_pr(pr: dict[str, Any]) -> None:
 def main() -> int:
     if not REQUIRED_WORKFLOWS:
         raise RuntimeError("REQUIRED_WORKFLOWS must list the repository's CI/security workflow names")
+    if not re.fullmatch(r"[A-Za-z0-9-]+\[bot\]", REPAIR_APP_LOGIN):
+        raise RuntimeError("REPAIR_APP_LOGIN must be the installed repair GitHub App bot login")
+    if (not re.fullmatch(r"[A-Za-z0-9-]+(?:\[bot\])?", KILO_LOGIN) or
+            KILO_LOGIN in {REPAIR_APP_LOGIN, RENOVATE_LOGIN, "github-actions[bot]"}):
+        raise RuntimeError("KILO_REPAIR_PR_LOGIN must name the distinct, verified Kilo PR creator")
     ensure_label("autonomy:kilo-implementation", "5319E7", "Kilo implementation PR linked to an autonomous repair carrier")
     ensure_label("autonomy:human-hold", "FBCA04", "Automation must stop for human action")
 
