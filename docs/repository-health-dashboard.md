@@ -1,77 +1,52 @@
 > **Document status:** Production reference  
-> **Last reviewed:** 26 August 2026  
+> **Last reviewed:** 29 September 2026  
 > **Operational authority:** Current repository README, SECURITY policy and operations guide.
 
-# Repository and Service Health Dashboard
+# Repository estate overview
 
-HIVE exposes an authenticated ecosystem health summary for HIVE-UI:
+HIVE exposes a read-only ecosystem repository/service health summary:
 
 ```http
 GET /v1/system/repo-health
 GET /v1/system/repo-health?force_refresh=true
 ```
 
-The endpoint is read-only, uses only operator-configured URLs, never accepts an arbitrary probe target, redacts response payloads, and caches results for a short period.
+The endpoint remains the backend authority for the **Repositories** overview in HIVE-UI. It is not an Operations-dashboard feed anymore. Repository health, snapshot freshness, Memory readiness and Intelligence readiness belong together on the repository estate surface so an operator sees one coherent status instead of the same repository data in two places.
 
-## Repositories and services
+The endpoint is read-only, uses only operator-configured targets, never accepts arbitrary probe URLs, redacts returned payloads and keeps a short bounded cache.
+
+## UI ownership boundary
+
+- **Repositories** owns governed repository registration/freshness and service-health overview.
+- **Operations** owns HIVE runtime health, integration readiness, operational events, execution reviews, workflow planning and destructive database administration.
+- HIVE-UI exposes no repository wake, repair, refresh-all, upload, reindex, setup, Intelligence-run or improvement controls.
+- Scheduled repository refresh, QA, Council, Intelligence, CodeQL/Kilo repair and deployment verification remain backend/CI automation responsibilities.
+
+`GET /v1/system/runtime-stats` intentionally excludes repository-manager counts so Operations cannot quietly recreate a second repository dashboard.
+
+## Governed services
 
 | Repository | Liveness | Operational/readiness |
 |---|---|---|
 | HIVE | Local process check | Local production-readiness report |
 | HIVE-UI | Public Cloudflare Worker `/health` | Not applicable |
-| AIMS-UI | Gateway liveness `https://chat.jonathan-harris.online/livez` | Operator-console readiness `https://chat.jonathan-harris.online/readyz` |
-| AIMS | `/health` | `/ops/health` |
-| RAMS | `/health` | Authenticated `/readiness` |
-| MAST | Durable R2 scheduler heartbeat | Heartbeat freshness and bounded recent-result summary |
-| IRS | Public root reachability | Not applicable |
-| Website | Public root reachability | Not applicable |
-
-AIMS-UI, AIMS and RAMS deliberately separate liveness from readiness because a service can be online while credentials, storage, repositories, queues, bindings or downstream providers are not ready.
+| AIMS-UI | Gateway liveness | Operator-console readiness |
+| AIMS | Service liveness | Operational readiness |
+| RAMS | Service liveness | Authenticated readiness |
+| MAST | Durable scheduler heartbeat | Heartbeat freshness and bounded recent-result summary |
+| IRS | Public service reachability | Not applicable |
+| Website | Public site reachability | Not applicable |
 
 ## Status rules
 
 - `healthy`: liveness passed and any operational check passed.
 - `degraded`: liveness passed but operational readiness did not pass or was not configured.
 - `down`: liveness failed or returned a non-success response.
-- `not_configured`: no target URL was supplied.
+- `not_configured`: no target was supplied.
+- `standby` / `maintenance`: intentional lifecycle state supplied by authoritative lifecycle evidence.
+- `starting`: expected bounded startup state.
 - `disabled`: ecosystem monitoring is disabled globally.
 
-## Environment variables
+## Security boundary
 
-```text
-REPO_HEALTH_ENABLED=true
-REPO_HEALTH_TIMEOUT_SECONDS=6
-REPO_HEALTH_CACHE_SECONDS=30
-HIVE_UI_HEALTH_URL=https://hive.jonathan-harris.online/health
-AIMS_UI_HEALTH_URL=https://chat.jonathan-harris.online/livez
-AIMS_UI_READINESS_URL=https://chat.jonathan-harris.online/readyz
-AIMS_HEALTH_URL=https://zeroth-kara-jonathanharris-3296ed37.koyeb.app/livez
-AIMS_OPERATIONAL_HEALTH_URL=https://zeroth-kara-jonathanharris-3296ed37.koyeb.app/readyz
-RAMS_HEALTH_URL=https://static-helaina-jonathanharris-6df5d241.koyeb.app/livez
-RAMS_READINESS_URL=https://static-helaina-jonathanharris-6df5d241.koyeb.app/readiness
-RAMS_HEALTH_BEARER_TOKEN={{ secret.RMS_API_KEY }}
-MAST_MONITOR_MODE=r2
-MAST_STATE_R2_LANE=meta_system
-MAST_STATE_OBJECT_KEY=state/mast/scheduler-state.json
-MAST_STATE_HEALTHY_MAX_AGE_SECONDS=90
-MAST_STATE_DOWN_MAX_AGE_SECONDS=300
-MAST_STATE_MAX_BYTES=1048576
-IRS_HEALTH_URL=https://images.jonathan-harris.online/
-WEBSITE_HEALTH_URL=https://jonathan-harris.online/
-```
-
-The RAMS token is sent only to the configured RAMS readiness URL. It is never returned in the health payload.
-
-MAST runs as a Koyeb Worker and therefore has no public inbound health URL. In
-`r2` mode HIVE reads the bounded scheduler state object from the configured
-`meta_system` lane. Scoped S3 reads are preferred; the governed public R2 URL is
-used as a read-only fallback when available. The worker is healthy while
-`lastTickAt` remains within the healthy threshold, degraded while mildly stale,
-and down only after the down threshold is exceeded.
-
-## Deployment order
-
-1. Deploy HIVE and verify the backend tests and `/readyz`.
-2. Set the production HIVE-UI and AIMS-UI health URLs plus the MAST R2 heartbeat variables in Koyeb.
-3. Call `/v1/system/repo-health?force_refresh=true` with the HIVE admin bearer token.
-4. Deploy HIVE-UI and verify the compact Ops cards and inspector payload.
+RAMS readiness credentials and other probe credentials are server-side only. They are never returned to HIVE-UI. The browser receives only the bounded health result required to render the repository overview.
