@@ -22,7 +22,7 @@ Dependency management
 ---------------------
 Mend Renovate GitHub App is the dependency update owner.
 Dependabot configuration is retained for repository/security posture visibility, but all update entries have open-pull-requests-limit: 0 so it does not create dependency PRs.
-Renovate updates are manually approved for HIVE. This includes Python, Docker and GitHub Actions updates.
+Renovate patch/minor/digest updates may automerge after the configured stability window and required checks; major updates remain manual.
 HIVE uses requirements.in as the direct production dependency source and requirements.txt as its compiled production lock. CI continues to enforce that the compiled lock matches requirements.in through scripts/verify_dependency_lock.py --compile. Any dependency PR must therefore include all generated/associated dependency files needed to pass that gate.
 
 Added controls
@@ -58,38 +58,18 @@ AUTONOMOUS PROVING-GROUP SETUP
 - Enable Kilo Code Reviews for this repository and enable REVIEW.md guidance in the Kilo Code Reviews configuration.
 - Kilo Code Reviewer is review-only; the repair PR also invokes @kilocode-bot in PR context for implementation. Bot-generated PR review behaviour must be verified in Kilo settings because Kilo documents bot-created PRs as ignored by default by automatic Code Reviews.
 
-AUTONOMY REPAIR GITHUB APP — REQUIRED FOR ZERO-TOUCH PR CI
-- Create one private GitHub App, e.g. `Autonomy Repair Bot`, and install it on the repositories participating in autonomous repair.
-- Repository permissions required by the App:
-  * Contents: Read and write
-  * Pull requests: Read and write
-  * Issues: Read and write (required for repository labels used by the lifecycle rules)
-  * Metadata: Read-only (automatic)
-- The App does NOT need merge, deployment, secrets, administration or security-event write authority.
-- Add repository variable `AUTONOMY_REPAIR_APP_ID` containing the numeric GitHub App ID.
-- Add repository secret `AUTONOMY_REPAIR_APP_PRIVATE_KEY` containing the PEM private key generated for the App.
-- `.github/workflows/autonomous-repair.yml` mints a short-lived installation token itself with OpenSSL/curl. No third-party token Action is required.
-- This App token is used only for repair branch push, lifecycle labels and PR creation. Kilo then repairs inside the PR; existing CI/security/rulesets decide whether it may progress.
-- Do not substitute `GITHUB_TOKEN`: GitHub deliberately makes PR workflow runs created/updated with `GITHUB_TOKEN` wait for maintainer approval.
-
-AUTONOMOUS REPAIR AUTHENTICATION
-- Required repository variable: AUTONOMY_REPAIR_APP_ID
-- Required repository secret: the GitHub App private-key secret referenced by `.github/workflows/autonomous-repair.yml`
-- The installed Autonomy Repair GitHub App needs Contents read/write, Pull requests read/write and Issues read/write for this repository.
-- Repair PRs are created with the GitHub App installation token, not GITHUB_TOKEN, so pull_request workflows start without the manual approval loop applied to workflow-created GITHUB_TOKEN PRs.
-- Mergify auto-merges an autonomy:repair PR only after the Autonomous repair marker gate succeeds and no active checks remain failed or pending. Kilo Code Review remains useful when it runs, but is not a mandatory named check because bot-generated PR review behaviour can vary. GitHub branch protection/rulesets remain authoritative.
-- The old Renovate-specific deployment-revert PR path has been removed where present so a failed deployment produces one repair path rather than competing recovery PRs.
-
-AUTONOMOUS MERGE SETTINGS
-- Kilo Code Review should remain enabled for repository pull requests with REVIEW.md guidance, but autonomous merging does not depend on that named check being present.
-- Mergify must have repository access. `.mergify.yml` auto-merges only validated `autonomy:repair` PRs after the repair-marker gate succeeds and all active checks are clear.
-- Protect `main` with the repository's normal required checks. At minimum, the aggregate release/CI gate, the Autonomous repair marker gate, the repository security checks, and Kilo/Socket checks that are configured as merge gates should be required.
-- Keep GitHub's workflow-approval security policy enabled; App-created repair PRs no longer depend on the workflow `GITHUB_TOKEN`.
-- Enable GitHub's automatic deletion of head branches after merge to keep autonomous repair branches tidy.
-CODEQL / TRUSTED PR AUTOMATION
-- CodeQL open alerts are enforced by the CodeQL workflow and feed the autonomous repair/Kilo loop.
-- The Autonomy Repair App creates the carrier PR with an installation token. GitHub documents that App-token-created automation PRs start normal pull_request workflows without the manual approval loop associated with workflow GITHUB_TOKEN-created PRs.
-- Kilo implementation mode may update the carrier or open one linked implementation PR. Prefer a same-repository branch when supported; a separate Kilo PR must still pass every repository check and must link back to the carrier evidence.
-- For public-fork workflow approval, use Repository Settings -> Actions -> General -> Approval for running fork pull request workflows from contributors. To remove the first-time-contributor prompt for the established Kilo bot without sending secrets/write tokens to forks, use the narrowest policy that fits: require approval only for first-time contributors who are new to GitHub. Keep fork secrets and write tokens disabled.
-- If a new App-created carrier PR still asks for approval, stop and treat it as a configuration defect. If only a Kilo implementation fork asks, record it in the Sunday automation evidence rather than weakening fork security controls.
-
+AUTONOMOUS REPAIR + TRUSTED PR AUTOMATION
+-----------------------------------------
+- Required repository variable: AUTONOMY_REPAIR_APP_ID.
+- Required repository secret: AUTONOMY_REPAIR_APP_PRIVATE_KEY containing the PEM private key for the installed Autonomous Repair Bot GitHub App.
+- Required GitHub App repository permissions: Contents read/write, Pull requests read/write, Issues read/write, Actions read/write, and Metadata read-only (automatic).
+- Actions read/write is used only by `.github/workflows/trusted-automation.yml` to admit workflow runs that GitHub has placed in `action_required` for a verified automation PR, with a safe rerun fallback for the same exact trusted PR/SHA. It is not a branch-protection bypass.
+- The trusted workflow runs from the default branch, never checks out or executes PR code, and admits only: exact same-repository Mend Renovate PRs, autonomous carrier PRs created by the repair App, and Kilo implementation PRs that are explicitly linked from an autonomous repair carrier.
+- Fork secrets and write tokens remain disabled. An unlinked Kilo PR or any unknown bot/user PR is not automatically admitted.
+- Renovate PRs may be admitted to run CI regardless of update type. Native auto-approval/auto-merge is requested only when the Renovate PR body explicitly reports `Automerge: Enabled.`; major/manual Renovate PRs remain manual as defined by committed `renovate.json` policy.
+- A verified linked Kilo implementation PR may be approved only after the current head SHA has successful repository CI, CodeQL and repository-security workflows and no current failing/pending checks.
+- Kilo/carrier changes to workflows, Renovate/Mergify configuration, CodeQL/security policy, secret-scanner controls, CODEOWNERS, SECURITY.md or autonomy governance files automatically receive `autonomy:human-hold` instead of autonomous merge.
+- `.mergify.yml` performs lifecycle housekeeping only: it may close `autonomy:superseded` and `autonomy:obsolete` PRs, but it does not merge code.
+- Native GitHub auto-merge / Merge Queue is the final merge authority. Trusted automation can request native auto-merge only after the exact-head checks are green; GitHub branch/ruleset protections remain authoritative.
+- Keep GitHub automatic deletion of merged head branches enabled where desired to remove completed automation branches.
+- CodeQL open alerts remain an independent gate and feed the CodeQL-to-Kilo repair handoff. Alert dismissal, broad suppressions, allowlist changes and security-policy decisions remain human-controlled.

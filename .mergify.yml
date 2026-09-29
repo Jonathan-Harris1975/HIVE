@@ -18,18 +18,3 @@ pull_request_rules:
       comment:
         message: "Closing because revalidation shows this autonomous repair is no longer required."
       close:
-
-  - name: merge fully validated autonomous repair
-    conditions:
-      - base = main
-      - label = autonomy:repair
-      - -label = autonomy:human-hold
-      - -label = autonomy:superseded
-      - -label = autonomy:obsolete
-      - title ~= ^\[autonomy\] Repair
-      - check-success = Autonomous repair marker gate
-      - "#check-failure = 0"
-      - "#check-pending = 0"
-    actions:
-      merge:
-        method: squash
