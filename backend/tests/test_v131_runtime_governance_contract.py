@@ -37,3 +37,9 @@ def test_governance_and_model_optimisation_routes_are_shipped() -> None:
         ("/v1/monthly-review/generate", "POST"),
     }
     assert required <= routes
+
+
+def test_operations_runtime_stats_do_not_duplicate_repository_overview() -> None:
+    source = Path("backend/app/api/system.py").read_text()
+    assert '"repository_manager"' not in source
+    assert "estate status belongs to /system/repo-health and the Repositories overview" in source
