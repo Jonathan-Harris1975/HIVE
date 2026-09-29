@@ -144,7 +144,13 @@ def is_carrier(pr: dict[str, Any]) -> bool:
 
 
 def carrier_comments(number: int) -> list[dict[str, Any]]:
-    return get(f"/repos/{REPO}/issues/{number}/comments?per_page=100")
+    comments: list[dict[str, Any]] = []
+    for page in range(1, 11):
+        chunk = get(f"/repos/{REPO}/issues/{number}/comments?per_page=100&page={page}")
+        comments.extend(chunk)
+        if len(chunk) < 100:
+            return comments
+    raise RuntimeError(f"PR #{number} has too many comments to verify safely")
 
 
 def linked_kilo_carrier(pr: dict[str, Any], carriers: list[dict[str, Any]]) -> int | None:
@@ -154,7 +160,7 @@ def linked_kilo_carrier(pr: dict[str, Any], carriers: list[dict[str, Any]]) -> i
     body = pr.get("body") or ""
     for carrier in carriers:
         carrier_url = str(carrier.get("html_url", ""))
-        if carrier_url and carrier_url in body:
+        if carrier_url and re.search(re.escape(carrier_url) + r"(?!\d)", body):
             return int(carrier["number"])
         try:
             comments = carrier_comments(int(carrier["number"]))
@@ -163,8 +169,32 @@ def linked_kilo_carrier(pr: dict[str, Any], carriers: list[dict[str, Any]]) -> i
             continue
         for item in comments:
             text = item.get("body") or ""
-            if item.get("user", {}).get("login") == KILO_LOGIN and pr_url and pr_url in text:
+            if item.get("user", {}).get("login") == KILO_LOGIN and pr_url and re.search(re.escape(pr_url) + r"(?!\d)", text):
                 return int(carrier["number"])
+    return None
+
+
+def linked_kilo_review_source(pr: dict[str, Any], sources: list[dict[str, Any]]) -> int | None:
+    """Require the trusted router's exact-head receipt before admitting a Kilo PR."""
+    if pr.get("user", {}).get("login") != KILO_LOGIN or not is_same_repo(pr):
+        return None
+    body = pr.get("body") or ""
+    for source in sources:
+        if source.get("user", {}).get("login") == KILO_LOGIN or not is_same_repo(source):
+            continue
+        source_url = str(source.get("html_url", ""))
+        sha = str(source.get("head", {}).get("sha", ""))
+        if not source_url or not re.search(re.escape(source_url) + r"(?!\d)", body) or not sha:
+            continue
+        try:
+            comments = carrier_comments(int(source["number"]))
+        except ApiError as exc:
+            log(f"Source PR #{source['number']} comments unavailable: {exc}")
+            continue
+        if any(item.get("user", {}).get("login") == "github-actions[bot]" and
+               f"<!-- kilo-auto-repair:{sha}:" in (item.get("body") or "")
+               for item in comments):
+            return int(source["number"])
     return None
 
 
@@ -177,12 +207,14 @@ def adopt_linked_kilo_prs(open_prs: list[dict[str, Any]]) -> None:
         labels = issue_labels(pr)
         if "autonomy:kilo-implementation" in labels:
             continue
-        carrier = linked_kilo_carrier(pr, carriers)
-        if carrier is None:
-            log(f"Kilo PR #{pr['number']} is not linked to an autonomous repair carrier; leaving it untrusted.")
+        source = linked_kilo_carrier(pr, carriers)
+        if source is None:
+            source = linked_kilo_review_source(pr, open_prs)
+        if source is None:
+            log(f"Kilo PR #{pr['number']} has no verified repair source; leaving it untrusted.")
             continue
         add_labels(int(pr["number"]), ["autonomy:repair", "autonomy:kilo-implementation"])
-        log(f"Trusted Kilo implementation PR #{pr['number']} linked to carrier #{carrier}.")
+        log(f"Trusted Kilo implementation PR #{pr['number']} linked to source PR #{source}.")
 
 
 def trusted_kind(pr: dict[str, Any]) -> str | None:
@@ -281,7 +313,13 @@ def all_required_checks_green(pr: dict[str, Any]) -> tuple[bool, str]:
 
 
 def pr_files(number: int) -> list[str]:
-    return [str(item.get("filename", "")) for item in get(f"/repos/{REPO}/pulls/{number}/files?per_page=100")]
+    names: list[str] = []
+    for page in range(1, 11):
+        chunk = get(f"/repos/{REPO}/pulls/{number}/files?per_page=100&page={page}")
+        names.extend(str(item.get("filename", "")) for item in chunk)
+        if len(chunk) < 100:
+            return names
+    raise RuntimeError(f"PR #{number} has too many changed files to verify safely")
 
 
 def sensitive_file(path: str) -> bool:
@@ -365,6 +403,14 @@ def reconcile_pr(pr: dict[str, Any]) -> None:
         sensitive = [path for path in pr_files(int(pr["number"])) if sensitive_file(path)]
         if sensitive:
             place_human_hold(pr, "the repair changes governance/security automation files: " + ", ".join(sensitive[:8]))
+            return
+
+    if kind == "kilo":
+        recent = list_recent_prs()
+        carriers = [source for source in recent if is_carrier(source)]
+        if (linked_kilo_carrier(pr, carriers) is None and
+                linked_kilo_review_source(pr, list_open_prs()) is None):
+            log(f"Kilo PR #{pr['number']} no longer has a current verified source; withholding merge.")
             return
 
     green, reason = all_required_checks_green(pr)
