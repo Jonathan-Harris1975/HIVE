@@ -13,7 +13,6 @@ from app.services.ops_events import list_ops_events
 from app.services.providers.registry import discover_providers
 from app.services.repo_health import build_repo_health_report
 from app.services.repo_hygiene import repo_hygiene_report
-from app.services.repository_manager import list_repositories, registry_size
 from app.storage.d1 import D1MetadataStore
 from app.storage.r2 import R2Storage
 from app.storage.sql_store import SqlStore
@@ -64,19 +63,13 @@ async def runtime_stats(settings: Settings = Depends(get_settings)) -> dict[str,
     """Return live runtime statistics for the Operations dashboard.
 
     All values are derived from actual runtime state — never placeholders.
-    This endpoint replaces any hardcoded statistics previously served by
-    earlier HIVE builds. Called by HIVE-UI on the Ops overview tab.
+    This endpoint is intentionally limited to system runtime state. Repository
+    estate status belongs to /system/repo-health and the Repositories overview,
+    preventing Operations from duplicating repository ownership or freshness.
     """
     sql = SqlStore(settings)
     d1 = D1MetadataStore(settings)
     r2 = R2Storage(settings)
-
-    # Repository Manager: live count from the in-process registry
-    repo_count = registry_size()
-    repo_summaries = list_repositories()
-    latest_repo_updated = max(
-        (r.updated_at for r in repo_summaries), default=None
-    )
 
     # Model Registry: live category counts from in-process registry
     reg = model_registry.list_categories()
@@ -105,10 +98,6 @@ async def runtime_stats(settings: Settings = Depends(get_settings)) -> dict[str,
         "ok": True,
         "build": BUILD_STAGE,
         "sampled_at": time.time(),
-        "repository_manager": {
-            "registered_count": repo_count,
-            "latest_updated_at": latest_repo_updated,
-        },
         "model_registry": {
             "total_models": total_registered_models,
             "categories_populated": categories_with_models,
