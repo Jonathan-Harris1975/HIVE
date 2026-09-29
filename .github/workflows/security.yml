@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: rams-security-${{ github.ref }}
+  group: hive-security-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -75,7 +75,7 @@ jobs:
       - name: Lint Dockerfile
         run: .ci-tools/bin/hadolint Dockerfile
       - name: Lint operational shell scripts
-        run: .ci-tools/bin/shellcheck scripts/install_production.sh scripts/release_gate.sh scripts/smoke_test.sh
+        run: .ci-tools/bin/shellcheck scripts/production_smoke.sh scripts/start.sh scripts/smoke.sh
 
   link_integrity:
     name: Lychee link integrity
