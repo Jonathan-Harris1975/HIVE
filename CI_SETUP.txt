@@ -56,15 +56,15 @@ AUTONOMOUS PROVING-GROUP SETUP
 
 - GitHub Actions must be allowed to create pull requests in repository Actions settings for the autonomous repair-PR workflow.
 - Enable Kilo Code Reviews for this repository and enable REVIEW.md guidance in the Kilo Code Reviews configuration.
-- Kilo Code Reviewer is review-only; the repair PR also invokes @kilocode-bot in PR context for implementation. Bot-generated PR review behaviour must be verified in Kilo settings because Kilo documents bot-created PRs as ignored by default by automatic Code Reviews.
+- Kilo Code Reviewer remains review-only, but trusted automation watches its PR comments. When a Kilo review says `Reply with @kilocode-bot fix it`, the default-branch control plane posts that exact implementation command automatically after trust/path checks; no human reply is required.
 
 AUTONOMOUS REPAIR + TRUSTED PR AUTOMATION
 -----------------------------------------
 - Required repository variable: AUTONOMY_REPAIR_APP_ID.
-- Required repository secret: AUTONOMY_REPAIR_APP_PRIVATE_KEY containing the PEM private key for the installed Autonomous Repair Bot GitHub App.
+- Repository secret name is `AUTONOMY_REPAIR_APP_PRIVATE_KEY`; store the PEM private key generated for the installed Autonomous Repair Bot GitHub App in that secret.
 - Required GitHub App repository permissions: Contents read/write, Pull requests read/write, Issues read/write, Actions read/write, and Metadata read-only (automatic).
 - Actions read/write is used only by `.github/workflows/trusted-automation.yml` to admit workflow runs that GitHub has placed in `action_required` for a verified automation PR, with a safe rerun fallback for the same exact trusted PR/SHA. It is not a branch-protection bypass.
-- The trusted workflow runs from the default branch, never checks out or executes PR code, and admits only: exact same-repository Mend Renovate PRs, autonomous carrier PRs created by the repair App, and Kilo implementation PRs that are explicitly linked from an autonomous repair carrier.
+- The trusted workflow runs from the default branch, never checks out or executes PR code, and admits only: exact same-repository Mend Renovate PRs, autonomous carrier PRs created by the repair App, and Kilo implementation PRs explicitly linked from a trusted carrier or trusted Renovate PR that automation handed to Kilo.
 - Fork secrets and write tokens remain disabled. An unlinked Kilo PR or any unknown bot/user PR is not automatically admitted.
 - Renovate PRs may be admitted to run CI regardless of update type. Native auto-approval/auto-merge is requested only when the Renovate PR body explicitly reports `Automerge: Enabled.`; major/manual Renovate PRs remain manual as defined by committed `renovate.json` policy.
 - A verified linked Kilo implementation PR may be approved only after the current head SHA has successful repository CI, CodeQL and repository-security workflows and no current failing/pending checks.
@@ -72,4 +72,4 @@ AUTONOMOUS REPAIR + TRUSTED PR AUTOMATION
 - `.mergify.yml` performs lifecycle housekeeping only: it may close `autonomy:superseded` and `autonomy:obsolete` PRs, but it does not merge code.
 - Native GitHub auto-merge / Merge Queue is the final merge authority. Trusted automation can request native auto-merge only after the exact-head checks are green; GitHub branch/ruleset protections remain authoritative.
 - Keep GitHub automatic deletion of merged head branches enabled where desired to remove completed automation branches.
-- CodeQL open alerts remain an independent gate and feed the CodeQL-to-Kilo repair handoff. Alert dismissal, broad suppressions, allowlist changes and security-policy decisions remain human-controlled.
+- CodeQL findings remain an independent merge gate without turning a successful analysis into an artificial CI failure. Trusted automation extracts policy-safe findings/check annotations, posts `@kilocode-bot fix it` automatically, and blocks native auto-merge until the findings clear. Alert dismissal, broad suppressions, secret/allowlist changes and security-policy decisions remain human-controlled.
