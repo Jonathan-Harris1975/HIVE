@@ -2,7 +2,7 @@ name: Autonomous main-branch repair PR
 
 on:
   workflow_run:
-    workflows: ["CI", "Koyeb production deployment watch", "Renovate dependency lock sync", "CodeQL", "Security and repository quality"]
+    workflows: ["CI", "Koyeb production deployment watch", "CodeQL", "Security and repository quality"]
     types: [completed]
   workflow_dispatch:
 
@@ -19,7 +19,9 @@ jobs:
     if: >-
       ${{
         github.event_name == 'workflow_dispatch' ||
-        github.event.workflow_run.head_branch == github.event.repository.default_branch
+        (github.event.workflow_run.event != 'pull_request' &&
+         github.event.workflow_run.head_branch == github.event.repository.default_branch &&
+         github.event.workflow_run.head_repository.full_name == github.repository)
       }}
     runs-on: ubuntu-latest
     steps:
@@ -52,14 +54,15 @@ jobs:
           signature="$(printf '%s' "$unsigned" | openssl dgst -sha256 -sign "$key_file" -binary | b64url)"
           jwt="${unsigned}.${signature}"
 
-          installation_id="$(
+          installation="$(
             curl --fail-with-body --silent --show-error \
               --header "Accept: application/vnd.github+json" \
               --header "Authorization: Bearer ${jwt}" \
               --header "X-GitHub-Api-Version: 2022-11-28" \
-              "https://api.github.com/repos/${REPO}/installation" |
-              jq -er '.id'
+              "https://api.github.com/repos/${REPO}/installation"
           )"
+          installation_id="$(jq -er '.id' <<< "$installation")"
+          repair_app_slug="$(jq -er '.app_slug' <<< "$installation")"
 
           app_token="$(
             curl --fail-with-body --silent --show-error \
@@ -74,10 +77,12 @@ jobs:
           rm -f "$key_file"
           echo "::add-mask::${app_token}"
           printf 'token=%s\n' "$app_token" >> "$GITHUB_OUTPUT"
+          printf 'repair_app_login=%s[bot]\n' "$repair_app_slug" >> "$GITHUB_OUTPUT"
 
       - name: Create or continue one repair PR and start Kilo Cloud Agent
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          REPAIR_APP_LOGIN: ${{ steps.app_token.outputs.repair_app_login }}
           REPO: ${{ github.repository }}
           EVENT_NAME: ${{ github.event_name }}
           RUN_ID: ${{ github.event.workflow_run.id }}
@@ -103,6 +108,15 @@ jobs:
           gh label create autonomy:obsolete --repo "$REPO" --color "D4C5F9" --description "Repair is no longer required" --force
           gh label create autonomy:human-hold --repo "$REPO" --color "FBCA04" --description "Automation must stop for human action" --force
 
+          verified_carriers() {
+            gh pr list --repo "$REPO" --state open --label autonomy:repair --limit 1000 \
+              --json number,author,headRefName |
+              jq -r --arg login "$REPAIR_APP_LOGIN" \
+                '.[] | select(.author.login == $login and (.headRefName | test("^autonomy/repair-[0-9]+$"))) | .number'
+          }
+
+          carriers="$(verified_carriers)"
+
           security_workflow=false
           if [ "$RUN_NAME" = "CodeQL" ] || [ "$RUN_NAME" = "Security and repository quality" ]; then
             security_workflow=true
@@ -112,7 +126,7 @@ jobs:
             local repair_pr="$1" marker already payload status
             marker="<!-- kilo-main-repair:${RUN_ID} -->"
             already="$(gh api --paginate "repos/${REPO}/issues/${repair_pr}/comments" \
-              --jq ".[] | select(.body | contains(\"${marker}\")) | .id" | head -1)"
+              --jq ".[] | select(.user.login == \"${REPAIR_APP_LOGIN}\" and (.body | contains(\"${marker}\"))) | .id" | sed -n '1p')"
             if [ -n "$already" ]; then
               echo "Kilo was already dispatched for run $RUN_ID."
               return
@@ -152,7 +166,7 @@ jobs:
               if [[ "$body" == *"Failed workflow: **${RUN_NAME}**"* ]]; then
                 gh pr edit "$old_pr" --repo "$REPO" --add-label autonomy:obsolete
               fi
-            done < <(gh pr list --repo "$REPO" --state open --label autonomy:repair --json number --jq '.[].number')
+            done <<< "$carriers"
             exit 0
           fi
 
@@ -161,7 +175,15 @@ jobs:
             exit 0
           fi
 
-          existing="$(gh pr list --repo "$REPO" --state open --label autonomy:repair --search "$HEAD_SHA in:body" --json number --jq '.[0].number // empty')"
+          existing=""
+          while read -r candidate; do
+            [ -n "$candidate" ] || continue
+            body="$(gh pr view "$candidate" --repo "$REPO" --json body --jq '.body')"
+            if [[ "$body" == *'Failed commit: `'"$HEAD_SHA"'`'* ]]; then
+              existing="$candidate"
+              break
+            fi
+          done <<< "$carriers"
           if [ -n "$existing" ]; then
             echo "Repair PR #$existing already tracks failed SHA $HEAD_SHA."
             dispatch_kilo "$existing"
@@ -174,7 +196,7 @@ jobs:
             if [ "$on_hold" != "true" ]; then
               gh pr edit "$old_pr" --repo "$REPO" --add-label autonomy:superseded
             fi
-          done < <(gh pr list --repo "$REPO" --state open --label autonomy:repair --json number --jq '.[].number')
+          done <<< "$carriers"
 
           workdir="$(mktemp -d)"
           trap 'rm -rf "$workdir"' EXIT
