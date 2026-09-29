@@ -61,14 +61,15 @@ def blocking_security(alert: dict) -> bool:
     if alert.get("state") != "open" or alert.get("tool", {}).get("name") != "CodeQL":
         return False
     rule = alert.get("rule") or {}
-    tags = [str(tag).lower() for tag in rule.get("tags", [])]
     score = rule.get("security_severity")
     if isinstance(score, (int, float)) or (isinstance(score, str) and re.fullmatch(r"\d+(?:\.\d+)?", score)):
         return float(score) >= 7
     level = str(rule.get("security_severity_level", "")).lower()
     if level in {"high", "critical"}:
         return True
-    return "security" in tags and str(rule.get("severity", "")).lower() in {"error", "critical", "high"}
+    # A generic CodeQL "error" is a quality severity, not proof of a high/critical
+    # security finding. Unknown security severity is never promoted to one.
+    return False
 
 
 def main() -> int:
