@@ -19,6 +19,7 @@ TOKEN = os.environ["GH_TOKEN"]
 EVENT = os.environ["GITHUB_EVENT_NAME"]
 DEFAULT = os.environ["DEFAULT_BRANCH"]
 KILO = {"kilo-code-bot", "kilo-code-bot[bot]"}
+KILO_IMPLEMENTER = os.environ.get("KILO_REPAIR_PR_LOGIN") or "kilo-code-bot[bot]"
 REPAIRABLE = re.compile(r"\b(fail(?:s|ed|ure)?|break(?:s|ing)?|broken|regression|mismatch|"
                         r"vulnerab\w*|security|unsafe|incorrect|bug|error|risk|suggest|"
                         r"should|fix|bump|update|regenerat\w*|missing|stale)\b", re.I)
@@ -100,6 +101,32 @@ def failed_run_steps(run_id: int) -> list[str]:
     raise ValueError("Workflow has too many jobs to classify safely")
 
 
+def safe_codeql_findings(pr: dict) -> list[str]:
+    """Send only current, high-impact alert identifiers on added PR lines."""
+    from codeql_gate import added_lines, blocking_security, api as codeql_api
+
+    number = int(pr["number"])
+    ref = urllib.parse.quote(f"refs/pull/{number}/merge", safe="")
+    alerts = codeql_api(f"/repos/{REPO}/code-scanning/alerts?state=open&ref={ref}&tool_name=CodeQL&per_page=100")
+    files = all_pages(f"/repos/{REPO}/pulls/{number}/files")
+    changed = {f["filename"]: added_lines(f["patch"]) for f in files if "patch" in f}
+    findings = []
+    for alert in alerts:
+        if not blocking_security(alert):
+            continue
+        location = (alert.get("most_recent_instance") or {}).get("location") or {}
+        path, line = location.get("path"), location.get("start_line")
+        if path not in changed or not isinstance(line, int) or line not in changed[path]:
+            continue
+        rule_id = str((alert.get("rule") or {}).get("id", "unknown"))
+        if (isinstance(path, str) and len(path) < 250 and
+                re.fullmatch(r"[\w./ -]+", path) and re.fullmatch(r"[\w./@-]+", rule_id)):
+            findings.append(f"CodeQL security alert #{int(alert['number'])}: {rule_id} at {path}:{line}")
+        if len(findings) == 8:
+            break
+    return findings
+
+
 def extract(event: dict) -> tuple[dict, str, list[str]] | None:
     if EVENT == "workflow_run":
         run = event["workflow_run"]
@@ -111,7 +138,13 @@ def extract(event: dict) -> tuple[dict, str, list[str]] | None:
         steps = failed_run_steps(int(run["id"]))
         if not steps:
             return None  # Runner/setup/transient failures have no verified repair target.
-        return pr, "check", [f"Failed {run['name']} run {run['html_url']}", *steps[:12]]
+        findings = [f"Failed {run['name']} run {run['html_url']}"]
+        if run.get("name") == "CodeQL":
+            try:
+                findings.extend(safe_codeql_findings(pr))
+            except Exception as exc:
+                print(f"::notice::Could not attach CodeQL alert identifiers ({type(exc).__name__}); linked run remains available.")
+        return pr, "check", [*findings, *steps[:11]]
 
     if EVENT == "issue_comment":
         if not event.get("issue", {}).get("pull_request") or event.get("comment", {}).get("user", {}).get("login") not in KILO:
@@ -136,7 +169,7 @@ def extract(event: dict) -> tuple[dict, str, list[str]] | None:
         evidence = review_evidence(event["comment"].get("body", ""), event["comment"].get("path", ""))
     else:
         return None
-    if not pr or pr.get("user", {}).get("login") in KILO or not evidence:
+    if not pr or pr.get("user", {}).get("login") in (KILO | {KILO_IMPLEMENTER}) or not evidence:
         return None
     return pr, "review", [evidence]
 
@@ -156,10 +189,10 @@ def dispatch(pr: dict, kind: str, findings: list[str]) -> None:
         raise RuntimeError("Configure KILO_REPAIR_TRIGGER_URL with this repository's Kilo Cloud Agent webhook trigger")
 
     source = pr["html_url"]
-    existing_kilo_pr = pr.get("user", {}).get("login") in KILO
+    existing_kilo_pr = pr.get("user", {}).get("login") == KILO_IMPLEMENTER
     destination = ("Update this existing Kilo PR branch; do not open a replacement PR. " if existing_kilo_pr else
-                   f"Create a new branch and one implementation PR to {DEFAULT}, including {source} "
-                   "in its PR body. Preserve the source PR's intended changes. ")
+                   f"Fetch and branch from source PR head {sha}; create one implementation PR to {DEFAULT} "
+                   f"including {source} in its PR body. Preserve the source PR's exact commit ancestry. ")
     instruction = (
         f"Repair the verified {kind} findings for {source} at exact head {sha}. "
         "Inspect the repository and linked checks. Make the smallest justified code/manifest/lockfile fix. "
