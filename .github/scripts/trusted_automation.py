@@ -232,7 +232,7 @@ def adopt_linked_kilo_prs(open_prs: list[dict[str, Any]]) -> None:
         log(f"Trusted Kilo implementation PR #{pr['number']} linked to source PR #{source}.")
 
 
-def trusted_kind(pr: dict[str, Any]) -> str | None:
+def automation_kind(pr: dict[str, Any]) -> str | None:
     labels = issue_labels(pr)
     if is_renovate(pr):
         return "renovate"
@@ -246,8 +246,8 @@ def trusted_kind(pr: dict[str, Any]) -> str | None:
 
 def current_pr_for_sha(open_prs: list[dict[str, Any]], sha: str) -> dict[str, Any] | None:
     matches = [pr for pr in open_prs if pr.get("head", {}).get("sha") == sha]
-    trusted = [pr for pr in matches if trusted_kind(pr)]
-    return trusted[0] if len(trusted) == 1 else None
+    eligible = [pr for pr in matches if automation_kind(pr)]
+    return eligible[0] if len(eligible) == 1 else None
 
 
 def admit_waiting_runs(open_prs: list[dict[str, Any]]) -> None:
@@ -259,7 +259,7 @@ def admit_waiting_runs(open_prs: list[dict[str, Any]]) -> None:
         pr = current_pr_for_sha(open_prs, sha)
         if pr is None:
             continue
-        kind = trusted_kind(pr)
+        kind = automation_kind(pr)
         if kind == "kilo" and (linked_kilo_carrier(pr, carriers) is None and
                                 linked_kilo_review_source(pr, open_prs) is None):
             continue
@@ -383,7 +383,7 @@ def enable_native_auto_merge(number: int) -> None:
 
 
 def reconcile_pr(pr: dict[str, Any]) -> None:
-    kind = trusted_kind(pr)
+    kind = automation_kind(pr)
     if kind is None or pr.get("draft"):
         return
     labels = issue_labels(pr)
