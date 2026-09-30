@@ -58,7 +58,7 @@ jobs:
             echo "::notice::Could not verify repair App identity."
             exit 0
           fi
-          if ! installation="$(curl --fail --silent --show-error \
+          if ! installation="$(curl --fail --silent --show-error --connect-timeout 5 --max-time 30 \
             --header 'Accept: application/vnd.github+json' \
             --header "Authorization: Bearer ${unsigned}.${signature}" \
             --header 'X-GitHub-Api-Version: 2022-11-28' \
