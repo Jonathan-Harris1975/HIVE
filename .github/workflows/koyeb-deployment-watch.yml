@@ -17,6 +17,7 @@ jobs:
   watch:
     if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository) }}
     runs-on: ubuntu-latest
+    environment: Koyeb
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # pinned release commit
@@ -24,7 +25,7 @@ jobs:
         id: deployment_config
         env:
           KOYEB_TOKEN: ${{ secrets.KOYEB_TOKEN }}
-          KOYEB_SERVICE: ${{ secrets.KOYEB_SERVICE }}
+          KOYEB_SERVICE: ${{ vars.KOYEB_SERVICE }}
         run: |
           set -euo pipefail
           missing=()
@@ -64,7 +65,7 @@ jobs:
       - name: Watch production deployment
         env:
           KOYEB_TOKEN: ${{ secrets.KOYEB_TOKEN }}
-          KOYEB_SERVICE: ${{ secrets.KOYEB_SERVICE }}
+          KOYEB_SERVICE: ${{ vars.KOYEB_SERVICE }}
           SERVICE_DISPLAY_NAME: HIVE
           OPS_ALERT_WEBHOOK_URL: ${{ secrets.OPS_ALERT_WEBHOOK_URL }}
           OPS_ALERT_WEBHOOK_TOKEN: ${{ secrets.OPS_ALERT_WEBHOOK_TOKEN }}
