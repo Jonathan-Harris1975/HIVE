@@ -58,12 +58,19 @@ def pr_details(number: int) -> dict | None:
             pr.get("base", {}).get("ref") != DEFAULT or
             pr.get("head", {}).get("repo", {}).get("full_name") != REPO):
         return None
+    # Carrier PRs only record a failed run; Kilo must fix a separate branch.
+    head = pr.get("head", {})
+    if (re.fullmatch(r"autonomy/repair-[0-9]+", head.get("ref", "")) and
+            any(label.get("name") == "autonomy:repair" for label in pr.get("labels", []))):
+        return None
     return pr
 
 
 def review_evidence(body: str, path: str = "") -> str:
     text = re.split(r"Reply with\s+`?@kilocode-bot\s+fix it", body or "", maxsplit=1, flags=re.I)[0]
     text = re.sub(r"<!--.*?-->", "", text, flags=re.S).strip()
+    if re.search(r"(?im)^\s*\*{0,2}Verdict:\*{0,2}\s*No (?:Issues Found|Code Review Findings|Findings)\b", text):
+        return ""
     if len(text) < 30 or not REPAIRABLE.search(text):
         return ""
     # An inline location is enough context; a summary needs a named code item.
