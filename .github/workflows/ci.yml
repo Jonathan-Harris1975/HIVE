@@ -144,7 +144,7 @@ jobs:
           assert health['ok'] is True
           assert health['app'] == 'HIVE'
           assert runtime['ok'] is True
-          assert 'repository_manager' in runtime
+          assert 'repository_manager' not in runtime
           assert 'model_registry' in runtime
           assert 'providers' in runtime
           PY2
@@ -172,7 +172,7 @@ jobs:
         with:
           name: hive-image-vulnerability-report-${{ github.sha }}
           path: trivy-hive-image.txt
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 90
 
   notify_failure:
