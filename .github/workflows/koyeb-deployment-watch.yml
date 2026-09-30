@@ -25,7 +25,7 @@ jobs:
         id: deployment_config
         env:
           KOYEB_TOKEN: ${{ secrets.KOYEB_TOKEN }}
-          KOYEB_SERVICE: ${{ secrets.KOYEB_SERVICE }}
+          KOYEB_SERVICE: ${{ vars.KOYEB_SERVICE || secrets.KOYEB_SERVICE }}
         run: |
           set -euo pipefail
           missing=()
@@ -65,7 +65,7 @@ jobs:
       - name: Watch production deployment
         env:
           KOYEB_TOKEN: ${{ secrets.KOYEB_TOKEN }}
-          KOYEB_SERVICE: ${{ secrets.KOYEB_SERVICE }}
+          KOYEB_SERVICE: ${{ vars.KOYEB_SERVICE || secrets.KOYEB_SERVICE }}
           SERVICE_DISPLAY_NAME: HIVE
           OPS_ALERT_WEBHOOK_URL: ${{ secrets.OPS_ALERT_WEBHOOK_URL }}
           OPS_ALERT_WEBHOOK_TOKEN: ${{ secrets.OPS_ALERT_WEBHOOK_TOKEN }}
