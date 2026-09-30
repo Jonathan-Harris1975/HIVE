@@ -21,6 +21,7 @@ EVENT = os.environ["GITHUB_EVENT_NAME"]
 DEFAULT = os.environ["DEFAULT_BRANCH"]
 KILO = {"kilo-code-bot", "kilo-code-bot[bot]"}
 KILO_IMPLEMENTER = os.environ.get("KILO_REPAIR_PR_LOGIN") or "kilo-code-bot[bot]"
+REPAIR_APP_LOGIN = os.environ.get("REPAIR_APP_LOGIN", "")
 REPAIRABLE = re.compile(r"\b(fail(?:s|ed|ure)?|break(?:s|ing)?|broken|regression|mismatch|"
                         r"vulnerab\w*|security|unsafe|incorrect|bug|error|risk|suggest|"
                         r"should|fix|bump|update|regenerat\w*|missing|stale)\b", re.I)
@@ -60,11 +61,13 @@ def pr_details(number: int) -> dict | None:
         return None
     # Carrier PRs only record a failed run; Kilo must fix a separate branch.
     head = pr.get("head", {})
-    if (pr.get("user", {}).get("login") == "autonomous-repair-bot[bot]" and
-            str(pr.get("title", "")).startswith("[autonomy] Repair ") and
+    if (str(pr.get("title", "")).startswith("[autonomy] Repair ") and
             re.fullmatch(r"autonomy/repair-[0-9]+", head.get("ref", "")) and
             any(label.get("name") == "autonomy:repair" for label in pr.get("labels", []))):
-        return None
+        # If App identity cannot be verified, avoid routing this carrier-shaped
+        # PR and creating a recursive repair request.
+        if not REPAIR_APP_LOGIN or pr.get("user", {}).get("login") == REPAIR_APP_LOGIN:
+            return None
     return pr
 
 
