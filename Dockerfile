@@ -27,6 +27,25 @@ FROM node:24.21.0-bookworm-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea41952009
 RUN npm install --global npm@11.19.1 \
     && npm cache clean --force
 
+# npm 11.19.1 still bundles brace-expansion 5.0.9 and undici 6.28.0, which the
+# production Trivy HIGH/CRITICAL gate correctly rejects (CVE-2026-102276,
+# CVE-2026-102278 and CVE-2026-19534). No published npm release refreshes those
+# transitive copies yet, so replace them in place here. The patched versions
+# stay inside their consumers' semver ranges (minimatch's ^5.0.5 for
+# brace-expansion, node-gyp's ^6.25.0 for undici), and the assertion fails the
+# build if npm's bundled layout ever stops matching this assumption.
+RUN npm_dir=/usr/local/lib/node_modules/npm \
+    && patch_dir="$(mktemp -d)" \
+    && npm pack brace-expansion@5.0.12 undici@6.29.0 --pack-destination "$patch_dir" --silent \
+    && for entry in brace-expansion:5.0.12 undici:6.29.0; do \
+         name="${entry%%:*}"; version="${entry##*:}"; \
+         rm -rf "${npm_dir}/node_modules/${name}"; \
+         mkdir -p "${npm_dir}/node_modules/${name}"; \
+         tar -xzf "${patch_dir}/${name}-${version}.tgz" -C "${npm_dir}/node_modules/${name}" --strip-components=1; \
+       done \
+    && rm -rf "$patch_dir" \
+    && node -e "const base='/usr/local/lib/node_modules/npm/node_modules'; for (const [name, expected] of [['brace-expansion','5.0.12'],['undici','6.29.0']]) { const {version} = require(base + '/' + name + '/package.json'); if (version !== expected) { throw new Error(name + ' is ' + version + ', expected ' + expected); } }"
+
 FROM python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
