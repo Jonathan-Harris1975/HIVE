@@ -238,8 +238,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ -d .autonomy/repair-requests ] && find .autonomy/repair-requests -type f -name '*.md' -print -quit | grep -q .; then
-            echo "::error::This PR still contains an unresolved autonomous repair request. Fix the underlying failure, then remove the repair-request marker."
-            find .autonomy/repair-requests -type f -name '*.md' -print
+          base_sha="${{ github.event.pull_request.base.sha }}"
+          git fetch --no-tags --depth=1 origin "$base_sha"
+          changed_markers="$(git diff --name-only --diff-filter=AMR "$base_sha" HEAD -- '.autonomy/repair-requests/*.md')"
+          if [ -n "$changed_markers" ]; then
+            echo "::error::This PR introduces an unresolved autonomous repair request. Fix the underlying failure, then remove the repair-request marker."
+            printf '%s\n' "$changed_markers"
             exit 1
           fi
