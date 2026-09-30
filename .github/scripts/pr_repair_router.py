@@ -185,7 +185,7 @@ def dispatch(pr: dict, kind: str, findings: list[str]) -> None:
         return
     url = os.environ.get("KILO_REPAIR_TRIGGER_URL", "")
     host = urllib.parse.urlparse(url).hostname or ""
-    if not url.startswith("https://") or not (host == "kilo.ai" or host.endswith(".kilo.ai")):
+    if not url.startswith("https://") or not (host == "hooks.kilosessions.ai" or host == "kilo.ai" or host.endswith(".kilo.ai")):
         raise RuntimeError("Configure KILO_REPAIR_TRIGGER_URL with this repository's Kilo Cloud Agent webhook trigger")
 
     source = pr["html_url"]
