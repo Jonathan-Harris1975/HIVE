@@ -233,5 +233,7 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as exc:
-        print(f"::error::PR repair routing failed: {exc}", file=sys.stderr)
-        sys.exit(1)
+        print(f"::warning::PR repair routing unavailable ({type(exc).__name__}); "
+              "check Kilo webhook configuration and the linked run. "
+              "The source CI/security result remains authoritative.", file=sys.stderr)
+        sys.exit(0)
