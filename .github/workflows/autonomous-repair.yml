@@ -79,6 +79,12 @@ jobs:
           printf 'token=%s\n' "$app_token" >> "$GITHUB_OUTPUT"
           printf 'repair_app_login=%s[bot]\n' "$repair_app_slug" >> "$GITHUB_OUTPUT"
 
+      - name: Check out trusted webhook validator
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
       - name: Create or continue one repair PR and start Kilo Cloud Agent
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
@@ -131,13 +137,10 @@ jobs:
               echo "Kilo was already dispatched for run $RUN_ID."
               return
             fi
-            case "${KILO_REPAIR_TRIGGER_URL:-}" in
-              https://hooks.kilosessions.ai/*|https://kilo.ai/*|https://*.kilo.ai/*) ;;
-              *)
-                echo "::error::Configure KILO_REPAIR_TRIGGER_URL with this repository's Kilo Cloud Agent webhook trigger."
-                exit 1
-                ;;
-            esac
+            if ! python3 .github/scripts/kilo_webhook_url.py; then
+              echo "::error::Configure KILO_REPAIR_TRIGGER_URL with this repository's Kilo Cloud Agent webhook trigger."
+              exit 1
+            fi
             local carrier_url="https://github.com/${REPO}/pull/${repair_pr}"
             payload="$(jq -n --arg repo "$REPO" --arg pr "$carrier_url" \
               --arg sha "$HEAD_SHA" --arg run "$RUN_URL" --arg workflow "$RUN_NAME" \
