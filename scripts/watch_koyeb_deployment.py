@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -16,6 +17,9 @@ from ops_notify import send_event
 SUCCESS = {"healthy", "sleeping"}
 FAILURE = {"error", "failed", "unhealthy", "cancelled", "canceled"}
 PENDING = {"pending", "provisioning", "scheduled", "allocating", "starting", "stopping", "building", "deploying", "degraded"}
+
+SERVICE_UUID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+SERVICE_SHORT_ID = re.compile(r"^[0-9a-fA-F]{8}$")
 
 
 def _walk(value: Any) -> Iterable[dict[str, Any]]:
@@ -48,6 +52,45 @@ def _deployments(service: str, token: str) -> list[dict[str, Any]]:
     deployments = list(_walk(payload))
     deployments.sort(key=_created, reverse=True)
     return deployments
+
+
+def _resolve_service(service: str, token: str) -> str:
+    """Translate a configured service reference into a Koyeb CLI identifier.
+
+    The Koyeb CLI resolves a full UUID, an 8-character short ID or an
+    ``app/service`` slug, but rejects a bare service name. Operators commonly
+    configure ``KOYEB_SERVICE`` as the plain service name, so look the ID up
+    through the service list before polling deployments.
+    """
+    if "/" in service or SERVICE_UUID.match(service) or SERVICE_SHORT_ID.match(service):
+        return service
+    result = subprocess.run(
+        ["koyeb", "services", "list", "--token", token, "-o", "json"],
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=45,
+    )
+    if result.returncode != 0:
+        return service
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return service
+    services = payload.get("services") if isinstance(payload, dict) else None
+    if not isinstance(services, list):
+        return service
+    matches = {
+        str(item["id"])
+        for item in services
+        if isinstance(item, dict)
+        and str(item.get("name", "")).strip() == service
+        and item.get("id")
+    }
+    if len(matches) == 1:
+        return matches.pop()
+    return service
 
 
 def _status(item: dict[str, Any]) -> str:
@@ -103,6 +146,7 @@ def main() -> int:
     if not service or not token:
         print("Koyeb deployment watcher is not configured; skipping.")
         return 0
+    service = _resolve_service(service, token)
     attempts = max(1, int(os.getenv("KOYEB_DEPLOYMENT_MAX_ATTEMPTS", "40")))
     poll_seconds = max(5, int(os.getenv("KOYEB_DEPLOYMENT_POLL_SECONDS", "15")))
     expected_sha = os.getenv("EXPECTED_DEPLOYMENT_SHA", os.getenv("GITHUB_SHA", "")).strip()
