@@ -13,6 +13,7 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from kilo_webhook_url import valid_kilo_webhook_url
 
 REPO = os.environ["GITHUB_REPOSITORY"]
 TOKEN = os.environ["GH_TOKEN"]
@@ -184,8 +185,7 @@ def dispatch(pr: dict, kind: str, findings: list[str]) -> None:
         print(f"PR #{number} already has its bounded {kind} repair attempt; skipping.")
         return
     url = os.environ.get("KILO_REPAIR_TRIGGER_URL", "")
-    host = urllib.parse.urlparse(url).hostname or ""
-    if not url.startswith("https://") or not (host == "hooks.kilosessions.ai" or host == "kilo.ai" or host.endswith(".kilo.ai")):
+    if not valid_kilo_webhook_url(url):
         raise RuntimeError("Configure KILO_REPAIR_TRIGGER_URL with this repository's Kilo Cloud Agent webhook trigger")
 
     source = pr["html_url"]
