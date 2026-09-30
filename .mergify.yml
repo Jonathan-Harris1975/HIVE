@@ -18,3 +18,17 @@ pull_request_rules:
       comment:
         message: "Closing because revalidation shows this autonomous repair is no longer required."
       close:
+
+  - name: update eligible pull requests before native GitHub merge
+    conditions:
+      - base = main
+      - -closed
+      - -draft
+      - -conflict
+      - -label = autonomy:human-hold
+      - -label = autonomy:superseded
+      - -label = autonomy:obsolete
+      - -head ~= ^autonomy/repair-
+      - "#commits-behind > 0"
+    actions:
+      update:
