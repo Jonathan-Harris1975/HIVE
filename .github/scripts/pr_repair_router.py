@@ -60,7 +60,9 @@ def pr_details(number: int) -> dict | None:
         return None
     # Carrier PRs only record a failed run; Kilo must fix a separate branch.
     head = pr.get("head", {})
-    if (re.fullmatch(r"autonomy/repair-[0-9]+", head.get("ref", "")) and
+    if (pr.get("user", {}).get("login") == "autonomous-repair-bot[bot]" and
+            str(pr.get("title", "")).startswith("[autonomy] Repair ") and
+            re.fullmatch(r"autonomy/repair-[0-9]+", head.get("ref", "")) and
             any(label.get("name") == "autonomy:repair" for label in pr.get("labels", []))):
         return None
     return pr
