@@ -32,10 +32,50 @@ jobs:
         with:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
+      - name: Discover installed repair App login
+        id: repair_app
+        env:
+          APP_ID: ${{ vars.AUTONOMY_REPAIR_APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.AUTONOMY_REPAIR_APP_PRIVATE_KEY }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "${APP_ID:-}" =~ ^[0-9]+$ || -z "${APP_PRIVATE_KEY:-}" ]]; then
+            echo "::notice::Repair App identity is unavailable; carrier-shaped PRs will not be routed."
+            exit 0
+          fi
+          key_file="$(mktemp "${RUNNER_TEMP}/repair-app.XXXXXX")"
+          trap 'rm -f "$key_file"' EXIT
+          printf '%s\n' "$APP_PRIVATE_KEY" > "$key_file"
+          chmod 600 "$key_file"
+          b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
+          now="$(date +%s)"
+          header="$(printf '%s' '{"alg":"RS256","typ":"JWT"}' | b64url)"
+          payload="$(printf '{"iat":%s,"exp":%s,"iss":"%s"}' "$((now - 60))" "$((now + 540))" "$APP_ID" | b64url)"
+          unsigned="${header}.${payload}"
+          if ! signature="$(printf '%s' "$unsigned" | openssl dgst -sha256 -sign "$key_file" -binary | b64url)"; then
+            echo "::notice::Could not verify repair App identity."
+            exit 0
+          fi
+          if ! installation="$(curl --fail --silent --show-error --connect-timeout 5 --max-time 30 \
+            --header 'Accept: application/vnd.github+json' \
+            --header "Authorization: Bearer ${unsigned}.${signature}" \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${REPO}/installation")"; then
+            echo "::notice::Could not verify repair App installation."
+            exit 0
+          fi
+          if ! slug="$(jq -er '.app_slug | select(test("^[a-z0-9][a-z0-9-]*$"))' <<< "$installation")"; then
+            echo "::notice::Could not verify repair App login."
+            exit 0
+          fi
+          printf 'login=%s[bot]\n' "$slug" >> "$GITHUB_OUTPUT"
       - name: Extract actionable PR findings and start Kilo repair
         env:
           GH_TOKEN: ${{ github.token }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           KILO_REPAIR_TRIGGER_URL: ${{ secrets.KILO_REPAIR_TRIGGER_URL }}
           KILO_REPAIR_PR_LOGIN: ${{ vars.KILO_REPAIR_PR_LOGIN }}
+          REPAIR_APP_LOGIN: ${{ steps.repair_app.outputs.login }}
         run: python3 .github/scripts/pr_repair_router.py
