@@ -90,6 +90,10 @@ def post(path: str, data: Any | None = None, expected: tuple[int, ...] = (200, 2
     return request("POST", path, data=data, expected=expected)
 
 
+def delete(path: str, expected: tuple[int, ...] = (200, 204)) -> Any:
+    return request("DELETE", path, expected=expected)
+
+
 def issue_labels(pr: dict[str, Any]) -> set[str]:
     return {str(x.get("name", "")) for x in pr.get("labels", [])}
 
@@ -138,8 +142,8 @@ def renovate_automerge_enabled(pr: dict[str, Any]) -> bool:
     return is_renovate(pr) and "**Automerge**: Enabled." in (pr.get("body") or "")
 
 
-def is_carrier(pr: dict[str, Any]) -> bool:
-    labels = issue_labels(pr)
+def is_repair_carrier_identity(pr: dict[str, Any]) -> bool:
+    """Identify a repair carrier regardless of lifecycle labels."""
     return (
         pr.get("user", {}).get("login") == REPAIR_APP_LOGIN
         and pr.get("state") == "open"
@@ -147,7 +151,14 @@ def is_carrier(pr: dict[str, Any]) -> bool:
         and pr.get("base", {}).get("ref") == DEFAULT_BRANCH
         and str(pr.get("title", "")).startswith(CARRIER_PREFIX)
         and re.fullmatch(r"autonomy/repair-\d+", str(pr.get("head", {}).get("ref", ""))) is not None
-        and "autonomy:repair" in labels
+        and "autonomy:repair" in issue_labels(pr)
+    )
+
+
+def is_carrier(pr: dict[str, Any]) -> bool:
+    labels = issue_labels(pr)
+    return (
+        is_repair_carrier_identity(pr)
         and not labels.intersection({"autonomy:human-hold", "autonomy:superseded", "autonomy:obsolete"})
     )
 
@@ -370,6 +381,38 @@ def admit_to_mergify(number: int) -> None:
     log(f"Admitted PR #{number} to Mergify after exact-head CI, CodeQL and security verification.")
 
 
+def reconcile_stale_carriers(open_prs: list[dict[str, Any]]) -> None:
+    """Retire carrier PRs tied to a main SHA that is no longer current.
+
+    This also clears stale human-hold labels. A hold remains meaningful only while
+    its failed main SHA is still the repository's current default-branch SHA.
+    """
+    branch = get(f"/repos/{REPO}/branches/{DEFAULT_BRANCH}")
+    current_main_sha = str(branch.get("commit", {}).get("sha", ""))
+    if not re.fullmatch(r"[0-9a-f]{40}", current_main_sha):
+        raise RuntimeError("Could not resolve the current default-branch SHA")
+
+    for pr in open_prs:
+        if not is_repair_carrier_identity(pr):
+            continue
+        body = str(pr.get("body") or "")
+        match = re.search(r"Failed commit:\s*`([0-9a-f]{40})`", body)
+        if match is None:
+            continue
+        failed_sha = match.group(1)
+        if failed_sha == current_main_sha:
+            continue
+
+        number = int(pr["number"])
+        labels = issue_labels(pr)
+        if "autonomy:human-hold" in labels:
+            delete(f"/repos/{REPO}/issues/{number}/labels/autonomy%3Ahuman-hold", expected=(200, 204))
+        if not labels.intersection({"autonomy:superseded", "autonomy:obsolete"}):
+            add_labels(number, ["autonomy:obsolete"])
+            comment(number, "Closing stale repair carrier: its failed main-branch SHA is no longer current.")
+        log(f"Retired stale repair carrier PR #{number} for {failed_sha[:12]}.")
+
+
 def reconcile_pr(pr: dict[str, Any]) -> None:
     kind = automation_kind(pr)
     if kind is None or pr.get("draft"):
@@ -435,6 +478,8 @@ def main() -> int:
     ensure_label("autonomy:admitted", "0E8A16", "Exact-head CI/security verification complete; Mergify may merge")
 
     open_prs = list_open_prs()
+    reconcile_stale_carriers(open_prs)
+    open_prs = list_open_prs()  # refresh after stale-carrier lifecycle changes
     adopt_linked_kilo_prs(open_prs)
     open_prs = list_open_prs()  # refresh labels after Kilo correlation
     admit_waiting_runs(open_prs)
