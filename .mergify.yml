@@ -5,6 +5,39 @@ commands_restrictions:
           - sender-permission >= write
           - sender = renovate[bot]
 
+merge_protections_settings:
+  reporting_method: check-runs
+  post_comment: true
+  auto_merge_conditions:
+    - base = main
+    - label = autonomy:admitted
+    - -draft
+    - -conflict
+    - -label = do-not-merge
+    - -label = needs-manual-review
+    - -label = autonomy:human-hold
+    - -label = autonomy:superseded
+    - -label = autonomy:obsolete
+    - "#review-threads-unresolved = 0"
+
+merge_protections:
+  - name: autonomous admission
+    if:
+      - base = main
+      - label = autonomy:admitted
+    success_conditions:
+      - check-success = ci-gate
+      - check-success = CodeQL security alert gate
+      - check-success = Trivy, Gitleaks and actionlint
+      - -draft
+      - -conflict
+      - -label = do-not-merge
+      - -label = needs-manual-review
+      - -label = autonomy:human-hold
+      - -label = autonomy:superseded
+      - -label = autonomy:obsolete
+      - "#review-threads-unresolved = 0"
+
 queue_rules:
   - name: routine
     merge_method: squash
@@ -59,21 +92,3 @@ pull_request_rules:
       - "#commits-behind > 0"
     actions:
       update:
-
-  - name: merge verified routine automation
-    conditions:
-      - base = main
-      - -closed
-      - -draft
-      - -conflict
-      - label = autonomy:admitted
-      - check-success = ci-gate
-      - -label = do-not-merge
-      - -label = needs-manual-review
-      - -label = autonomy:human-hold
-      - -label = autonomy:superseded
-      - -label = autonomy:obsolete
-      - "#review-threads-unresolved = 0"
-    actions:
-      queue:
-        name: routine
