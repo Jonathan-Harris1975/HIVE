@@ -2,7 +2,7 @@ name: Autonomous main-branch repair PR
 
 on:
   workflow_run:
-    workflows: ["CI", "Koyeb production deployment watch", "CodeQL", "Security and repository quality"]
+    workflows: ["CI", "CodeQL", "Security and repository quality"]
     types: [completed]
   workflow_dispatch:
 
@@ -200,6 +200,16 @@ jobs:
 
           if [ "$RUN_CONCLUSION" != "failure" ]; then
             echo "Workflow conclusion is $RUN_CONCLUSION; no repair action required."
+            exit 0
+          fi
+
+          # Do not wake Kilo for formatting/lint already owned by autofix.ci, or for
+          # runner/cache/deployment/provider plumbing. Require a failed step that
+          # identifies a repository code, test, build, dependency or security defect.
+          failed_steps="$(gh api "repos/${REPO}/actions/runs/${RUN_ID}/jobs?per_page=100" \
+            --jq '.jobs[] | select(.conclusion == "failure") | .steps[]? | select(.conclusion == "failure") | .name')"
+          if ! printf '%s\n' "$failed_steps" | python3 .github/scripts/kilo_failure_classifier.py >/dev/null; then
+            echo "No repository-repairable failure identified; no carrier PR or Kilo task will be created."
             exit 0
           fi
 

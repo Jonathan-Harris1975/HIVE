@@ -2,7 +2,7 @@ name: Autonomous PR issue repair
 
 on:
   workflow_run:
-    workflows: ["CI", "Koyeb production deployment watch", "CodeQL", "Security and repository quality"]
+    workflows: ["CI", "CodeQL", "Security and repository quality"]
     types: [completed]
   issue_comment:
     types: [created]
