@@ -37,7 +37,7 @@ click==8.5.0
     #   uvicorn
 et-xmlfile==2.0.0
     # via openpyxl
-fastapi==0.141.1
+fastapi==0.142.2
     # via -r requirements.in
 h11==0.16.0
     # via
