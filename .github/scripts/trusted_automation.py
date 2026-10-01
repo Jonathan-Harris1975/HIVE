@@ -358,28 +358,16 @@ def approve_pr(number: int, sha: str) -> None:
     log(f"Approved PR #{number} at {sha[:12]} after trusted checks passed.")
 
 
-def enable_native_auto_merge(number: int) -> None:
+def admit_to_mergify(number: int) -> None:
     pr = get(f"/repos/{REPO}/pulls/{number}")
     if pr.get("state") != "open":
         return
-    if pr.get("auto_merge"):
-        log(f"Native auto-merge is already enabled for PR #{number}.")
+    labels = issue_labels(pr)
+    if "autonomy:admitted" in labels:
+        log(f"PR #{number} is already admitted to Mergify.")
         return
-    proc = subprocess.run(
-        ["gh", "pr", "merge", str(number), "--repo", REPO, "--auto", "--squash"],
-        text=True,
-        capture_output=True,
-        env={**os.environ, "GH_TOKEN": TOKEN},
-    )
-    if proc.returncode != 0:
-        combined = (proc.stdout + "\n" + proc.stderr).strip()
-        # A race where another trusted actor merged/enabled auto-merge is harmless.
-        current = get(f"/repos/{REPO}/pulls/{number}")
-        if current.get("state") != "open" or current.get("merged") or current.get("auto_merge"):
-            log(f"PR #{number} changed state while native auto-merge was being enabled; no further action needed.")
-            return
-        raise RuntimeError(f"Could not enable native auto-merge for PR #{number}: {combined}")
-    log(f"Requested native GitHub auto-merge / merge-queue handling for PR #{number}.")
+    add_labels(number, ["autonomy:admitted"])
+    log(f"Admitted PR #{number} to Mergify after exact-head CI, CodeQL and security verification.")
 
 
 def reconcile_pr(pr: dict[str, Any]) -> None:
@@ -431,7 +419,7 @@ def reconcile_pr(pr: dict[str, Any]) -> None:
         if current_head_unchanged(number, sha) is None:
             return
 
-    enable_native_auto_merge(number)
+    admit_to_mergify(number)
 
 
 def main() -> int:
@@ -444,6 +432,7 @@ def main() -> int:
         raise RuntimeError("KILO_REPAIR_PR_LOGIN must name the distinct, verified Kilo PR creator")
     ensure_label("autonomy:kilo-implementation", "5319E7", "Kilo implementation PR linked to an autonomous repair carrier")
     ensure_label("autonomy:human-hold", "FBCA04", "Automation must stop for human action")
+    ensure_label("autonomy:admitted", "0E8A16", "Exact-head CI/security verification complete; Mergify may merge")
 
     open_prs = list_open_prs()
     adopt_linked_kilo_prs(open_prs)
