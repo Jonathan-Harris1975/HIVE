@@ -92,3 +92,8 @@ pull_request_rules:
       - "#commits-behind > 0"
     actions:
       update:
+merge_queue:
+  status_comments: outcomes
+  queue_controls_comment: false
+  skip_intermediate_results: true
+  reset_on_external_merge: never
