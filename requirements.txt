@@ -93,7 +93,7 @@ python-dateutil==2.9.0.post0
     # via botocore
 python-docx==1.2.0
     # via -r requirements.in
-python-dotenv==1.2.2
+python-dotenv==1.2.3
     # via
     #   pydantic-settings
     #   uvicorn
@@ -103,7 +103,7 @@ pyyaml==6.0.3
     # via
     #   headroom-ai
     #   uvicorn
-regex==2026.9.10
+regex==2026.9.29
     # via tiktoken
 requests==2.34.2
     # via tiktoken
