@@ -242,16 +242,21 @@ jobs:
 
   ci_gate:
     name: ci-gate
-    needs: [release_gate]
+    needs: [release_gate, autonomous_repair_guard]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
       - name: Enforce aggregate CI result
         env:
           RELEASE_GATE_RESULT: ${{ needs.release_gate.result }}
+          REPAIR_GUARD_RESULT: ${{ needs.autonomous_repair_guard.result }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
           test "$RELEASE_GATE_RESULT" = "success" || { echo "release_gate was $RELEASE_GATE_RESULT" >&2; exit 1; }
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            test "$REPAIR_GUARD_RESULT" = "success"
+          fi
 
 
   autonomous_repair_guard:
