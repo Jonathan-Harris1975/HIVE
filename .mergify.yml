@@ -1,4 +1,4 @@
-commands_restrictions:
+5commands_restrictions:
   queue:
     conditions:
       - or:
