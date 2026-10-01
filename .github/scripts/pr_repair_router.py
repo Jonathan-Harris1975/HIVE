@@ -14,6 +14,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from kilo_webhook_url import valid_kilo_webhook_url
+from kilo_failure_classifier import repairable_failed_steps
 
 REPO = os.environ["GITHUB_REPOSITORY"]
 TOKEN = os.environ["GH_TOKEN"]
@@ -154,13 +155,17 @@ def extract(event: dict) -> tuple[dict, str, list[str]] | None:
         steps = failed_run_steps(int(run["id"]))
         if not steps:
             return None  # Runner/setup/transient failures have no verified repair target.
+        actionable = repairable_failed_steps(steps)
+        if not actionable:
+            print("No Kilo-repairable failed step was identified; leaving autofix/operations to handle it.")
+            return None
         findings = [f"Failed {run['name']} run {run['html_url']}"]
         if run.get("name") == "CodeQL":
             try:
                 findings.extend(safe_codeql_findings(pr))
             except Exception as exc:
                 print(f"::notice::Could not attach CodeQL alert identifiers ({type(exc).__name__}); linked run remains available.")
-        return pr, "check", [*findings, *steps[:11]]
+        return pr, "check", [*findings, *actionable[:11]]
 
     if EVENT == "issue_comment":
         if not event.get("issue", {}).get("pull_request") or event.get("comment", {}).get("user", {}).get("login") not in KILO:
