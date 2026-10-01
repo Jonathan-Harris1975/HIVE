@@ -14,6 +14,9 @@ permissions:
 
 jobs:
   test:
+    permissions:
+      contents: read
+      id-token: write
     name: Test (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
@@ -39,7 +42,16 @@ jobs:
         run: |
           python -V
           python -m compileall -q backend/app backend/tests
-          python -m pytest backend/tests -q --tb=short --cov=app --cov-report=term-missing --cov-fail-under=74
+          python -m pytest backend/tests -q --tb=short --cov=app --cov-report=term-missing --cov-report=xml:coverage.xml --cov-fail-under=74
+
+      - name: Upload coverage to Codecov
+        if: matrix.python-version == '3.14.7'
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          use_oidc: true
+          files: coverage.xml
+          flags: unit
+          fail_ci_if_error: false
 
   performance:
     name: API performance regression gate (Python 3.14)
