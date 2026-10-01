@@ -166,10 +166,13 @@ jobs:
               [ -n "$old_pr" ] || continue
               labels="$(gh pr view "$old_pr" --repo "$REPO" --json labels --jq '[.labels[].name] | join(",")')"
               case ",$labels," in
-                *,autonomy:human-hold,*|*,autonomy:superseded,*|*,autonomy:obsolete,*) continue ;;
+                *,autonomy:superseded,*|*,autonomy:obsolete,*) continue ;;
               esac
               body="$(gh pr view "$old_pr" --repo "$REPO" --json body --jq '.body')"
               if [[ "$body" == *"Failed workflow: **${RUN_NAME}**"* ]]; then
+                # A successful current main-branch run makes the old failure carrier stale,
+                # including a previous human hold that was attached only to that failure.
+                gh pr edit "$old_pr" --repo "$REPO" --remove-label autonomy:human-hold >/dev/null 2>&1 || true
                 gh pr edit "$old_pr" --repo "$REPO" --add-label autonomy:obsolete
               fi
             done <<< "$carriers"
@@ -198,10 +201,10 @@ jobs:
 
           while read -r old_pr; do
             [ -n "$old_pr" ] || continue
-            on_hold="$(gh pr view "$old_pr" --repo "$REPO" --json labels --jq '[.labels[].name] | any(. == "autonomy:human-hold")')"
-            if [ "$on_hold" != "true" ]; then
-              gh pr edit "$old_pr" --repo "$REPO" --add-label autonomy:superseded
-            fi
+            # A newer authoritative main-branch failure supersedes the old carrier.
+            # Clear a stale hold before labelling it superseded so Mergify can close it.
+            gh pr edit "$old_pr" --repo "$REPO" --remove-label autonomy:human-hold >/dev/null 2>&1 || true
+            gh pr edit "$old_pr" --repo "$REPO" --add-label autonomy:superseded
           done <<< "$carriers"
 
           workdir="$(mktemp -d)"
@@ -213,8 +216,8 @@ jobs:
 
           branch="autonomy/repair-${RUN_ID}"
           git checkout -b "$branch"
-          mkdir -p .autonomy/repair-requests
-          request=".autonomy/repair-requests/${RUN_ID}.md"
+          mkdir -p .autonomy
+          request=".autonomy/repair-request-${RUN_ID}.md"
           cat > "$request" <<EOF
           # Autonomous repair request
 

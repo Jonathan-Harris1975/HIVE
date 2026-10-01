@@ -270,7 +270,7 @@ jobs:
           head_sha="${{ github.event.pull_request.head.sha }}"
           git fetch --no-tags origin "$base_sha" "$head_sha"
           merge_base="$(git merge-base "$base_sha" "$head_sha")"
-          changed_markers="$(git diff --name-only --diff-filter=AMR "$merge_base" "$head_sha" -- '.autonomy/repair-requests/*.md')"
+          changed_markers="$(git diff --name-only --diff-filter=AMR "$merge_base" "$head_sha" -- '.autonomy/repair-request-*.md')"
           if [ -n "$changed_markers" ]; then
             echo "::error::This PR introduces an unresolved autonomous repair request. Fix the underlying failure, then remove the repair-request marker."
             printf '%s\n' "$changed_markers"
