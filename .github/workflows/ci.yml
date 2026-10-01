@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
     branches: ["**"]
 
@@ -11,6 +11,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: hive-ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
