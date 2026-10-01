@@ -1,3 +1,20 @@
+queue_rules:
+  - name: routine
+    merge_method: squash
+    queue_conditions:
+      - base = main
+      - label = autonomy:admitted
+      - check-success = ci-gate
+      - check-success = CodeQL security alert gate
+      - check-success = Trivy, Gitleaks and actionlint
+      - -label = autonomy:human-hold
+      - -label = autonomy:obsolete
+      - -label = autonomy:superseded
+    merge_conditions:
+      - check-success = ci-gate
+      - check-success = CodeQL security alert gate
+      - check-success = Trivy, Gitleaks and actionlint
+
 pull_request_rules:
   - name: close explicitly superseded autonomous pull requests
     conditions:
@@ -51,5 +68,5 @@ pull_request_rules:
       - -label = autonomy:obsolete
       - "#review-threads-unresolved = 0"
     actions:
-      merge:
-        method: squash
+      queue:
+        name: routine

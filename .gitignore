@@ -18,3 +18,11 @@ local-data/
 *.pem
 *.key
 *.p12
+
+.ci-tools/
+
+coverage/
+
+playwright-report/
+
+test-results/

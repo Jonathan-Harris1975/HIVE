@@ -1,6 +1,9 @@
 name: Repository Council
 
 on:
+  workflow_run:
+    workflows: ["Koyeb production deployment watch"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       target_sha:
@@ -19,6 +22,11 @@ concurrency:
 
 jobs:
   council:
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch' ||
+          (github.event.workflow_run.conclusion == 'success' &&
+           github.event.workflow_run.head_branch == github.event.repository.default_branch &&
+           github.event.workflow_run.head_repository.full_name == github.repository) }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out trusted Council definition
@@ -33,7 +41,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          REQUESTED_SHA: ${{ inputs.target_sha }}
+          REQUESTED_SHA: ${{ inputs.target_sha || github.event.workflow_run.head_sha }}
         shell: bash
         run: |
           set -euo pipefail
@@ -46,6 +54,39 @@ jobs:
           fi
           printf 'sha=%s\n' "$resolved" >> "$GITHUB_OUTPUT"
 
+      - name: Require current exact-SHA CI and security evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          REQUIRED_WORKFLOWS: "CI|CodeQL|Security and repository quality"
+        shell: bash
+        run: |
+          set -euo pipefail
+          IFS='|' read -r -a required <<< "$REQUIRED_WORKFLOWS"
+          for attempt in $(seq 1 60); do
+            runs="$(gh api --paginate --slurp "repos/${REPO}/actions/runs?head_sha=${TARGET_SHA}&per_page=100" --jq 'map(.workflow_runs) | add')"
+            ready=true
+            for workflow in "${required[@]}"; do
+              result="$(jq -r --arg name "$workflow" --arg branch "$DEFAULT_BRANCH" --arg sha "$TARGET_SHA" \
+                '[.[] | select(.name == $name and .head_branch == $branch and .head_sha == $sha and .event != "pull_request")] | sort_by(.run_number, .run_attempt) | last | if .status == "completed" then .conclusion else "pending" end' <<< "$runs")"
+              case "$result" in
+                success) ;;
+                failure|cancelled|timed_out|action_required|skipped|neutral|stale)
+                  echo "::error::Required workflow $workflow returned $result for $TARGET_SHA."
+                  exit 1 ;;
+                *) ready=false ;;
+              esac
+            done
+            if [ "$ready" = true ]; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::Exact-SHA CI/security evidence did not become ready."
+          exit 1
+
       - name: Refuse Council while autonomous repair is unresolved
         env:
           GH_TOKEN: ${{ github.token }}
@@ -55,7 +96,7 @@ jobs:
           set -euo pipefail
           blockers="$(gh pr list --repo "$REPO" --state open --limit 1000 \
             --json number,title,labels,url \
-            --jq '[.[] | select(any(.labels[]?; .name == "autonomy:repair" or .name == "autonomy:human-hold"))]')"
+            --jq '[.[] | select(any(.labels[]?; .name == "autonomy:human-hold") or (any(.labels[]?; .name == "autonomy:repair") and (any(.labels[]?; .name == "autonomy:obsolete" or .name == "autonomy:superseded") | not)))]')"
           count="$(jq 'length' <<< "$blockers")"
           if [ "$count" -gt 0 ]; then
             echo "::error::Council cannot start with ${count} unresolved autonomy repair/human-hold PR(s)."
@@ -82,6 +123,7 @@ jobs:
         run: |
           set -euo pipefail
           prompt="$(cat .council/council.md)"
+          test -n "${prompt//[[:space:]]/}" || { echo "::error::Council contract is empty."; exit 1; }
           task="$(cat <<EOF
           Run the repository Council defined below against exact SHA ${TARGET_SHA} in ${REPO}.
           The checked-in .council/council.md is the authoritative Council contract.

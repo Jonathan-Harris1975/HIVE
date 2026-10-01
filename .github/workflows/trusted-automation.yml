@@ -1,4 +1,4 @@
-name: Trusted automation admission and native merge
+name: Trusted automation admission for Mergify
 
 on:
   issue_comment:

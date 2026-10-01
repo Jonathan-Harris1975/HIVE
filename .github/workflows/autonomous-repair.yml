@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: autonomous-repair-${{ github.event.workflow_run.id || github.run_id }}
+  group: autonomous-repair-${{ github.repository }}
   cancel-in-progress: false
 
 jobs:
@@ -91,6 +91,7 @@ jobs:
           REPAIR_APP_LOGIN: ${{ steps.app_token.outputs.repair_app_login }}
           REPO: ${{ github.repository }}
           EVENT_NAME: ${{ github.event_name }}
+          RUN_WORKFLOW_ID: ${{ github.event.workflow_run.workflow_id }}
           RUN_ID: ${{ github.event.workflow_run.id }}
           RUN_NAME: ${{ github.event.workflow_run.name }}
           RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
@@ -105,6 +106,19 @@ jobs:
 
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             echo "GitHub App authentication succeeded; manual dispatch creates no repair PR."
+            exit 0
+          fi
+
+          # An old/out-of-order completion must not retire or create current repairs.
+          current_sha="$(gh api "repos/${REPO}/commits/${DEFAULT_BRANCH}" --jq '.sha')"
+          if [ "$HEAD_SHA" != "$current_sha" ]; then
+            echo "Ignoring completion for a default-branch SHA that is no longer current."
+            exit 0
+          fi
+          latest_run="$(gh api "repos/${REPO}/actions/workflows/${RUN_WORKFLOW_ID}/runs?branch=${DEFAULT_BRANCH}&head_sha=${HEAD_SHA}&per_page=100" \
+            --jq '[.workflow_runs[] | select(.event != "pull_request")] | sort_by(.run_number, .run_attempt) | last | .id')"
+          if [ "$latest_run" != "$RUN_ID" ]; then
+            echo "Ignoring an older attempt superseded by a newer workflow run."
             exit 0
           fi
 
@@ -166,7 +180,10 @@ jobs:
               [ -n "$old_pr" ] || continue
               labels="$(gh pr view "$old_pr" --repo "$REPO" --json labels --jq '[.labels[].name] | join(",")')"
               case ",$labels," in
-                *,autonomy:superseded,*|*,autonomy:obsolete,*) continue ;;
+                *,autonomy:superseded,*|*,autonomy:obsolete,*)
+                  gh pr close "$old_pr" --repo "$REPO"
+                  gh pr edit "$old_pr" --repo "$REPO" --remove-label autonomy:repair
+                  continue ;;
               esac
               body="$(gh pr view "$old_pr" --repo "$REPO" --json body --jq '.body')"
               if [[ "$body" == *"Failed workflow: **${RUN_NAME}**"* ]]; then
@@ -174,6 +191,8 @@ jobs:
                 # including a previous human hold that was attached only to that failure.
                 gh pr edit "$old_pr" --repo "$REPO" --remove-label autonomy:human-hold >/dev/null 2>&1 || true
                 gh pr edit "$old_pr" --repo "$REPO" --add-label autonomy:obsolete
+                gh pr close "$old_pr" --repo "$REPO"
+                gh pr edit "$old_pr" --repo "$REPO" --remove-label autonomy:repair
               fi
             done <<< "$carriers"
             exit 0
@@ -188,7 +207,14 @@ jobs:
           while read -r candidate; do
             [ -n "$candidate" ] || continue
             body="$(gh pr view "$candidate" --repo "$REPO" --json body --jq '.body')"
-            if [[ "$body" == *'Failed commit: `'"$HEAD_SHA"'`'* ]]; then
+            labels="$(gh pr view "$candidate" --repo "$REPO" --json labels --jq '[.labels[].name] | join(",")')"
+            case ",$labels," in
+              *,autonomy:superseded,*|*,autonomy:obsolete,*) continue ;;
+            esac
+            if [[ "$body" == *'Failed commit: `'"$HEAD_SHA"'`'* ]] && [[ "$body" == *"Failed workflow: **${RUN_NAME}**"* ]]; then
+              case ",$labels," in
+                *,autonomy:human-hold,*) echo "Current repair requires human action."; exit 0 ;;
+              esac
               existing="$candidate"
               break
             fi
@@ -201,10 +227,14 @@ jobs:
 
           while read -r old_pr; do
             [ -n "$old_pr" ] || continue
-            # A newer authoritative main-branch failure supersedes the old carrier.
+            body="$(gh pr view "$old_pr" --repo "$REPO" --json body --jq '.body')"
+            [[ "$body" == *"Failed workflow: **${RUN_NAME}**"* ]] || continue
+            # A newer authoritative failure in the same workflow supersedes the old carrier.
             # Clear a stale hold before labelling it superseded so Mergify can close it.
             gh pr edit "$old_pr" --repo "$REPO" --remove-label autonomy:human-hold >/dev/null 2>&1 || true
             gh pr edit "$old_pr" --repo "$REPO" --add-label autonomy:superseded
+            gh pr close "$old_pr" --repo "$REPO"
+            gh pr edit "$old_pr" --repo "$REPO" --remove-label autonomy:repair
           done <<< "$carriers"
 
           workdir="$(mktemp -d)"

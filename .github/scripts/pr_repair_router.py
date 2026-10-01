@@ -59,6 +59,9 @@ def pr_details(number: int) -> dict | None:
             pr.get("base", {}).get("ref") != DEFAULT or
             pr.get("head", {}).get("repo", {}).get("full_name") != REPO):
         return None
+    labels = {label.get("name") for label in pr.get("labels", [])}
+    if labels.intersection({"autonomy:obsolete", "autonomy:superseded", "autonomy:human-hold"}):
+        return None
     # Carrier PRs only record a failed run; Kilo must fix a separate branch.
     head = pr.get("head", {})
     if (str(pr.get("title", "")).startswith("[autonomy] Repair ") and

@@ -151,7 +151,7 @@ def is_repair_carrier_identity(pr: dict[str, Any]) -> bool:
         and pr.get("base", {}).get("ref") == DEFAULT_BRANCH
         and str(pr.get("title", "")).startswith(CARRIER_PREFIX)
         and re.fullmatch(r"autonomy/repair-\d+", str(pr.get("head", {}).get("ref", ""))) is not None
-        and "autonomy:repair" in issue_labels(pr)
+        and bool(issue_labels(pr).intersection({"autonomy:repair", "autonomy:obsolete", "autonomy:superseded"}))
     )
 
 
@@ -382,10 +382,10 @@ def admit_to_mergify(number: int) -> None:
 
 
 def reconcile_stale_carriers(open_prs: list[dict[str, Any]]) -> None:
-    """Retire carrier PRs tied to a main SHA that is no longer current.
+    """Close verified retired carriers directly, without waiting for Mergify.
 
-    This also clears stale human-hold labels. A hold remains meaningful only while
-    its failed main SHA is still the repository's current default-branch SHA.
+    Retired carrier branches are retained as failure evidence. Implementations
+    and arbitrary PRs are never closed by this lifecycle reconciler.
     """
     branch = get(f"/repos/{REPO}/branches/{DEFAULT_BRANCH}")
     current_main_sha = str(branch.get("commit", {}).get("sha", ""))
@@ -395,22 +395,21 @@ def reconcile_stale_carriers(open_prs: list[dict[str, Any]]) -> None:
     for pr in open_prs:
         if not is_repair_carrier_identity(pr):
             continue
-        body = str(pr.get("body") or "")
-        match = re.search(r"Failed commit:\s*`([0-9a-f]{40})`", body)
-        if match is None:
-            continue
-        failed_sha = match.group(1)
-        if failed_sha == current_main_sha:
-            continue
-
-        number = int(pr["number"])
         labels = issue_labels(pr)
-        if "autonomy:human-hold" in labels:
-            delete(f"/repos/{REPO}/issues/{number}/labels/autonomy%3Ahuman-hold", expected=(200, 204))
-        if not labels.intersection({"autonomy:superseded", "autonomy:obsolete"}):
+        retired = bool(labels.intersection({"autonomy:superseded", "autonomy:obsolete"}))
+        match = re.search(r"Failed commit:\s*`([0-9a-f]{40})`", str(pr.get("body") or ""))
+        if not retired and (match is None or match.group(1) == current_main_sha):
+            continue
+        number = int(pr["number"])
+        if not retired:
             add_labels(number, ["autonomy:obsolete"])
-            comment(number, "Closing stale repair carrier: its failed main-branch SHA is no longer current.")
-        log(f"Retired stale repair carrier PR #{number} for {failed_sha[:12]}.")
+        request("PATCH", f"/repos/{REPO}/pulls/{number}", {"state": "closed"})
+        # Close before removing active labels so a failed close remains retryable.
+        for label in ("autonomy:human-hold", "autonomy:repair", "autonomy:admitted"):
+            if label in labels:
+                encoded = urllib.parse.quote(label, safe="")
+                delete(f"/repos/{REPO}/issues/{number}/labels/{encoded}", expected=(200, 204))
+        log(f"Closed retired repair carrier PR #{number}.")
 
 
 def reconcile_pr(pr: dict[str, Any]) -> None:
@@ -475,6 +474,7 @@ def main() -> int:
         raise RuntimeError("KILO_REPAIR_PR_LOGIN must name the distinct, verified Kilo PR creator")
     ensure_label("autonomy:kilo-implementation", "5319E7", "Kilo implementation PR linked to an autonomous repair carrier")
     ensure_label("autonomy:human-hold", "FBCA04", "Automation must stop for human action")
+    ensure_label("autonomy:obsolete", "D4C5F9", "Repair carrier is no longer current")
     ensure_label("autonomy:admitted", "0E8A16", "Exact-head CI/security verification complete; Mergify may merge")
 
     open_prs = list_open_prs()
