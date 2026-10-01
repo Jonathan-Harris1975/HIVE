@@ -228,6 +228,20 @@ jobs:
           path: release-attestation.json
           retention-days: 90
 
+  ci_gate:
+    name: ci-gate
+    needs: [release_gate]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce aggregate CI result
+        env:
+          RELEASE_GATE_RESULT: ${{ needs.release_gate.result }}
+        run: |
+          set -euo pipefail
+          test "$RELEASE_GATE_RESULT" = "success" || { echo "release_gate was $RELEASE_GATE_RESULT" >&2; exit 1; }
+
+
   autonomous_repair_guard:
     name: Autonomous repair marker gate
     if: github.event_name == 'pull_request'
