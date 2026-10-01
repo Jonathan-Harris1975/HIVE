@@ -19,7 +19,7 @@ pull_request_rules:
         message: "Closing because revalidation shows this autonomous repair is no longer required."
       close:
 
-  - name: update admitted Kilo implementation branches before native GitHub merge
+  - name: refresh admitted Kilo implementation branches
     conditions:
       - base = main
       - -closed
@@ -35,3 +35,22 @@ pull_request_rules:
       - "#commits-behind > 0"
     actions:
       update:
+
+  - name: merge verified routine automation
+    conditions:
+      - base = main
+      - -closed
+      - -draft
+      - -conflict
+      - label = autonomy:admitted
+      - check-success = ci-gate
+      - -label = do-not-merge
+      - -label = needs-manual-review
+      - -label = autonomy:human-hold
+      - -label = autonomy:superseded
+      - -label = autonomy:obsolete
+      - "#review-threads-unresolved = 0"
+    actions:
+      merge:
+        method: squash
+      delete_head_branch:
