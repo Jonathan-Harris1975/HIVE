@@ -5,19 +5,52 @@ on:
     branches: [main]
   pull_request:
     branches: ["**"]
-
-  schedule:
-    - cron: '0 0 * * 0'
+  # The weekend orchestrator dispatches CI on the settled default-branch SHA; there is
+  # deliberately no cron here so CI never starts in the middle of the Renovate window.
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
   group: hive-ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Only superseded PR pushes are cancelled; main, queue and weekend evidence runs finish.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  changes:
+    name: Detect runtime-affecting changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      runtime: ${{ steps.diff.outputs.runtime }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+      - name: Decide whether runtime gates are needed
+        id: diff
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          # Pushes to main, dispatches and the weekend run always execute every gate.
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "runtime=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # On pull_request the checkout is the merge commit: HEAD^1 is the base tip.
+          changed="$(git diff --name-only HEAD^1 HEAD)"
+          printf '%s\n' "$changed"
+          if printf '%s\n' "$changed" | grep -Eq '^(backend/|scripts/|Dockerfile|\.dockerignore|requirements|runtime\.txt|nixpacks\.toml|Procfile|\.github/workflows/ci\.yml|\.github/scripts/)'; then
+            echo "runtime=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "runtime=false" >> "$GITHUB_OUTPUT"
+          fi
+
   test:
+    needs: changes
+    if: needs.changes.outputs.runtime == 'true'
     permissions:
       contents: read
       id-token: write
@@ -25,10 +58,12 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.11.16", "3.12.14", "3.13.15", "3.14.7"]
+        # Pull requests (and Mergify queue candidates) test the production Python only;
+        # the full compatibility matrix runs in the weekend evidence run.
+        python-version: ${{ fromJSON(github.event_name == 'pull_request' && '["3.14.7"]' || '["3.11.16","3.12.14","3.13.15","3.14.7"]') }}
 
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -49,7 +84,8 @@ jobs:
           python -m pytest backend/tests -q --tb=short --cov=app --cov-report=term-missing --cov-report=xml:coverage.xml --cov-fail-under=74
 
       - name: Upload coverage to Codecov
-        if: matrix.python-version == '3.14.7'
+        # Free-tier budget: upload once per week, in the run that precedes the Council.
+        if: github.event_name == 'workflow_dispatch' && matrix.python-version == '3.14.7'
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           use_oidc: true
@@ -59,12 +95,14 @@ jobs:
 
   performance:
     name: API performance regression gate (Python 3.14)
+    needs: changes
+    if: needs.changes.outputs.runtime == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.14.8"
+          python-version: "3.14.7"
           cache: "pip"
       - name: Install dependencies
         run: |
@@ -78,7 +116,7 @@ jobs:
         run: python scripts/performance_gate.py
       - name: Retain performance evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: hive-performance-${{ github.sha }}
           path: hive-performance.json
@@ -89,10 +127,10 @@ jobs:
     name: Lint, type and security checks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.14.8"
+          python-version: "3.14.7"
           cache: "pip"
       - name: Reject committed literal secrets
         run: python scripts/secret_scan.py
@@ -117,9 +155,11 @@ jobs:
 
   docker:
     name: Docker runtime and API smoke
+    needs: changes
+    if: needs.changes.outputs.runtime == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       - name: Build Docker image
         run: docker build --target runtime -t hive:ci .
       - name: Verify runtime engineering binaries
@@ -184,7 +224,7 @@ jobs:
           fi
       - name: Retain production image vulnerability report
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: hive-image-vulnerability-report-${{ github.sha }}
           path: trivy-hive-image.txt
@@ -194,11 +234,12 @@ jobs:
   notify_failure:
     name: Notify central operations on CI failure
     needs: [test, performance, lint, docker]
-    if: ${{ always() && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}
+    # Superseded pull-request runs are cancelled by design and must not raise operational events.
+    if: ${{ always() && github.event_name != 'pull_request' && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       - name: Send redacted HIVE operational event
         env:
           OPS_ALERT_WEBHOOK_URL: ${{ vars.OPS_ALERT_WEBHOOK_URL || secrets.OPS_ALERT_WEBHOOK_URL || 'https://hive.jonathan-harris.online/v1/ops/events' }}
@@ -215,7 +256,7 @@ jobs:
 
   release_gate:
     name: Release gate (exact SHA)
-    needs: [test, performance, lint, docker]
+    needs: [changes, test, performance, lint, docker]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     permissions:
@@ -223,22 +264,31 @@ jobs:
     steps:
       - name: Require all release checks to be green
         env:
+          RESULT_CHANGES: ${{ needs.changes.result }}
+          RUNTIME_CHANGED: ${{ needs.changes.outputs.runtime }}
           RESULT_TEST: ${{ needs.test.result }}
           RESULT_PERFORMANCE: ${{ needs.performance.result }}
           RESULT_LINT: ${{ needs.lint.result }}
           RESULT_DOCKER: ${{ needs.docker.result }}
         run: |
-          test "$RESULT_TEST" = "success"
-          test "$RESULT_PERFORMANCE" = "success"
+          set -euo pipefail
+          test "$RESULT_CHANGES" = "success"
           test "$RESULT_LINT" = "success"
-          test "$RESULT_DOCKER" = "success"
+          for result in "$RESULT_TEST" "$RESULT_PERFORMANCE" "$RESULT_DOCKER"; do
+            if [ "$RUNTIME_CHANGED" = "true" ]; then
+              test "$result" = "success"
+            else
+              # Runtime gates are skipped only when the change cannot affect the runtime.
+              test "$result" = "skipped"
+            fi
+          done
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Assert checked-out commit is the workflow SHA
         run: |
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           printf '{"repository":"%s","sha":"%s","workflow_run":"%s","status":"green"}\n' "$GITHUB_REPOSITORY" "$GITHUB_SHA" "$GITHUB_RUN_ID" > release-attestation.json
       - name: Retain exact-SHA release attestation
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-attestation-${{ github.sha }}
           path: release-attestation.json

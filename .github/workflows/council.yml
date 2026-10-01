@@ -1,13 +1,17 @@
 name: Repository Council
 
 on:
-  workflow_run:
-    workflows: ["Koyeb production deployment watch"]
-    types: [completed]
+  # Dispatch only: the weekend orchestrator releases the Council once Mergify has completed,
+  # CI/CodeQL/Security and the exact-SHA deployment are green, and at least one hour after
+  # the Renovate window has closed.
   workflow_dispatch:
     inputs:
       target_sha:
         description: "Exact default-branch SHA to judge (blank = current default branch)"
+        required: false
+        type: string
+      pending_minimum_age:
+        description: "Renovate updates still waiting on minimumReleaseAge (from the dashboard)"
         required: false
         type: string
 
@@ -22,11 +26,6 @@ concurrency:
 
 jobs:
   council:
-    if: >-
-      ${{ github.event_name == 'workflow_dispatch' ||
-          (github.event.workflow_run.conclusion == 'success' &&
-           github.event.workflow_run.head_branch == github.event.repository.default_branch &&
-           github.event.workflow_run.head_repository.full_name == github.repository) }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out trusted Council definition
@@ -41,7 +40,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          REQUESTED_SHA: ${{ inputs.target_sha || github.event.workflow_run.head_sha }}
+          REQUESTED_SHA: ${{ inputs.target_sha }}
         shell: bash
         run: |
           set -euo pipefail
@@ -117,6 +116,7 @@ jobs:
         env:
           REPO: ${{ github.repository }}
           TARGET_SHA: ${{ steps.target.outputs.sha }}
+          PENDING_MINIMUM_AGE: ${{ inputs.pending_minimum_age || 'unknown' }}
           RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
           KILO_REPAIR_TRIGGER_URL: ${{ secrets.KILO_REPAIR_TRIGGER_URL }}
         shell: bash
@@ -129,6 +129,7 @@ jobs:
           The checked-in .council/council.md is the authoritative Council contract.
           Inspect live GitHub Actions, security, pull-request, merge, deployment and repository evidence tied to that SHA.
           Do not infer missing evidence and do not weaken checks.
+          Renovate updates still waiting on minimumReleaseAge at this run: ${PENDING_MINIMUM_AGE}. Record them as PENDING_MINIMUM_AGE (not a failure).
           If a safe repository change is required, make the smallest justified change on one branch and open one PR against the default branch. Do not merge or deploy it yourself.
           If no code change is required, do not create a cosmetic PR.
           Return the Council disposition and evidence in the Kilo task result.

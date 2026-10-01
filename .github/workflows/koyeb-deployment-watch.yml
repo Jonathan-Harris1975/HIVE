@@ -11,7 +11,8 @@ permissions:
 
 concurrency:
   group: koyeb-deployment-watch-HIVE
-  cancel-in-progress: true
+  # A weekend verification must not cancel a push-triggered deployment watch in flight.
+  cancel-in-progress: false
 
 jobs:
   watch:
@@ -71,7 +72,9 @@ jobs:
           OPS_ALERT_WEBHOOK_TOKEN: ${{ secrets.OPS_ALERT_WEBHOOK_TOKEN }}
           GITHUB_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
           EXPECTED_DEPLOYMENT_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
-          EXPECTED_DEPLOYMENT_AFTER: ${{ github.event.workflow_run.created_at || '' }}
+          # Only a push run is expected to produce a new deployment. For a weekend dispatch
+          # (or a manual run) the watcher verifies the live deployment of the exact SHA.
+          EXPECTED_DEPLOYMENT_AFTER: ${{ (github.event.workflow_run.event == 'push' && github.event.workflow_run.created_at) || '' }}
         run: python scripts/watch_koyeb_deployment.py
       - name: Record exact-SHA production deployment attestation
         env:

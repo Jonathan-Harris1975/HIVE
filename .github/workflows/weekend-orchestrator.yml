@@ -1,0 +1,147 @@
+name: Weekend orchestrator
+
+# Runs once per week, straight after the Renovate window closes (Sunday 02:30 Europe/London).
+# GitHub cron is UTC only, so both DST offsets are scheduled and the guard step lets exactly
+# one of them through: 01:30 UTC is 02:30 London in BST, 02:30 UTC is 02:30 London in GMT.
+on:
+  schedule:
+    - cron: '30 1 * * 0'
+    - cron: '30 2 * * 0'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Settle and verify, but do not dispatch the Repository Council"
+        required: false
+        default: true
+        type: boolean
+      skip_time_guard:
+        description: "Ignore the Sunday launch-window check (manual proving runs)"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: weekend-orchestrator
+  cancel-in-progress: false
+
+jobs:
+  orchestrate:
+    name: Settle, verify and release Council
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - name: Check out trusted orchestrator from the default branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Launch-window guard
+        id: guard
+        env:
+          SKIP_GUARD: ${{ github.event_name == 'workflow_dispatch' && inputs.skip_time_guard }}
+        run: |
+          set -euo pipefail
+          if [ "$SKIP_GUARD" = "true" ]; then
+            python3 .github/scripts/weekend_orchestrator.py --guard --skip-guard
+          else
+            python3 .github/scripts/weekend_orchestrator.py --guard
+          fi
+
+      - name: Mint autonomous repair GitHub App token
+        if: steps.guard.outputs.run == 'true'
+        id: app_token
+        env:
+          APP_ID: ${{ vars.AUTONOMY_REPAIR_APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.AUTONOMY_REPAIR_APP_PRIVATE_KEY }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${APP_ID:-}" || { echo "::error::Repository variable AUTONOMY_REPAIR_APP_ID is required."; exit 1; }
+          test -n "${APP_PRIVATE_KEY:-}" || { echo "::error::Repository secret AUTONOMY_REPAIR_APP_PRIVATE_KEY is required."; exit 1; }
+
+          key_file="${RUNNER_TEMP}/autonomy-repair-app.pem"
+          printf '%s\n' "$APP_PRIVATE_KEY" > "$key_file"
+          chmod 600 "$key_file"
+
+          b64url() {
+            openssl base64 -A | tr '+/' '-_' | tr -d '='
+          }
+
+          now="$(date +%s)"
+          header="$(printf '%s' '{"alg":"RS256","typ":"JWT"}' | b64url)"
+          payload="$(printf '{"iat":%s,"exp":%s,"iss":"%s"}' "$((now - 60))" "$((now + 540))" "$APP_ID" | b64url)"
+          unsigned="${header}.${payload}"
+          signature="$(printf '%s' "$unsigned" | openssl dgst -sha256 -sign "$key_file" -binary | b64url)"
+          jwt="${unsigned}.${signature}"
+
+          installation_id="$(
+            curl --fail-with-body --silent --show-error \
+              --header "Accept: application/vnd.github+json" \
+              --header "Authorization: Bearer ${jwt}" \
+              --header "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/repos/${REPO}/installation" | jq -er '.id'
+          )"
+
+          app_token="$(
+            curl --fail-with-body --silent --show-error \
+              --request POST \
+              --header "Accept: application/vnd.github+json" \
+              --header "Authorization: Bearer ${jwt}" \
+              --header "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/app/installations/${installation_id}/access_tokens" | jq -er '.token'
+          )"
+
+          rm -f "$key_file"
+          echo "::add-mask::${app_token}"
+          printf 'token=%s\n' "$app_token" >> "$GITHUB_OUTPUT"
+
+      - name: Settle Mergify, verify exact-SHA evidence and release Council
+        if: steps.guard.outputs.run == 'true'
+        id: orchestrate
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+          ORCHESTRATION_REPORT_PATH: ${{ runner.temp }}/weekend-orchestration.json
+        shell: bash
+        run: |
+          set -uo pipefail
+          args=()
+          if [ "$DRY_RUN" = "true" ]; then args+=(--dry-run); fi
+          python3 .github/scripts/weekend_orchestrator.py "${args[@]}"
+          code=$?
+          echo "exit_code=${code}" >> "$GITHUB_OUTPUT"
+          exit "$code"
+
+      - name: Retain orchestration record
+        if: always() && steps.guard.outputs.run == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: weekend-orchestration-${{ github.run_id }}
+          path: ${{ runner.temp }}/weekend-orchestration.json
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Report hold or failure to central operations
+        if: always() && steps.guard.outputs.run == 'true' && steps.orchestrate.outcome == 'failure'
+        continue-on-error: true
+        env:
+          OPS_ALERT_WEBHOOK_URL: ${{ vars.OPS_ALERT_WEBHOOK_URL || secrets.OPS_ALERT_WEBHOOK_URL || 'https://hive.jonathan-harris.online/v1/ops/events' }}
+          OPS_ALERT_WEBHOOK_TOKEN: ${{ secrets.OPS_ALERT_WEBHOOK_TOKEN || secrets.OPS_EVENT_INGEST_TOKEN }}
+          EXIT_CODE: ${{ steps.orchestrate.outputs.exit_code }}
+        run: >-
+          python scripts/ops_notify.py
+          --service HIVE
+          --event-type weekend_orchestration_hold
+          --title "HIVE weekend orchestration needs attention"
+          --summary "The weekend orchestrator ended with exit code ${EXIT_CODE:-unknown}; Council was not released. Open the linked run for the stage record."
+          --event-id "github:${{ github.repository }}:weekend:${{ github.run_id }}:${{ github.run_attempt }}"
+          --release-id "${{ github.sha }}"
+          --url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

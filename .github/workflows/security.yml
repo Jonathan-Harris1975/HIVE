@@ -2,10 +2,8 @@ name: Security and repository quality
 
 on:
   pull_request:
-  push:
-    branches: [main]
-  schedule:
-    - cron: '0 5 * * 0'
+  # Default-branch evidence is produced by the weekend orchestrator (dispatch) just before
+  # the Council run, not on every push to main.
   workflow_dispatch:
 
 permissions:
@@ -13,7 +11,7 @@ permissions:
 
 concurrency:
   group: hive-security-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   SCORECARD_VERSION: '5.5.0'
@@ -29,7 +27,9 @@ jobs:
         with:
           fetch-depth: 0
       - name: Verify autonomy lifecycle regressions
-        run: python3 .github/scripts/test_autonomy_lifecycle.py
+        run: |
+          python3 .github/scripts/test_autonomy_lifecycle.py
+          python3 .github/scripts/test_weekend_orchestrator.py
       - name: Install pinned CI tools
         run: python scripts/install_ci_tools.py trivy gitleaks actionlint
       - name: Trivy filesystem vulnerability and misconfiguration scan
@@ -40,16 +40,20 @@ jobs:
           --ignore-unfixed
           --exit-code 1
           --no-progress
-      - name: Gitleaks full-history secret scan
+      - name: Gitleaks secret scan (PR range on pull requests, full history weekly)
         id: gitleaks
         continue-on-error: true
-        run: >-
-          .ci-tools/bin/gitleaks git .
-          --redact
-          --no-banner
-          --report-format json
-          --report-path gitleaks-report.json
-          --exit-code 1
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          args=(git . --redact --no-banner --report-format json --report-path gitleaks-report.json --exit-code 1)
+          if [ "$EVENT_NAME" = "pull_request" ] && [ -n "$BASE_SHA" ] && [ -n "$HEAD_SHA" ]; then
+            args+=(--log-opts="${BASE_SHA}..${HEAD_SHA}")
+          fi
+          .ci-tools/bin/gitleaks "${args[@]}"
       - name: Upload redacted Gitleaks diagnostic report
         if: always() && hashFiles('gitleaks-report.json') != ''
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -81,6 +85,8 @@ jobs:
 
   link_integrity:
     name: Lychee link integrity
+    # Links change on the internet, not with a pull request: weekly evidence run only.
+    if: github.event_name != 'pull_request'
     continue-on-error: true
     runs-on: ubuntu-latest
     timeout-minutes: 15

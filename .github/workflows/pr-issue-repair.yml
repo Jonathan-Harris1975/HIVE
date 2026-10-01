@@ -30,8 +30,9 @@ jobs:
          (github.event.issue.pull_request &&
           (github.event.comment.user.type != 'Bot' ||
            github.event.comment.user.login == (vars.KILO_REPAIR_PR_LOGIN || 'kilo-code-bot[bot]')))) &&
-        (github.event_name != 'workflow_run' || github.event.action != 'requested' ||
-         github.event.workflow_run.event == 'pull_request')
+        (github.event_name != 'workflow_run' ||
+         (github.event.workflow_run.event == 'pull_request' &&
+          github.event.workflow_run.conclusion == 'failure'))
       }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
