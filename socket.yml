@@ -1,0 +1,20 @@
+version: 2
+
+# Limit Socket PR analysis to dependency-policy surfaces used by this repository.
+triggerPaths:
+  - "requirements.in"
+  - "requirements.txt"
+  - "requirements-dev.txt"
+  - "pyproject.toml"
+  - "renovate.json"
+  - ".github/dependabot.yml"
+
+# Keep Socket's default issue policy, but make the GitHub App behaviour explicit.
+githubApp:
+  enabled: true
+  dependencyOverviewEnabled: true
+  disableCommentsAndCheckRuns: false
+
+# Do not suppress unresolved imports/dependencies: these are useful supply-chain signals.
+issueRules:
+  unresolvedRequire: true
