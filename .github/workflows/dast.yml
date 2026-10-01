@@ -1,0 +1,51 @@
+name: DAST penetration test
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: "Authorised target URL. Leave empty to use repository variable DAST_TARGET_URL."
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  dast:
+    name: OWASP ZAP full active scan
+    if: ${{ vars.DAST_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      issues: write
+    env:
+      INPUT_TARGET_URL: ${{ inputs.target_url }}
+      CONFIGURED_TARGET_URL: ${{ vars.DAST_TARGET_URL }}
+    steps:
+      - name: Resolve authorised target
+        id: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          target="${INPUT_TARGET_URL:-${CONFIGURED_TARGET_URL:-}}"
+          if [[ -z "$target" ]]; then
+            echo "::error::DAST is enabled but no authorised target URL is configured."
+            exit 1
+          fi
+          case "$target" in
+            https://*|http://localhost*|http://127.0.0.1*) ;;
+            *)
+              echo "::error::Refusing active DAST against a non-HTTPS remote target."
+              exit 1
+              ;;
+          esac
+          echo "url=$target" >> "$GITHUB_OUTPUT"
+
+      - name: Run OWASP ZAP full scan
+        uses: zaproxy/action-full-scan@75ee1686750ab1511a73b26b77a2a7c9d5051d47
+        with:
+          target: ${{ steps.target.outputs.url }}
+          allow_issue_writing: true
+          fail_action: true
