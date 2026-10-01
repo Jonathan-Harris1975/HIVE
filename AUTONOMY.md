@@ -1,6 +1,15 @@
 # Autonomous Repository Policy
 
-Scheduled repository window: **Sunday 00:00 UTC**, with a 2.5-hour allocation before the next repository starts.
+Scheduled repository window: **Sunday 00:00–02:30 Europe/London** (the Renovate schedule in `renovate.json`), a 2.5-hour allocation before the next repository starts.
+
+## Weekend orchestration
+`.github/workflows/weekend-orchestrator.yml` runs once, straight after the Renovate window closes (02:30 London; two UTC crons plus a London-time guard cover BST and GMT). It is the single control plane for the weekend run:
+1. **Settle.** Wait until Mergify has completed: no automation PR (admitted, queued, repair, human-hold, Renovate auto-merge) is open and no PR run is in flight. Idle admitted PRs get one `@mergifyio refresh`; trusted-automation is nudged every 15 minutes. Limit: 3 hours, then `HUMAN_HOLD`.
+2. **Verify.** Dispatch CI, CodeQL and Security on the settled default-branch SHA, then confirm the exact-SHA Koyeb deployment. CodeQL, Security, Lychee, Scorecard and the Codecov upload run here, not on every push or PR.
+3. **Repair.** A failure goes through the existing carrier-PR and Kilo path. Once the repair has merged, the orchestrator settles and verifies again (two repair attempts at most, then `HUMAN_HOLD`).
+4. **Council.** Released only when everything above is green, no repair or human-hold PR is open, and it is at least one hour after the window closed (03:30 London). Renovate updates still under the two-day release age are reported to the Council as `PENDING_MINIMUM_AGE` and roll into the next weekend automatically.
+
+A manual run defaults to a dry run (everything except releasing the Council) with the time guard skipped; use it to prove the sequence before the first live weekend.
 
 All changes from humans, Renovate, autofix.ci, KiloConnect/Kilo Code, RAMS/OpenRouter or future Council automation must use a pull request and pass this repository's required CI/security/deployment gates.
 

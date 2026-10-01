@@ -1,7 +1,8 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    "config:recommended"
+    "config:recommended",
+    "group:allNonMajor"
   ],
   "dependencyDashboard": true,
   "timezone": "Europe/London",
@@ -11,6 +12,7 @@
   "rangeStrategy": "replace",
   "platformAutomerge": false,
   "minimumReleaseAge": "2 days",
+  "internalChecksFilter": "strict",
   "vulnerabilityAlerts": {
     "automerge": true,
     "minimumReleaseAge": "0 days",
@@ -26,6 +28,15 @@
     "automerge": true
   },
   "packageRules": [
+    {
+      "description": "Digest, pin and lock-file updates carry no release timestamp; do not let them sit permanently pending on the stability check",
+      "matchUpdateTypes": [
+        "digest",
+        "pinDigest",
+        "lockFileMaintenance"
+      ],
+      "minimumReleaseAgeBehaviour": "timestamp-optional"
+    },
     {
       "description": "Automerge patch, minor and digest updates (npm and GitHub Actions) once the stability window and required checks pass",
       "matchUpdateTypes": [
