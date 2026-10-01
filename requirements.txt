@@ -144,7 +144,7 @@ urllib3==2.8.0
     #   -r requirements.in
     #   botocore
     #   requests
-uvicorn==0.53.0
+uvicorn==0.54.0
     # via -r requirements.in
 uvloop==0.22.1
     # via uvicorn
