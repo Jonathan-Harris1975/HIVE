@@ -103,7 +103,7 @@ pyyaml==6.0.3
     # via
     #   headroom-ai
     #   uvicorn
-regex==2026.9.10
+regex==2026.9.29
     # via tiktoken
 requests==2.34.2
     # via tiktoken
