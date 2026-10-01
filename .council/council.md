@@ -19,6 +19,20 @@ The expected chain is:
 9. Production verification proves the exact deployed SHA.
 10. Only then is the repository eligible for this final QA/Council pass.
 
+## Version-control and dependency autonomy
+Council acceptance covers the full version-control maintenance loop, not only failure recovery. Verify Mend Renovate as the repository's dependency/version authority and require evidence for the scheduled Renovate window.
+
+- Confirm the active root `renovate.json` is the configuration Renovate consumes and that no competing dependency bot is opening routine update PRs.
+- Verify detection and PR creation for supported package managers, GitHub Actions, container images and lockfiles actually present in this repository.
+- Verify the configured Europe/London schedule, concurrency/rate limits and the two-day minimum release-age policy for routine updates.
+- Verify vulnerability updates bypass the routine stability delay as configured and still pass the repository's security and CI gates.
+- Verify lock-file maintenance remains deterministic and source manifests/locks stay synchronised.
+- Verify patch, minor and digest updates can progress without a maintainer once all required checks pass.
+- Major updates are deliberately not routine-automerge candidates in the current Renovate policy. Record every major update as `PENDING_MAJOR_REVIEW` until its compatibility work is admitted through the repository's normal reviewed PR path; do not misreport it as an autonomy failure or silently merge it.
+- Verify Renovate's `@mergifyio queue` hand-off does not bypass `autonomy:admitted`, `ci-gate`, security checks, unresolved-thread policy or any repository-specific acceptance gate.
+- Confirm Mergify remains the sole routine merge authority and the resulting merge is squash-only.
+- Detect and report abandoned, duplicate, superseded or perpetually rebasing Renovate PRs; a green dashboard with accumulating update debt is not Council acceptance.
+
 ## Security handling
 - A CodeQL alert that has no native/automatic fix is still actionable evidence and must be handed to Kilo automatically.
 - Kilo may make the smallest safe code/configuration repair.
@@ -29,7 +43,7 @@ The expected chain is:
 Return a concise structured report with:
 
 1. **Target identity**: repository, target SHA, source run/window and deployment SHA if applicable.
-2. **Renovate outcome**: PRs attempted, merged, blocked, superseded or still pending; confirm lockfile/source-manifest ownership stayed with Renovate.
+2. **Renovate/version-control outcome**: scheduled window, package managers inspected, PRs attempted/merged/blocked/superseded/pending, vulnerability updates, lock maintenance and update debt; confirm source-manifest/lock ownership stayed with Renovate and record major updates separately as `PENDING_MAJOR_REVIEW`.
 3. **Deterministic CI**: test/build/lint/type/lock/repository-hygiene results and any flaky or skipped gate.
 4. **Security**: CodeQL open-alert count, CodeQL-to-Kilo handoffs, Trivy, Gitleaks, actionlint and repo-specific security evidence.
 5. **Autonomous repair ledger**: failure -> repair PR -> Kilo -> rerun -> merge/hold, including repair attempt count and orphan/superseded PR checks.
