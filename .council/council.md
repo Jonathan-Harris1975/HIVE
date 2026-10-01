@@ -31,6 +31,7 @@ Council acceptance covers the full version-control maintenance loop, not only fa
 - Major updates are deliberately not routine-automerge candidates in the current Renovate policy. Record every major update as `PENDING_MAJOR_REVIEW` until its compatibility work is admitted through the repository's normal reviewed PR path; do not misreport it as an autonomy failure or silently merge it.
 - Verify Renovate's `@mergifyio queue` hand-off does not bypass `autonomy:admitted`, `ci-gate`, security checks, unresolved-thread policy or any repository-specific acceptance gate.
 - Confirm Mergify remains the sole routine merge authority and the resulting merge is squash-only.
+- Renovate updates that have not yet reached the two-day minimum release age are held by `internalChecksFilter: strict` and listed under the Dependency Dashboard's Pending Status Checks. They roll into the next weekend window automatically. Record the count the orchestrator passes to this run as `PENDING_MINIMUM_AGE`; it is not a failure and not update debt.
 - Detect and report abandoned, duplicate, superseded or perpetually rebasing Renovate PRs; a green dashboard with accumulating update debt is not Council acceptance.
 
 ## Security handling
