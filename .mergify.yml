@@ -53,4 +53,3 @@ pull_request_rules:
     actions:
       merge:
         method: squash
-      delete_head_branch:
