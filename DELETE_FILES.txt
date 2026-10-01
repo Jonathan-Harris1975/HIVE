@@ -1,0 +1,7 @@
+# Central Council prompt copies are removed after distributing an authoritative prompt to each repository.
+docs/council_prompts/AIMS-UI_FINAL_QA_COUNCIL_PROMPT.md
+docs/council_prompts/HIVE-UI_FINAL_QA_COUNCIL_PROMPT.md
+docs/council_prompts/HIVE_FINAL_QA_COUNCIL_PROMPT.md
+docs/council_prompts/RAMS_FINAL_QA_COUNCIL_PROMPT.md
+docs/council_prompts/IRS_FINAL_QA_COUNCIL_PROMPT.md
+docs/council_prompts/1
