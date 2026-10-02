@@ -42,11 +42,11 @@ async def require_admin(
     supplied = credentials.credentials.strip() if credentials else ""
     fingerprint = token_fingerprint(supplied)
 
-    # IP- and token-scoped lockout: checked before validating credentials so a
-    # client already locked out cannot use this call to keep probing tokens.
-    auth_rate_limiter.check(client_ip, fingerprint)
-
     if not credentials or credentials.scheme.lower() != "bearer":
+        # Only failed authentication attempts are subject to lockout. A caller
+        # presenting the configured credential must always be able to recover
+        # immediately after a proxy/secret configuration error is corrected.
+        auth_rate_limiter.check(client_ip, fingerprint)
         auth_rate_limiter.record_failure(client_ip, fingerprint)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -56,7 +56,13 @@ async def require_admin(
 
     expected = settings.admin_bearer_token.strip()
     if not supplied or not expected or not secrets.compare_digest(supplied, expected):
+        auth_rate_limiter.check(client_ip, fingerprint)
         auth_rate_limiter.record_failure(client_ip, fingerprint)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid bearer token")
 
+    # A valid credential is proof that this is not an authentication probe.
+    # Clear any stale IP/token failures without first applying the lockout.
+    # This is especially important behind HIVE-UI/Cloudflare, where many proxy
+    # requests can share one egress address and a stale Worker secret can trip
+    # the broader IP bucket before the secret is corrected.
     auth_rate_limiter.record_success(client_ip, fingerprint)
