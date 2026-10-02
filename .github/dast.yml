@@ -1,0 +1,35 @@
+name: DAST penetration test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dast-${{ github.repository }}
+  cancel-in-progress: false
+
+env:
+  DAST_ENABLED: ${{ vars.DAST_ENABLED || 'false' }}
+  DAST_TARGET_URL: ${{ vars.DAST_TARGET_URL || '' }}
+
+jobs:
+  zap-full-scan:
+    name: OWASP ZAP full active scan
+    if: ${{ vars.DAST_ENABLED == 'true' && vars.DAST_TARGET_URL != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 105
+    steps:
+      - name: Refuse unauthorised/non-HTTPS remote target
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$DAST_TARGET_URL" in https://*) ;; *) echo "::error::DAST_TARGET_URL must be an authorised HTTPS endpoint."; exit 1;; esac
+      - name: Run authorised ZAP full scan
+        uses: zaproxy/action-full-scan@3c58388149901b9a03b7718852c5ba889646c27c # v0.13.0
+        with:
+          target: ${{ env.DAST_TARGET_URL }}
+          allow_issue_writing: false
+          fail_action: true
+          artifact_name: dast-zap-full-${{ github.run_id }}

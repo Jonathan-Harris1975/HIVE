@@ -1,0 +1,82 @@
+name: Repository Council
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_sha:
+        description: "Exact default-branch SHA to assess (blank = current default branch)"
+        required: false
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: read
+  security-events: read
+
+concurrency:
+  group: repository-council-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  council:
+    runs-on: ubuntu-latest
+    timeout-minutes: 145
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Resolve exact target SHA
+        id: target
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          REQUESTED_SHA: ${{ inputs.target_sha || '' }}
+        run: |
+          set -euo pipefail
+          current="$(gh api "repos/${REPO}/commits/${DEFAULT_BRANCH}" --jq .sha)"
+          target="${REQUESTED_SHA:-$current}"
+          test "$target" = "$current" || { echo "::error::Council target must be the current default-branch SHA."; exit 1; }
+          echo "sha=$target" >> "$GITHUB_OUTPUT"
+      - name: Require exact-SHA CI/security evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          REQUIRED_WORKFLOWS: "CI|CodeQL|Security and repository quality"
+        run: |
+          set -euo pipefail
+          IFS='|' read -r -a required <<< "$REQUIRED_WORKFLOWS"
+          runs="$(gh api --paginate --slurp "repos/${REPO}/actions/runs?head_sha=${TARGET_SHA}&per_page=100" --jq 'map(.workflow_runs) | add')"
+          for workflow in "${required[@]}"; do
+            result="$(jq -r --arg name "$workflow" '[.[] | select(.name == $name and .event != "pull_request")] | sort_by(.run_number,.run_attempt) | last | if .status == "completed" then .conclusion else "missing" end' <<< "$runs")"
+            test "$result" = success || { echo "::error::$workflow exact-SHA evidence is $result"; exit 1; }
+          done
+      - name: Refuse unresolved autonomy state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          blockers="$(gh pr list --state open --limit 1000 --json number,labels,url --jq '[.[] | select(any(.labels[]?; .name == "autonomy:human-hold") or (any(.labels[]?; .name == "autonomy:repair") and (any(.labels[]?; .name == "autonomy:obsolete" or .name == "autonomy:superseded") | not)))]')"
+          test "$(jq length <<< "$blockers")" -eq 0 || { jq . <<< "$blockers"; exit 1; }
+      - name: Validate Kilo Council trigger
+        env:
+          KILO_REPAIR_TRIGGER_URL: ${{ secrets.KILO_REPAIR_TRIGGER_URL }}
+        run: |
+          test -n "${KILO_REPAIR_TRIGGER_URL:-}"
+          python3 .github/scripts/kilo_webhook_url.py
+      - name: Dispatch Council contract to Kilo
+        env:
+          REPO: ${{ github.repository }}
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+          KILO_REPAIR_TRIGGER_URL: ${{ secrets.KILO_REPAIR_TRIGGER_URL }}
+        run: |
+          set -euo pipefail
+          prompt="$(cat .council/council.md)"
+          task="Run the checked-in Council contract for $REPO@$TARGET_SHA. Do not create a cosmetic PR.\n\n$prompt"
+          payload="$(jq -n --arg repository "$REPO" --arg sha "$TARGET_SHA" --arg task "$task" '{repository:$repository,target_sha:$sha,kind:"repository-council",task:$task}')"
+          code="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 30 -X POST -H 'Content-Type: application/json' --data "$payload" "$KILO_REPAIR_TRIGGER_URL")"
+          [[ "$code" == 2?? ]] || { echo "::error::Kilo Council trigger returned HTTP $code"; exit 1; }

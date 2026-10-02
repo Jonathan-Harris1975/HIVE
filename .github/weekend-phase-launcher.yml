@@ -1,0 +1,81 @@
+name: Weekend CI phase launcher
+
+on:
+  schedule:
+    - cron: "0 11 * * 6"
+    - cron: "0 10 * * 6"
+    - cron: "0 2 * * 0"
+    - cron: "0 1 * * 0"
+    - cron: "0 16 * * 0"
+    - cron: "0 15 * * 0"
+  workflow_dispatch:
+    inputs:
+      phase:
+        description: "Phase to dispatch"
+        required: true
+        default: ci
+        type: choice
+        options:
+          - ci
+          - dast
+          - council
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: weekend-phase-launcher-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Resolve Europe/London phase slot
+        id: slot
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          MANUAL_PHASE: ${{ inputs.phase || '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          now="$(TZ=Europe/London date '+%a %H:%M')"
+          phase=""; workflow=""
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            phase="$MANUAL_PHASE"
+            case "$phase" in
+              ci) workflow="ci.yml" ;;
+              dast) workflow="dast.yml" ;;
+              council) workflow="council.yml" ;;
+              *) echo "::error::Unsupported phase $phase"; exit 1 ;;
+            esac
+          else
+          if [ "$now" = "Sat 11:00" ]; then phase="ci"; workflow="ci.yml"; fi
+          if [ "$now" = "Sun 02:00" ]; then phase="dast"; workflow="dast.yml"; fi
+          if [ "$now" = "Sun 16:00" ]; then phase="council"; workflow="council.yml"; fi
+          fi
+          if [ -z "$phase" ]; then
+            echo "Scheduled UTC/DST duplicate is outside the intended London slot; no action."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "run=true" >> "$GITHUB_OUTPUT"
+          echo "phase=$phase" >> "$GITHUB_OUTPUT"
+          echo "workflow=$workflow" >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch phase workflow
+        if: steps.slot.outputs.run == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WORKFLOW: ${{ steps.slot.outputs.workflow }}
+        run: gh workflow run "$WORKFLOW" --repo "$GITHUB_REPOSITORY" --ref "${{ github.event.repository.default_branch }}"
+
+      - name: Record allocated windows
+        if: always()
+        run: |
+          echo "CI: Sat 11:00–Sat 13:30"
+          echo "DAST: Sun 02:00–Sun 04:00"
+          echo "Council: Sun 16:00–Sun 18:30"
+          echo "Weekend operating envelope: Friday 20:00 to Monday 04:00 Europe/London"
