@@ -80,6 +80,33 @@ def test_lockout_is_scoped_per_ip_and_does_not_block_valid_client():
     assert response.status_code != 429
 
 
+
+def test_valid_admin_token_recovers_immediately_after_ip_lockout():
+    """A corrected trusted proxy credential must not wait for an IP lockout to expire."""
+    client = _client()
+
+    # Rotating bad credentials eventually trip the broader source-IP bucket.
+    for index in range(31):
+        client.get(
+            "/v1/repositories",
+            headers={"Authorization": f"Bearer invalid-rotating-token-{index}"},
+        )
+
+    blocked = client.get(
+        "/v1/repositories",
+        headers={"Authorization": "Bearer another-invalid-token"},
+    )
+    assert blocked.status_code == 429
+
+    # Once HIVE-UI's HIVE_ADMIN_TOKEN is corrected to match ADMIN_BEARER_TOKEN,
+    # the valid request succeeds immediately and clears stale source failures.
+    recovered = client.get(
+        "/v1/repositories",
+        headers={"Authorization": f"Bearer {'a' * 48}"},
+    )
+    assert recovered.status_code != 429
+    assert recovered.status_code < 400
+
 def test_auth_rate_limiter_unit_sliding_window_and_lockout():
     """Unit-level test of the limiter itself, independent of FastAPI, using
     a fake clock so the test is fast and deterministic."""
