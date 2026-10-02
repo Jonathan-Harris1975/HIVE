@@ -1,4 +1,4 @@
-# HIVE.
+# HIVE
 
 HIVE is the FastAPI operator and repository-intelligence service for the wider estate. HIVE-UI reaches it through an authenticated proxy; HIVE then coordinates model/provider access, repository analysis, durable operational state, Cloudflare storage/search services, and ecosystem health data. It is not a public anonymous API.
 
