@@ -1,27 +1,19 @@
 name: Autonomous PR issue repair
-permissions:
-  actions: read
-  contents: read
-  issues: write
-  pull-requests: write
-  security-events: read
 concurrency:
   group: kilo-pr-repair-${{ github.repository }}
   cancel-in-progress: false
 jobs:
-  route_verified_issue:
+  authenticate_actor:
     if: ${{ (github.event_name != 'issue_comment' || github.event.issue.pull_request) && (github.event_name != 'workflow_run'
       || github.event.workflow_run.event == 'pull_request') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      trusted: ${{ steps.actor.outputs.trusted }}
+      repair_app_login: ${{ steps.repair_app.outputs.login }}
     steps:
-    - name: Check out trusted router from default branch
-      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      with:
-        ref: ${{ github.event.repository.default_branch }}
-        persist-credentials: false
-    - name: Verify blocker recovery safety
-      run: python3 .github/scripts/test_pr_blocker_recovery.py
     - name: Discover installed repair App login
       id: repair_app
       env:
@@ -61,13 +53,42 @@ jobs:
           exit 0
         fi
         printf 'login=%s[bot]\n' "$slug" >> "$GITHUB_OUTPUT"
+    - name: Authenticate comment and review actor
+      id: actor
+      env:
+        EVENT_NAME: ${{ github.event_name }}
+        ACTOR_LOGIN: ${{ github.event.review.user.login || github.event.comment.user.login }}
+        ACTOR_ASSOCIATION: ${{ github.event.review.author_association || github.event.comment.author_association }}
+        KILO_LOGIN: ${{ vars.KILO_REPAIR_PR_LOGIN }}
+        REPAIR_LOGIN: ${{ steps.repair_app.outputs.login }}
+      run: |-
+        python3 - <<'PYCODE'
+        import os
+        interactive = os.environ['EVENT_NAME'] in {'issue_comment', 'pull_request_review', 'pull_request_review_comment'}
+        known = {'kilo-code-bot', 'kilo-code-bot[bot]', 'chatgpt-codex-connector', 'chatgpt-codex-connector[bot]', os.environ['KILO_LOGIN'], os.environ['REPAIR_LOGIN']} - {''}
+        trusted = (not interactive or os.environ['ACTOR_LOGIN'] in known or os.environ['ACTOR_ASSOCIATION'] in {'OWNER', 'MEMBER', 'COLLABORATOR'})
+        with open(os.environ['GITHUB_OUTPUT'], 'a') as stream:
+            stream.write('trusted=' + str(trusted).lower() + '\n')
+        PYCODE
+  route_verified_issue:
+    if: ${{ needs.authenticate_actor.outputs.trusted == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+    - name: Check out trusted router from default branch
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        ref: ${{ github.event.repository.default_branch }}
+        persist-credentials: false
+    - name: Verify blocker recovery safety
+      run: python3 .github/scripts/test_pr_blocker_recovery.py
     - name: Extract actionable PR findings and start Kilo repair
       env:
         GH_TOKEN: ${{ github.token }}
         DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         KILO_REPAIR_TRIGGER_URL: ${{ secrets.KILO_REPAIR_TRIGGER_URL }}
         KILO_REPAIR_PR_LOGIN: ${{ vars.KILO_REPAIR_PR_LOGIN }}
-        REPAIR_APP_LOGIN: ${{ steps.repair_app.outputs.login }}
+        REPAIR_APP_LOGIN: ${{ needs.authenticate_actor.outputs.repair_app_login }}
       run: python3 .github/scripts/pr_repair_router.py
     - name: Recover merge conflicts and verified review blockers
       env:
@@ -75,7 +96,7 @@ jobs:
         DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         KILO_REPAIR_TRIGGER_URL: ${{ secrets.KILO_REPAIR_TRIGGER_URL }}
         KILO_REPAIR_PR_LOGIN: ${{ vars.KILO_REPAIR_PR_LOGIN }}
-        REPAIR_APP_LOGIN: ${{ steps.repair_app.outputs.login }}
+        REPAIR_APP_LOGIN: ${{ needs.authenticate_actor.outputs.repair_app_login }}
       run: python3 .github/scripts/pr_blocker_recovery.py
     - name: Preserve PR blocker recovery report
       if: always()
@@ -85,6 +106,15 @@ jobs:
         path: pr-blocker-recovery.json
         retention-days: 30
         if-no-files-found: warn
+    needs: authenticate_actor
+    permissions:
+      actions: read
+      checks: read
+      statuses: read
+      contents: read
+      issues: write
+      pull-requests: write
+      security-events: read
 'on':
   workflow_run:
     workflows:
@@ -113,3 +143,5 @@ jobs:
         description: Optional PR number; blank checks all eligible open PRs
         required: false
         type: string
+permissions:
+  contents: read
