@@ -402,6 +402,38 @@ class Recovery(unittest.TestCase):
             finally:
                 os.chdir(previous)
 
+    def test_operational_errors_are_actionable_without_exposing_secrets(self):
+        cases = [
+            (
+                RuntimeError(
+                    "Configure KILO_REPAIR_TRIGGER_URL with this repository's Kilo Cloud Agent webhook trigger"
+                ),
+                "repair-webhook-configuration",
+            ),
+            (RuntimeError("Kilo trigger returned HTTP 401"), "repair-webhook-http"),
+            (RuntimeError("Kilo trigger could not be reached"), "repair-webhook-unreachable"),
+            (
+                m.router.urllib.error.HTTPError(
+                    "https://api.github.com/private?token=secret-value",
+                    403,
+                    "secret-value",
+                    {},
+                    None,
+                ),
+                "github-api-http",
+            ),
+            (
+                RuntimeError("https://private.invalid?token=secret-value"),
+                "unexpected-recovery-error",
+            ),
+        ]
+        for error, code in cases:
+            result = m.describe_error(error)
+            self.assertEqual(result["error_code"], code)
+            self.assertNotIn("secret-value", json.dumps(result))
+        self.assertEqual(m.describe_error(cases[1][0])["http_status"], 401)
+        self.assertEqual(m.describe_error(cases[3][0])["http_status"], 403)
+
     def test_conflict_dispatch_requests_existing_branch_and_no_force_push(self):
         with (
             patch.object(m.router, "all_pages", return_value=[]),
