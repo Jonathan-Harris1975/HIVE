@@ -27,7 +27,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Verify branch PR safety and idempotency
-        run: python3 -m unittest discover -s .github/scripts -p "test_branch_pr_automation.py"
+        run: python3 .github/scripts/test_branch_pr_automation.py
       - name: Verify autonomy lifecycle regressions
         run: |
           python3 .github/scripts/test_autonomy_lifecycle.py

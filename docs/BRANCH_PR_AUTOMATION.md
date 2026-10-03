@@ -15,3 +15,5 @@ Repository settings must retain auto-merge and automatic deletion of merged bran
 Run safety tests with `python3 -m unittest discover -s .github/scripts -p 'test_branch_pr_automation.py'`. They are also part of the existing repository security workflow.
 
 Activation requires applying the additive ruleset through an administrator-capable GitHub connection. Committing the JSON alone does not apply it. Verify one harmless approved branch push end to end: one PR; normal PR CI; no duplicate on repeat; native merge after required checks; source deletion after merge. Until live protection and that test are verified, deployment status is HOLD.
+
+Automation and security configuration under `.github/` requires code-owner review. Ordinary development changes need no routine owner approval. Existing advisory link checks remain advisory and are excluded from required merge gates. The controller revokes native auto-merge when its management marker is removed or required workflows become non-green. Reused branch names recover unless the current tip was deliberately closed without merging.

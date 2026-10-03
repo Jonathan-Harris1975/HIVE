@@ -1,11 +1,9 @@
 """Behavioural safety tests; no GitHub credentials or network access required."""
 import copy
 import importlib.util
-import json
 import os
 from pathlib import Path
 import sys
-import tempfile
 import unittest
 from unittest.mock import patch
 os.environ.setdefault('GH_TOKEN', 'test-token')
@@ -220,5 +218,53 @@ class BranchSafety(unittest.TestCase):
             'list_open_prs', return_value=[]), patch.object(m, 'create_or_reuse_pr') as create:
             m.recover_branch_signals()
             create.assert_called_once_with(('fix/example', 'a' * 40))
+    def test_deleted_fork_is_ignored(self):
+        pr = copy.deepcopy(self.pr)
+        pr['head']['repo'] = None
+        self.assertFalse(m.same_repo(pr))
+
+    def test_reused_branch_recovers_after_merge_or_new_tip(self):
+        os.environ['GITHUB_EVENT_NAME'] = 'schedule'
+        for merged, sha in [(True, 'a' * 40), (False, 'b' * 40)]:
+            closed = copy.deepcopy(self.pr)
+            closed['merged'] = merged
+            closed['head']['sha'] = sha
+            with patch.object(m, 'get', side_effect=[
+                [{'name': 'fix/example', 'commit': {'sha': 'a' * 40}}],
+                [closed], {'ahead_by': 1},
+            ]), patch.object(m, 'list_open_prs', return_value=[]), patch.object(m, 'create_or_reuse_pr') as create:
+                m.recover_branch_signals()
+                create.assert_called_once_with(('fix/example', 'a' * 40))
+
+    def test_management_label_removal_disarms_request(self):
+        self.pr['labels'] = []
+        self.pr['auto_merge'] = {'enabled_by': {}}
+        with patch.object(m, 'list_open_prs', return_value=[self.pr]), patch.object(m, 'refresh_pr', return_value=self.pr), patch.object(m, 'graphql') as gql:
+            m.reconcile_managed_prs()
+            self.assertIn('disablePullRequestAutoMerge', gql.call_args.args[0])
+
+    def test_non_strict_security_contexts_cannot_borrow_strict_ci(self):
+        rules = [
+            {'type': 'required_status_checks', 'parameters': {
+                'required_status_checks': [{'context': 'ci-gate'}], 'strict_required_status_checks_policy': True,
+            }},
+            {'type': 'required_status_checks', 'parameters': {'required_status_checks': [{'context': 'security'}]}},
+        ]
+        self.assertIsNone(self.policy(rules=rules)[0])
+
+    def test_branch_merge_methods_are_respected(self):
+        rule = {'type': 'required_status_checks', 'parameters': {
+            'required_status_checks': [{'context': 'ci-gate'}, {'context': 'security'}], 'strict_required_status_checks_policy': True,
+        }}
+        restriction = {'type': 'pull_request', 'parameters': {'allowed_merge_methods': ['rebase']}}
+        self.assertEqual(self.policy(settings={'allow_rebase_merge': True}, rules=[rule, restriction])[0], 'REBASE')
+        self.assertIsNone(self.policy(rules=[rule, restriction])[0])
+
+    def test_cli_failure_is_deferred(self):
+        with patch.object(m, 'native_merge_policy', return_value=('SQUASH', 'ok')), patch.object(
+            m.subprocess, 'run', side_effect=m.subprocess.CalledProcessError(1, ['gh']),
+        ):
+            m.enable_native_auto_merge(self.pr)
+
 if __name__ == '__main__':
     unittest.main()

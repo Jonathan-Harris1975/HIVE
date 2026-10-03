@@ -166,7 +166,7 @@ def list_open_prs() -> list[dict[str, Any]]:
 
 
 def same_repo(pr: dict[str, Any]) -> bool:
-    return str(pr.get("head", {}).get("repo", {}).get("full_name", "")) == REPO
+    return str(((pr.get("head") or {}).get("repo") or {}).get("full_name", "")) == REPO
 
 
 def allowed_branch(branch: str) -> bool:
@@ -386,7 +386,12 @@ def native_merge_policy() -> tuple[str | None, str]:
     # The public effective-rules endpoint excludes disabled/evaluate rulesets.
     rules = []
     for page in range(1, 11):
-        chunk = get(f"/repos/{REPO}/rules/branches/{urllib.parse.quote(DEFAULT_BRANCH, safe='')}?per_page=100&page={page}")
+        try:
+            chunk = get(f"/repos/{REPO}/rules/branches/{urllib.parse.quote(DEFAULT_BRANCH, safe='')}?per_page=100&page={page}")
+        except ApiError as exc:
+            if exc.status != 404:
+                raise
+            chunk = []
         rules.extend(chunk)
         if len(chunk) < 100:
             break
@@ -394,13 +399,23 @@ def native_merge_policy() -> tuple[str | None, str]:
         return None, "effective branch rules exceed the safe pagination limit"
     contexts: set[str] = set()
     strict = False
+    strict_contexts: set[str] = set()
+    allowed_methods = {"squash", "merge", "rebase"}
     for rule in rules:
         if rule.get("type") == "merge_queue":
             return None, "native merge queue requires a separately validated merge_group CI path"
+        if rule.get("type") == "required_linear_history":
+            allowed_methods.discard("merge")
+        if rule.get("type") == "pull_request":
+            methods = (rule.get("parameters") or {}).get("allowed_merge_methods")
+            if methods is not None:
+                allowed_methods.intersection_update(methods)
         if rule.get("type") == "required_status_checks":
             params = rule.get("parameters") or {}
             contexts.update(x.get("context", "") for x in params.get("required_status_checks", []))
-            strict = strict or params.get("strict_required_status_checks_policy") is True
+            if params.get("strict_required_status_checks_policy") is True:
+                strict = True
+                strict_contexts.update(x.get("context", "") for x in params.get("required_status_checks", []))
     # Legacy branch protection is not returned by the rulesets endpoint.
     owner, name = REPO.split("/", 1)
     data = graphql("""
@@ -417,16 +432,18 @@ def native_merge_policy() -> tuple[str | None, str]:
     legacy = ((data.get("repository") or {}).get("ref") or {}).get("branchProtectionRule") or {}
     if legacy.get("requiresStatusChecks"):
         contexts.update(legacy.get("requiredStatusCheckContexts") or [])
-        strict = strict or legacy.get("requiresStrictStatusChecks") is True
+        if legacy.get("requiresStrictStatusChecks") is True:
+            strict = True
+            strict_contexts.update(legacy.get("requiredStatusCheckContexts") or [])
     if not REQUIRED_CHECKS:
         return None, "REQUIRED_CHECKS must identify repository CI and security gates"
     missing = set(REQUIRED_CHECKS) - contexts
     if missing:
         return None, "branch protection does not enforce: " + ", ".join(sorted(missing))
-    if not strict:
+    if not strict or set(REQUIRED_CHECKS) - strict_contexts:
         return None, "branch protection must require checks against the latest target branch"
     for flag, method in (("allow_squash_merge", "SQUASH"), ("allow_merge_commit", "MERGE"), ("allow_rebase_merge", "REBASE")):
-        if settings.get(flag):
+        if settings.get(flag) and method.lower() in allowed_methods:
             return method, "repository merge policy verified"
     return None, "repository has no supported merge method enabled"
 
@@ -450,7 +467,9 @@ def recover_branch_signals() -> None:
             # A deliberately closed PR is an owner decision, not a lost signal.
             query = urllib.parse.urlencode({"state": "closed", "base": DEFAULT_BRANCH, "head": f"{REPO.split('/')[0]}:{name}", "per_page": 100})
             closed = get(f"/repos/{REPO}/pulls?{query}")
-            if any(same_repo(pr) and pr.get("head", {}).get("ref") == name for pr in closed):
+            if any(same_repo(pr) and pr.get("head", {}).get("ref") == name
+                   and pr.get("head", {}).get("sha") == sha
+                   and not pr.get("merged_at") and not pr.get("merged") for pr in closed):
                 continue
             comparison = get(f"/repos/{REPO}/compare/{urllib.parse.quote(DEFAULT_BRANCH, safe='')}...{urllib.parse.quote(sha, safe='')}")
             if int(comparison.get("ahead_by", 0)) > 0:
@@ -479,10 +498,14 @@ def enable_native_auto_merge(pr: dict[str, Any]) -> None:
     # GitHub already allows it. Strict enforced checks protect the latest base;
     # --match-head-commit protects against a concurrent source push.
     flag = {"SQUASH": "--squash", "MERGE": "--merge", "REBASE": "--rebase"}[method]
-    subprocess.run([
+    try:
+        subprocess.run([
         "gh", "pr", "merge", str(pr["number"]), "--repo", REPO,
         "--auto", flag, "--match-head-commit", str(pr["head"]["sha"]),
-    ], check=True)
+        ], check=True)
+    except subprocess.CalledProcessError as exc:
+        log(f"PR #{pr['number']} merge request deferred (gh exit {exc.returncode}); continuing reconciliation.")
+        return
     log(f"Requested guarded GitHub auto-merge for PR #{pr['number']} after exact-head checks passed.")
 
 
@@ -490,7 +513,7 @@ def reconcile_managed_prs() -> None:
     for listed in list_open_prs():
         # Observe holds/drafts even after native auto-merge was previously armed.
         if not (same_repo(listed) and listed.get("user", {}).get("login") == REPAIR_APP_LOGIN
-                and MANAGED_LABEL.lower() in issue_labels(listed)):
+                and allowed_branch(str(listed.get("head", {}).get("ref", "")))):
             continue
         number = int(listed["number"])
         current = refresh_pr(number)
@@ -509,6 +532,7 @@ def reconcile_managed_prs() -> None:
 
         green, reason = required_checks_green(current)
         if not green:
+            disable_native_auto_merge(current)
             log(f"PR #{number} not ready: {reason}.")
             continue
 
