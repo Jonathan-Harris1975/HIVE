@@ -235,6 +235,56 @@ def candidate_numbers(event):
     return [int(pr["number"]) for pr in router.all_pages(f"/repos/{router.REPO}/pulls?state=open")]
 
 
+def describe_error(exc):
+    """Publish only known-safe diagnostics, never exception URLs or response bodies."""
+    message = str(exc)
+    if isinstance(exc, router.urllib.error.HTTPError):
+        return {
+            "error_code": "github-api-http",
+            "http_status": exc.code,
+            "guidance": "Check the recovery job's GitHub token permissions and repository access.",
+        }
+    if message.startswith("Configure KILO_REPAIR_TRIGGER_URL with"):
+        return {
+            "error_code": "repair-webhook-configuration",
+            "guidance": "Set KILO_REPAIR_TRIGGER_URL to this repository's supported Kilo Cloud Agent trigger URL.",
+        }
+    match = re.fullmatch(r"Kilo trigger returned HTTP ([0-9]{3})", message)
+    if match:
+        return {
+            "error_code": "repair-webhook-http",
+            "http_status": int(match[1]),
+            "guidance": "Check the configured Kilo trigger's authentication, availability and accepted payload.",
+        }
+    if message == "Kilo trigger could not be reached":
+        return {
+            "error_code": "repair-webhook-unreachable",
+            "guidance": "Check Kilo trigger availability and network connectivity from GitHub Actions.",
+        }
+    if message in {
+        "Unable to read complete review-thread metadata",
+        "Review thread resolution was not confirmed",
+    }:
+        return {
+            "error_code": "review-api-error",
+            "guidance": "Check GitHub GraphQL access and pull-request write permission.",
+        }
+    if "limit" in message and message in {
+        "Review thread exceeds the evidence limit",
+        "Review-thread pagination exceeds safe limit",
+        "Check pagination exceeds safe limit",
+        "GitHub result exceeded the safe 1,000-entry limit",
+    }:
+        return {
+            "error_code": "metadata-limit",
+            "guidance": "Review the PR manually; metadata exceeded the bounded recovery limit.",
+        }
+    return {
+        "error_code": "unexpected-recovery-error",
+        "guidance": "Inspect the trusted recovery code and API operation; raw exception details are withheld.",
+    }
+
+
 def main():
     event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
     results = []
@@ -244,17 +294,37 @@ def main():
             results.append(recover(number))
         except Exception as exc:
             errors += 1
+            detail = describe_error(exc)
             results.append(
-                {"pr": number, "state": "recovery-error", "error_type": type(exc).__name__}
+                {
+                    "pr": number,
+                    "state": "recovery-error",
+                    "error_type": type(exc).__name__,
+                    **detail,
+                }
             )
             print(
-                f"::error::Blocker recovery for PR #{number} failed ({type(exc).__name__}). Inspect API permissions and the configured repair webhook."
+                f"::error::Blocker recovery for PR #{number}: {detail['error_code']}"
+                + (f" (HTTP {detail['http_status']})" if "http_status" in detail else "")
+                + ". "
+                + detail["guidance"]
             )
     text = json.dumps({"repository": router.REPO, "results": results}, indent=2) + "\n"
     Path("pr-blocker-recovery.json").write_text(text)
     summary = (
         "# Automatic PR blocker recovery\n\n"
-        + "\n".join(f"- PR #{r['pr']}: {r['state']}" for r in results)
+        + "\n".join(
+            f"- PR #{r['pr']}: {r['state']}"
+            + (
+                f" — {r['error_code']}"
+                + (f" (HTTP {r['http_status']})" if "http_status" in r else "")
+                + ". "
+                + r["guidance"]
+                if "error_code" in r
+                else ""
+            )
+            for r in results
+        )
         + "\n"
     )
     with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a") as stream:
