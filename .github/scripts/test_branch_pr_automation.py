@@ -149,10 +149,17 @@ class BranchSafety(unittest.TestCase):
                 m.enable_native_auto_merge(self.pr)
             gql.assert_not_called()
 
-    def test_only_native_auto_merge_is_requested(self):
-        with patch.object(m, 'native_merge_policy', return_value=('SQUASH', 'ok')), patch.object(m, 'graphql') as gql, patch.object(m, 'put') as put:
+    def test_gh_requests_guarded_auto_merge(self):
+        with patch.object(m, 'native_merge_policy', return_value=('SQUASH', 'ok')), \
+                patch.object(m.subprocess, 'run') as run, patch.object(m, 'put') as put:
             m.enable_native_auto_merge(self.pr)
-            self.assertIn('enablePullRequestAutoMerge', gql.call_args.args[0])
+            command = run.call_args.args[0]
+            self.assertEqual(command, [
+                'gh', 'pr', 'merge', '7', '--repo', 'owner/repo', '--auto',
+                '--squash', '--match-head-commit', 'a' * 40,
+            ])
+            self.assertTrue(run.call_args.kwargs['check'])
+            self.assertNotIn('--admin', command)
             put.assert_not_called()
 
     def test_existing_auto_merge_is_idempotent(self):

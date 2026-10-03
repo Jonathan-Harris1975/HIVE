@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -474,17 +475,15 @@ def enable_native_auto_merge(pr: dict[str, Any]) -> None:
     if pr.get("auto_merge"):
         log(f"Native GitHub auto-merge is already enabled for PR #{pr['number']}.")
         return
-    # Use the native auto-merge mutation only. Never fall back to an immediate
-    # REST merge or --admin when GitHub says the request is unavailable.
-    graphql("""
-      mutation($id:ID!,$method:PullRequestMergeMethod!) {
-        enablePullRequestAutoMerge(input:{pullRequestId:$id,mergeMethod:$method}) {
-          pullRequest {number state autoMergeRequest{enabledAt}}
-        }
-      }
-    """, {"id": pr["node_id"], "method": method})
-    log(f"Requested native GitHub auto-merge for PR #{pr['number']} after exact-head checks passed.")
-
+    # gh queues native auto-merge when blocked, or completes the merge when
+    # GitHub already allows it. Strict enforced checks protect the latest base;
+    # --match-head-commit protects against a concurrent source push.
+    flag = {"SQUASH": "--squash", "MERGE": "--merge", "REBASE": "--rebase"}[method]
+    subprocess.run([
+        "gh", "pr", "merge", str(pr["number"]), "--repo", REPO,
+        "--auto", flag, "--match-head-commit", str(pr["head"]["sha"]),
+    ], check=True)
+    log(f"Requested guarded GitHub auto-merge for PR #{pr['number']} after exact-head checks passed.")
 
 
 def reconcile_managed_prs() -> None:
