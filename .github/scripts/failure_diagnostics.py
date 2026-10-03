@@ -41,7 +41,8 @@ def render(repo, run, jobs, artifacts):
             if item.get('expired'):
                 continue
             lines.append(f'- [{safe(item["name"])}]({url}/artifacts/{int(item["id"])})')
-    lines += ['', 'Security runs publish rule/file/line/commit evidence in **security-diagnostics**. Test, build and deployment errors are in the linked failed step logs; logs are not copied into this report.',
+    lines += ['', ('Security runs publish rule/file/line/commit evidence in **security-diagnostics**. '
+                  'Test, build and deployment errors are in the linked failed step logs; logs are not copied into this report.'),
               'Fix the recorded cause and rerun the relevant checks. This reporting workflow grants no bypass and does not change the failed check conclusion.']
     return '\n'.join(lines) + '\n'
 

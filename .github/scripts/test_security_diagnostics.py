@@ -1,6 +1,8 @@
 """Regression tests for actionable, secret-free diagnostic evidence."""
 import importlib.util
 import json
+import os
+from unittest.mock import patch
 from pathlib import Path
 import tempfile
 import unittest
@@ -35,7 +37,7 @@ class Diagnostics(unittest.TestCase):
                 }],
             }]}))
             out = root / 'out'
-            text = security.render(out, {'gitleaks': {'outcome': 'failure'}}, 'owner/repo', 'https://github.com/owner/repo/actions/runs/1', raw)
+            text = security.render(out, {'gitleaks': {'outcome': 'failure', 'outputs': {'token': 'DO_NOT_PUBLISH_STEP_OUTPUT'}}}, 'owner/repo', 'https://github.com/owner/repo/actions/runs/1', raw)
             for p in out.iterdir():
                 self.assertNotIn('DO_NOT_PUBLISH', p.read_text())
             self.assertIn('/blob/' + 'a' * 40 + '/fixtures/example.py#L12', text)
@@ -82,6 +84,29 @@ class Diagnostics(unittest.TestCase):
         }]}]})
         self.assertNotIn('DO_NOT_PUBLISH', json.dumps(rows))
         self.assertEqual(rows[0]['StartLine'], 3)
+
+    def test_lint_report_excludes_snippet_and_message(self):
+        rows = security.actionlint_findings([{
+            'filepath': '.github/workflows/ci.yml', 'line': 12, 'column': 9,
+            'message': 'SC2086: DO_NOT_PUBLISH_MESSAGE', 'snippet': 'DO_NOT_PUBLISH_SOURCE', 'kind': 'shellcheck',
+        }])
+        self.assertNotIn('DO_NOT_PUBLISH', json.dumps(rows))
+        self.assertEqual(rows[0]['Rule'], 'SC2086')
+        self.assertIn('Quote expansions', rows[0]['Guidance'])
+
+    def test_success_without_evidence_fails_reporting(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            env = {
+                'SECURITY_STEPS': json.dumps({'gitleaks': {'outcome': 'success'}}),
+                'GITHUB_REPOSITORY': 'owner/repo', 'GITHUB_RUN_ID': '1',
+                'REPORT_DIR': str(root / 'out'), 'RAW_REPORT_DIR': str(root / 'raw'),
+                'GITHUB_STEP_SUMMARY': str(root / 'summary.md'),
+            }
+            with patch.dict(os.environ, env):
+                with self.assertRaises(RuntimeError):
+                    security.main()
+            self.assertIn('No report was produced', (root / 'summary.md').read_text())
 
 if __name__ == '__main__':
     unittest.main()
