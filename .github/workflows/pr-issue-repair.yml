@@ -1,6 +1,8 @@
 name: Autonomous PR issue repair
 permissions:
   actions: read
+  checks: read
+  statuses: read
   contents: read
   issues: write
   pull-requests: write
@@ -10,7 +12,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   route_verified_issue:
-    if: ${{ (github.event_name != 'issue_comment' || github.event.issue.pull_request) && (github.event_name != 'workflow_run'
+    if: ${{ (github.event_name != 'issue_comment' || (github.event.issue.pull_request && (github.event.comment.user.login == 'kilo-code-bot[bot]' || github.event.comment.user.login == 'kilo-code-bot' || github.event.comment.user.login == 'chatgpt-codex-connector[bot]' || github.event.comment.user.login == 'chatgpt-codex-connector' || (vars.KILO_REPAIR_PR_LOGIN != '' && github.event.comment.user.login == vars.KILO_REPAIR_PR_LOGIN) || contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)))) && (github.event_name != 'workflow_run'
       || github.event.workflow_run.event == 'pull_request') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15

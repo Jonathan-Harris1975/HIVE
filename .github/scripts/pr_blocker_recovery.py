@@ -58,7 +58,7 @@ def required_checks_pass(pr):
     # GitHub supplies the effective native branch requirements. Never infer them
     # from workflow names or accept an empty requirement set as approval.
     branch = router.urllib.parse.quote(router.DEFAULT, safe="")
-    rules = router.api("GET", f"/repos/{router.REPO}/rules/branches/{branch}")
+    rules = router.all_pages(f"/repos/{router.REPO}/rules/branches/{branch}")
     required = [
         item
         for rule in rules
@@ -216,6 +216,12 @@ def candidate_numbers(event):
     if event.get("pull_request"):
         return [int(event["pull_request"]["number"])]
     if event.get("issue", {}).get("pull_request"):
+        comment = event.get("comment", {})
+        trusted = BOT_REVIEWERS | {login(router.KILO_IMPLEMENTER), login(router.REPAIR_APP_LOGIN)}
+        if login(comment.get("user", {}).get("login")) not in trusted and comment.get(
+            "author_association"
+        ) not in {"OWNER", "MEMBER", "COLLABORATOR"}:
+            return []
         return [int(event["issue"]["number"])]
     requested = event.get("inputs", {}).get("pr_number")
     if requested:

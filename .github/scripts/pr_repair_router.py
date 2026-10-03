@@ -195,15 +195,18 @@ def extract(event: dict) -> tuple[dict, str, list[str]] | None:
     return pr, "review", [evidence]
 
 
-def dispatch(pr: dict, kind: str, findings: list[str]) -> None:
+def dispatch(pr: dict, kind: str, findings: list[str]) -> str:
     number, sha = pr["number"], pr["head"]["sha"]
     marker = f"<!-- kilo-auto-repair:{sha}:{kind} -->"
     comments = all_pages(f"/repos/{REPO}/issues/{number}/comments")
     markers = [c for c in comments if c.get("user", {}).get("login") == "github-actions[bot]" and
                "<!-- kilo-auto-repair:" in (c.get("body") or "")]
-    if any(marker in c["body"] for c in markers) or sum(f":{kind} -->" in c["body"] for c in markers) >= 2:
-        print(f"PR #{number} already has its bounded {kind} repair attempt; skipping.")
-        return
+    if any(marker in c["body"] for c in markers):
+        print(f"PR #{number} already has its current {kind} repair request; skipping.")
+        return 'already-requested'
+    if sum(f":{kind} -->" in c["body"] for c in markers) >= 2:
+        print(f"::warning::PR #{number} exhausted its two {kind} repair attempts; inspect the repair agent's results.")
+        return 'attempt-limit'
     url = os.environ.get("KILO_REPAIR_TRIGGER_URL", "")
     if not valid_kilo_webhook_url(url):
         raise RuntimeError("Configure KILO_REPAIR_TRIGGER_URL with this repository's Kilo Cloud Agent webhook trigger")
@@ -213,7 +216,7 @@ def dispatch(pr: dict, kind: str, findings: list[str]) -> None:
     destination = ("Update this existing Kilo PR branch; do not open a replacement PR. " if existing_kilo_pr else
                    f"Fetch and branch from source PR head {sha}; create one implementation PR to {DEFAULT} "
                    f"including {source} in its PR body. Preserve the source PR's exact commit ancestry. ")
-    blocker_recovery = kind.startswith(('merge-conflict-', 'review-threads-'))
+    blocker_recovery = kind.startswith(('merge-conflict-', 'branch-behind-', 'review-threads-'))
     if blocker_recovery:
         base_sha = kind.rsplit('-', 1)[-1]
         fresh = pr_details(int(number))
@@ -221,11 +224,11 @@ def dispatch(pr: dict, kind: str, findings: list[str]) -> None:
         if (not fresh or fresh['head']['sha'] != sha or current_base != base_sha or
                 {x.get('name') for x in fresh.get('labels', [])} & {'hold', 'do-not-merge', 'needs-manual-review', 'autonomy:human-hold'}):
             print(f"PR #{number} or its base moved before dispatch; defer to the next sweep.")
-            return
+            return 'changed-before-dispatch'
         destination = (
             f"Update the existing source PR branch {pr['head']['ref']} in place. "
             f"Fetch current source head {sha} and target base {base_sha}; refuse if either moved. "
-            "For a merge conflict, merge the target base, resolve by preserving both changes' intent, "
+            "For a merge conflict or behind branch, merge the target base, resolve by preserving both changes' intent, "
             "retain scanner/reporting and safety tests, validate and push a normal fast-forward update. "
             "Never force-push, overwrite unrelated work, or open a replacement PR. "
             "For review blockers, inspect each linked thread against current code AND live configuration. "
@@ -262,6 +265,7 @@ def dispatch(pr: dict, kind: str, findings: list[str]) -> None:
         f"{marker}\nAutonomous Kilo repair requested for the current {kind} findings. "
         "The source PR remains governed by its normal checks."})
     print(f"Sent {kind} repair for PR #{number} at {sha[:12]} to Kilo.")
+    return 'requested'
 
 
 def main() -> None:
