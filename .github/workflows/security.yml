@@ -26,6 +26,8 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      - name: Verify branch PR safety and idempotency
+        run: python3 .github/scripts/test_branch_pr_automation.py
       - name: Verify autonomy lifecycle regressions
         run: |
           python3 .github/scripts/test_autonomy_lifecycle.py
@@ -134,3 +136,4 @@ jobs:
           set -euo pipefail
           "$SCORECARD_BIN" --repo="github.com/${GITHUB_REPOSITORY}" --format=json --show-details > scorecard.json
           cat scorecard.json
+
