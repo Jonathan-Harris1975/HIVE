@@ -1,0 +1,34 @@
+name: Branch PR signal
+
+on:
+  push:
+    branches:
+      - "fix/**"
+      - "feat/**"
+      - "chore/**"
+      - "ci/**"
+      - "work/**"
+      - "codex/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: branch-pr-signal-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  signal:
+    if: ${{ github.ref_name != github.event.repository.default_branch }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Publish safe branch signal
+        env:
+          SOURCE_BRANCH: ${{ github.ref_name }}
+          SOURCE_SHA: ${{ github.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'Approved branch signal: %s@%s -> %s\n' "$SOURCE_BRANCH" "$SOURCE_SHA" "$DEFAULT_BRANCH"
