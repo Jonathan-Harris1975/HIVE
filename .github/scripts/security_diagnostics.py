@@ -51,6 +51,26 @@ def trivy_findings(data):
     return findings
 
 
+def actionlint_findings(data):
+    notes = {
+        'SC2086': 'Quote expansions to prevent word splitting and globbing.',
+        'SC2034': 'Remove or use the unused variable.',
+        'SC2155': 'Declare and assign separately so failures remain visible.',
+        'SC2016': 'Check whether literal text or shell interpolation is intended.',
+        'SC2129': 'Combine repeated redirects where appropriate.',
+    }
+    rows = []
+    for item in data or []:
+        rule = re.search(r'SC[0-9]{4}', item.get('message', ''))
+        rule = rule.group(0) if rule else str(item.get('kind', 'workflow-lint'))
+        rows.append({
+            'File': item.get('filepath', ''), 'Line': item.get('line', ''),
+            'Column': item.get('column', ''), 'Rule': rule,
+            'Guidance': notes.get(rule, 'Open the workflow lint step for the full error; check the workflow syntax or expression.'),
+        })
+    return rows
+
+
 def source_link(repo, finding):
     commit = str(finding.get('Commit', ''))
     if not re.fullmatch('[0-9a-fA-F]{40}', commit):
@@ -103,16 +123,35 @@ def render(report_dir, steps, repo, run_url, raw_dir):
                   '| Type / ID | Severity | Target | Package / lines | Installed | Fix / resolution |', '|---|---|---|---|---|---|']
         for f in vulnerabilities[:100]:
             location = f.get('Package') or f'{f.get("StartLine", "")}–{f.get("EndLine", "")}'
-            lines.append(f'| {cell(f["Kind"])} / {cell(f["ID"])} | {cell(f["Severity"])} | {cell(f["Target"])} | {cell(location)} | {cell(f.get("Installed", ""))} | {cell(f.get("Fixed") or f.get("Resolution", ""))} |')
+            lines.append(
+                f'| {cell(f["Kind"])} / {cell(f["ID"])} | {cell(f["Severity"])} | {cell(f["Target"])} | '
+                f'{cell(location)} | {cell(f.get("Installed", ""))} | '
+                f'{cell(f.get("Fixed") or f.get("Resolution", ""))} |'
+            )
         if len(vulnerabilities) > 100:
             lines += ['', 'First 100 shown; download the artifact for every finding.']
+    lines += ['', '## Workflow lint', '']
+    data, error = read_report(raw_dir / 'actionlint.json', list)
+    lint = actionlint_findings(data) if data is not None else []
+    (report_dir / 'workflow-lint-findings.json').write_text(json.dumps(lint, indent=2) + '\n')
+    if error:
+        lines.append(error)
+    else:
+        lines += [f'**{len(lint)} workflow lint findings.**', '',
+                  '| File | Line / column | Rule | Guidance |', '|---|---|---|---|']
+        for item in lint[:100]:
+            lines.append(
+                f'| {cell(item["File"])} | {cell(item["Line"])} / {cell(item["Column"])} | '
+                f'{cell(item["Rule"])} | {cell(item["Guidance"])} |'
+            )
     lines += ['', '## Other failures', '',
               'Workflow lint and repository-policy errors remain in their named step logs with file/line details. A missing report is never presented as a clean scan.',
               'The separate **Deployment failure diagnostics** workflow lists failed/cancelled jobs and steps for completed workflow runs after it is installed on the default branch.',
               '', 'Download **security-diagnostics** from this run’s Artifacts section for the Markdown report and metadata-only JSON.']
     result = '\n'.join(lines) + '\n'
     (report_dir / 'security-findings.md').write_text(result)
-    (report_dir / 'check-outcomes.json').write_text(json.dumps(steps, indent=2) + '\n')
+    outcomes = {name: {key: step.get(key) for key in ('outcome', 'conclusion')} for name, step in steps.items()}
+    (report_dir / 'check-outcomes.json').write_text(json.dumps(outcomes, indent=2) + '\n')
     return result
 
 
@@ -123,7 +162,7 @@ def main():
     text = render(Path(os.environ['REPORT_DIR']), steps, repo, run_url, Path(os.environ['RAW_REPORT_DIR']))
     with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
         summary.write(text)
-    for scanner, kind in (('gitleaks', list), ('trivy', dict)):
+    for scanner, kind in (('gitleaks', list), ('trivy', dict), ('actionlint', list)):
         if steps.get(scanner, {}).get('outcome') == 'success':
             _, error = read_report(Path(os.environ['RAW_REPORT_DIR']) / (scanner + '.json'), kind)
             if error:
