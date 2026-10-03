@@ -1,0 +1,17 @@
+# Native branch PR automation — HIVE
+
+Approved same-repository branches: `fix/**`, `feat/**`, `chore/**`, `ci/**`, `work/**`, `codex/**`. The target is resolved from GitHub's current default branch. Tags, the default branch, dependency-bot namespaces, repair carriers, merge-queue branches and temporary/internal namespaces are excluded. Existing Dependabot, Renovate, Mergify and repair automation retain their own ownership.
+
+The read-only Branch PR signal triggers the existing trusted default-branch controller. The controller never checks out branch or PR code, and reuses the existing autonomous repair bot credentials. GitHub Actions creates PR CI normally with these installation credentials; no new App is installed. Duplicate protection matches source repository, source branch and target branch, including concurrent creation. PR metadata comes from the branch commit. A missing label on a previously created bot PR is repaired on retry. An existing PR created by another actor is reused without taking over merge ownership.
+
+Hourly and manual reconciliation recovers missing signals. Deliberately closed PRs are not recreated by recovery. The exact current head must pass: **CI, CodeQL, Security and repository quality**. Every workflow page and its latest attempt is considered. Drafts, hold/manual-review/superseded/obsolete labels, conflicts and unknown mergeability withhold auto-merge. Metadata events revoke an already armed request on a held managed PR.
+
+Native auto-merge is requested only after GitHub enforces all configured required gate names and checks against the latest target branch. Disabled/evaluation rulesets do not count. Missing, unreadable or insufficient protection withholds merge; there is no immediate-merge or admin bypass fallback. The supported merge method is selected from repository settings. Repositories requiring a native merge queue remain on HOLD until their existing CI is validated for `merge_group`.
+
+Required enforced gate names: **ci-gate, CodeQL security alert gate, Trivy, Gitleaks and actionlint, Hadolint and ShellCheck, Autonomous repair marker gate**. Additional existing rules and review requirements remain enforced by GitHub. The supplied `.github/branch-pr-ruleset.json` is a concrete additive ruleset configuration for the current unprotected branch, with no bypass actors and required checks tied to GitHub Actions. It does not replace existing rules. Review approvals are not newly required, so routine automation does not need owner approval; unresolved review threads still block merging.
+
+Repository settings must retain auto-merge and automatic deletion of merged branches. GitHub deletes eligible merged source branches; the controller never force-deletes a branch. Both settings were enabled during this review.
+
+Run safety tests with `python3 -m unittest discover -s .github/scripts -p 'test_branch_pr_automation.py'`. They are also part of the existing repository security workflow.
+
+Activation requires applying the additive ruleset through an administrator-capable GitHub connection. Committing the JSON alone does not apply it. Verify one harmless approved branch push end to end: one PR; normal PR CI; no duplicate on repeat; native merge after required checks; source deletion after merge. Until live protection and that test are verified, deployment status is HOLD.
