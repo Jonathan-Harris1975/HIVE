@@ -35,11 +35,22 @@ class Recovery(unittest.TestCase):
 
     def test_conflict_routes_even_without_failed_ci(self):
         self.pr.update(mergeable=False,mergeable_state='dirty')
-        with patch.object(m.router,'pr_details',return_value=self.pr),patch.object(m.router,'api',side_effect=self.api),patch.object(m.router,'dispatch') as dispatch,patch.object(m,'review_threads') as threads:
+        with patch.object(m.router,'pr_details',return_value=self.pr),patch.object(m.router,'api',side_effect=self.api),patch.object(m.router,'dispatch',return_value='requested') as dispatch,patch.object(m,'review_threads') as threads:
             result=m.recover(7)
-        self.assertEqual(result['state'],'conflict-routed')
+        self.assertEqual(result['state'],'conflict-requested')
         self.assertEqual(dispatch.call_args.args[1],'merge-conflict-'+'b'*40)
         threads.assert_not_called()
+
+    def test_behind_branch_routes_existing_source_update(self):
+        self.pr['mergeable_state']='behind'
+        with patch.object(m.router,'pr_details',return_value=self.pr),patch.object(m.router,'api',side_effect=self.api),patch.object(m.router,'dispatch',return_value='requested') as dispatch:
+            self.assertEqual(m.recover(7)['state'],'behind-requested')
+        self.assertEqual(dispatch.call_args.args[1],'branch-behind-'+'b'*40)
+
+    def test_exhausted_attempts_are_visible_not_reported_as_requested(self):
+        self.pr['mergeable']=False
+        with patch.object(m.router,'pr_details',return_value=self.pr),patch.object(m.router,'api',side_effect=self.api),patch.object(m.router,'dispatch',return_value='attempt-limit'):
+            self.assertEqual(m.recover(7)['state'],'conflict-attempt-limit')
 
     def test_unknown_mergeability_does_not_guess(self):
         self.pr['mergeable']=None

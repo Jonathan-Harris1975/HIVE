@@ -99,10 +99,13 @@ def recover(number):
     if pr.get('mergeable') is False or pr.get('mergeable_state') == 'dirty':
         # Include base SHA in the deduplication identity: a later base change is
         # a new conflict, rather than a lifetime two-attempt limit for this PR.
-        router.dispatch(pr, 'merge-conflict-' + base, [f'Current PR #{number} has merge conflicts at head {sha} against base {base}.'])
-        return {'pr': number, 'state': 'conflict-routed', 'head': sha, 'base': base}
+        request = router.dispatch(pr, 'merge-conflict-' + base, [f'Current PR #{number} has merge conflicts at head {sha} against base {base}.'])
+        return {'pr': number, 'state': 'conflict-' + request, 'head': sha, 'base': base}
     if pr.get('mergeable') is not True:
         return {'pr': number, 'state': 'mergeability-pending'}
+    if pr.get('mergeable_state') == 'behind':
+        request = router.dispatch(pr, 'branch-behind-' + base, [f'PR #{number} is behind required current base {base}; head is {sha}.'])
+        return {'pr': number, 'state': 'behind-' + request, 'head': sha, 'base': base}
     threads = [t for t in review_threads(number) if not t['isResolved']]
     if not threads:
         return {'pr': number, 'state': 'no-conflict-or-review-blocker'}
@@ -126,12 +129,13 @@ def recover(number):
                 raise RuntimeError('Review thread resolution was not confirmed')
             resolved.append(thread['id'])
     remaining = [t for t in bot_threads if t['id'] not in resolved]
+    request = None
     if remaining:
         evidence = [f"Thread {t['id']} at {t['path']}:{t.get('line') or 'historical line'} (outdated={t['isOutdated']}): " +
                     router.review_evidence(t['comments']['nodes'][0]['body'], t['path'])[:3500] for t in remaining]
-        router.dispatch(pr, 'review-threads-' + base, evidence)
+        request = router.dispatch(pr, 'review-threads-' + base, evidence)
     return {'pr': number, 'state': 'review-recovery', 'head': sha, 'base': base,
-            'resolved': resolved, 'bot_threads_remaining': len(remaining), 'human_threads_remaining': len(threads) - len(bot_threads)}
+            'resolved': resolved, 'request_status': request, 'bot_threads_remaining': len(remaining), 'human_threads_remaining': len(threads) - len(bot_threads)}
 
 
 def candidate_numbers(event):
