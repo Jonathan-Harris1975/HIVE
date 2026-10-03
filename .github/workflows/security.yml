@@ -25,6 +25,10 @@ jobs:
       run: |
         python3 .github/scripts/test_autonomy_lifecycle.py
         python3 .github/scripts/test_weekend_orchestrator.py
+    - name: Verify PR blocker recovery regressions
+      id: blocker_recovery_tests
+      continue-on-error: true
+      run: python3 .github/scripts/test_pr_blocker_recovery.py
     - name: Prepare isolated diagnostic paths
       run: mkdir -p "$RUNNER_TEMP/security-raw" "$RUNNER_TEMP/security-diagnostics"
     - name: Test diagnostic redaction and failure handling
