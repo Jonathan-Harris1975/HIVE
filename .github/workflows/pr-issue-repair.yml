@@ -1,91 +1,147 @@
 name: Autonomous PR issue repair
-
-on:
-  workflow_run:
-    workflows: ["CI", "CodeQL", "Security and repository quality"]
-    types: [completed]
-  issue_comment:
-    types: [created]
-  pull_request_review:
-    types: [submitted]
-  pull_request_review_comment:
-    types: [created]
-
-permissions:
-  actions: read
-  contents: read
-  issues: write
-  pull-requests: read
-  security-events: read
-
 concurrency:
   group: kilo-pr-repair-${{ github.repository }}
   cancel-in-progress: false
-
 jobs:
-  route_verified_issue:
-    if: >-
-      ${{
-        (github.event_name != 'issue_comment' ||
-         (github.event.issue.pull_request &&
-          (github.event.comment.user.type != 'Bot' ||
-           github.event.comment.user.login == (vars.KILO_REPAIR_PR_LOGIN || 'kilo-code-bot[bot]')))) &&
-        (github.event_name != 'workflow_run' ||
-         (github.event.workflow_run.event == 'pull_request' &&
-          github.event.workflow_run.conclusion == 'failure'))
-      }}
+  authenticate_actor:
+    if: ${{ (github.event_name != 'issue_comment' || github.event.issue.pull_request) && (github.event_name != 'workflow_run'
+      || github.event.workflow_run.event == 'pull_request') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      trusted: ${{ steps.actor.outputs.trusted }}
+      repair_app_login: ${{ steps.repair_app.outputs.login }}
     steps:
-      - name: Check out trusted router from default branch
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event.repository.default_branch }}
-          persist-credentials: false
-      - name: Discover installed repair App login
-        id: repair_app
-        env:
-          APP_ID: ${{ vars.AUTONOMY_REPAIR_APP_ID }}
-          APP_PRIVATE_KEY: ${{ secrets.AUTONOMY_REPAIR_APP_PRIVATE_KEY }}
-          REPO: ${{ github.repository }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ ! "${APP_ID:-}" =~ ^[0-9]+$ || -z "${APP_PRIVATE_KEY:-}" ]]; then
-            echo "::notice::Repair App identity is unavailable; carrier-shaped PRs will not be routed."
-            exit 0
-          fi
-          key_file="$(mktemp "${RUNNER_TEMP}/repair-app.XXXXXX")"
-          trap 'rm -f "$key_file"' EXIT
-          printf '%s\n' "$APP_PRIVATE_KEY" > "$key_file"
-          chmod 600 "$key_file"
-          b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
-          now="$(date +%s)"
-          header="$(printf '%s' '{"alg":"RS256","typ":"JWT"}' | b64url)"
-          payload="$(printf '{"iat":%s,"exp":%s,"iss":"%s"}' "$((now - 60))" "$((now + 540))" "$APP_ID" | b64url)"
-          unsigned="${header}.${payload}"
-          if ! signature="$(printf '%s' "$unsigned" | openssl dgst -sha256 -sign "$key_file" -binary | b64url)"; then
-            echo "::notice::Could not verify repair App identity."
-            exit 0
-          fi
-          if ! installation="$(curl --fail --silent --show-error --connect-timeout 5 --max-time 30 \
-            --header 'Accept: application/vnd.github+json' \
-            --header "Authorization: Bearer ${unsigned}.${signature}" \
-            --header 'X-GitHub-Api-Version: 2022-11-28' \
-            "https://api.github.com/repos/${REPO}/installation")"; then
-            echo "::notice::Could not verify repair App installation."
-            exit 0
-          fi
-          if ! slug="$(jq -er '.app_slug | select(test("^[a-z0-9][a-z0-9-]*$"))' <<< "$installation")"; then
-            echo "::notice::Could not verify repair App login."
-            exit 0
-          fi
-          printf 'login=%s[bot]\n' "$slug" >> "$GITHUB_OUTPUT"
-      - name: Extract actionable PR findings and start Kilo repair
-        env:
-          GH_TOKEN: ${{ github.token }}
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          KILO_REPAIR_TRIGGER_URL: ${{ secrets.KILO_REPAIR_TRIGGER_URL }}
-          KILO_REPAIR_PR_LOGIN: ${{ vars.KILO_REPAIR_PR_LOGIN }}
-          REPAIR_APP_LOGIN: ${{ steps.repair_app.outputs.login }}
-        run: python3 .github/scripts/pr_repair_router.py
+    - name: Discover installed repair App login
+      id: repair_app
+      env:
+        APP_ID: ${{ vars.AUTONOMY_REPAIR_APP_ID }}
+        APP_PRIVATE_KEY: ${{ secrets.AUTONOMY_REPAIR_APP_PRIVATE_KEY }}
+        REPO: ${{ github.repository }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [[ ! "${APP_ID:-}" =~ ^[0-9]+$ || -z "${APP_PRIVATE_KEY:-}" ]]; then
+          echo "::notice::Repair App identity is unavailable; carrier-shaped PRs will not be routed."
+          exit 0
+        fi
+        key_file="$(mktemp "${RUNNER_TEMP}/repair-app.XXXXXX")"
+        trap 'rm -f "$key_file"' EXIT
+        printf '%s\n' "$APP_PRIVATE_KEY" > "$key_file"
+        chmod 600 "$key_file"
+        b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
+        now="$(date +%s)"
+        header="$(printf '%s' '{"alg":"RS256","typ":"JWT"}' | b64url)"
+        payload="$(printf '{"iat":%s,"exp":%s,"iss":"%s"}' "$((now - 60))" "$((now + 540))" "$APP_ID" | b64url)"
+        unsigned="${header}.${payload}"
+        if ! signature="$(printf '%s' "$unsigned" | openssl dgst -sha256 -sign "$key_file" -binary | b64url)"; then
+          echo "::notice::Could not verify repair App identity."
+          exit 0
+        fi
+        if ! installation="$(curl --fail --silent --show-error --connect-timeout 5 --max-time 30 \
+          --header 'Accept: application/vnd.github+json' \
+          --header "Authorization: Bearer ${unsigned}.${signature}" \
+          --header 'X-GitHub-Api-Version: 2022-11-28' \
+          "https://api.github.com/repos/${REPO}/installation")"; then
+          echo "::notice::Could not verify repair App installation."
+          exit 0
+        fi
+        if ! slug="$(jq -er '.app_slug | select(test("^[a-z0-9][a-z0-9-]*$"))' <<< "$installation")"; then
+          echo "::notice::Could not verify repair App login."
+          exit 0
+        fi
+        printf 'login=%s[bot]\n' "$slug" >> "$GITHUB_OUTPUT"
+    - name: Authenticate comment and review actor
+      id: actor
+      env:
+        EVENT_NAME: ${{ github.event_name }}
+        ACTOR_LOGIN: ${{ github.event.review.user.login || github.event.comment.user.login }}
+        ACTOR_ASSOCIATION: ${{ github.event.review.author_association || github.event.comment.author_association }}
+        KILO_LOGIN: ${{ vars.KILO_REPAIR_PR_LOGIN }}
+        REPAIR_LOGIN: ${{ steps.repair_app.outputs.login }}
+      run: |-
+        python3 - <<'PYCODE'
+        import os
+        interactive = os.environ['EVENT_NAME'] in {'issue_comment', 'pull_request_review', 'pull_request_review_comment'}
+        known = {'kilo-code-bot', 'kilo-code-bot[bot]', 'chatgpt-codex-connector', 'chatgpt-codex-connector[bot]', os.environ['KILO_LOGIN'], os.environ['REPAIR_LOGIN']} - {''}
+        trusted = (not interactive or os.environ['ACTOR_LOGIN'] in known or os.environ['ACTOR_ASSOCIATION'] in {'OWNER', 'MEMBER', 'COLLABORATOR'})
+        with open(os.environ['GITHUB_OUTPUT'], 'a') as stream:
+            stream.write('trusted=' + str(trusted).lower() + '\n')
+        PYCODE
+  route_verified_issue:
+    if: ${{ needs.authenticate_actor.outputs.trusted == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+    - name: Check out trusted router from default branch
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        ref: ${{ github.event.repository.default_branch }}
+        persist-credentials: false
+    - name: Verify blocker recovery safety
+      run: python3 .github/scripts/test_pr_blocker_recovery.py
+    - name: Extract actionable PR findings and start Kilo repair
+      env:
+        GH_TOKEN: ${{ github.token }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        KILO_REPAIR_TRIGGER_URL: ${{ secrets.KILO_REPAIR_TRIGGER_URL }}
+        KILO_REPAIR_PR_LOGIN: ${{ vars.KILO_REPAIR_PR_LOGIN }}
+        REPAIR_APP_LOGIN: ${{ needs.authenticate_actor.outputs.repair_app_login }}
+      run: python3 .github/scripts/pr_repair_router.py
+    - name: Recover merge conflicts and verified review blockers
+      env:
+        GH_TOKEN: ${{ github.token }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        KILO_REPAIR_TRIGGER_URL: ${{ secrets.KILO_REPAIR_TRIGGER_URL }}
+        KILO_REPAIR_PR_LOGIN: ${{ vars.KILO_REPAIR_PR_LOGIN }}
+        REPAIR_APP_LOGIN: ${{ needs.authenticate_actor.outputs.repair_app_login }}
+      run: python3 .github/scripts/pr_blocker_recovery.py
+    - name: Preserve PR blocker recovery report
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: pr-blocker-recovery-${{ github.run_id }}-${{ github.run_attempt }}
+        path: pr-blocker-recovery.json
+        retention-days: 30
+        if-no-files-found: warn
+    needs: authenticate_actor
+    permissions:
+      actions: read
+      checks: read
+      statuses: read
+      contents: read
+      issues: write
+      pull-requests: write
+      security-events: read
+'on':
+  workflow_run:
+    workflows:
+    - CI
+    - CodeQL
+    - Security and repository quality
+    types:
+    - completed
+  issue_comment:
+    types:
+    - created
+  pull_request_review:
+    types:
+    - submitted
+  pull_request_review_comment:
+    types:
+    - created
+  push:
+    branches:
+    - main
+  schedule:
+  - cron: 11,31,51 * * * *
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Optional PR number; blank checks all eligible open PRs
+        required: false
+        type: string
+permissions:
+  contents: read
