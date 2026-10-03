@@ -1,112 +1,133 @@
 name: Security and repository quality
-
-on:
-  pull_request:
-  # Default-branch evidence is produced by the weekend orchestrator (dispatch) just before
-  # the Council run, not on every push to main.
-  workflow_dispatch:
-
+'on':
+  pull_request: null
+  workflow_dispatch: null
 permissions:
   contents: read
-
 concurrency:
   group: hive-security-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-
 env:
-  SCORECARD_VERSION: '5.5.0'
-
+  SCORECARD_VERSION: 5.5.0
 jobs:
   repository_security:
     name: Trivy, Gitleaks and actionlint
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - name: Checkout repository with full history
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      - name: Verify branch PR safety and idempotency
-        run: python3 .github/scripts/test_branch_pr_automation.py
-      - name: Verify autonomy lifecycle regressions
-        run: |
-          python3 .github/scripts/test_autonomy_lifecycle.py
-          python3 .github/scripts/test_weekend_orchestrator.py
-      - name: Install pinned CI tools
-        run: python scripts/install_ci_tools.py trivy gitleaks actionlint
-      - name: Trivy filesystem vulnerability and misconfiguration scan
-        run: >-
-          .ci-tools/bin/trivy fs .
-          --scanners vuln,misconfig
-          --severity HIGH,CRITICAL
-          --ignore-unfixed
-          --exit-code 1
-          --no-progress
-      - name: Gitleaks secret scan (PR range on pull requests, full history weekly)
-        id: gitleaks
-        continue-on-error: true
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set -euo pipefail
-          args=(git . --redact --no-banner --report-format json --report-path gitleaks-report.json --exit-code 1)
-          if [ "$EVENT_NAME" = "pull_request" ] && [ -n "$BASE_SHA" ] && [ -n "$HEAD_SHA" ]; then
-            args+=(--log-opts="${BASE_SHA}..${HEAD_SHA}")
-          fi
-          .ci-tools/bin/gitleaks "${args[@]}"
-      - name: Upload redacted Gitleaks diagnostic report
-        if: always() && hashFiles('gitleaks-report.json') != ''
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: gitleaks-redacted-diagnostic-${{ github.run_id }}
-          path: gitleaks-report.json
-          if-no-files-found: error
-          retention-days: 14
-      - name: Enforce Gitleaks result
-        if: steps.gitleaks.outcome == 'failure'
-        run: |
-          echo 'Gitleaks detected potential secrets. Download the redacted diagnostic artifact for rule, file, commit, line and fingerprint metadata.' >&2
-          exit 1
-      - name: Validate GitHub Actions workflows
-        run: .ci-tools/bin/actionlint -color
-
+    - name: Checkout repository with full history
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        fetch-depth: 0
+    - name: Verify branch PR safety and idempotency
+      run: python3 .github/scripts/test_branch_pr_automation.py
+    - name: Verify autonomy lifecycle regressions
+      run: |
+        python3 .github/scripts/test_autonomy_lifecycle.py
+        python3 .github/scripts/test_weekend_orchestrator.py
+    - name: Prepare isolated diagnostic paths
+      run: mkdir -p "$RUNNER_TEMP/security-raw" "$RUNNER_TEMP/security-diagnostics"
+    - name: Test diagnostic redaction and failure handling
+      id: security_tests
+      run: python3 .github/scripts/test_security_diagnostics.py
+    - name: Install pinned CI tools
+      run: python scripts/install_ci_tools.py trivy gitleaks actionlint
+      id: install_security_tools
+    - name: Trivy filesystem vulnerability and misconfiguration scan
+      run: .ci-tools/bin/trivy fs . --scanners vuln,misconfig --severity HIGH,CRITICAL --ignore-unfixed --exit-code
+        1 --no-progress --format json --output "$RUNNER_TEMP/security-raw/trivy.json"
+      id: trivy
+      continue-on-error: true
+      if: ${{ !cancelled() && steps.install_security_tools.outcome == 'success' }}
+    - name: Gitleaks secret scan (PR range on pull requests, full history weekly)
+      id: gitleaks
+      continue-on-error: true
+      env:
+        EVENT_NAME: ${{ github.event_name }}
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      run: |
+        set -uo pipefail
+        set +e
+        args=(git . --redact=100 --no-banner --report-format json --report-path "$RUNNER_TEMP/security-raw/gitleaks.json" --exit-code 42)
+        if [ "$EVENT_NAME" = "pull_request" ] && [ -n "$BASE_SHA" ] && [ -n "$HEAD_SHA" ]; then
+          args+=(--log-opts="${BASE_SHA}..${HEAD_SHA}")
+        fi
+        .ci-tools/bin/gitleaks "${args[@]}"
+        status=$?
+        if [ "$status" -eq 42 ]; then
+          echo '::error::Potential secrets detected. See the Security findings and deployment blockers summary and security-diagnostics artifact.'
+        elif [ "$status" -ne 0 ]; then
+          echo "::error::Gitleaks execution failed (exit $status); this is an operational error, not a finding count. Inspect this step."
+        fi
+        exit "$status"
+      if: ${{ !cancelled() && steps.install_security_tools.outcome == 'success' }}
+      shell: bash
+    - name: Validate GitHub Actions workflows
+      run: .ci-tools/bin/actionlint -color
+      id: actionlint
+      continue-on-error: true
+      if: ${{ !cancelled() && steps.install_security_tools.outcome == 'success' }}
+    - name: Publish actionable security findings
+      if: always()
+      env:
+        SECURITY_STEPS: ${{ toJSON(steps) }}
+        RAW_REPORT_DIR: ${{ runner.temp }}/security-raw
+        REPORT_DIR: ${{ runner.temp }}/security-diagnostics
+      run: python3 .github/scripts/security_diagnostics.py
+    - name: Upload metadata-only diagnostic reports
+      if: always()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      with:
+        name: security-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+        path: ${{ runner.temp }}/security-diagnostics/
+        retention-days: 30
+        if-no-files-found: error
+    - name: Enforce all scanner results
+      if: always()
+      env:
+        SECURITY_STEPS: ${{ toJSON(steps) }}
+      run: |-
+        python3 - <<'PYCODE'
+        import json
+        import os
+        steps = json.loads(os.environ['SECURITY_STEPS'])
+        failed = [name for name, step in steps.items() if step.get('outcome') in ('failure', 'cancelled')]
+        if failed:
+            print('::error::Security check blocked by: ' + ', '.join(failed) + '. Open the job summary and diagnostic artifact for details.')
+            raise SystemExit(1)
+        for name in ('gitleaks', 'trivy', 'actionlint'):
+            if steps.get(name, {}).get('outcome') != 'success':
+                print('::error::Required scanner did not complete successfully: ' + name)
+                raise SystemExit(1)
+        PYCODE
   container_and_shell_quality:
     name: Hadolint and ShellCheck
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install pinned Docker and shell linters
-        run: python scripts/install_ci_tools.py hadolint shellcheck
-      - name: Lint Dockerfile
-        run: .ci-tools/bin/hadolint Dockerfile
-      - name: Lint operational shell scripts
-        run: .ci-tools/bin/shellcheck scripts/production_smoke.sh scripts/start.sh scripts/smoke.sh
-
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+    - name: Install pinned Docker and shell linters
+      run: python scripts/install_ci_tools.py hadolint shellcheck
+    - name: Lint Dockerfile
+      run: .ci-tools/bin/hadolint Dockerfile
+    - name: Lint operational shell scripts
+      run: .ci-tools/bin/shellcheck scripts/production_smoke.sh scripts/start.sh scripts/smoke.sh
   link_integrity:
     name: Lychee link integrity
-    # Links change on the internet, not with a pull request: weekly evidence run only.
     if: github.event_name != 'pull_request'
     continue-on-error: true
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install pinned Lychee
-        continue-on-error: true
-        run: python scripts/install_ci_tools.py lychee
-      - name: Check repository links
-        continue-on-error: true
-        run: >-
-          .ci-tools/bin/lychee
-          --no-progress
-          --cache
-          --max-retries 2
-          --timeout 20
-          README.md SECURITY.md CONTEXT_RESILIENCE.md docs
-
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+    - name: Install pinned Lychee
+      continue-on-error: true
+      run: python scripts/install_ci_tools.py lychee
+    - name: Check repository links
+      continue-on-error: true
+      run: .ci-tools/bin/lychee --no-progress --cache --max-retries 2 --timeout 20 README.md SECURITY.md CONTEXT_RESILIENCE.md
+        docs
   scorecard:
     name: OpenSSF Scorecard
     continue-on-error: true
@@ -118,22 +139,21 @@ jobs:
       actions: read
       checks: read
     steps:
-      - name: Install pinned Scorecard CLI from source
-        continue-on-error: true
-        env:
-          GOBIN: ${{ runner.temp }}/scorecard-bin
-        run: |
-          set -euo pipefail
-          mkdir -p "$GOBIN"
-          go install "github.com/ossf/scorecard/v5@v${SCORECARD_VERSION}"
-          "$GOBIN/scorecard" version
-      - name: Run OpenSSF Scorecard
-        continue-on-error: true
-        env:
-          GITHUB_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SCORECARD_BIN: ${{ runner.temp }}/scorecard-bin/scorecard
-        run: |
-          set -euo pipefail
-          "$SCORECARD_BIN" --repo="github.com/${GITHUB_REPOSITORY}" --format=json --show-details > scorecard.json
-          cat scorecard.json
-
+    - name: Install pinned Scorecard CLI from source
+      continue-on-error: true
+      env:
+        GOBIN: ${{ runner.temp }}/scorecard-bin
+      run: |
+        set -euo pipefail
+        mkdir -p "$GOBIN"
+        go install "github.com/ossf/scorecard/v5@v${SCORECARD_VERSION}"
+        "$GOBIN/scorecard" version
+    - name: Run OpenSSF Scorecard
+      continue-on-error: true
+      env:
+        GITHUB_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        SCORECARD_BIN: ${{ runner.temp }}/scorecard-bin/scorecard
+      run: |
+        set -euo pipefail
+        "$SCORECARD_BIN" --repo="github.com/${GITHUB_REPOSITORY}" --format=json --show-details > scorecard.json
+        cat scorecard.json
