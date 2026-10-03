@@ -213,15 +213,16 @@ def recover(number):
 
 
 def candidate_numbers(event):
-    if event.get("pull_request"):
-        return [int(event["pull_request"]["number"])]
-    if event.get("issue", {}).get("pull_request"):
-        comment = event.get("comment", {})
+    actor = event.get("review") or event.get("comment")
+    if actor and (event.get("pull_request") or event.get("issue", {}).get("pull_request")):
         trusted = BOT_REVIEWERS | {login(router.KILO_IMPLEMENTER), login(router.REPAIR_APP_LOGIN)}
-        if login(comment.get("user", {}).get("login")) not in trusted and comment.get(
+        if login(actor.get("user", {}).get("login")) not in trusted and actor.get(
             "author_association"
         ) not in {"OWNER", "MEMBER", "COLLABORATOR"}:
             return []
+    if event.get("pull_request"):
+        return [int(event["pull_request"]["number"])]
+    if event.get("issue", {}).get("pull_request"):
         return [int(event["issue"]["number"])]
     requested = event.get("inputs", {}).get("pr_number")
     if requested:
