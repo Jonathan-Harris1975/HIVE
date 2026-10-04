@@ -1,8 +1,8 @@
 name: Council merge window
 on:
-  pull_request_target:
+  pull_request_target: # zizmor: ignore[dangerous-triggers] -- protected controller; see ../scripts/council-trigger-audit.md
     types: [opened, reopened, synchronize, ready_for_review, converted_to_draft, labeled, unlabeled]
-  workflow_run:
+  workflow_run: # zizmor: ignore[dangerous-triggers] -- protected controller; see ../scripts/council-trigger-audit.md
     workflows: [CI, Repository Council completion]
     types: [completed]
   schedule:
