@@ -27,3 +27,5 @@ Dependabot security-update PR creation is OFF in live repository settings; alert
 ## Council completion receipt
 
 `council-completion.yml` verifies an authenticated Kilo App completion against live canonical exact-SHA workflows, deployment evidence and existing DAST opt-in before retaining a receipt and publishing `Repository Council acceptance`. The configured Kilo identity uses the existing `KILO_REPAIR_PR_LOGIN`; no new App permissions or external callback endpoint are added. Receipt delivery is not live-proved and the persistent freeze/consumer remains unfinished. A successful Council dispatch alone cannot certify or release an envelope.
+
+The read-only `accepted_receipt` consumer revalidates the current default head and live evidence, checks a completed canonical verifier run, checks the retained receipt digest and rejects receipts predating the envelope start. A Kilo-written status alone cannot authenticate acceptance. Twenty-three receipt publisher/consumer tests pass locally. The consumer is not yet connected to a persistent merge-freeze controller.

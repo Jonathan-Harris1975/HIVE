@@ -206,6 +206,83 @@ def verify(
     }
 
 
+def accepted_receipt(api, policy, repo, kilo_login, dast_enabled, not_before):
+    """Consume only the trusted completed workflow's retained current receipt.
+
+    ``not_before`` is the persistent envelope start supplied by its controller.
+    Returning a receipt does not change a branch, label or merge setting.
+    """
+    default = api.request("")["default_branch"]
+    target = api.request(f"/commits/{default}")["sha"]
+    statuses = api.pages(f"/commits/{target}/statuses")
+    statuses = [
+        item
+        for item in statuses
+        if item.get("context") == "Repository Council acceptance"
+    ]
+    require(bool(statuses), "No Council acceptance receipt exists for the current SHA")
+    latest = max(statuses, key=lambda item: int(item["id"]))
+    creator = latest.get("creator") or {}
+    require(
+        latest["state"] == "success"
+        and creator.get("login") == "github-actions[bot]"
+        and creator.get("type") == "Bot",
+        "Acceptance was not published by the trusted Actions verifier",
+    )
+    match = re.fullmatch(
+        r"Council ([1-9][0-9]*); verified receipt ([1-9][0-9]*)",
+        latest.get("description") or "",
+    )
+    require(match is not None, "Acceptance receipt identity is malformed")
+    council_id, completion_id = map(int, match.groups())
+    expected_url = f"https://github.com/{repo}/actions/runs/{completion_id}"
+    require(
+        latest.get("target_url") == expected_url,
+        "Acceptance links to a different completion run",
+    )
+    require(
+        latest["created_at"] >= not_before, "Acceptance predates the current envelope"
+    )
+    council = api.request(f"/actions/runs/{council_id}")
+    require(
+        council["created_at"] >= not_before,
+        "Source Council belongs to an older envelope",
+    )
+    completion = api.request(f"/actions/runs/{completion_id}")
+    require(
+        completion["status"] == "completed" and completion["conclusion"] == "success",
+        "Completion verifier has not completed successfully",
+    )
+    receipt = verify(
+        api,
+        policy,
+        target,
+        council_id,
+        completion_id,
+        kilo_login,
+        "READY_FOR_COUNCIL_ACCEPTANCE",
+        dast_enabled,
+    )
+    artifacts = api.pages(f"/actions/runs/{completion_id}/artifacts", "artifacts")
+    expected = f"council-receipt-{target}-{council_id}"
+    matching = [
+        item
+        for item in artifacts
+        if item["name"] == expected
+        and not item["expired"]
+        and re.fullmatch(r"sha256:[0-9a-f]{64}", item.get("digest") or "")
+    ]
+    require(len(matching) == 1, "Missing retained authenticated Council receipt")
+    require(
+        api.request(f"/commits/{default}")["sha"] == target,
+        "Default head changed during receipt consumption",
+    )
+    receipt["receipt_artifact"] = {
+        key: matching[0][key] for key in ("id", "name", "digest")
+    }
+    return receipt
+
+
 def main():
     repo = os.environ["GITHUB_REPOSITORY"]
     api = GitHub(repo, os.environ["GH_TOKEN"])

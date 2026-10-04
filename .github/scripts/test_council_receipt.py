@@ -3,7 +3,7 @@
 import copy
 import unittest
 
-from council_receipt import EvidenceError, verify
+from council_receipt import EvidenceError, accepted_receipt, verify
 
 SHA = "a" * 40
 POLICY = {
@@ -29,6 +29,8 @@ class FakeGitHub:
         }
         self.completion = {
             "workflow_id": 7,
+            "status": "completed",
+            "conclusion": "success",
             "event": "workflow_dispatch",
             "head_branch": "main",
             "head_sha": SHA,
@@ -69,6 +71,25 @@ class FakeGitHub:
             }
         ]
         self.prs = []
+        self.statuses = [
+            {
+                "id": 1,
+                "context": "Repository Council acceptance",
+                "state": "success",
+                "creator": {"login": "github-actions[bot]", "type": "Bot"},
+                "description": "Council 60; verified receipt 70",
+                "target_url": "https://github.com/owner/repo/actions/runs/70",
+                "created_at": "2026-10-04T20:01:00Z",
+            }
+        ]
+        self.receipt_artifacts = [
+            {
+                "id": 2,
+                "name": "council-receipt-" + SHA + "-60",
+                "expired": False,
+                "digest": "sha256:" + "d" * 64,
+            }
+        ]
 
     def request(self, path):
         if path == "":
@@ -84,6 +105,10 @@ class FakeGitHub:
         raise AssertionError(path)
 
     def pages(self, path, key=None):
+        if path == "/commits/" + SHA + "/statuses":
+            return self.statuses
+        if path == "/actions/runs/70/artifacts":
+            return self.receipt_artifacts
         if path == "/actions/runs/60/jobs":
             return [
                 {
@@ -208,6 +233,47 @@ class ReceiptTests(unittest.TestCase):
         self.api.request = changed_head
         with self.assertRaises(EvidenceError):
             self.verify()
+
+    def consume(self, not_before="2026-10-04T18:00:00Z"):
+        return accepted_receipt(
+            self.api, POLICY, "owner/repo", "kilo-code-bot[bot]", True, not_before
+        )
+
+    def test_consumer_requires_authenticated_retained_current_receipt(self):
+        self.assertEqual(self.consume()["receipt_artifact"]["id"], 2)
+
+    def test_consumer_rejects_direct_kilo_status_without_trusted_verifier(self):
+        self.api.statuses[0]["creator"]["login"] = "kilo-code-bot[bot]"
+        with self.assertRaises(EvidenceError):
+            self.consume()
+
+    def test_consumer_rejects_status_linked_to_another_run(self):
+        self.api.statuses[0]["target_url"] = (
+            "https://github.com/owner/repo/actions/runs/99"
+        )
+        with self.assertRaises(EvidenceError):
+            self.consume()
+
+    def test_consumer_rejects_a_previous_envelope(self):
+        with self.assertRaises(EvidenceError):
+            self.consume("2026-10-04T20:00:00Z")
+
+    def test_consumer_rejects_incomplete_verifier(self):
+        self.api.completion["status"] = "in_progress"
+        with self.assertRaises(EvidenceError):
+            self.consume()
+
+    def test_consumer_rejects_missing_retained_receipt(self):
+        self.api.receipt_artifacts = []
+        with self.assertRaises(EvidenceError):
+            self.consume()
+
+    def test_consumer_rejects_newer_failure_over_older_success(self):
+        later = copy.deepcopy(self.api.statuses[0])
+        later.update(id=2, state="failure")
+        self.api.statuses.append(later)
+        with self.assertRaises(EvidenceError):
+            self.consume()
 
     def test_unresolved_repair_blocks_acceptance(self):
         self.api.prs = [{"labels": [{"name": "autonomy:repair"}]}]
