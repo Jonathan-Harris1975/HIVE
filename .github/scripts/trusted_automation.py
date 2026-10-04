@@ -385,16 +385,47 @@ def approve_pr(number: int, sha: str) -> None:
     log(f"Approved PR #{number} at {sha[:12]} after trusted checks passed.")
 
 
-def admit_to_mergify(number: int) -> None:
-    pr = get(f"/repos/{REPO}/pulls/{number}")
-    if pr.get("state") != "open":
+def emit_admission_status(number: int, sha: str, state: str, reason: str) -> None:
+    """Publish an exact-head proof from the trusted default-branch controller only."""
+    token = os.environ.get("ADMISSION_STATUS_TOKEN", "")
+    if not token or not re.fullmatch(r"[0-9a-f]{40}", sha):
+        raise RuntimeError("A scoped admission status token and exact head SHA are required")
+    payload = {"state": state, "context": "Trusted automation admission",
+               "description": reason[:140],
+               "target_url": f"https://github.com/{REPO}/pull/{number}"}
+    req = urllib.request.Request(f"{API}/repos/{REPO}/statuses/{sha}",
+                                 data=json.dumps(payload).encode(), method="POST")
+    req.add_header("Accept", "application/vnd.github+json")
+    req.add_header("Authorization", f"Bearer {token}")
+    req.add_header("X-GitHub-Api-Version", "2022-11-28")
+    req.add_header("Content-Type", "application/json")
+    with urllib.request.urlopen(req, timeout=30) as response:
+        if response.status != 201:
+            raise RuntimeError("Could not publish exact-head admission proof")
+
+
+def revoke_admission(pr: dict[str, Any]) -> None:
+    if "autonomy:admitted" in issue_labels(pr):
+        delete(f"/repos/{REPO}/issues/{pr['number']}/labels/autonomy%3Aadmitted", expected=(200, 204))
+
+
+def admit_to_mergify(number: int, expected_sha: str) -> None:
+    pr = current_head_unchanged(number, expected_sha)
+    if pr is None or pr.get("draft") or pr.get("auto_merge"):
         return
     labels = issue_labels(pr)
-    if "autonomy:admitted" in labels:
-        log(f"PR #{number} is already admitted to Mergify.")
+    if labels.intersection({"dependency:manual", "needs-manual-review", "do-not-merge", "autonomy:human-hold", "autonomy:superseded", "autonomy:obsolete"}):
+        revoke_admission(pr)
         return
-    add_labels(number, ["autonomy:admitted"])
-    log(f"Admitted PR #{number} to Mergify after exact-head CI, CodeQL and security verification.")
+    if automation_kind(pr) == "renovate" and not renovate_auto_eligible(pr):
+        revoke_admission(pr)
+        return
+    emit_admission_status(number, expected_sha, "success", "Exact-head identity, policy and required CI/security verified")
+    if current_head_unchanged(number, expected_sha) is None:
+        return
+    if "autonomy:admitted" not in labels:
+        add_labels(number, ["autonomy:admitted"])
+    log(f"Admitted PR #{number} at {expected_sha[:12]}; Mergify requires the same-head proof.")
 
 
 def reconcile_stale_carriers(open_prs: list[dict[str, Any]]) -> None:
@@ -430,6 +461,9 @@ def reconcile_stale_carriers(open_prs: list[dict[str, Any]]) -> None:
 
 def reconcile_pr(pr: dict[str, Any]) -> None:
     kind = automation_kind(pr)
+    if is_same_repo(pr) and (kind is not None or "autonomy:admitted" in issue_labels(pr)):
+        emit_admission_status(int(pr["number"]), str(pr.get("head", {}).get("sha", "")), "pending", "Revalidating exact-head automation admission")
+        revoke_admission(pr)
     if kind is None or pr.get("draft"):
         return
     labels = issue_labels(pr)
@@ -486,7 +520,7 @@ def reconcile_pr(pr: dict[str, Any]) -> None:
         if current_head_unchanged(number, sha) is None:
             return
 
-    admit_to_mergify(number)
+    admit_to_mergify(number, sha)
 
 
 def main() -> int:

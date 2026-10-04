@@ -38,11 +38,9 @@ jobs:
     - name: Verify branch PR safety and idempotency
       run: python3 .github/scripts/test_branch_pr_automation.py
     - name: Verify autonomy lifecycle regressions
-      run: 'python3 .github/scripts/test_autonomy_lifecycle.py
-
+      run: |
+        python3 .github/scripts/test_autonomy_lifecycle.py
         python3 .github/scripts/test_weekend_orchestrator.py
-
-        '
     - name: Verify PR blocker recovery regressions
       id: blocker_recovery_tests
       continue-on-error: true
@@ -69,7 +67,21 @@ jobs:
         EVENT_NAME: ${{ github.event_name }}
         BASE_SHA: ${{ github.event.pull_request.base.sha }}
         HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-      run: "set -uo pipefail\nset +e\nargs=(git . --gitleaks-ignore-path .gitleaksignore --redact=100 --no-banner --report-format json --report-path \"$RUNNER_TEMP/security-raw/gitleaks.json\" --exit-code 42)\nif [ \"$EVENT_NAME\" = \"pull_request\" ] && [ -n \"$BASE_SHA\" ] && [ -n \"$HEAD_SHA\" ]; then\n  args+=(--log-opts=\"${BASE_SHA}..${HEAD_SHA}\")\nfi\n.ci-tools/bin/gitleaks \"${args[@]}\"\nstatus=$?\nif [ \"$status\" -eq 42 ]; then\n  echo '::error::Potential secrets detected. See the Security findings and deployment blockers summary and security-diagnostics artifact.'\nelif [ \"$status\" -ne 0 ]; then\n  echo \"::error::Gitleaks execution failed (exit $status); this is an operational error, not a finding count. Inspect this step.\"\nfi\nexit \"$status\"\n"
+      run: |
+        set -uo pipefail
+        set +e
+        args=(git . --gitleaks-ignore-path .gitleaksignore --redact=100 --no-banner --report-format json --report-path "$RUNNER_TEMP/security-raw/gitleaks.json" --exit-code 42)
+        if [ "$EVENT_NAME" = "pull_request" ] && [ -n "$BASE_SHA" ] && [ -n "$HEAD_SHA" ]; then
+          args+=(--log-opts="${BASE_SHA}..${HEAD_SHA}")
+        fi
+        .ci-tools/bin/gitleaks "${args[@]}"
+        status=$?
+        if [ "$status" -eq 42 ]; then
+          echo '::error::Potential secrets detected. See the Security findings and deployment blockers summary and security-diagnostics artifact.'
+        elif [ "$status" -ne 0 ]; then
+          echo "::error::Gitleaks execution failed (exit $status); this is an operational error, not a finding count. Inspect this step."
+        fi
+        exit "$status"
       if: ${{ !cancelled() && steps.install_security_tools.outcome == 'success' }}
       shell: bash
     - name: Validate GitHub Actions workflows
@@ -96,7 +108,20 @@ jobs:
       if: always()
       env:
         SECURITY_STEPS: ${{ toJSON(steps) }}
-      run: "python3 - <<'PYCODE'\nimport json\nimport os\nsteps = json.loads(os.environ['SECURITY_STEPS'])\nfailed = [name for name, step in steps.items() if step.get('outcome') in ('failure', 'cancelled')]\nif failed:\n    print('::error::Security check blocked by: ' + ', '.join(failed) + '. Open the job summary and diagnostic artifact for details.')\n    raise SystemExit(1)\nfor name in ('gitleaks', 'trivy', 'actionlint'):\n    if steps.get(name, {}).get('outcome') != 'success':\n        print('::error::Required scanner did not complete successfully: ' + name)\n        raise SystemExit(1)\nPYCODE"
+      run: |-
+        python3 - <<'PYCODE'
+        import json
+        import os
+        steps = json.loads(os.environ['SECURITY_STEPS'])
+        failed = [name for name, step in steps.items() if step.get('outcome') in ('failure', 'cancelled')]
+        if failed:
+            print('::error::Security check blocked by: ' + ', '.join(failed) + '. Open the job summary and diagnostic artifact for details.')
+            raise SystemExit(1)
+        for name in ('gitleaks', 'trivy', 'actionlint'):
+            if steps.get(name, {}).get('outcome') != 'success':
+                print('::error::Required scanner did not complete successfully: ' + name)
+                raise SystemExit(1)
+        PYCODE
   container_and_shell_quality:
     name: Hadolint and ShellCheck
     runs-on: ubuntu-latest
@@ -138,24 +163,17 @@ jobs:
       continue-on-error: true
       env:
         GOBIN: ${{ runner.temp }}/scorecard-bin
-      run: 'set -euo pipefail
-
+      run: |
+        set -euo pipefail
         mkdir -p "$GOBIN"
-
         go install "github.com/ossf/scorecard/v5@v${SCORECARD_VERSION}"
-
         "$GOBIN/scorecard" version
-
-        '
     - name: Run OpenSSF Scorecard
       continue-on-error: true
       env:
         GITHUB_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         SCORECARD_BIN: ${{ runner.temp }}/scorecard-bin/scorecard
-      run: 'set -euo pipefail
-
+      run: |
+        set -euo pipefail
         "$SCORECARD_BIN" --repo="github.com/${GITHUB_REPOSITORY}" --format=json --show-details > scorecard.json
-
         cat scorecard.json
-
-        '
