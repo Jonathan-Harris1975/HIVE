@@ -171,7 +171,8 @@ class Orchestrator:
             head = pr.get("head", {}).get("ref", "")
             login = pr.get("user", {}).get("login", "")
             body = pr.get("body") or ""
-            renovate_auto = (login == RENOVATE_LOGIN and "**Automerge**: Enabled." in body)
+            renovate_auto = (login == RENOVATE_LOGIN and "dependency:auto-eligible" in self.labels(pr)
+                             and "dependency:manual" not in self.labels(pr))
             if (self.labels(pr) & AUTOMATION_LABELS or head.startswith(MERGIFY_QUEUE_PREFIX)
                     or renovate_auto):
                 found.append(pr)

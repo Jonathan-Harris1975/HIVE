@@ -1,0 +1,61 @@
+name: Authenticated Council completion
+on:
+  workflow_dispatch:
+    inputs:
+      target_sha:
+        description: Exact default-branch SHA assessed by Council
+        required: true
+        type: string
+      council_run_id:
+        description: Source Repository Council workflow run ID
+        required: true
+        type: string
+      disposition:
+        description: Completed Council disposition
+        required: true
+        type: choice
+        options:
+          - READY_FOR_COUNCIL_ACCEPTANCE
+          - HUMAN_HOLD
+          - NOT_READY
+permissions:
+  contents: read
+concurrency:
+  group: council-completion-${{ github.repository }}
+  cancel-in-progress: false
+jobs:
+  verify_completion:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+      statuses: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TARGET_SHA: ${{ inputs.target_sha }}
+      COUNCIL_RUN_ID: ${{ inputs.council_run_id }}
+      DISPOSITION: ${{ inputs.disposition }}
+      KILO_COUNCIL_LOGIN: ${{ vars.KILO_REPAIR_PR_LOGIN || 'kilo-code-bot[bot]' }}
+      DAST_ENABLED: ${{ vars.DAST_ENABLED }}
+    steps:
+      - name: Check out trusted completion verifier only
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Authenticate Kilo and independently verify exact-SHA evidence
+        run: python3 .github/scripts/council_receipt.py
+      - name: Retain authenticated completion receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: council-receipt-${{ inputs.target_sha }}-${{ inputs.council_run_id }}
+          path: council-receipt.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Revalidate and publish exact-SHA Council acceptance
+        env:
+          RECEIPT_MODE: publish
+        run: python3 .github/scripts/council_receipt.py

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Admit and merge only verified automation pull requests.
+"""Admit only verified automation pull requests.
 
 Runs from the trusted default-branch workflow. It never checks out or executes PR code.
 """
@@ -31,6 +31,12 @@ URL_END = r"(?![A-Za-z0-9/_-])"
 KILO_SENSITIVE_PREFIXES = (
     ".github/workflows/",
     ".github/actions/",
+    ".github/scripts/",
+    "codecov.yml",
+    "socket.yml",
+    ".council/",
+    ".lychee",
+    "zizmor",
     ".github/CODEOWNERS",
     ".github/dependabot.yml",
     ".mergify.yml",
@@ -138,9 +144,13 @@ def is_renovate(pr: dict[str, Any]) -> bool:
     )
 
 
-def renovate_automerge_enabled(pr: dict[str, Any]) -> bool:
-    return is_renovate(pr) and "**Automerge**: Enabled." in (pr.get("body") or "")
+def renovate_auto_eligible(pr: dict[str, Any]) -> bool:
+    return (is_renovate(pr) and str(pr.get("head", {}).get("ref", "")).startswith("renovate/")
+            and "dependency:auto-eligible" in issue_labels(pr)
+            and not issue_labels(pr).intersection({"dependency:manual", "needs-manual-review", "do-not-merge"}))
 
+
+renovate_automerge_enabled = renovate_auto_eligible
 
 def is_repair_carrier_identity(pr: dict[str, Any]) -> bool:
     """Identify a repair carrier regardless of lifecycle labels."""
@@ -328,6 +338,12 @@ def pr_files(number: int) -> list[str]:
     raise RuntimeError(f"PR #{number} has too many changed files to verify safely")
 
 
+def dependency_manifest(path: str) -> bool:
+    name = path.rsplit("/", 1)[-1]
+    return (name in {"package.json", "package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml", "pyproject.toml", "poetry.lock", "uv.lock", "Pipfile", "Pipfile.lock", "Dockerfile"}
+            or name.startswith("requirements") and name.endswith((".txt", ".in", ".lock")))
+
+
 def sensitive_file(path: str) -> bool:
     if path in KILO_SENSITIVE_EXACT:
         return True
@@ -369,16 +385,47 @@ def approve_pr(number: int, sha: str) -> None:
     log(f"Approved PR #{number} at {sha[:12]} after trusted checks passed.")
 
 
-def admit_to_mergify(number: int) -> None:
-    pr = get(f"/repos/{REPO}/pulls/{number}")
-    if pr.get("state") != "open":
+def emit_admission_status(number: int, sha: str, state: str, reason: str) -> None:
+    """Publish an exact-head proof from the trusted default-branch controller only."""
+    token = os.environ.get("ADMISSION_STATUS_TOKEN", "")
+    if not token or not re.fullmatch(r"[0-9a-f]{40}", sha):
+        raise RuntimeError("A scoped admission status token and exact head SHA are required")
+    payload = {"state": state, "context": "Trusted automation admission",
+               "description": reason[:140],
+               "target_url": f"https://github.com/{REPO}/pull/{number}"}
+    req = urllib.request.Request(f"{API}/repos/{REPO}/statuses/{sha}",
+                                 data=json.dumps(payload).encode(), method="POST")
+    req.add_header("Accept", "application/vnd.github+json")
+    req.add_header("Authorization", f"Bearer {token}")
+    req.add_header("X-GitHub-Api-Version", "2022-11-28")
+    req.add_header("Content-Type", "application/json")
+    with urllib.request.urlopen(req, timeout=30) as response:
+        if response.status != 201:
+            raise RuntimeError("Could not publish exact-head admission proof")
+
+
+def revoke_admission(pr: dict[str, Any]) -> None:
+    if "autonomy:admitted" in issue_labels(pr):
+        delete(f"/repos/{REPO}/issues/{pr['number']}/labels/autonomy%3Aadmitted", expected=(200, 204))
+
+
+def admit_to_mergify(number: int, expected_sha: str) -> None:
+    pr = current_head_unchanged(number, expected_sha)
+    if pr is None or pr.get("draft") or pr.get("auto_merge"):
         return
     labels = issue_labels(pr)
-    if "autonomy:admitted" in labels:
-        log(f"PR #{number} is already admitted to Mergify.")
+    if labels.intersection({"dependency:manual", "needs-manual-review", "do-not-merge", "autonomy:human-hold", "autonomy:superseded", "autonomy:obsolete"}):
+        revoke_admission(pr)
         return
-    add_labels(number, ["autonomy:admitted"])
-    log(f"Admitted PR #{number} to Mergify after exact-head CI, CodeQL and security verification.")
+    if automation_kind(pr) == "renovate" and not renovate_auto_eligible(pr):
+        revoke_admission(pr)
+        return
+    emit_admission_status(number, expected_sha, "success", "Exact-head identity, policy and required CI/security verified")
+    if current_head_unchanged(number, expected_sha) is None:
+        return
+    if "autonomy:admitted" not in labels:
+        add_labels(number, ["autonomy:admitted"])
+    log(f"Admitted PR #{number} at {expected_sha[:12]}; Mergify requires the same-head proof.")
 
 
 def reconcile_stale_carriers(open_prs: list[dict[str, Any]]) -> None:
@@ -414,6 +461,9 @@ def reconcile_stale_carriers(open_prs: list[dict[str, Any]]) -> None:
 
 def reconcile_pr(pr: dict[str, Any]) -> None:
     kind = automation_kind(pr)
+    if is_same_repo(pr) and (kind is not None or "autonomy:admitted" in issue_labels(pr)):
+        emit_admission_status(int(pr["number"]), str(pr.get("head", {}).get("sha", "")), "pending", "Revalidating exact-head automation admission")
+        revoke_admission(pr)
     if kind is None or pr.get("draft"):
         return
     labels = issue_labels(pr)
@@ -425,12 +475,21 @@ def reconcile_pr(pr: dict[str, Any]) -> None:
         log(f"Carrier PR #{pr['number']} is lifecycle evidence; withholding auto-merge.")
         return
 
-    if kind == "renovate" and not renovate_automerge_enabled(pr):
+    if pr.get("auto_merge"):
+        log(f"PR #{pr['number']} is armed for native auto-merge; withholding Mergify admission.")
+        return
+
+    if kind == "renovate" and not renovate_auto_eligible(pr):
         # Major/manual Renovate PRs may run CI automatically, but remain human merge decisions.
         return
 
     if kind == "kilo":
-        sensitive = [path for path in pr_files(int(pr["number"])) if sensitive_file(path)]
+        changed = pr_files(int(pr["number"]))
+        dependency_files = [path for path in changed if dependency_manifest(path)]
+        if dependency_files:
+            place_human_hold(pr, "Renovate owns dependency manifests and locks: " + ", ".join(dependency_files[:8]))
+            return
+        sensitive = [path for path in changed if sensitive_file(path)]
         if sensitive:
             place_human_hold(pr, "the repair changes governance/security automation files: " + ", ".join(sensitive[:8]))
             return
@@ -454,6 +513,36 @@ def reconcile_pr(pr: dict[str, Any]) -> None:
         log(f"PR #{number} changed while being evaluated; waiting for the next reconciliation.")
         return
 
+    # A frozen cycle admits only an implementation linked to an authenticated
+    # carrier for a still-failing current-envelope run. This status is minted
+    # with the existing GitHub Actions status token, not the repair App token.
+    from pathlib import Path
+    import merge_window
+    freeze_api = merge_window.GitHub(REPO, os.environ.get("ADMISSION_STATUS_TOKEN") or TOKEN)
+    freeze_policy = json.loads(Path(".council/receipt-policy.json").read_text())
+    freeze_run = merge_window.anchor(freeze_api, freeze_policy, REPO, DEFAULT_BRANCH)
+    freeze_base = freeze_api.request(f"/commits/{DEFAULT_BRANCH}")["sha"]
+    freeze_closed = bool(freeze_run and merge_window.released(
+        freeze_api, freeze_policy, REPO, freeze_run, DEFAULT_BRANCH, KILO_LOGIN,
+        os.environ.get("DAST_ENABLED", "").lower() == "true"))
+    if freeze_run and not freeze_closed and kind == "kilo":
+        sources = [source for source in list_open_prs() if is_carrier(source)]
+        source_number = linked_kilo_carrier(pr, sources)
+        source = next((source for source in sources if source["number"] == source_number), None)
+        if source is None:
+            return
+        try:
+            merge_window.authorize_repair(freeze_api, freeze_policy, REPO, pr, source,
+                REPAIR_APP_LOGIN, freeze_run, freeze_base, DEFAULT_BRANCH, KILO_LOGIN)
+        except merge_window.EvidenceError as exc:
+            log(f"PR #{number} not an authorised envelope repair: {exc}")
+            return
+    merge_window.publish_pr(freeze_api, freeze_policy, REPO, pr, freeze_run,
+        freeze_base, DEFAULT_BRANCH, KILO_LOGIN, freeze_closed)
+    window_status = merge_window.latest_status(freeze_api, sha, merge_window.CONTEXT)
+    if not merge_window.trusted(window_status):
+        return
+
     # Renovate and Kilo are distinct identities, so the repair App can provide the trusted review.
     # Carrier PRs are authored by the same repair App and GitHub correctly forbids self-approval.
     if kind in {"renovate", "kilo"}:
@@ -461,7 +550,7 @@ def reconcile_pr(pr: dict[str, Any]) -> None:
         if current_head_unchanged(number, sha) is None:
             return
 
-    admit_to_mergify(number)
+    admit_to_mergify(number, sha)
 
 
 def main() -> int:

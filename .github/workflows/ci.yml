@@ -27,6 +27,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 2
       - name: Decide whether runtime gates are needed
         id: diff
@@ -64,6 +65,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -100,6 +103,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.14.7"
@@ -128,6 +133,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.14.7"
@@ -160,6 +167,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
       - name: Build Docker image
         run: docker build --target runtime -t hive:ci .
       - name: Verify runtime engineering binaries
@@ -283,6 +292,8 @@ jobs:
             fi
           done
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Assert checked-out commit is the workflow SHA
         run: |
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
@@ -299,6 +310,8 @@ jobs:
     needs: [release_gate, autonomous_repair_guard]
     if: ${{ always() }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Enforce aggregate CI result
         env:
@@ -312,6 +325,43 @@ jobs:
             test "$REPAIR_GUARD_RESULT" = "success"
           fi
 
+  council_freeze:
+    name: Record final CI evidence freeze
+    needs: [ci_gate]
+    if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && needs.ci_gate.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+      statuses: write
+    concurrency:
+      group: council-window-${{ github.repository }}-default
+      cancel-in-progress: false
+    steps:
+      - name: Check out protected freeze controller
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Freeze ordinary merges before final CI PASS
+        id: freeze
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FREEZE_MODE: record
+          KILO_REPAIR_PR_LOGIN: ${{ vars.KILO_REPAIR_PR_LOGIN }}
+          DAST_ENABLED: ${{ vars.DAST_ENABLED }}
+        run: python3 .github/scripts/merge_window.py
+      - name: Retain authenticated CI freeze marker
+        if: steps.freeze.outputs.artifact != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.freeze.outputs.artifact }}
+          path: council-freeze.json
+          if-no-files-found: error
+          retention-days: 90
+
 
   autonomous_repair_guard:
     name: Autonomous repair marker gate
@@ -320,6 +370,7 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
+          persist-credentials: false
           fetch-depth: 0
       - name: Require autonomous repair request to be resolved
         shell: bash
