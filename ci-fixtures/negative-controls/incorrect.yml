@@ -1,0 +1,9 @@
+name: Incorrect workflow detector fixture
+on: push
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo '${{ nonexistent.context }}'

@@ -1,0 +1,11 @@
+name: Unsafe workflow detector fixture
+on:
+  issues:
+    types: [opened]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "${{ github.event.issue.title }}"

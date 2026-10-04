@@ -28,9 +28,9 @@ class BranchSafety(unittest.TestCase):
             'labels': [{'name': m.MANAGED_LABEL}], 'mergeable': True, 'mergeable_state': 'clean'}
 
     def test_branch_namespaces(self):
-        for branch in ['fix/x', 'feat/x', 'chore/x', 'ci/x', 'work/x', 'codex/x/y']:
+        for branch in ['fix/x', 'feat/x', 'chore/x', 'ci/x', 'work/x']:
             self.assertTrue(m.allowed_branch(branch), branch)
-        for branch in ['main', 'autonomy/repair-1', 'renovate/x', 'dependabot/x', 'mergify/merge-queue/x', 'tmp/x', 'internal/x', 'refs/tags/v1', \
+        for branch in ['main', 'codex/x/y', 'automation/revert', 'autonomy/repair-1', 'renovate/x', 'dependabot/x', 'mergify/merge-queue/x', 'tmp/x', 'internal/x', 'refs/tags/v1', \
             'fix/', 'fix/a..b', 'fix/a//b', 'fix/x;echo']:
             self.assertFalse(m.allowed_branch(branch), branch)
 

@@ -10,15 +10,54 @@ concurrency:
 env:
   SCORECARD_VERSION: 5.5.0
 jobs:
+  dependency_review:
+    name: Dependency Review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+    - name: Block vulnerable dependency changes without choosing versions
+      uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+      with:
+        fail-on-severity: high
+        fail-on-scopes: runtime,development,unknown
+        vulnerability-check: true
+        license-check: false
+        warn-only: false
+        comment-summary-in-pr: never
+        retry-on-snapshot-warnings: true
+        retry-on-snapshot-warnings-timeout: 120
   repository_security:
     name: Trivy, Gitleaks and actionlint
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
+    - name: Observe runner processes and egress
+      uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1
+      with:
+        egress-policy: audit
     - name: Checkout repository with full history
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
         fetch-depth: 0
+        persist-credentials: false
+    - name: Install pinned zizmor
+      run: python3 scripts/install_ci_tools.py zizmor
+    - name: Prove Council completion authentication and stale-evidence rejection
+      run: python3 .github/scripts/test_council_receipt.py
+    - name: Inspect GitHub Actions security posture
+      run: .ci-tools/bin/zizmor --offline .github/workflows
+    - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+      with:
+        node-version: 24.21.0
+    - name: Strict Renovate configuration validation
+      run: npx --yes --package renovate@44.132.5 -- renovate-config-validator --strict renovate.json
+    - name: Verify automation ownership boundaries
+      run: python3 .github/scripts/test_ci_ownership.py
+    - name: Verify fixed weekend windows and DST guards
+      run: python3 .github/scripts/test_weekend_slot.py
     - name: Verify branch PR safety and idempotency
       run: python3 .github/scripts/test_branch_pr_automation.py
     - name: Verify autonomy lifecycle regressions
@@ -37,9 +76,10 @@ jobs:
     - name: Install pinned CI tools
       run: python scripts/install_ci_tools.py trivy gitleaks actionlint
       id: install_security_tools
+    - name: Prove exact Gitleaks ignore and unlisted detection
+      run: python3 .github/scripts/test_gitleaks_ignore.py
     - name: Trivy filesystem vulnerability and misconfiguration scan
-      run: .ci-tools/bin/trivy fs . --scanners vuln,misconfig --severity HIGH,CRITICAL --ignore-unfixed --exit-code
-        1 --no-progress --format json --output "$RUNNER_TEMP/security-raw/trivy.json"
+      run: .ci-tools/bin/trivy fs . --scanners vuln,misconfig --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress --format json --output "$RUNNER_TEMP/security-raw/trivy.json"
       id: trivy
       continue-on-error: true
       if: ${{ !cancelled() && steps.install_security_tools.outcome == 'success' }}
@@ -53,7 +93,7 @@ jobs:
       run: |
         set -uo pipefail
         set +e
-        args=(git . --redact=100 --no-banner --report-format json --report-path "$RUNNER_TEMP/security-raw/gitleaks.json" --exit-code 42)
+        args=(git . --gitleaks-ignore-path .gitleaksignore --redact=100 --no-banner --report-format json --report-path "$RUNNER_TEMP/security-raw/gitleaks.json" --exit-code 42)
         if [ "$EVENT_NAME" = "pull_request" ] && [ -n "$BASE_SHA" ] && [ -n "$HEAD_SHA" ]; then
           args+=(--log-opts="${BASE_SHA}..${HEAD_SHA}")
         fi
@@ -111,6 +151,8 @@ jobs:
     timeout-minutes: 15
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
     - name: Install pinned Docker and shell linters
       run: python scripts/install_ci_tools.py hadolint shellcheck
     - name: Lint Dockerfile
@@ -125,13 +167,14 @@ jobs:
     timeout-minutes: 15
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
     - name: Install pinned Lychee
       continue-on-error: true
       run: python scripts/install_ci_tools.py lychee
     - name: Check repository links
       continue-on-error: true
-      run: .ci-tools/bin/lychee --no-progress --cache --max-retries 2 --timeout 20 README.md SECURITY.md CONTEXT_RESILIENCE.md
-        docs
+      run: .ci-tools/bin/lychee --no-progress --cache --max-retries 2 --timeout 20 README.md SECURITY.md CONTEXT_RESILIENCE.md docs
   scorecard:
     name: OpenSSF Scorecard
     continue-on-error: true

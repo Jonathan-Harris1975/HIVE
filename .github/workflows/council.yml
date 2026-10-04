@@ -114,6 +114,7 @@ jobs:
 
       - name: Dispatch repository Council to Kilo
         env:
+          COUNCIL_RUN_ID: ${{ github.run_id }}
           REPO: ${{ github.repository }}
           TARGET_SHA: ${{ steps.target.outputs.sha }}
           PENDING_MINIMUM_AGE: ${{ inputs.pending_minimum_age || 'unknown' }}
@@ -133,6 +134,7 @@ jobs:
           If a safe repository change is required, make the smallest justified change on one branch and open one PR against the default branch. Do not merge or deploy it yourself.
           If no code change is required, do not create a cosmetic PR.
           Return the Council disposition and evidence in the Kilo task result.
+          Source Council run ID: ${COUNCIL_RUN_ID}. Also deliver the completed disposition through the authenticated completion handoff defined below.
 
           ${prompt}
           EOF
@@ -141,8 +143,9 @@ jobs:
             --arg repository "$REPO" \
             --arg sha "$TARGET_SHA" \
             --arg run "$RUN_URL" \
+            --arg council_run_id "$COUNCIL_RUN_ID" \
             --arg task "$task" \
-            '{repository:$repository,target_sha:$sha,council_run:$run,kind:"repository-council",task:$task}')"
+            '{repository:$repository,target_sha:$sha,council_run:$run,council_run_id:$council_run_id,kind:"repository-council",task:$task}')"
           status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 30 \
             --request POST --header 'Content-Type: application/json' --data "$payload" "$KILO_REPAIR_TRIGGER_URL")"
           if [[ "$status" != 2?? ]]; then

@@ -24,6 +24,13 @@ TOOLS = {
         "binary": "trivy",
         "archive": "tar.gz",
     },
+    "zizmor": {
+        "version": "1.30.1",
+        "url": "https://github.com/zizmorcore/zizmor/releases/download/v1.30.1/zizmor-x86_64-unknown-linux-gnu.tar.gz",
+        "sha256": "e65324f4430c2717591937edcec90ccbefaf14c174f8ec9415e03ca875b46e1a",
+        "binary": "zizmor",
+        "archive": "tar.gz",
+    },
     "gitleaks": {
         "version": "8.30.1",
         "url": "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz",

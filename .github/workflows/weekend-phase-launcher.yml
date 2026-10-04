@@ -1,0 +1,67 @@
+name: Weekend CI phase launcher
+'on':
+  schedule:
+  - cron: 0 11 * * 6
+  - cron: 0 10 * * 6
+  - cron: 0 2 * * 0
+  - cron: 0 1 * * 0
+  - cron: 0 16 * * 0
+  - cron: 0 15 * * 0
+  workflow_dispatch:
+    inputs:
+      phase:
+        description: Phase to dispatch
+        required: true
+        default: ci
+        type: choice
+        options:
+        - ci
+        - dast
+        - council
+permissions:
+  actions: write
+  contents: read
+concurrency:
+  group: weekend-phase-launcher-${{ github.repository }}
+  cancel-in-progress: false
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        ref: ${{ github.event.repository.default_branch }}
+        persist-credentials: false
+    - name: Resolve Europe/London phase slot
+      id: slot
+      env:
+        EVENT_NAME: ${{ github.event_name }}
+        MANUAL_PHASE: ${{ inputs.phase || '' }}
+        SCHEDULE: ${{ github.event.schedule || '' }}
+        CI_START: Sat 11:00
+        DAST_START: Sun 02:00
+        COUNCIL_START: Sun 16:00
+        CI_WORKFLOW: ci.yml
+      shell: bash
+      run: python3 .github/scripts/weekend_slot.py
+    - name: Dispatch phase workflow
+      if: steps.slot.outputs.run == 'true'
+      env:
+        GH_TOKEN: ${{ github.token }}
+        WORKFLOW: ${{ steps.slot.outputs.workflow }}
+        PHASE: ${{ steps.slot.outputs.phase }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      run: |
+        set -euo pipefail
+        gh workflow run "$WORKFLOW" --repo "$GITHUB_REPOSITORY" --ref "$DEFAULT_BRANCH"
+        if [ "$PHASE" = ci ]; then
+          gh workflow run security.yml --repo "$GITHUB_REPOSITORY" --ref "$DEFAULT_BRANCH"
+          gh workflow run codeql.yml --repo "$GITHUB_REPOSITORY" --ref "$DEFAULT_BRANCH"
+        fi
+    - name: Record prescribed starts
+      if: always()
+      run: |
+        echo "CI: Sat 11:00 Europe/London"
+        echo "DAST: Sun 02:00 Europe/London"
+        echo "Council: Sun 16:00 Europe/London"

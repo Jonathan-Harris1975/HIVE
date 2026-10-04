@@ -1,97 +1,101 @@
 commands_restrictions:
   queue:
     conditions:
-      - or:
-          - sender-permission >= write
-          - sender = renovate[bot]
-
+    - sender-permission >= write
+    - sender != renovate[bot]
 merge_protections_settings:
   reporting_method: check-runs
   post_comment: true
   auto_merge_conditions:
-    - base = main
-    - label = autonomy:admitted
-    - -draft
-    - -conflict
-    - -label = do-not-merge
-    - -label = needs-manual-review
-    - -label = autonomy:human-hold
-    - -label = autonomy:superseded
-    - -label = autonomy:obsolete
-    - "#review-threads-unresolved = 0"
-
+  - base = main
+  - label = autonomy:admitted
+  - -label = dependency:manual
+  - -draft
+  - -conflict
+  - -label = do-not-merge
+  - -label = needs-manual-review
+  - -label = autonomy:human-hold
+  - -label = autonomy:superseded
+  - -label = autonomy:obsolete
+  - '#review-threads-unresolved = 0'
+  - check-success = Trusted automation admission
 merge_protections:
-  - name: autonomous admission
-    if:
-      - base = main
-      - label = autonomy:admitted
-    success_conditions:
-      - check-success = ci-gate
-      - check-success = CodeQL security alert gate
-      - check-success = Trivy, Gitleaks and actionlint
-      - -draft
-      - -conflict
-      - -label = do-not-merge
-      - -label = needs-manual-review
-      - -label = autonomy:human-hold
-      - -label = autonomy:superseded
-      - -label = autonomy:obsolete
-      - "#review-threads-unresolved = 0"
-
+- name: autonomous admission
+  if:
+  - base = main
+  - label = autonomy:admitted
+  success_conditions:
+  - check-success = ci-gate
+  - check-success = CodeQL security alert gate
+  - check-success = Trivy, Gitleaks and actionlint
+  - check-success = Dependency Review
+  - -draft
+  - -conflict
+  - -label = do-not-merge
+  - -label = needs-manual-review
+  - -label = autonomy:human-hold
+  - -label = autonomy:superseded
+  - -label = autonomy:obsolete
+  - '#review-threads-unresolved = 0'
+  - -label = dependency:manual
+  - check-success = Trusted automation admission
 queue_rules:
-  - name: routine
-    merge_method: squash
-    queue_conditions:
-      - base = main
-      - label = autonomy:admitted
-      - check-success = ci-gate
-      - check-success = CodeQL security alert gate
-      - check-success = Trivy, Gitleaks and actionlint
-      - -label = autonomy:human-hold
-      - -label = autonomy:obsolete
-      - -label = autonomy:superseded
-    merge_conditions:
-      - check-success = ci-gate
-      - check-success = CodeQL security alert gate
-      - check-success = Trivy, Gitleaks and actionlint
-
+- name: routine
+  merge_method: squash
+  queue_conditions:
+  - base = main
+  - label = autonomy:admitted
+  - check-success = ci-gate
+  - check-success = CodeQL security alert gate
+  - check-success = Trivy, Gitleaks and actionlint
+  - check-success = Dependency Review
+  - -label = autonomy:human-hold
+  - -label = autonomy:obsolete
+  - -label = autonomy:superseded
+  - -label = dependency:manual
+  - check-success = Trusted automation admission
+  merge_conditions:
+  - check-success = ci-gate
+  - check-success = CodeQL security alert gate
+  - check-success = Trivy, Gitleaks and actionlint
+  - check-success = Dependency Review
+  - -label = dependency:manual
+  - check-success = Trusted automation admission
 pull_request_rules:
-  - name: close explicitly superseded autonomous pull requests
-    conditions:
-      - label = autonomy:superseded
-      - -merged
-      - -closed
-    actions:
-      comment:
-        message: "Closing because a newer authoritative repair supersedes this autonomous PR."
-      close:
-
-  - name: close explicitly obsolete autonomous pull requests
-    conditions:
-      - label = autonomy:obsolete
-      - -merged
-      - -closed
-    actions:
-      comment:
-        message: "Closing because revalidation shows this autonomous repair is no longer required."
-      close:
-
-  - name: refresh admitted Kilo implementation branches
-    conditions:
-      - base = main
-      - -closed
-      - -draft
-      - -from-fork
-      - label = autonomy:repair
-      - label = autonomy:kilo-implementation
-      - -conflict
-      - -label = autonomy:human-hold
-      - -label = autonomy:superseded
-      - -label = autonomy:obsolete
-      - -head ~= ^autonomy/repair-
-      - "#commits-behind > 0"
-    actions:
-      update:
+- name: close explicitly superseded autonomous pull requests
+  conditions:
+  - label = autonomy:superseded
+  - -merged
+  - -closed
+  actions:
+    comment:
+      message: Closing because a newer authoritative repair supersedes this autonomous PR.
+    close: null
+- name: close explicitly obsolete autonomous pull requests
+  conditions:
+  - label = autonomy:obsolete
+  - -merged
+  - -closed
+  actions:
+    comment:
+      message: Closing because revalidation shows this autonomous repair is no longer required.
+    close: null
+- name: refresh admitted Kilo implementation branches
+  conditions:
+  - base = main
+  - -closed
+  - -draft
+  - -from-fork
+  - label = autonomy:repair
+  - label = autonomy:kilo-implementation
+  - -conflict
+  - -label = autonomy:human-hold
+  - -label = autonomy:superseded
+  - -label = autonomy:obsolete
+  - -head ~= ^autonomy/repair-
+  - '#commits-behind > 0'
+  actions:
+    update: null
 merge_queue:
   status_comments: outcomes
   queue_controls_comment: false

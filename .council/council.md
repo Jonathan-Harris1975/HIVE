@@ -18,3 +18,24 @@ Run the final evidence-led QA/Council pass for **HIVE** after its allocated week
 Return target identity, CI, security, dependency automation, repair ledger, merge evidence, deployment/readiness evidence, DAST state, remaining risks and one disposition: `READY_FOR_COUNCIL_ACCEPTANCE`, `HUMAN_HOLD`, or `NOT_READY`.
 
 Never weaken checks, dismiss security findings, create cosmetic PRs or treat model text as proof.
+
+## Authenticated completion handoff
+
+A successful webhook dispatch is not a completed Council assessment. After the
+assessment is complete, the installed Kilo GitHub App must dispatch
+`council-completion.yml` on the default branch using its existing Actions write
+permission. Supply `target_sha`, the supplied `council_run_id`, and the completed
+`disposition` (`READY_FOR_COUNCIL_ACCEPTANCE`, `HUMAN_HOLD`, or `NOT_READY`).
+Never dispatch an acceptance merely because this contract was received.
+
+The trusted completion verifier requires the configured Kilo bot identity,
+current default-branch SHA, canonical source Council workflow and successful
+handoff step. It independently fetches the latest exact-SHA CI, CodeQL, security
+and deployment runs, retained deployment artifact digest, enabled DAST execution
+and unresolved repair state. Declined dispositions, skipped enabled DAST, stale
+heads and missing evidence fail closed. It retains a receipt before revalidating
+and publishing `Repository Council acceptance` on that exact SHA. Model prose
+and a supplied list of run IDs cannot replace those API checks.
+
+This receipt is the input for the outstanding persistent merge-freeze controller.
+Receipt delivery and consumption must pass live acceptance before READY.
