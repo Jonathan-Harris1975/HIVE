@@ -140,8 +140,8 @@ def is_renovate(pr: dict[str, Any]) -> bool:
     )
 
 
-def renovate_automerge_enabled(pr: dict[str, Any]) -> bool:
-    return is_renovate(pr) and "**Automerge**: Enabled." in (pr.get("body") or "")
+def renovate_auto_eligible(pr: dict[str, Any]) -> bool:
+    return is_renovate(pr) and "dependency:auto-eligible" in issue_labels(pr)
 
 
 def is_managed_branch_pr(pr: dict[str, Any]) -> bool:
@@ -444,8 +444,8 @@ def reconcile_pr(pr: dict[str, Any]) -> None:
         log(f"Carrier PR #{pr['number']} is lifecycle evidence; withholding auto-merge.")
         return
 
-    if kind == "renovate" and not renovate_automerge_enabled(pr):
-        # Major/manual Renovate PRs may run CI automatically, but remain human merge decisions.
+    if kind == "renovate" and not renovate_auto_eligible(pr):
+        # Renovate eligibility is explicit metadata; manual/unlabelled updates remain human merge decisions.
         return
 
     if kind in {"kilo", "branch-pr"}:
@@ -495,6 +495,8 @@ def main() -> int:
     if (not re.fullmatch(r"[A-Za-z0-9-]+(?:\[bot\])?", KILO_LOGIN) or
             KILO_LOGIN in {REPAIR_APP_LOGIN, RENOVATE_LOGIN, "github-actions[bot]"}):
         raise RuntimeError("KILO_REPAIR_PR_LOGIN must name the distinct, verified Kilo PR creator")
+    ensure_label("dependency:auto-eligible", "0E8A16", "Renovate update class is eligible for trusted admission after exact-head gates")
+    ensure_label("dependency:manual", "FBCA04", "Renovate update class requires a human merge decision")
     ensure_label("autonomy:kilo-implementation", "5319E7", "Kilo implementation PR linked to an autonomous repair carrier")
     ensure_label("autonomy:human-hold", "FBCA04", "Automation must stop for human action")
     ensure_label("autonomy:obsolete", "D4C5F9", "Repair carrier is no longer current")
