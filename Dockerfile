@@ -1,4 +1,4 @@
-FROM python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 AS builder
+FROM python:3.14.8-slim-bookworm@sha256:c8137f4c460908c8763f281c8f22c431eb5c538514ba9553fc3a89c06b7cfb88 AS builder
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -46,7 +46,7 @@ RUN npm_dir=/usr/local/lib/node_modules/npm \
     && rm -rf "$patch_dir" \
     && node -e "const base='/usr/local/lib/node_modules/npm/node_modules'; for (const [name, expected] of [['brace-expansion','5.0.12'],['undici','6.29.0']]) { const {version} = require(base + '/' + name + '/package.json'); if (version !== expected) { throw new Error(name + ' is ' + version + ', expected ' + expected); } }"
 
-FROM python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 AS runtime
+FROM python:3.14.8-slim-bookworm@sha256:c8137f4c460908c8763f281c8f22c431eb5c538514ba9553fc3a89c06b7cfb88 AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
