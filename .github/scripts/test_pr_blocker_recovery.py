@@ -41,7 +41,7 @@ class Recovery(unittest.TestCase):
                 "nodes": [
                     {
                         "body": "Fix the missing independent validation in the current security workflow.",
-                        "author": {"login": "chatgpt-codex-connector"},
+                        "author": {"login": "kilo-code-bot"},
                     }
                 ]
             },
