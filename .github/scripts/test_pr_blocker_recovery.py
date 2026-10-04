@@ -41,7 +41,7 @@ class Recovery(unittest.TestCase):
                 "nodes": [
                     {
                         "body": "Fix the missing independent validation in the current security workflow.",
-                        "author": {"login": "chatgpt-codex-connector"},
+                        "author": {"login": "kilo-code-bot"},
                     }
                 ]
             },
@@ -322,7 +322,11 @@ class Recovery(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "output"
             for event in ["issue_comment", "pull_request_review", "pull_request_review_comment"]:
-                for who, expected in [("outsider", "false"), ("repair[bot]", "true")]:
+                for who, expected in [
+                    ("outsider", "false"),
+                    ("chatgpt-codex-connector", "false"),
+                    ("repair[bot]", "true"),
+                ]:
                     output.write_text("")
                     with patch.dict(
                         os.environ,

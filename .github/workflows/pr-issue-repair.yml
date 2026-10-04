@@ -65,7 +65,7 @@ jobs:
         python3 - <<'PYCODE'
         import os
         interactive = os.environ['EVENT_NAME'] in {'issue_comment', 'pull_request_review', 'pull_request_review_comment'}
-        known = {'kilo-code-bot', 'kilo-code-bot[bot]', 'chatgpt-codex-connector', 'chatgpt-codex-connector[bot]', os.environ['KILO_LOGIN'], os.environ['REPAIR_LOGIN']} - {''}
+        known = {'kilo-code-bot', 'kilo-code-bot[bot]', os.environ['KILO_LOGIN'], os.environ['REPAIR_LOGIN']} - {''}
         trusted = (not interactive or os.environ['ACTOR_LOGIN'] in known or os.environ['ACTOR_ASSOCIATION'] in {'OWNER', 'MEMBER', 'COLLABORATOR'})
         with open(os.environ['GITHUB_OUTPUT'], 'a') as stream:
             stream.write('trusted=' + str(trusted).lower() + '\n')
