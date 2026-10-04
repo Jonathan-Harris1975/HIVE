@@ -8,7 +8,7 @@ from pathlib import Path
 import re
 import pr_repair_router as router
 
-BOT_REVIEWERS = {"chatgpt-codex-connector", "kilo-code-bot"}
+BOT_REVIEWERS = {"kilo-code-bot"}
 HOLD_LABELS = {
     "autonomy:human-hold",
     "autonomy:obsolete",
