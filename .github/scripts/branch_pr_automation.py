@@ -31,8 +31,10 @@ REQUIRED_WORKFLOWS = [
 REQUIRED_CHECKS = [x.strip() for x in os.environ.get("REQUIRED_CHECKS", "").split("|") if x.strip()]
 
 MANAGED_LABEL = "automation:branch-pr"
-ALLOWED_PREFIXES = ("fix/", "feat/", "chore/", "ci/", "work/", "codex/")
+ALLOWED_PREFIXES = ("fix/", "feat/", "chore/", "ci/", "work/")
 EXCLUDED_PREFIXES = (
+    "codex/",
+    "automation/",
     "autonomy/",
     "renovate/",
     "dependabot/",
@@ -50,7 +52,7 @@ BLOCKING_LABELS = {
     "autonomy:obsolete",
     "autonomy:superseded",
 }
-BRANCH_RE = re.compile(r"^(fix|feat|chore|ci|work|codex)/[A-Za-z0-9._/-]+$")
+BRANCH_RE = re.compile(r"^(fix|feat|chore|ci|work)/[A-Za-z0-9._/-]+$")
 
 
 def log(message: str) -> None:

@@ -1,0 +1,19 @@
+# CI automation ownership
+
+Renovate alone chooses dependency versions, updates manifests/locks and opens dependency PRs. Dependabot configuration is passive: every version PR limit is zero. Disabling Dependabot security-update PRs is a separate live repository setting and must be verified independently.
+
+Renovate never merges, enables native auto-merge or posts Mergify queue commands. Approved existing minor/patch/digest, security and lock-maintenance policies generate `dependency:auto-eligible`. Major/manual rules generate `dependency:manual`, which takes precedence. Trusted admission checks the exact Renovate identity, same repository, `renovate/` namespace, eligibility and exact-head required workflows before admission. Mergify alone merges admitted automation. PRs already armed for native auto-merge are withheld from Mergify admission.
+
+The native ordinary branch lane excludes `renovate/`, `dependabot/`, `autonomy/`, `mergify/`, `automation/` and `codex/`. Codex changes use a dedicated branch and PR with all normal checks. This bootstrap PR has no self-merge authority. Kilo repairs established application behaviour through PRs and cannot change manifests, dependency locks or protected governance controls. autofix.ci remains mechanical only.
+
+Production dependency rollback selects the exact failed merge SHA, merged Renovate PR and main base. It opens a recovery PR and grants no direct merge authority.
+
+## Controls and timing
+
+The existing required security check names and scanner thresholds remain unchanged. actionlint checks workflow correctness; zizmor checks workflow security. Strict Renovate validation runs in the security workflow. Harden-Runner observes the security job in audit mode. Lychee retains the repository-specific existing advisory/blocking policy.
+
+Renovate refresh: `after 9am and before 11am on saturday`, Europe/London. CI: Sat 11:00; DAST: Sun 02:00; Council: Sun 16:00. The launcher dispatches CI, CodeQL and Security as one phase. DAST opt-in and targets are unchanged. Routine merging after final CI PASS must remain frozen until exact-SHA Council certification. A demonstrated freeze/receipt mechanism remains an outstanding acceptance requirement.
+
+## Live verification still required
+
+Dependabot security-update settings, complete installed App scopes, live Dependency Review support, clean scanner baselines, real safe/manual Renovate PR behaviour, exact-head admission/Mergify merge, runner audit evidence, Council freeze and deployment provenance/OIDC applicability must be proved before READY. Source-built deployments or transient CI image tags must not gain artificial attestation uploads. Existing overlapping CI bootstrap PRs must be reconciled before merge so older code cannot restore obsolete admission or capture Codex branches.

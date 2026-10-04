@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Admit and merge only verified automation pull requests.
+"""Admit only verified automation pull requests.
 
 Runs from the trusted default-branch workflow. It never checks out or executes PR code.
 """
@@ -31,6 +31,12 @@ URL_END = r"(?![A-Za-z0-9/_-])"
 KILO_SENSITIVE_PREFIXES = (
     ".github/workflows/",
     ".github/actions/",
+    ".github/scripts/",
+    "codecov.yml",
+    "socket.yml",
+    ".council/",
+    ".lychee",
+    "zizmor",
     ".github/CODEOWNERS",
     ".github/dependabot.yml",
     ".mergify.yml",
@@ -138,9 +144,13 @@ def is_renovate(pr: dict[str, Any]) -> bool:
     )
 
 
-def renovate_automerge_enabled(pr: dict[str, Any]) -> bool:
-    return is_renovate(pr) and "**Automerge**: Enabled." in (pr.get("body") or "")
+def renovate_auto_eligible(pr: dict[str, Any]) -> bool:
+    return (is_renovate(pr) and str(pr.get("head", {}).get("ref", "")).startswith("renovate/")
+            and "dependency:auto-eligible" in issue_labels(pr)
+            and not issue_labels(pr).intersection({"dependency:manual", "needs-manual-review", "do-not-merge"}))
 
+
+renovate_automerge_enabled = renovate_auto_eligible
 
 def is_repair_carrier_identity(pr: dict[str, Any]) -> bool:
     """Identify a repair carrier regardless of lifecycle labels."""
@@ -328,6 +338,12 @@ def pr_files(number: int) -> list[str]:
     raise RuntimeError(f"PR #{number} has too many changed files to verify safely")
 
 
+def dependency_manifest(path: str) -> bool:
+    name = path.rsplit("/", 1)[-1]
+    return (name in {"package.json", "package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml", "pyproject.toml", "poetry.lock", "uv.lock", "Pipfile", "Pipfile.lock", "Dockerfile"}
+            or name.startswith("requirements") and name.endswith((".txt", ".in", ".lock")))
+
+
 def sensitive_file(path: str) -> bool:
     if path in KILO_SENSITIVE_EXACT:
         return True
@@ -425,12 +441,21 @@ def reconcile_pr(pr: dict[str, Any]) -> None:
         log(f"Carrier PR #{pr['number']} is lifecycle evidence; withholding auto-merge.")
         return
 
-    if kind == "renovate" and not renovate_automerge_enabled(pr):
+    if pr.get("auto_merge"):
+        log(f"PR #{pr['number']} is armed for native auto-merge; withholding Mergify admission.")
+        return
+
+    if kind == "renovate" and not renovate_auto_eligible(pr):
         # Major/manual Renovate PRs may run CI automatically, but remain human merge decisions.
         return
 
     if kind == "kilo":
-        sensitive = [path for path in pr_files(int(pr["number"])) if sensitive_file(path)]
+        changed = pr_files(int(pr["number"]))
+        dependency_files = [path for path in changed if dependency_manifest(path)]
+        if dependency_files:
+            place_human_hold(pr, "Renovate owns dependency manifests and locks: " + ", ".join(dependency_files[:8]))
+            return
+        sensitive = [path for path in changed if sensitive_file(path)]
         if sensitive:
             place_human_hold(pr, "the repair changes governance/security automation files: " + ", ".join(sensitive[:8]))
             return

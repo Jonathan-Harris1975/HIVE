@@ -3,7 +3,6 @@ commands_restrictions:
     conditions:
       - or:
           - sender-permission >= write
-          - sender = renovate[bot]
 
 merge_protections_settings:
   reporting_method: check-runs
@@ -11,6 +10,7 @@ merge_protections_settings:
   auto_merge_conditions:
     - base = main
     - label = autonomy:admitted
+    - -label = dependency:manual
     - -draft
     - -conflict
     - -label = do-not-merge
