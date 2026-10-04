@@ -31,13 +31,17 @@ jobs:
         APP_ID: ${{ vars.AUTONOMY_REPAIR_APP_ID }}
         APP_PRIVATE_KEY: ${{ secrets.AUTONOMY_REPAIR_APP_PRIVATE_KEY }}
         REPO: ${{ github.repository }}
+        REPOSITORY_ID: ${{ github.event.repository.id }}
       shell: bash
       run: |
         set -euo pipefail
         test -n "${APP_ID:-}" || { echo "::error::Repository variable AUTONOMY_REPAIR_APP_ID is required."; exit 1; }
         test -n "${APP_PRIVATE_KEY:-}" || { echo "::error::Repository secret AUTONOMY_REPAIR_APP_PRIVATE_KEY is required."; exit 1; }
 
-        key_file="${RUNNER_TEMP}/autonomy-repair-app.pem"
+        [[ "${REPOSITORY_ID:-}" =~ ^[1-9][0-9]*$ ]] || { echo "::error::A numeric current repository ID is required."; exit 1; }
+        umask 077
+        key_file="$(mktemp "${RUNNER_TEMP}/autonomy-repair-app.XXXXXX")"
+        trap 'rm -f "$key_file"' EXIT
         printf '%s\n' "$APP_PRIVATE_KEY" > "$key_file"
         chmod 600 "$key_file"
 
@@ -70,6 +74,8 @@ jobs:
             --header "Accept: application/vnd.github+json" \
             --header "Authorization: Bearer ${jwt}" \
             --header "X-GitHub-Api-Version: 2022-11-28" \
+            --header "Content-Type: application/json" \
+            --data "$(jq -cn --argjson repository_id "$REPOSITORY_ID" '{repository_ids: [$repository_id]}')" \
             "https://api.github.com/app/installations/${installation_id}/access_tokens" |
             jq -er '.token'
         )"
@@ -115,6 +121,19 @@ jobs:
         path: .council-repair-authorizations/*.json
         if-no-files-found: error
         retention-days: 90
+    - name: Revoke repository-scoped repair App token
+      if: ${{ always() && steps.app_token.outputs.token != '' }}
+      env:
+        APP_TOKEN: ${{ steps.app_token.outputs.token }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        curl --fail-with-body --silent --show-error \
+          --request DELETE \
+          --header "Accept: application/vnd.github+json" \
+          --header "Authorization: Bearer ${APP_TOKEN}" \
+          --header "X-GitHub-Api-Version: 2022-11-28" \
+          "https://api.github.com/installation/token"
 'on':
   issue_comment:
     types:
@@ -150,3 +169,4 @@ jobs:
     - synchronize
     - reopened
   workflow_dispatch: null
+
