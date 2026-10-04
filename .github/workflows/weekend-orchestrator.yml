@@ -1,12 +1,9 @@
 name: Weekend orchestrator
 
-# Runs once per week, straight after the Renovate window closes (Sunday 02:30 Europe/London).
-# GitHub cron is UTC only, so both DST offsets are scheduled and the guard step lets exactly
-# one of them through: 01:30 UTC is 02:30 London in BST, 02:30 UTC is 02:30 London in GMT.
+# Manual proving/recovery orchestrator only.
+# Scheduled CI, DAST and Council phases are owned by weekend-phase-launcher.yml
+# so there is one authoritative Europe/London schedule and no early Council dispatch.
 on:
-  schedule:
-    - cron: '30 1 * * 0'
-    - cron: '30 2 * * 0'
   workflow_dispatch:
     inputs:
       dry_run:
