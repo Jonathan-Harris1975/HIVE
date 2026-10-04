@@ -513,6 +513,36 @@ def reconcile_pr(pr: dict[str, Any]) -> None:
         log(f"PR #{number} changed while being evaluated; waiting for the next reconciliation.")
         return
 
+    # A frozen cycle admits only an implementation linked to an authenticated
+    # carrier for a still-failing current-envelope run. This status is minted
+    # with the existing GitHub Actions status token, not the repair App token.
+    from pathlib import Path
+    import merge_window
+    freeze_api = merge_window.GitHub(REPO, os.environ.get("ADMISSION_STATUS_TOKEN") or TOKEN)
+    freeze_policy = json.loads(Path(".council/receipt-policy.json").read_text())
+    freeze_run = merge_window.anchor(freeze_api, freeze_policy, REPO, DEFAULT_BRANCH)
+    freeze_base = freeze_api.request(f"/commits/{DEFAULT_BRANCH}")["sha"]
+    freeze_closed = bool(freeze_run and merge_window.released(
+        freeze_api, freeze_policy, REPO, freeze_run, DEFAULT_BRANCH, KILO_LOGIN,
+        os.environ.get("DAST_ENABLED", "").lower() == "true"))
+    if freeze_run and not freeze_closed and kind == "kilo":
+        sources = [source for source in list_open_prs() if is_carrier(source)]
+        source_number = linked_kilo_carrier(pr, sources)
+        source = next((source for source in sources if source["number"] == source_number), None)
+        if source is None:
+            return
+        try:
+            merge_window.authorize_repair(freeze_api, freeze_policy, REPO, pr, source,
+                REPAIR_APP_LOGIN, freeze_run, freeze_base, DEFAULT_BRANCH, KILO_LOGIN)
+        except merge_window.EvidenceError as exc:
+            log(f"PR #{number} not an authorised envelope repair: {exc}")
+            return
+    merge_window.publish_pr(freeze_api, freeze_policy, REPO, pr, freeze_run,
+        freeze_base, DEFAULT_BRANCH, KILO_LOGIN, freeze_closed)
+    window_status = merge_window.latest_status(freeze_api, sha, merge_window.CONTEXT)
+    if not merge_window.trusted(window_status):
+        return
+
     # Renovate and Kilo are distinct identities, so the repair App can provide the trusted review.
     # Carrier PRs are authored by the same repair App and GitHub correctly forbids self-approval.
     if kind in {"renovate", "kilo"}:

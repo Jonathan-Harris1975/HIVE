@@ -18,6 +18,7 @@ merge_protections_settings:
   - -label = autonomy:superseded
   - -label = autonomy:obsolete
   - '#review-threads-unresolved = 0'
+  - check-success = Council merge window
   - check-success = Trusted automation admission
 merge_protections:
 - name: autonomous admission
@@ -38,6 +39,7 @@ merge_protections:
   - -label = autonomy:obsolete
   - '#review-threads-unresolved = 0'
   - -label = dependency:manual
+  - check-success = Council merge window
   - check-success = Trusted automation admission
 queue_rules:
 - name: routine
@@ -53,6 +55,7 @@ queue_rules:
   - -label = autonomy:obsolete
   - -label = autonomy:superseded
   - -label = dependency:manual
+  - check-success = Council merge window
   - check-success = Trusted automation admission
   merge_conditions:
   - check-success = ci-gate
@@ -60,6 +63,7 @@ queue_rules:
   - check-success = Trivy, Gitleaks and actionlint
   - check-success = Dependency Review
   - -label = dependency:manual
+  - check-success = Council merge window
   - check-success = Trusted automation admission
 pull_request_rules:
 - name: close explicitly superseded autonomous pull requests

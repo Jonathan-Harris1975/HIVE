@@ -3,5 +3,6 @@
   "deployment": "koyeb-deployment-watch.yml",
   "artifact": "hive-deployment-attestation-",
   "dast": true,
-  "dispatch_step": "Dispatch repository Council to Kilo"
+  "dispatch_step": "Dispatch repository Council to Kilo",
+  "ci_start": "Sat 11:00"
 }

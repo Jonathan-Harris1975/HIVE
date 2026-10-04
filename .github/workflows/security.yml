@@ -46,7 +46,9 @@ jobs:
     - name: Install pinned zizmor
       run: python3 scripts/install_ci_tools.py zizmor
     - name: Prove Council completion authentication and stale-evidence rejection
-      run: python3 .github/scripts/test_council_receipt.py
+      run: |
+        python3 .github/scripts/test_council_receipt.py
+        python3 .github/scripts/test_merge_window.py
     - name: Inspect GitHub Actions security posture
       run: .ci-tools/bin/zizmor --offline .github/workflows
     - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020

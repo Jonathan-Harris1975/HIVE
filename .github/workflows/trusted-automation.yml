@@ -10,6 +10,9 @@ concurrency:
   cancel-in-progress: false
 jobs:
   reconcile:
+    concurrency:
+      group: council-window-${{ github.repository }}-default
+      cancel-in-progress: false
     if: |-
       ${{
         (github.event_name != 'issue_comment' ||
@@ -90,6 +93,7 @@ jobs:
         REQUIRED_CHECKS: ci-gate|CodeQL security alert gate|Trivy, Gitleaks and actionlint|Hadolint and ShellCheck|Autonomous repair marker gate|Analyze (actions)|Analyze (python)
       run: python .github/scripts/branch_pr_automation.py
     - name: Admit, repair and reconcile verified automation pull requests
+      id: admission
       if: ${{ !cancelled() && steps.app_token.outcome == 'success' }}
       env:
         GH_TOKEN: ${{ steps.app_token.outputs.token }}
@@ -101,7 +105,16 @@ jobs:
         CURRENT_RUN_ID: ${{ github.run_id }}
         REQUIRED_WORKFLOWS: CI|CodeQL|Security and repository quality
         ADMISSION_STATUS_TOKEN: ${{ github.token }}
+        DAST_ENABLED: ${{ vars.DAST_ENABLED }}
       run: python .github/scripts/trusted_automation.py
+    - name: Retain authenticated current-envelope repair authorization
+      if: steps.admission.outputs.repair_artifact != ''
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: ${{ steps.admission.outputs.repair_artifact }}
+        path: .council-repair-authorizations/*.json
+        if-no-files-found: error
+        retention-days: 90
 'on':
   issue_comment:
     types:

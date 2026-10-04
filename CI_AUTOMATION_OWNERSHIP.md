@@ -26,6 +26,41 @@ Dependabot security-update PR creation is OFF in live repository settings; alert
 
 ## Council completion receipt
 
-`council-completion.yml` verifies an authenticated Kilo App completion against live canonical exact-SHA workflows, deployment evidence and existing DAST opt-in before retaining a receipt and publishing `Repository Council acceptance`. The configured Kilo identity uses the existing `KILO_REPAIR_PR_LOGIN`; no new App permissions or external callback endpoint are added. Receipt delivery is not live-proved and the persistent freeze/consumer remains unfinished. A successful Council dispatch alone cannot certify or release an envelope.
+`council-completion.yml` verifies an authenticated Kilo App completion against live canonical exact-SHA workflows, deployment evidence and existing DAST opt-in before retaining a receipt and publishing `Repository Council acceptance`. The configured Kilo identity uses the existing `KILO_REPAIR_PR_LOGIN`; no new App permissions or external callback endpoint are added. Receipt delivery and persistent freeze enforcement are implemented in this draft and remain unproved live. A successful Council dispatch alone cannot certify or release an envelope.
 
-The read-only `accepted_receipt` consumer revalidates the current default head and live evidence, checks a completed canonical verifier run, checks the retained receipt digest and rejects receipts predating the envelope start. A Kilo-written status alone cannot authenticate acceptance. Twenty-three receipt publisher/consumer tests pass locally. The consumer is not yet connected to a persistent merge-freeze controller.
+The read-only `accepted_receipt` consumer revalidates the current default head and live evidence, checks a completed canonical verifier run, checks the retained receipt digest and rejects receipts predating the envelope start. A Kilo-written status alone cannot authenticate acceptance. Twenty-three receipt publisher/consumer tests pass locally. The consumer is connected to the persistent merge-freeze controller in this draft; live native-protection activation and end-to-end acceptance remain outstanding.
+
+
+## Authenticated Council freeze
+
+The default-branch CI workflow records its evidence marker only after the CI
+aggregate succeeds inside this repository's fixed London CI slot. It revokes
+previous PR merge-window successes before completing final CI PASS, then retains
+an exact run/attempt/SHA freeze artifact. The marker survives repair merges.
+The CI recorder, scheduled/event controller and trusted admission job share one
+repository concurrency group and never execute PR code with a write token.
+
+`Council merge window` is required by Mergify at protection, queue and merge
+boundaries. Native branch protection must require this GitHub Actions context
+and Dependency Review once the protected controllers are installed; enabling the
+native requirements and a full live freeze/repair/re-certification demonstration
+remain release prerequisites. Configuration and unit tests alone are not live
+acceptance.
+
+A frozen cycle allows only a Kilo implementation already verified by the
+existing trusted admission controller, linked to the authenticated repair App's
+carrier for a still-failing canonical default-branch run in the current weekend
+envelope. A completed trusted default-branch authorization run must retain an
+exact implementation-head/base/failure/freeze-run/attempt artifact. A label,
+comment, direct status, stale base or superseded failure cannot grant the
+exception. Dependency manifests, locks and protected controls remain outside
+Kilo's automated repair authority.
+
+Only completed authenticated Council receipt publication releases the freeze.
+Retained receipt digests, canonical source Council and completion runs, Kilo
+actor and triggering actor, current exact-SHA evidence and unresolved holds are
+checked. A later ordinary merge may advance a completed cycle; divergent
+history cannot inherit it. A new CI attempt invalidates an older release. Missing
+or expired evidence and bounded-pagination failures stop admission. No workflow
+scanner exception is added for this controller; trigger audit findings remain
+visible for review.
