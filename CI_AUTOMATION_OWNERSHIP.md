@@ -23,3 +23,7 @@ Admission now publishes the `Trusted automation admission` status on the exact v
 The launcher authenticates the event’s scheduled UTC cron against the prescribed London start and current DST offset. Delayed starts remain accepted only inside the fixed allocated window; the alternate DST cron is rejected. Independent CI/scanner/DAST phase crons are removed. Targets, opt-in, reporting and existing application operations are preserved.
 
 Dependabot security-update PR creation is OFF in live repository settings; alerts and dependency graphs remain ON. Auto-triage has no custom PR-creation rule. The pinned native Dependency Review job cannot choose versions, alter manifests or create update PRs. Existing scanner and licensing policies are retained.
+
+## Council completion receipt
+
+`council-completion.yml` verifies an authenticated Kilo App completion against live canonical exact-SHA workflows, deployment evidence and existing DAST opt-in before retaining a receipt and publishing `Repository Council acceptance`. The configured Kilo identity uses the existing `KILO_REPAIR_PR_LOGIN`; no new App permissions or external callback endpoint are added. Receipt delivery is not live-proved and the persistent freeze/consumer remains unfinished. A successful Council dispatch alone cannot certify or release an envelope.

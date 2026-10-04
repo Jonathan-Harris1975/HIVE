@@ -1,0 +1,7 @@
+{
+  "ci": "ci.yml",
+  "deployment": "koyeb-deployment-watch.yml",
+  "artifact": "hive-deployment-attestation-",
+  "dast": true,
+  "dispatch_step": "Dispatch repository Council to Kilo"
+}
