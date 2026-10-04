@@ -1,5 +1,6 @@
 """Regression checks for repair retirement; all GitHub writes are mocked."""
 import copy
+import inspect
 import os
 import unittest
 from unittest.mock import patch
@@ -7,6 +8,7 @@ from unittest.mock import patch
 os.environ.setdefault("GH_TOKEN", "unit-test")
 os.environ.setdefault("GITHUB_REPOSITORY", "owner/repo")
 
+import branch_pr_automation as branch_controller  # noqa: E402
 import trusted_automation as automation  # noqa: E402
 
 
@@ -82,6 +84,78 @@ class RepairRetirementTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self.retire()
         self.delete.assert_not_called()
+
+
+class ManagedBranchOwnershipTests(unittest.TestCase):
+    def setUp(self):
+        self.sha = "c" * 40
+        self.pr = {
+            "number": 22,
+            "state": "open",
+            "draft": False,
+            "title": "Implement requested change",
+            "user": {"login": "repair[bot]"},
+            "head": {
+                "ref": "codex/requested-change",
+                "sha": self.sha,
+                "repo": {"full_name": "owner/repo"},
+            },
+            "base": {"ref": "main"},
+            "labels": [{"name": "automation:branch-pr"}],
+            "body": "",
+        }
+        for name, value in {
+            "REPO": "owner/repo",
+            "REPAIR_APP_LOGIN": "repair[bot]",
+            "DEFAULT_BRANCH": "main",
+        }.items():
+            self.enterContext(patch.object(automation, name, value))
+        self.enterContext(patch.object(automation, "log"))
+
+    def test_branch_controller_has_no_native_merge_authority(self):
+        source = inspect.getsource(branch_controller)
+        self.assertNotIn("enablePullRequestAutoMerge", source)
+        self.assertNotIn("disablePullRequestAutoMerge", source)
+        self.assertNotIn("enable_native_auto_merge", source)
+        self.assertNotIn('gh", "pr", "merge', source)
+
+    def test_managed_branch_pr_is_admitted_to_mergify_after_green_checks(self):
+        admit = self.enterContext(patch.object(automation, "admit_to_mergify"))
+        approve = self.enterContext(patch.object(automation, "approve_pr"))
+        self.enterContext(
+            patch.object(automation, "pr_files", return_value=["backend/app/example.py"])
+        )
+        self.enterContext(
+            patch.object(
+                automation,
+                "all_required_checks_green",
+                return_value=(True, "green"),
+            )
+        )
+        self.enterContext(
+            patch.object(automation, "current_head_unchanged", return_value=self.pr)
+        )
+
+        automation.reconcile_pr(copy.deepcopy(self.pr))
+
+        admit.assert_called_once_with(22)
+        approve.assert_not_called()
+
+    def test_managed_branch_pr_touching_protected_controls_gets_human_hold(self):
+        hold = self.enterContext(patch.object(automation, "place_human_hold"))
+        admit = self.enterContext(patch.object(automation, "admit_to_mergify"))
+        self.enterContext(
+            patch.object(
+                automation,
+                "pr_files",
+                return_value=[".github/workflows/security.yml"],
+            )
+        )
+
+        automation.reconcile_pr(copy.deepcopy(self.pr))
+
+        hold.assert_called_once()
+        admit.assert_not_called()
 
 
 if __name__ == "__main__":
