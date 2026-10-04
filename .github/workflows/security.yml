@@ -35,6 +35,8 @@ jobs:
       run: npx --yes --package renovate@44.132.5 -- renovate-config-validator --strict renovate.json
     - name: Verify automation ownership boundaries
       run: python3 .github/scripts/test_ci_ownership.py
+    - name: Verify fixed weekend windows and DST guards
+      run: python3 .github/scripts/test_weekend_slot.py
     - name: Verify branch PR safety and idempotency
       run: python3 .github/scripts/test_branch_pr_automation.py
     - name: Verify autonomy lifecycle regressions
