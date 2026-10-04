@@ -10,6 +10,25 @@ concurrency:
 env:
   SCORECARD_VERSION: 5.5.0
 jobs:
+  dependency_review:
+    name: Dependency Review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+    - name: Block vulnerable dependency changes without choosing versions
+      uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+      with:
+        fail-on-severity: high
+        fail-on-scopes: runtime,development,unknown
+        vulnerability-check: true
+        license-check: false
+        warn-only: false
+        comment-summary-in-pr: never
+        retry-on-snapshot-warnings: true
+        retry-on-snapshot-warnings-timeout: 120
   repository_security:
     name: Trivy, Gitleaks and actionlint
     runs-on: ubuntu-latest
@@ -130,6 +149,8 @@ jobs:
     timeout-minutes: 15
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
     - name: Install pinned Docker and shell linters
       run: python scripts/install_ci_tools.py hadolint shellcheck
     - name: Lint Dockerfile
@@ -144,6 +165,8 @@ jobs:
     timeout-minutes: 15
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
     - name: Install pinned Lychee
       continue-on-error: true
       run: python scripts/install_ci_tools.py lychee

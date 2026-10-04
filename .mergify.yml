@@ -28,6 +28,7 @@ merge_protections:
   - check-success = ci-gate
   - check-success = CodeQL security alert gate
   - check-success = Trivy, Gitleaks and actionlint
+  - check-success = Dependency Review
   - -draft
   - -conflict
   - -label = do-not-merge
@@ -47,6 +48,7 @@ queue_rules:
   - check-success = ci-gate
   - check-success = CodeQL security alert gate
   - check-success = Trivy, Gitleaks and actionlint
+  - check-success = Dependency Review
   - -label = autonomy:human-hold
   - -label = autonomy:obsolete
   - -label = autonomy:superseded
@@ -56,6 +58,7 @@ queue_rules:
   - check-success = ci-gate
   - check-success = CodeQL security alert gate
   - check-success = Trivy, Gitleaks and actionlint
+  - check-success = Dependency Review
   - -label = dependency:manual
   - check-success = Trusted automation admission
 pull_request_rules:
