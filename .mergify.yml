@@ -11,6 +11,11 @@ merge_protections_settings:
   auto_merge_conditions:
     - base = main
     - label = autonomy:admitted
+    - check-success = ci-gate
+    - check-success = CodeQL security alert gate
+    - check-success = Trivy, Gitleaks and actionlint
+    - check-success = Item 6 / Dependency Review
+    - check-success = Item 6 / Renovate config
     - -draft
     - -conflict
     - -label = do-not-merge
@@ -29,6 +34,8 @@ merge_protections:
       - check-success = ci-gate
       - check-success = CodeQL security alert gate
       - check-success = Trivy, Gitleaks and actionlint
+      - check-success = Item 6 / Dependency Review
+      - check-success = Item 6 / Renovate config
       - -draft
       - -conflict
       - -label = do-not-merge
@@ -47,6 +54,8 @@ queue_rules:
       - check-success = ci-gate
       - check-success = CodeQL security alert gate
       - check-success = Trivy, Gitleaks and actionlint
+      - check-success = Item 6 / Dependency Review
+      - check-success = Item 6 / Renovate config
       - -label = autonomy:human-hold
       - -label = autonomy:obsolete
       - -label = autonomy:superseded
@@ -54,6 +63,8 @@ queue_rules:
       - check-success = ci-gate
       - check-success = CodeQL security alert gate
       - check-success = Trivy, Gitleaks and actionlint
+      - check-success = Item 6 / Dependency Review
+      - check-success = Item 6 / Renovate config
 
 pull_request_rules:
   - name: close explicitly superseded autonomous pull requests
