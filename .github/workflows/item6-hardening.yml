@@ -6,6 +6,10 @@ on:
       - main
   workflow_dispatch:
 
+concurrency:
+  group: item6-hardening-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
@@ -39,11 +43,12 @@ jobs:
 
       - name: Audit GitHub Actions with zizmor
         # Audit-only during rollout because existing trusted workflows contain pre-existing zizmor findings.
-        # Findings remain visible in logs while the enforced Dependency Review and Renovate validation continue to gate.
+        # Findings are surfaced as annotations while Dependency Review and Renovate validation remain normal blocking jobs in this workflow; merge-gate wiring is handled separately.
         continue-on-error: true
         uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
         with:
           advanced-security: false
+          annotations: true
           online-audits: false
 
   renovate-config:
