@@ -91,8 +91,6 @@ jobs:
   sbom:
     permissions:
       contents: read
-      id-token: write
-      attestations: write
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -113,13 +111,6 @@ jobs:
           format: spdx-json
           output-file: item6-sbom.spdx.json
           upload-artifact: false
-
-      - name: Attest repository SBOM
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
-        with:
-          subject-path: .
-          sbom-path: item6-sbom.spdx.json
 
       - name: Retain repository SBOM
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
