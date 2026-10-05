@@ -11,6 +11,8 @@ merge_protections_settings:
   auto_merge_conditions:
     - base = main
     - label = autonomy:admitted
+    - check-success = Item 6 / Dependency Review
+    - check-success = Item 6 / Renovate config
     - -draft
     - -conflict
     - -label = do-not-merge
