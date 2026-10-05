@@ -264,7 +264,14 @@ class Recovery(unittest.TestCase):
                     }
                 ]
             }
-            with patch.object(m.router, "api", side_effect=[requirement, checks, {"statuses": []}]):
+            rulesets = [{"id": 1, "enforcement": "active", "target": "branch"}]
+            detail = {
+                "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"]}},
+                "rules": requirement,
+            }
+            with patch.object(
+                m.router, "api", side_effect=[rulesets, detail, checks, {"statuses": []}]
+            ):
                 self.assertEqual(m.required_checks_pass(self.pr), expected)
 
     def test_manual_pr_selection_and_invalid_number(self):
