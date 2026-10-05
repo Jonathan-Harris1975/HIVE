@@ -106,7 +106,7 @@ jobs:
 
       - name: Attest repository SBOM
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/attest-sbom@e8998f949152b193b063cb0ec769d69d929409be # v3
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
         with:
           subject-path: .
           sbom-path: item6-sbom.spdx.json
