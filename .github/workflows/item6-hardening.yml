@@ -18,6 +18,7 @@ permissions:
 
 jobs:
   dependency-review:
+    name: Item 6 / Dependency Review
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -59,6 +60,7 @@ jobs:
           online-audits: false
 
   renovate-config:
+    name: Item 6 / Renovate config
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
