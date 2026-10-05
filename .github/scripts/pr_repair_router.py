@@ -281,7 +281,9 @@ def safe_route_error(exc: Exception) -> str:
         return f"Kilo trigger returned HTTP {match.group(1)}"
     if message == "Kilo trigger could not be reached":
         return "Kilo trigger could not be reached"
-    return f"{type(exc).__name__}; detail withheld"
+    secret = os.environ.get("KILO_REPAIR_TRIGGER_URL", "")
+    safe = message.replace(secret, "<redacted>") if secret else message
+    return safe or f"{type(exc).__name__}"
 
 
 def main() -> None:
