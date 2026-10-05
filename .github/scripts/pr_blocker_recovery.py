@@ -57,8 +57,15 @@ def review_threads(number):
 def required_checks_pass(pr):
     # GitHub supplies the effective native branch requirements. Never infer them
     # from workflow names or accept an empty requirement set as approval.
-    branch = router.urllib.parse.quote(router.DEFAULT, safe="")
-    rules = router.all_pages(f"/repos/{router.REPO}/rules/branches/{branch}")
+    rulesets = router.all_pages(f"/repos/{router.REPO}/rulesets")
+    rules = []
+    for summary in rulesets:
+        if summary.get("enforcement") != "active" or summary.get("target") != "branch":
+            continue
+        detail = router.api("GET", f"/repos/{router.REPO}/rulesets/{summary['id']}")
+        includes = detail.get("conditions", {}).get("ref_name", {}).get("include", [])
+        if "~DEFAULT_BRANCH" in includes or f"refs/heads/{router.DEFAULT}" in includes:
+            rules.extend(detail.get("rules", []))
     required = [
         item
         for rule in rules
@@ -98,7 +105,7 @@ def required_checks_pass(pr):
 
 
 def verified_receipts(comments, sha, base_sha):
-    trusted = {login(router.KILO_IMPLEMENTER), login(router.REPAIR_APP_LOGIN)} - {""}
+    trusted = {login(router.REPAIR_APP_LOGIN)} - {""}
     receipts = {}
     for comment in comments:
         if login(comment.get("user", {}).get("login")) not in trusted:
@@ -150,11 +157,12 @@ def recover(number):
     threads = [t for t in review_threads(number) if not t["isResolved"]]
     if not threads:
         return {"pr": number, "state": "no-conflict-or-review-blocker"}
+    repair_reviewers = BOT_REVIEWERS | {login(router.KILO_IMPLEMENTER), login(router.REPAIR_APP_LOGIN)} - {""}
     bot_threads = [
         t
         for t in threads
         if t["comments"]["nodes"]
-        and login(t["comments"]["nodes"][0].get("author", {}).get("login")) in BOT_REVIEWERS
+        and login(t["comments"]["nodes"][0].get("author", {}).get("login")) in repair_reviewers
     ]
     comments = router.all_pages(f"/repos/{router.REPO}/issues/{number}/comments")
     receipts = verified_receipts(comments, sha, base)
@@ -191,7 +199,7 @@ def recover(number):
             ).get("thread", {}).get("isResolved"):
                 raise RuntimeError("Review thread resolution was not confirmed")
             resolved.append(thread["id"])
-    remaining = [t for t in bot_threads if t["id"] not in resolved]
+    remaining = [t for t in bot_threads if t["id"] not in resolved and t["id"] not in receipts]
     request = None
     if remaining:
         evidence = [
