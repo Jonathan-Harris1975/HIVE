@@ -22,6 +22,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # pinned release commit
+      with:
+        persist-credentials: false
       - name: Check Koyeb deployment-watch configuration
         id: deployment_config
         env:
@@ -60,9 +62,7 @@ jobs:
             sha256sum --check --strict archive.sha256
             tar -xzf "$archive"
           )
-          install -d -m 0755 "$HOME/.local/bin"
-          install -m 0755 "$workdir/koyeb" "$HOME/.local/bin/koyeb"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          sudo install -m 0755 "$workdir/koyeb" /usr/local/bin/koyeb
       - name: Watch production deployment
         env:
           KOYEB_TOKEN: ${{ secrets.KOYEB_TOKEN }}
