@@ -56,7 +56,7 @@ class Recovery(unittest.TestCase):
         self.config.start()
         self.addCleanup(self.config.stop)
 
-    def receipt(self, author="kilo-code-bot[bot]", sha=None, base=None):
+    def receipt(self, author="repair[bot]", sha=None, base=None):
         return {
             "user": {"login": author},
             "body": "<!-- pr-blocker-resolution:"
@@ -146,6 +146,9 @@ class Recovery(unittest.TestCase):
         ]:
             self.assertEqual(m.verified_receipts([receipt], "a" * 40, "b" * 40), {})
         self.assertIn("PRRT_test", m.verified_receipts([self.receipt()], "a" * 40, "b" * 40))
+        self.assertEqual(
+            m.verified_receipts([self.receipt(author="kilo-code-bot[bot]")], "a" * 40, "b" * 40), {}
+        )
 
     def test_receipt_accepts_configured_app_identity(self):
         self.assertIn(
@@ -192,9 +195,12 @@ class Recovery(unittest.TestCase):
             patch.object(m, "review_threads", return_value=[self.thread]),
             patch.object(m.router, "all_pages", return_value=[self.receipt()]),
             patch.object(m, "required_checks_pass", return_value=False),
-            patch.object(m.router, "dispatch"),
+            patch.object(m.router, "dispatch") as dispatch,
         ):
-            self.assertEqual(m.recover(7)["resolved"], [])
+            result = m.recover(7)
+            self.assertEqual(result["resolved"], [])
+            self.assertEqual(result["bot_threads_remaining"], 0)
+        dispatch.assert_not_called()
         self.assertFalse(any(c.args[1] == "/graphql" for c in api.call_args_list))
 
     def test_head_movement_before_resolution_defers(self):
