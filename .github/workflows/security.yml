@@ -18,7 +18,6 @@ jobs:
     - name: Checkout repository with full history
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
-        persist-credentials: false
         fetch-depth: 0
     - name: Verify branch PR safety and idempotency
       run: python3 .github/scripts/test_branch_pr_automation.py
@@ -164,8 +163,6 @@ jobs:
     timeout-minutes: 15
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-    with:
-      persist-credentials: false
     - name: Install pinned Docker and shell linters
       run: python scripts/install_ci_tools.py hadolint shellcheck
     - name: Lint Dockerfile
@@ -180,8 +177,6 @@ jobs:
     timeout-minutes: 15
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-    with:
-      persist-credentials: false
     - name: Install pinned Lychee
       continue-on-error: true
       run: python scripts/install_ci_tools.py lychee
