@@ -4,6 +4,9 @@ on:
   pull_request:
     branches:
       - main
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 concurrency:
@@ -12,6 +15,8 @@ concurrency:
 
 permissions:
   contents: read
+  id-token: write
+  attestations: write
 
 jobs:
   dependency-review:
@@ -96,6 +101,12 @@ jobs:
           format: spdx-json
           output-file: item6-sbom.spdx.json
           upload-artifact: false
+
+      - name: Attest repository SBOM
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v3
+        with:
+          subject-path: item6-sbom.spdx.json
 
       - name: Retain repository SBOM
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
