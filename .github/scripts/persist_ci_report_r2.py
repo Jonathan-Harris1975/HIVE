@@ -14,7 +14,7 @@ def signing_key(secret,date,region="auto",service="s3"):
     k=hmac.new(k,region.encode(),hashlib.sha256).digest()
     k=hmac.new(k,service.encode(),hashlib.sha256).digest()
     return hmac.new(k,b"aws4_request",hashlib.sha256).digest()
-def request(method, endpoint, key, body=b"", ctype=None):
+def request(method, endpoint, key, body=b"", ctype=None, expected_length=None):
     access,secret=req("R2_ACCESS_KEY_ID"),req("R2_SECRET_ACCESS_KEY")
     parsed=urllib.parse.urlsplit(endpoint.rstrip("/")+"/"+BUCKET+"/"+"/".join(urllib.parse.quote(p,safe="-._~") for p in key.split("/")))
     now=dt.datetime.now(dt.timezone.utc); amz=now.strftime("%Y%m%dT%H%M%SZ"); day=now.strftime("%Y%m%d")
@@ -31,6 +31,10 @@ def request(method, endpoint, key, body=b"", ctype=None):
     try:
         with urllib.request.urlopen(r,timeout=45) as resp:
             if resp.status not in (200,201,204): raise RuntimeError(f"R2 HTTP {resp.status}")
+            if expected_length is not None:
+                remote = int(resp.headers.get("Content-Length", "-1"))
+                if remote != expected_length:
+                    raise RuntimeError(f"R2 length mismatch: expected {expected_length}, got {remote}")
     except urllib.error.HTTPError as e:
         raise RuntimeError(f"R2 {method} failed with HTTP {e.code}") from e
 def main():
@@ -62,7 +66,7 @@ def main():
     for f in files:
         rel=f.relative_to(a.source).as_posix(); key=f"{prefix}/{rel}"; body=f.read_bytes()
         request("PUT",endpoint,key,body,mimetypes.guess_type(f.name)[0] or "application/octet-stream")
-        request("HEAD",endpoint,key)
+        request("HEAD",endpoint,key,expected_length=len(body))
         objects.append({"key":key,"sha256":hashlib.sha256(body).hexdigest(),"bytes":len(body)})
     manifest = {
         "schema_version": 1,
@@ -77,7 +81,7 @@ def main():
         "source_run": f"https://github.com/{repository}/actions/runs/{run}",
     }
     mb=(json.dumps(manifest,indent=2,sort_keys=True)+"\n").encode(); mkey=f"{prefix}/evidence-manifest.json"
-    request("PUT",endpoint,mkey,mb,"application/json"); request("HEAD",endpoint,mkey)
+    request("PUT",endpoint,mkey,mb,"application/json"); request("HEAD",endpoint,mkey,expected_length=len(mb))
     print(json.dumps({"verified":True,"bucket":BUCKET,"prefix":prefix,"manifest_key":mkey,"objects":len(objects)+1},sort_keys=True))
     if os.environ.get("GITHUB_STEP_SUMMARY"):
         with open(os.environ["GITHUB_STEP_SUMMARY"],"a",encoding="utf-8") as h: h.write(f"\nR2 evidence verified: \`r2://{BUCKET}/{prefix}/\`\n")
