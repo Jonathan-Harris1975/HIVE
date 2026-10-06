@@ -10,7 +10,6 @@ import pr_repair_router as router
 
 BOT_REVIEWERS = {"kilo-code-bot"}
 HOLD_LABELS = {
-    "autonomy:human-hold",
     "autonomy:obsolete",
     "autonomy:superseded",
     "hold",
