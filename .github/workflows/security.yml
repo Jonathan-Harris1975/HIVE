@@ -93,6 +93,33 @@ jobs:
           exit 1
         }
 
+    - name: Prove actionlint detects a seeded workflow defect
+      if: ${{ !cancelled() && steps.install_security_tools.outcome == 'success' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        fixture="$(mktemp --suffix=.yml)"
+        trap 'rm -f "$fixture"' EXIT
+        cat > "$fixture" <<'YAML'
+        name: synthetic-actionlint-canary
+        on: push
+        jobs:
+          broken:
+            runs-on: ubuntu-latest
+            steps:
+              - name: Deliberately invalid workflow key
+                runz: echo "actionlint must reject this"
+        YAML
+        set +e
+        .ci-tools/bin/actionlint -color "$fixture"
+        status=$?
+        set -e
+        if [ "$status" -eq 0 ]; then
+          echo "::error::Seeded invalid workflow unexpectedly passed actionlint."
+          exit 1
+        fi
+        echo "Seeded actionlint defect was detected as required."
+
     - name: Trivy filesystem vulnerability and misconfiguration scan
       run: .ci-tools/bin/trivy fs . --scanners vuln,misconfig --severity HIGH,CRITICAL --ignore-unfixed --exit-code
         1 --no-progress --format json --output "$RUNNER_TEMP/security-raw/trivy.json"
