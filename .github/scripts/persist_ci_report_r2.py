@@ -35,7 +35,7 @@ def request(method, endpoint, key, body=b"", ctype=None):
         raise RuntimeError(f"R2 {method} failed with HTTP {e.code}") from e
 def main():
     p=argparse.ArgumentParser(); p.add_argument("phase",choices=("dast","council")); p.add_argument("sha"); p.add_argument("source",type=Path); a=p.parse_args()
-    repo=req("GITHUB_REPOSITORY").split("/")[-1]; run=req("GITHUB_RUN_ID"); attempt=req("GITHUB_RUN_ATTEMPT")
+    repo=req("GITHUB_REPOSITORY").split("/")[-1]; run=(os.environ.get("EVIDENCE_RUN_ID","").strip() or req("GITHUB_RUN_ID")); attempt=(os.environ.get("EVIDENCE_RUN_ATTEMPT","").strip() or req("GITHUB_RUN_ATTEMPT"))
     if not re.fullmatch(r"[0-9a-fA-F]{40}",a.sha): raise SystemExit("exact 40-character SHA required")
     if not run.isdigit() or not attempt.isdigit(): raise SystemExit("numeric run id/attempt required")
     if not a.source.is_dir(): raise SystemExit("evidence source directory required")
