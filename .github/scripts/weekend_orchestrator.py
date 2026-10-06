@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """Weekend orchestrator: settle Mergify, verify exact-SHA evidence, then release Council.
 
-Sequence (Europe/London): the Renovate window closes at 02:30; this script starts at
-02:30, waits for every automation PR to be merged or closed (Mergify completing), runs
-CI, CodeQL and Security on the final default-branch SHA, confirms the production
-deployment for that SHA, waits until at least one hour after the window closed, and only
-then dispatches the Repository Council. Failures are left to the existing Kilo repair
+Manual proving/recovery sequence (Europe/London): the scheduled weekend phases are owned
+by weekend-phase-launcher.yml. This script may settle automation PRs and verify CI,
+CodeQL, Security and exact-SHA deployment evidence, but any non-dry-run Council release
+is held until the authoritative Sunday 16:00 Council slot. Failures are left to the existing Kilo repair
 path; the orchestrator waits for the repair to merge, re-verifies and retries (bounded).
 
 Exit codes: 0 Council dispatched (or dry run complete), 3 HUMAN_HOLD, 1 unexpected error.
@@ -29,9 +28,9 @@ from zoneinfo import ZoneInfo
 LONDON = ZoneInfo("Europe/London")
 UTC = timezone.utc
 
-WINDOW_CLOSE = (2, 30)          # Renovate window closes Sunday 02:30 London
-COUNCIL_DELAY = timedelta(hours=1)
-GUARD_GRACE = timedelta(minutes=59)  # tolerate delayed cron starts
+CI_WINDOW_CLOSE = (11, 0)        # Renovate refresh closes Saturday 11:00 London; CI starts
+COUNCIL_START = (16, 0)             # Authoritative Repository Council start, Sunday London
+GUARD_GRACE = timedelta(minutes=59)  # manual proving guard tolerance
 
 REQUIRED_WORKFLOWS = {
     "CI": "ci.yml",
@@ -55,24 +54,27 @@ def log(message: str) -> None:
 
 # --------------------------------------------------------------------------- time
 
-def window_close_for(now: datetime) -> datetime:
-    """Return the Sunday 02:30 London instant belonging to the week of ``now``."""
+def ci_window_close_for(now: datetime) -> datetime:
+    """Return the Saturday 11:00 London CI boundary belonging to the week of ``now``."""
     local = now.astimezone(LONDON)
-    days_back = (local.weekday() + 1) % 7  # Monday=0 ... Sunday=6 -> Sunday gives 0
-    sunday = (local - timedelta(days=days_back)).date()
-    return datetime(sunday.year, sunday.month, sunday.day, *WINDOW_CLOSE, tzinfo=LONDON)
+    days_back = (local.weekday() - 5) % 7  # Saturday=5
+    saturday = (local - timedelta(days=days_back)).date()
+    return datetime(saturday.year, saturday.month, saturday.day, *CI_WINDOW_CLOSE, tzinfo=LONDON)
 
 
 def council_not_before(now: datetime) -> datetime:
-    return window_close_for(now) + COUNCIL_DELAY
+    """Return the authoritative Sunday 16:00 London Council start for this weekend."""
+    close = ci_window_close_for(now)
+    sunday = (close + timedelta(days=1)).date()
+    return datetime(sunday.year, sunday.month, sunday.day, *COUNCIL_START, tzinfo=LONDON)
 
 
 def in_launch_window(now: datetime) -> bool:
-    """True from the window close until 59 minutes later, on the Sunday only."""
+    """Manual proving guard: accept only the first hour of the Saturday CI slot."""
     local = now.astimezone(LONDON)
-    if local.weekday() != 6:
+    if local.weekday() != 5:
         return False
-    close = window_close_for(local)
+    close = ci_window_close_for(local)
     return close <= local <= close + GUARD_GRACE
 
 

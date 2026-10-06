@@ -1,0 +1,64 @@
+name: OIDC readiness
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  github-oidc:
+    name: GitHub OIDC claim verification
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      id-token: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2
+        with:
+          egress-policy: audit
+
+      - name: Request and verify GitHub OIDC token
+        shell: bash
+        env:
+          EXPECTED_REPOSITORY: ${{ github.repository }}
+          EXPECTED_REF: refs/heads/main
+          EXPECTED_OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64, json, os, urllib.parse, urllib.request
+          audience = f"https://github.com/{os.environ['EXPECTED_OWNER']}"
+          request_url = os.environ["ACTIONS_ID_TOKEN_REQUEST_URL"]
+          request_url += ("&" if "?" in request_url else "?") + "audience=" + urllib.parse.quote(audience, safe="")
+          request = urllib.request.Request(request_url, headers={"Authorization": f"bearer {os.environ['ACTIONS_ID_TOKEN_REQUEST_TOKEN']}"})
+          with urllib.request.urlopen(request, timeout=20) as response:
+              token = json.load(response)["value"]
+          parts = token.split(".")
+          if len(parts) != 3:
+              raise RuntimeError("GitHub OIDC endpoint returned a malformed JWT")
+          payload = parts[1] + "=" * (-len(parts[1]) % 4)
+          claims = json.loads(base64.urlsafe_b64decode(payload))
+          expected = {"iss": "https://token.actions.githubusercontent.com", "aud": audience, "repository": os.environ["EXPECTED_REPOSITORY"], "ref": os.environ["EXPECTED_REF"]}
+          for key, value in expected.items():
+              if claims.get(key) != value:
+                  raise RuntimeError(f"OIDC claim {key!r} did not match the expected value")
+          safe_claims = {k: claims.get(k) for k in ("iss","aud","repository","repository_id","repository_owner","ref","sha","workflow","job_workflow_ref","event_name","run_id","run_attempt")}
+          safe_claims["verified"] = True
+          with open("oidc-readiness.json", "w", encoding="utf-8") as handle:
+              json.dump(safe_claims, handle, indent=2, sort_keys=True)
+              handle.write("\n")
+          PY
+
+      - name: Retain sanitised OIDC evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: oidc-readiness-${{ github.sha }}
+          path: oidc-readiness.json
+          if-no-files-found: error
+          retention-days: 90

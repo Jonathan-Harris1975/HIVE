@@ -39,7 +39,7 @@ Changes to authentication, uploads, ZIP handling, storage permissions, repositor
 4. Run the full test and static-analysis gates.
 5. Record security-relevant upgrades in `docs/CHANGELOG.md`.
 
-Do not hand-edit transitive versions without also updating `requirements.in` where a deliberate direct security floor is required. Dependabot covers pip, Docker, and GitHub Actions weekly, but automated updates still require CI evidence.
+Do not hand-edit transitive versions without also updating `requirements.in` where a deliberate direct security floor is required. Mend Renovate is the sole dependency updater for pip, Docker, and GitHub Actions. Dependabot remains passive only and does not create version or security update PRs; all Renovate updates still require the repository CI/security evidence.
 
 ## Secrets and configuration
 
