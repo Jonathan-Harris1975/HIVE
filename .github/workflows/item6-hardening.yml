@@ -53,6 +53,50 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Seed unsafe Actions canary
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > .github/workflows/__zizmor_seed_canary.yml <<'YAML'
+          name: zizmor synthetic canary
+          on:
+            pull_request_target:
+          permissions:
+            contents: write
+          jobs:
+            unsafe:
+              runs-on: ubuntu-latest
+              steps:
+                - uses: actions/checkout@v4
+                  with:
+                    ref: ${{ github.event.pull_request.head.sha }}
+          YAML
+
+      - name: Prove zizmor detects seeded unsafe workflow
+        id: zizmor_seed
+        continue-on-error: true
+        uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
+        with:
+          advanced-security: false
+          annotations: false
+          min-severity: medium
+          min-confidence: medium
+          online-audits: false
+          version: "1.30.1"
+
+      - name: Remove zizmor canary and assert detection
+        if: always()
+        env:
+          ZIZMOR_SEED_OUTCOME: ${{ steps.zizmor_seed.outcome }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/__zizmor_seed_canary.yml
+          if [ "$ZIZMOR_SEED_OUTCOME" != "failure" ]; then
+            echo "::error::Seeded unsafe Actions pattern was not rejected by zizmor."
+            exit 1
+          fi
+
       - name: Audit GitHub Actions with zizmor
         # Blocking after the live trigger baseline was reconciled. Accepted
         # trigger exceptions are narrow and documented at the trigger itself.
@@ -84,6 +128,22 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24.21.0
+
+      - name: Prove malformed Renovate configuration fails
+        shell: bash
+        run: |
+          set -euo pipefail
+          malformed="$(mktemp)"
+          printf '%s\n' '{"extends":["config:recommended"],"platformAutomerge":"not-a-boolean"}' > "$malformed"
+          set +e
+          npx --yes --package=renovate@44.133.0 renovate-config-validator --strict "$malformed"
+          status=$?
+          set -e
+          rm -f "$malformed"
+          if [ "$status" -eq 0 ]; then
+            echo "::error::Malformed Renovate configuration unexpectedly passed strict validation."
+            exit 1
+          fi
 
       - name: Validate Renovate configuration
         run: npx --yes --package=renovate@44.133.0 renovate-config-validator --strict renovate.json
