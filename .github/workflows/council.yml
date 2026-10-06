@@ -151,6 +151,8 @@ jobs:
           set -euo pipefail
           echo "::add-mask::$COUNCIL_RESULT_PUT_URL"
           prompt="$(cat .council/council.md)"
+          IMPORTANT COMPLETION RETURN CONTRACT: after producing the real completed Council assessment, return it to this repository by dispatching workflow "council-result-r2.yml" on the default branch. Supply target_sha=${TARGET_SHA}, source_council_run_id=${GITHUB_RUN_ID}, disposition=<real Council disposition>, report_md_b64=<base64 of the completed Markdown report>, and report_json_b64=<base64 of the completed JSON report>. The JSON must include repository and exact_evaluated_sha. Do not report Council persistence complete unless that return workflow succeeds and verifies R2 storage.
+
           test -n "${prompt//[[:space:]]/}" || { echo "::error::Council contract is empty."; exit 1; }
           task="$(cat <<EOF
           Run the repository Council defined below against exact SHA ${TARGET_SHA} in ${REPO}.
