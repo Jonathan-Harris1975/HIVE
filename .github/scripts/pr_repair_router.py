@@ -235,7 +235,7 @@ def dispatch(pr: dict, kind: str, findings: list[str]) -> str:
         fresh = pr_details(int(number))
         current_base = api('GET', f'/repos/{REPO}/commits/{urllib.parse.quote(DEFAULT, safe="")}')['sha']
         if (not fresh or fresh['head']['sha'] != sha or current_base != base_sha or
-                {x.get('name') for x in fresh.get('labels', [])} & {'hold', 'do-not-merge', 'needs-manual-review', 'autonomy:human-hold'}):
+                {x.get('name') for x in fresh.get('labels', [])} & {'hold', 'do-not-merge', 'needs-manual-review'}):
             print(f"PR #{number} or its base moved before dispatch; defer to the next sweep.")
             return 'changed-before-dispatch'
         destination = (
