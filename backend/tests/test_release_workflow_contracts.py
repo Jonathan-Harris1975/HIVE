@@ -66,7 +66,7 @@ def test_ci_scans_the_built_hive_image_and_retains_the_report() -> None:
 
 def test_all_workflow_actions_are_immutably_pinned() -> None:
     for path in (WATCHER_PATH, CI_PATH, DAST_PATH):
-        uses = re.findall(r"^\s*- uses:\s*([^\s#]+)", path.read_text(encoding="utf-8"), re.MULTILINE)
+        uses = re.findall(r"^\s*(?:-\s*)?uses:\s*([^\s#]+)", path.read_text(encoding="utf-8"), re.MULTILINE)
         assert uses
         for action in uses:
             assert re.search(r"@[0-9a-f]{40}$", action), action
