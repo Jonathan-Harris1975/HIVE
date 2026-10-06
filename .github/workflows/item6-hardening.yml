@@ -80,7 +80,6 @@ jobs:
               runs-on: ubuntu-latest
               steps:
                 - uses: actions/checkout@main
-                - run: echo "${{ github.event.pull_request.title }}"
           YAML
 
       - name: Prove zizmor detects the seeded unsafe pattern
@@ -135,7 +134,7 @@ jobs:
         run: |
           set -euo pipefail
           fixture="$RUNNER_TEMP/renovate-invalid.json"
-          printf '%s\n' '{ "extends": [ "config:recommended", ] }' > "$fixture"
+          printf '%s\n' '{"extends":["config:recommended"],"platformAutomerge":"definitely-not-a-boolean"}' > "$fixture"
           set +e
           npx --yes --package=renovate@44.133.0 renovate-config-validator --strict "$fixture"
           status=$?
