@@ -19,7 +19,6 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
-      issues: write
     env:
       INPUT_TARGET_URL: ${{ inputs.target_url }}
       CONFIGURED_TARGET_URL: ${{ vars.DAST_TARGET_URL }}
@@ -44,8 +43,71 @@ jobs:
           echo "url=$target" >> "$GITHUB_OUTPUT"
 
       - name: Run OWASP ZAP full scan
+        id: zap
         uses: zaproxy/action-full-scan@75ee1686750ab1511a73b26b77a2a7c9d5051d47
         with:
           target: ${{ steps.target.outputs.url }}
-          allow_issue_writing: true
+          allow_issue_writing: false
           fail_action: true
+
+      - name: Build sanitised exact-run DAST evidence
+        if: always()
+        env:
+          REPOSITORY: ${{ github.repository }}
+          TARGET_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          ZAP_OUTCOME: ${{ steps.zap.outcome }}
+          TARGET_URL: ${{ steps.target.outputs.url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          from urllib.parse import urlsplit
+
+          source = Path("report_json.json")
+          summary = {"report_present": source.exists(), "alerts": [], "risk_counts": {}}
+          if source.exists():
+              raw = json.loads(source.read_text(encoding="utf-8"))
+              for site in raw.get("site", []) if isinstance(raw, dict) else []:
+                  for alert in site.get("alerts", []) if isinstance(site, dict) else []:
+                      risk = str(alert.get("riskdesc") or alert.get("riskcode") or "unknown").split(" ", 1)[0]
+                      count = len(alert.get("instances", []) or [])
+                      summary["risk_counts"][risk] = summary["risk_counts"].get(risk, 0) + count
+                      summary["alerts"].append({
+                          "plugin_id": str(alert.get("pluginid") or alert.get("alertRef") or ""),
+                          "name": str(alert.get("name") or alert.get("alert") or "")[:200],
+                          "risk": risk[:40],
+                          "instance_count": count,
+                      })
+
+          target = os.environ.get("TARGET_URL", "")
+          parsed = urlsplit(target) if target else None
+          origin = f"{parsed.scheme}://{parsed.netloc}" if parsed and parsed.scheme and parsed.netloc else None
+          payload = {
+              "schema_version": 1,
+              "kind": "dast",
+              "repository": os.environ["REPOSITORY"],
+              "sha": os.environ["TARGET_SHA"],
+              "run_id": int(os.environ["RUN_ID"]),
+              "run_attempt": int(os.environ["RUN_ATTEMPT"]),
+              "workflow": "DAST penetration test",
+              "scan_outcome": os.environ.get("ZAP_OUTCOME") or "not-run",
+              "target_origin": origin,
+              "summary": summary,
+          }
+          Path("dast-r2-evidence.json").write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+          PY
+
+      - name: Persist DAST evidence to hive-repositories R2
+        if: always()
+        env:
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID || vars.CF_R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || secrets.CF_R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || secrets.CF_R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: hive-repositories
+          R2_EVIDENCE_PREFIX: ci-evidence
+        run: python3 .github/scripts/r2_evidence_store.py dast-r2-evidence.json
