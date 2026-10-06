@@ -55,18 +55,19 @@ def presign_put(bucket: str, key: str, expires: int) -> str:
     scope = f"{short}/auto/s3/aws4_request"
     query = {
         "X-Amz-Algorithm": "AWS4-HMAC-SHA256",
+        "X-Amz-Content-Sha256": "UNSIGNED-PAYLOAD",
         "X-Amz-Credential": f"{access}/{scope}",
         "X-Amz-Date": amz_date,
         "X-Amz-Expires": str(expires),
-        "X-Amz-SignedHeaders": "host",
+        "X-Amz-SignedHeaders": "content-type;host",
     }
     canonical_query = urllib.parse.urlencode(sorted(query.items()), quote_via=urllib.parse.quote)
     canonical_request = "\n".join([
         "PUT",
         path,
         canonical_query,
-        f"host:{host}\n",
-        "host",
+        f"content-type:application/json\nhost:{host}\n",
+        "content-type;host",
         "UNSIGNED-PAYLOAD",
     ])
     string_to_sign = "\n".join([
