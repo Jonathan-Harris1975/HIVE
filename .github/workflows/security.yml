@@ -125,6 +125,32 @@ jobs:
         exit "$status"
       if: ${{ !cancelled() && steps.install_security_tools.outcome == 'success' }}
       shell: bash
+    - name: Prove actionlint detects seeded workflow defect
+      if: ${{ !cancelled() && steps.install_security_tools.outcome == 'success' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        canary="$(mktemp --suffix=.yml)"
+        cat > "$canary" <<'YAML'
+        name: actionlint synthetic canary
+        on: push
+        jobs:
+          broken:
+            runs-on: ubuntu-latest
+            steps:
+              - uses: actions/checkout@v4
+                run: echo "a step cannot define both uses and run"
+        YAML
+        set +e
+        .ci-tools/bin/actionlint "$canary"
+        status=$?
+        set -e
+        rm -f "$canary"
+        if [ "$status" -eq 0 ]; then
+          echo "::error::Seeded workflow correctness defect was not rejected by actionlint."
+          exit 1
+        fi
+
     - name: Validate GitHub Actions workflows
       run: .ci-tools/bin/actionlint -color
       id: actionlint
