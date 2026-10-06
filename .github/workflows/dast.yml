@@ -24,6 +24,11 @@ jobs:
       INPUT_TARGET_URL: ${{ inputs.target_url }}
       CONFIGURED_TARGET_URL: ${{ vars.DAST_TARGET_URL }}
     steps:
+      - name: Check out trusted repository definition
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
       - name: Resolve authorised target
         id: target
         shell: bash
@@ -44,8 +49,68 @@ jobs:
           echo "url=$target" >> "$GITHUB_OUTPUT"
 
       - name: Run OWASP ZAP full scan
+        id: zap
         uses: zaproxy/action-full-scan@75ee1686750ab1511a73b26b77a2a7c9d5051d47
         with:
           target: ${{ steps.target.outputs.url }}
           allow_issue_writing: true
           fail_action: true
+          artifact_name: zap_scan
+          cmd_options: "-J zap-report.json -w zap-report.md"
+
+      - name: Build bound DAST evidence metadata
+        if: always()
+        env:
+          TARGET_URL: ${{ steps.target.outputs.url }}
+          ZAP_OUTCOME: ${{ steps.zap.outcome }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .evidence
+          jq -n \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg sha "$GITHUB_SHA" \
+            --arg run_id "$GITHUB_RUN_ID" \
+            --arg run_attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg workflow "$GITHUB_WORKFLOW" \
+            --arg target_url "${TARGET_URL:-}" \
+            --arg zap_outcome "${ZAP_OUTCOME:-unknown}" \
+            '{
+              schema_version: 1,
+              evidence_kind: "dast",
+              repository: $repository,
+              default_sha: $sha,
+              workflow: $workflow,
+              workflow_run_id: $run_id,
+              workflow_run_attempt: $run_attempt,
+              target_url: $target_url,
+              scan_outcome: $zap_outcome
+            }' > .evidence/dast-metadata.json
+
+      - name: Persist DAST evidence to hive-repositories R2
+        if: always()
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID || secrets.CF_R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || secrets.CF_R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || secrets.CF_R2_SECRET_ACCESS_KEY }}
+          R2_EVIDENCE_BUCKET: hive-repositories
+        shell: bash
+        run: |
+          set -euo pipefail
+          prefix="evidence/${GITHUB_REPOSITORY}/${GITHUB_SHA}/dast/${GITHUB_RUN_ID}/${GITHUB_RUN_ATTEMPT}"
+          python3 .github/scripts/r2_evidence.py \
+            --file .evidence/dast-metadata.json \
+            --key "$prefix/dast-metadata.json" \
+            --content-type application/json
+          if [ -f zap-report.json ]; then
+            python3 .github/scripts/r2_evidence.py \
+              --file zap-report.json \
+              --key "$prefix/zap-report.json" \
+              --content-type application/json
+          fi
+          if [ -f zap-report.md ]; then
+            python3 .github/scripts/r2_evidence.py \
+              --file zap-report.md \
+              --key "$prefix/zap-report.md" \
+              --content-type text/markdown
+          fi
