@@ -113,6 +113,7 @@ jobs:
           python3 .github/scripts/kilo_webhook_url.py
 
       - name: Dispatch repository Council to Kilo
+        id: dispatch
         env:
           REPO: ${{ github.repository }}
           TARGET_SHA: ${{ steps.target.outputs.sha }}
@@ -149,4 +150,54 @@ jobs:
             echo "::error::Kilo Council trigger returned HTTP ${status}."
             exit 1
           fi
+          echo "http_status=$status" >> "$GITHUB_OUTPUT"
           echo "Council dispatched for ${REPO}@${TARGET_SHA}."
+
+      - name: Build bound Council dispatch evidence
+        if: ${{ steps.dispatch.outcome == 'success' }}
+        env:
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+          DISPATCH_HTTP_STATUS: ${{ steps.dispatch.outputs.http_status }}
+          PENDING_MINIMUM_AGE: ${{ inputs.pending_minimum_age || 'unknown' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .evidence
+          jq -n \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg sha "$TARGET_SHA" \
+            --arg run_id "$GITHUB_RUN_ID" \
+            --arg run_attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg workflow "$GITHUB_WORKFLOW" \
+            --arg dispatch_http_status "$DISPATCH_HTTP_STATUS" \
+            --arg pending_minimum_age "$PENDING_MINIMUM_AGE" \
+            '{
+              schema_version: 1,
+              evidence_kind: "council-dispatch",
+              repository: $repository,
+              default_sha: $sha,
+              workflow: $workflow,
+              workflow_run_id: $run_id,
+              workflow_run_attempt: $run_attempt,
+              dispatch_http_status: $dispatch_http_status,
+              pending_minimum_age: $pending_minimum_age,
+              final_council_disposition: null,
+              final_result_persisted: false
+            }' > .evidence/council-dispatch.json
+
+      - name: Persist Council dispatch evidence to hive-repositories R2
+        if: ${{ steps.dispatch.outcome == 'success' }}
+        env:
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID || secrets.CF_R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || secrets.CF_R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || secrets.CF_R2_SECRET_ACCESS_KEY }}
+          R2_EVIDENCE_BUCKET: hive-repositories
+        shell: bash
+        run: |
+          set -euo pipefail
+          prefix="evidence/${GITHUB_REPOSITORY}/${TARGET_SHA}/council/${GITHUB_RUN_ID}/${GITHUB_RUN_ATTEMPT}"
+          python3 .github/scripts/r2_evidence.py \
+            --file .evidence/council-dispatch.json \
+            --key "$prefix/council-dispatch.json" \
+            --content-type application/json
