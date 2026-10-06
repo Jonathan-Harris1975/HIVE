@@ -150,3 +150,49 @@ jobs:
             exit 1
           fi
           echo "Council dispatched for ${REPO}@${TARGET_SHA}."
+
+      - name: Build exact-run Council evidence receipt
+        env:
+          REPOSITORY: ${{ github.repository }}
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          PENDING_MINIMUM_AGE: ${{ inputs.pending_minimum_age || 'unknown' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          payload = {
+              "schema_version": 1,
+              "kind": "council",
+              "repository": os.environ["REPOSITORY"],
+              "sha": os.environ["TARGET_SHA"],
+              "run_id": int(os.environ["RUN_ID"]),
+              "run_attempt": int(os.environ["RUN_ATTEMPT"]),
+              "workflow": "Repository Council",
+              "preflight_exact_sha_verified": True,
+              "required_ci_security_verified": True,
+              "unresolved_autonomy_state": False,
+              "external_council_dispatch": "accepted",
+              "certification_complete": False,
+              "pending_minimum_release_age": os.environ.get("PENDING_MINIMUM_AGE", "unknown"),
+              "note": "This receipt proves the GitHub Council preflight and external dispatch only. Final Council certification must be persisted by the Council result path before READY can be claimed.",
+          }
+          Path("council-r2-evidence.json").write_text(
+              json.dumps(payload, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Persist Council run evidence to hive-repositories R2
+        env:
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID || vars.CF_R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || secrets.CF_R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || secrets.CF_R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: hive-repositories
+          R2_EVIDENCE_PREFIX: ci-evidence
+        run: python3 .github/scripts/r2_evidence_store.py council-r2-evidence.json
