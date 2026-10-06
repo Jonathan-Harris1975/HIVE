@@ -40,6 +40,10 @@ jobs:
       run: python3 .github/scripts/test_security_diagnostics.py
     - name: Test exact-run R2 evidence persistence helper
       run: python3 .github/scripts/test_r2_evidence_store.py
+    - name: Test bounded Council result channel
+      run: python3 .github/scripts/test_r2_result_channel.py
+    - name: Test R2 mutation lease identity
+      run: python3 .github/scripts/test_r2_mutation_lease.py
     - name: Install pinned CI tools
       run: python scripts/install_ci_tools.py trivy gitleaks actionlint
       id: install_security_tools

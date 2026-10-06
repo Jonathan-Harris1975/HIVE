@@ -27,6 +27,7 @@ concurrency:
 jobs:
   council:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - name: Check out trusted Council definition
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -112,16 +113,43 @@ jobs:
           test -n "${KILO_REPAIR_TRIGGER_URL:-}" || { echo "::error::KILO_REPAIR_TRIGGER_URL is required."; exit 1; }
           python3 .github/scripts/kilo_webhook_url.py
 
+      - name: Create bounded Council result channel
+        id: result_channel
+        env:
+          REPO: ${{ github.repository }}
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID || vars.CF_R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || secrets.CF_R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || secrets.CF_R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: hive-repositories
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo_key="${REPO//\//__}"
+          key="ci-evidence/${repo_key}/council-final/${TARGET_SHA}/${RUN_ID}-${RUN_ATTEMPT}.json"
+          url="$(python3 .github/scripts/r2_result_channel.py presign-put --bucket "$R2_BUCKET" --key "$key" --expires 3600)"
+          echo "::add-mask::$url"
+          {
+            echo "key=$key"
+            echo "put_url=$url"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Dispatch repository Council to Kilo
         env:
           REPO: ${{ github.repository }}
           TARGET_SHA: ${{ steps.target.outputs.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
           PENDING_MINIMUM_AGE: ${{ inputs.pending_minimum_age || 'unknown' }}
           RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
           KILO_REPAIR_TRIGGER_URL: ${{ secrets.KILO_REPAIR_TRIGGER_URL }}
+          COUNCIL_RESULT_PUT_URL: ${{ steps.result_channel.outputs.put_url }}
         shell: bash
         run: |
           set -euo pipefail
+          echo "::add-mask::$COUNCIL_RESULT_PUT_URL"
           prompt="$(cat .council/council.md)"
           test -n "${prompt//[[:space:]]/}" || { echo "::error::Council contract is empty."; exit 1; }
           task="$(cat <<EOF
@@ -132,7 +160,14 @@ jobs:
           Renovate updates still waiting on minimumReleaseAge at this run: ${PENDING_MINIMUM_AGE}. Record them as PENDING_MINIMUM_AGE (not a failure).
           If a safe repository change is required, make the smallest justified change on one branch and open one PR against the default branch. Do not merge or deploy it yourself.
           If no code change is required, do not create a cosmetic PR.
-          Return the Council disposition and evidence in the Kilo task result.
+
+          When the Council review is complete, write a sanitised JSON file named council-final.json containing:
+          {"kind":"council-final","repository":"${REPO}","sha":"${TARGET_SHA}","run_id":${RUN_ID},"run_attempt":${RUN_ATTEMPT},"certification_complete":true,"disposition":"READY|HOLD|PENDING_MINIMUM_AGE","evidence":[],"blockers":[]}
+          Populate evidence and blockers with concise non-secret strings. Do not include credentials, tokens, raw secret scanner output, or the upload URL in the JSON.
+          Then upload that exact file with:
+          curl --fail --silent --show-error --request PUT --header 'Content-Type: application/json' --data-binary @council-final.json '${COUNCIL_RESULT_PUT_URL}'
+          The URL is a short-lived capability for this one Council result object only. Do not print, persist, echo, commit, or reuse it.
+          The GitHub Council workflow will validate the exact repository/SHA/run binding before accepting the result.
 
           ${prompt}
           EOF
@@ -150,6 +185,34 @@ jobs:
             exit 1
           fi
           echo "Council dispatched for ${REPO}@${TARGET_SHA}."
+
+      - name: Wait for and validate final Council result
+        env:
+          REPOSITORY: ${{ github.repository }}
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          RESULT_KEY: ${{ steps.result_channel.outputs.key }}
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID || vars.CF_R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || secrets.CF_R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || secrets.CF_R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: hive-repositories
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/r2_result_channel.py wait-get \
+            --bucket "$R2_BUCKET" \
+            --key "$RESULT_KEY" \
+            --output council-final.json \
+            --timeout 2700 \
+            --interval 15
+          python3 .github/scripts/r2_result_channel.py validate-result council-final.json \
+            --repository "$REPOSITORY" \
+            --sha "$TARGET_SHA" \
+            --run-id "$RUN_ID" \
+            --run-attempt "$RUN_ATTEMPT"
+          disposition="$(jq -r '.disposition' council-final.json)"
+          echo "Final Council disposition: $disposition"
 
       - name: Build exact-run Council evidence receipt
         env:
@@ -178,9 +241,9 @@ jobs:
               "required_ci_security_verified": True,
               "unresolved_autonomy_state": False,
               "external_council_dispatch": "accepted",
-              "certification_complete": False,
+              "certification_complete": True,
               "pending_minimum_release_age": os.environ.get("PENDING_MINIMUM_AGE", "unknown"),
-              "note": "This receipt proves the GitHub Council preflight and external dispatch only. Final Council certification must be persisted by the Council result path before READY can be claimed.",
+              "note": "Final Council result was returned through the bounded exact-run R2 result channel and validated before this receipt was written.",
           }
           Path("council-r2-evidence.json").write_text(
               json.dumps(payload, indent=2, sort_keys=True) + "\n",
