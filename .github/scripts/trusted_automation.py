@@ -24,7 +24,10 @@ DEFAULT_BRANCH = os.environ.get("DEFAULT_BRANCH", "main")
 REPAIR_APP_LOGIN = os.environ.get("REPAIR_APP_LOGIN", "")
 
 RENOVATE_LOGIN = "renovate[bot]"
-KILO_LOGIN = os.environ.get("KILO_REPAIR_PR_LOGIN") or "kilo-code-bot[bot]"
+KILO_LOGIN = os.environ.get("KILO_REPAIR_PR_LOGIN", "").strip()
+CTO_LOGIN = os.environ.get("CTO_NEW_PR_LOGIN", "").strip()
+CTO_TASK_LABEL = "autonomy:cto-task"
+CTO_IMPLEMENTATION_LABEL = "autonomy:cto-implementation"
 CARRIER_PREFIX = "[autonomy] Repair "
 BRANCH_PR_LABEL = "automation:branch-pr"
 BRANCH_PR_RE = re.compile(r"^(fix|feat|chore|ci|work|codex)/[A-Za-z0-9._/-]+$")
@@ -182,6 +185,46 @@ def is_carrier(pr: dict[str, Any]) -> bool:
     )
 
 
+def cto_issue_reference(pr: dict[str, Any]) -> int | None:
+    """Return the single repository issue explicitly linked by a cto.new PR."""
+    if pr.get("user", {}).get("login") != CTO_LOGIN or not is_same_repo(pr):
+        return None
+    body = str(pr.get("body") or "")
+    patterns = (
+        r"(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)",
+        rf"https://github\.com/{re.escape(REPO)}/issues/(\d+)",
+    )
+    numbers: set[int] = set()
+    for pattern in patterns:
+        numbers.update(int(value) for value in re.findall(pattern, body, flags=re.IGNORECASE))
+    return next(iter(numbers)) if len(numbers) == 1 else None
+
+def verified_cto_task(pr: dict[str, Any]) -> int | None:
+    """Require a real cto.new-assigned task, not a programme/checkpoint issue."""
+    number = cto_issue_reference(pr)
+    if number is None:
+        return None
+    issue = get(f"/repos/{REPO}/issues/{number}")
+    if issue.get("pull_request") is not None:
+        return None
+    labels = issue_labels(issue)
+    assignees = {str(item.get("login", "")) for item in issue.get("assignees", [])}
+    if CTO_TASK_LABEL not in labels or CTO_LOGIN not in assignees:
+        return None
+    if issue.get("state") not in {"open", "closed"}:
+        return None
+    return number
+
+def is_cto_implementation_identity(pr: dict[str, Any]) -> bool:
+    labels = issue_labels(pr)
+    return (
+        pr.get("user", {}).get("login") == CTO_LOGIN
+        and pr.get("state") == "open"
+        and is_same_repo(pr)
+        and pr.get("base", {}).get("ref") == DEFAULT_BRANCH
+        and CTO_IMPLEMENTATION_LABEL in labels
+    )
+
 def carrier_comments(number: int) -> list[dict[str, Any]]:
     comments: list[dict[str, Any]] = []
     for page in range(1, 11):
@@ -262,6 +305,20 @@ def adopt_linked_kilo_prs(open_prs: list[dict[str, Any]]) -> None:
         log(f"Trusted Kilo implementation PR #{pr['number']} linked to source PR #{source}.")
 
 
+def adopt_linked_cto_prs(open_prs: list[dict[str, Any]]) -> None:
+    """Adopt only cto.new PRs that prove linkage to an explicitly assigned task."""
+    for pr in open_prs:
+        if pr.get("user", {}).get("login") != CTO_LOGIN:
+            continue
+        if CTO_IMPLEMENTATION_LABEL in issue_labels(pr):
+            continue
+        task = verified_cto_task(pr)
+        if task is None:
+            log(f"cto.new PR #{pr['number']} has no single verified cto.new task; leaving it untrusted.")
+            continue
+        add_labels(int(pr["number"]), [CTO_IMPLEMENTATION_LABEL])
+        log(f"Trusted cto.new implementation PR #{pr['number']} linked to task #{task}.")
+
 def automation_kind(pr: dict[str, Any]) -> str | None:
     labels = issue_labels(pr)
     if is_renovate(pr):
@@ -273,6 +330,8 @@ def automation_kind(pr: dict[str, Any]) -> str | None:
     if (pr.get("user", {}).get("login") == KILO_LOGIN and is_same_repo(pr) and
             "autonomy:kilo-implementation" in labels and "autonomy:repair" in labels):
         return "kilo"
+    if is_cto_implementation_identity(pr):
+        return "cto"
     return None
 
 
@@ -450,10 +509,10 @@ def reconcile_pr(pr: dict[str, Any]) -> None:
         # Renovate eligibility is explicit metadata; manual/unlabelled updates remain human merge decisions.
         return
 
-    if kind in {"kilo", "branch-pr", "renovate"}:
+    if kind in {"kilo", "cto", "branch-pr", "renovate"}:
         sensitive = [path for path in pr_files(int(pr["number"])) if sensitive_file(path)]
         if sensitive:
-            source = {"kilo": "repair", "branch-pr": "managed branch", "renovate": "Renovate"}[kind]
+            source = {"kilo": "repair", "cto": "cto.new", "branch-pr": "managed branch", "renovate": "Renovate"}[kind]
             place_human_hold(
                 pr,
                 f"the {source} PR changes governance/security automation files: " + ", ".join(sensitive[:8]),
@@ -466,6 +525,10 @@ def reconcile_pr(pr: dict[str, Any]) -> None:
                 linked_kilo_review_source(pr, list_open_prs()) is None):
             log(f"Kilo PR #{pr['number']} no longer has a current verified source; withholding merge.")
             return
+
+    if kind == "cto" and verified_cto_task(pr) is None:
+        log(f"cto.new PR #{pr['number']} no longer has a verified assigned task; withholding merge.")
+        return
 
     green, reason = all_required_checks_green(pr)
     if not green:
@@ -481,7 +544,7 @@ def reconcile_pr(pr: dict[str, Any]) -> None:
 
     # Renovate and Kilo are distinct identities, so the repair App can provide the trusted review.
     # Carrier PRs are authored by the same repair App and GitHub correctly forbids self-approval.
-    if kind in {"renovate", "kilo"}:
+    if kind in {"renovate", "kilo", "cto"}:
         approve_pr(number, sha)
         if current_head_unchanged(number, sha) is None:
             return
@@ -497,9 +560,14 @@ def main() -> int:
     if (not re.fullmatch(r"[A-Za-z0-9-]+(?:\[bot\])?", KILO_LOGIN) or
             KILO_LOGIN in {REPAIR_APP_LOGIN, RENOVATE_LOGIN, "github-actions[bot]"}):
         raise RuntimeError("KILO_REPAIR_PR_LOGIN must name the distinct, verified Kilo PR creator")
+    if (not re.fullmatch(r"[A-Za-z0-9-]+(?:\[bot\])?", CTO_LOGIN) or
+            CTO_LOGIN in {REPAIR_APP_LOGIN, RENOVATE_LOGIN, KILO_LOGIN, "github-actions[bot]"}):
+        raise RuntimeError("CTO_NEW_PR_LOGIN must name the distinct, verified cto.new PR creator")
     ensure_label("dependency:auto-eligible", "0E8A16", "Renovate update class is eligible for trusted admission after exact-head gates")
     ensure_label("dependency:manual", "FBCA04", "Renovate update class requires a human merge decision")
     ensure_label("autonomy:kilo-implementation", "5319E7", "Kilo implementation PR linked to an autonomous repair carrier")
+    ensure_label(CTO_TASK_LABEL, "1D76DB", "Actionable engineering task explicitly assigned to cto.new")
+    ensure_label(CTO_IMPLEMENTATION_LABEL, "5319E7", "cto.new implementation PR linked to an explicitly assigned task")
     ensure_label("autonomy:human-hold", "FBCA04", "Automation must stop for human action")
     ensure_label("autonomy:obsolete", "D4C5F9", "Repair carrier is no longer current")
     ensure_label("autonomy:admitted", "0E8A16", "Exact-head CI/security verification complete; Mergify may merge")
@@ -509,6 +577,8 @@ def main() -> int:
     open_prs = list_open_prs()  # refresh after stale-carrier lifecycle changes
     adopt_linked_kilo_prs(open_prs)
     open_prs = list_open_prs()  # refresh labels after Kilo correlation
+    adopt_linked_cto_prs(open_prs)
+    open_prs = list_open_prs()  # refresh labels after cto.new task correlation
     admit_waiting_runs(open_prs)
 
     # Reconcile current trusted PRs. Runs admitted above will normally become ready on a later
