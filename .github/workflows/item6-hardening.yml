@@ -130,6 +130,23 @@ jobs:
         with:
           node-version: 24.21.0
 
+      - name: Prove malformed Renovate configuration is rejected
+        shell: bash
+        run: |
+          set -euo pipefail
+          fixture="$RUNNER_TEMP/renovate-invalid.json"
+          printf '%s\n' '{ "extends": [ "config:recommended", ] }' > "$fixture"
+          set +e
+          npx --yes --package=renovate@44.133.0 renovate-config-validator --strict "$fixture"
+          status=$?
+          set -e
+          rm -f "$fixture"
+          if [ "$status" -eq 0 ]; then
+            echo "::error::Malformed Renovate configuration unexpectedly passed strict validation."
+            exit 1
+          fi
+          echo "Malformed Renovate configuration was rejected as required."
+
       - name: Validate Renovate configuration
         run: npx --yes --package=renovate@44.133.0 renovate-config-validator --strict renovate.json
 
