@@ -1,0 +1,57 @@
+name: R2 evidence live validation
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/r2-evidence-live-validation.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: r2-evidence-live-validation
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out trusted repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build exact-run storage validation evidence
+        env:
+          REPOSITORY: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          payload = {
+              "schema_version": 1,
+              "kind": "r2-live-validation",
+              "repository": os.environ["REPOSITORY"],
+              "sha": os.environ["SHA"],
+              "run_id": int(os.environ["RUN_ID"]),
+              "run_attempt": int(os.environ["RUN_ATTEMPT"]),
+              "non_secret_canary": "HIVE exact-run R2 storage validation",
+          }
+          with open("r2-live-validation.json", "w", encoding="utf-8") as handle:
+              json.dump(payload, handle, sort_keys=True)
+          PY
+
+      - name: Persist and HEAD-verify live R2 evidence
+        env:
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID || vars.CF_R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || secrets.CF_R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || secrets.CF_R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: hive-repositories
+          R2_EVIDENCE_PREFIX: ci-evidence
+        run: python3 .github/scripts/r2_evidence_store.py r2-live-validation.json

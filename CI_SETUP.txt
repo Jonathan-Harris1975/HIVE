@@ -51,7 +51,7 @@ AUTONOMOUS PROVING-GROUP SETUP
 - GitHub native branch/ruleset protections remain authoritative gates. Native GitHub auto-merge / Merge Queue must not race Mergify on automation PRs.
 - DAST and Repository Council GitHub-run evidence is persisted to the existing private `hive-repositories` R2 bucket under exact repository/SHA/run-ID/run-attempt keys. Persistence failure is blocking and is verified with a post-write HEAD request.
 - The DAST job is an observer only: OWASP ZAP issue-writing is disabled. The stored DAST receipt contains sanitised result metadata and no credentials.
-- The current Repository Council workflow stores a preflight/dispatch receipt only. That receipt explicitly does not claim final certification; final Council-result persistence remains required before the repository may be declared READY.
+- Repository Council now creates a short-lived presigned PUT capability scoped to one exact R2 result object, passes it only inside the Kilo Council task, waits for that exact result, and validates repository/SHA/run-ID/run-attempt before accepting certification. Kilo receives no standing R2 credentials and must not print or persist the temporary URL.
 - GitHub Actions R2 persistence requires an existing write-capable credential pair exposed as `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` (or the `CF_R2_*` aliases) and `R2_ACCOUNT_ID` (or `CF_R2_ACCOUNT_ID`) as a repository variable. The bucket is fixed to `hive-repositories`; these credentials are not added to application runtime access by this CI work.
 - Codecov remains intentionally not enabled by this CI programme. OWASP ZAP is enabled only in the authorised DAST workflow.
 
@@ -65,7 +65,7 @@ CTO.NEW PLANNED-ENGINEERING LANE
 - A cto.new implementation may begin only from genuine actionable repository work intentionally handed to the supported cto.new GitHub integration.
 - The exact live cto.new GitHub bot/assignment/PR identity must be verified from a real supported handoff before trusted admission recognises it. No guessed bot login or synthetic assignment convention is permitted.
 - Until that live identity and handoff are verified, the cto.new mutation lane is fail-closed and Kilo must not silently absorb planned-engineering work merely because cto.new is unavailable.
-- Kilo/cto.new same-fingerprint mutation requires a durable external lease/transfer record before either agent is allowed to replace the other as writer. Generic GitHub Issues are not that durable-state mechanism.
+- Kilo/cto.new same-fingerprint mutation uses the R2-backed conditional lease helper at `.github/scripts/r2_mutation_lease.py`. It uses exact fingerprint hashing plus conditional `If-None-Match` / `If-Match` writes in `hive-repositories` so a concurrent writer loses closed rather than racing. Generic GitHub Issues are not the lease store. The cto.new lane itself remains fail-closed until a real supported task handoff proves its live identity.
 
 AUTONOMOUS REPAIR + TRUSTED PR AUTOMATION
 -----------------------------------------
