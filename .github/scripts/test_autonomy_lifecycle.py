@@ -170,15 +170,35 @@ class KiloPolicyTests(unittest.TestCase):
         permission = self.policy["permission"]
         self.assertEqual(permission["question"], "deny")
         self.assertEqual(permission["external_directory"], "deny")
-        for tool in ("edit", "write"):
+        for tool in ("edit", "write", "apply_patch"):
             self.assertEqual(permission[tool]["*"], "allow")
             for path in ("kilo.jsonc", ".github/workflows/*", ".github/scripts/*", ".mergify.yml", "renovate.json"):
                 self.assertEqual(permission[tool][path], "deny")
 
     def test_kilo_cannot_force_push_merge_or_deploy(self):
         bash = self.policy["permission"]["bash"]
-        for command in ("git push +*", "git push *--force*", "git push * -f*", "gh pr merge *", "koyeb *"):
+        self.assertEqual(bash["*"], "deny")
+        for command in (
+            "git push +*",
+            "git push --force",
+            "git push -f",
+            "git push --force-with-lease",
+            "git push --mirror",
+            "git push --delete",
+            "git push *--force*",
+            "git push * -f*",
+            "bash -c *",
+            "sh -c *",
+            "gh pr merge *",
+            "koyeb *",
+        ):
             self.assertEqual(bash[command], "deny")
+        for command in (
+            "git push origin HEAD",
+            "git push --set-upstream origin HEAD",
+            "git push -u origin HEAD",
+        ):
+            self.assertEqual(bash[command], "allow")
 
 
 class RenovateGovernanceTests(unittest.TestCase):
