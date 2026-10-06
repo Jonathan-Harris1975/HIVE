@@ -11,6 +11,10 @@ on:
         description: Repository Council workflow run ID that dispatched this assessment
         required: true
         type: string
+      source_council_run_attempt:
+        description: Repository Council workflow run attempt
+        required: true
+        type: string
       disposition:
         description: Council disposition/status
         required: true
@@ -87,7 +91,7 @@ jobs:
           R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          GITHUB_RUN_ID: ${{ inputs.source_council_run_id }}
-          GITHUB_RUN_ATTEMPT: "1"
+          EVIDENCE_RUN_ID: ${{ inputs.source_council_run_id }}
+          EVIDENCE_RUN_ATTEMPT: ${{ inputs.source_council_run_attempt }}
           EVIDENCE_STATUS: ${{ inputs.disposition }}
         run: python3 .github/scripts/persist_ci_report_r2.py council "${{ inputs.target_sha }}" "$RUNNER_TEMP/council-r2"
