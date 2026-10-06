@@ -58,6 +58,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TARGET_SHA: ${{ inputs.target_sha }}
           SOURCE_COUNCIL_RUN_ID: ${{ inputs.source_council_run_id }}
+          SOURCE_COUNCIL_RUN_ATTEMPT: ${{ inputs.source_council_run_attempt }}
           DISPOSITION: ${{ inputs.disposition }}
           REPORT_MD_B64: ${{ inputs.report_md_b64 }}
           REPORT_JSON_B64: ${{ inputs.report_json_b64 }}
@@ -72,8 +73,10 @@ jobs:
           test "$current" = "$TARGET_SHA" || { echo "::error::Returned Council result is stale; current default SHA is $current."; exit 1; }
           source_name="$(gh api "repos/$REPO/actions/runs/$SOURCE_COUNCIL_RUN_ID" --jq .name)"
           source_sha="$(gh api "repos/$REPO/actions/runs/$SOURCE_COUNCIL_RUN_ID" --jq .head_sha)"
+          source_attempt="$(gh api "repos/$REPO/actions/runs/$SOURCE_COUNCIL_RUN_ID" --jq .run_attempt)"
           test "$source_name" = "Repository Council" || { echo "::error::Source run is not Repository Council."; exit 1; }
           test "$source_sha" = "$TARGET_SHA" || { echo "::error::Source Council run SHA does not match returned result."; exit 1; }
+          test "$source_attempt" = "$SOURCE_COUNCIL_RUN_ATTEMPT" || { echo "::error::Source Council run attempt does not match returned result."; exit 1; }
           mkdir -p "$RUNNER_TEMP/council-r2"
           printf '%s' "$REPORT_MD_B64" | base64 --decode > "$RUNNER_TEMP/council-r2/council-report.md"
           printf '%s' "$REPORT_JSON_B64" | base64 --decode > "$RUNNER_TEMP/council-r2/council-report.json"
