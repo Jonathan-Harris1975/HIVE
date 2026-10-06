@@ -65,6 +65,51 @@ jobs:
           online-audits: false
           version: "1.30.1"
 
+      - name: Create seeded unsafe Actions canary
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > .zizmor-seeded-canary.yml <<'YAML'
+          name: synthetic-zizmor-canary
+          on:
+            pull_request_target:
+          permissions:
+            contents: write
+          jobs:
+            unsafe:
+              runs-on: ubuntu-latest
+              steps:
+                - uses: actions/checkout@main
+                - run: echo "${{ github.event.pull_request.title }}"
+          YAML
+
+      - name: Prove zizmor detects the seeded unsafe pattern
+        id: seeded_zizmor
+        continue-on-error: true
+        uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
+        with:
+          inputs: .zizmor-seeded-canary.yml
+          advanced-security: false
+          annotations: false
+          min-severity: medium
+          min-confidence: medium
+          online-audits: false
+          version: "1.30.1"
+
+      - name: Require seeded zizmor detection and remove canary
+        if: always()
+        env:
+          SEEDED_ZIZMOR_OUTCOME: ${{ steps.seeded_zizmor.outcome }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .zizmor-seeded-canary.yml
+          if [ "$SEEDED_ZIZMOR_OUTCOME" != "failure" ]; then
+            echo "::error::Seeded unsafe Actions pattern was not rejected by zizmor."
+            exit 1
+          fi
+          echo "Seeded zizmor unsafe pattern was detected as required."
+
   renovate-config:
     name: Item 6 / Renovate config
     runs-on: ubuntu-latest
