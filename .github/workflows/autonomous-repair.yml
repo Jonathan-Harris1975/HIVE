@@ -156,10 +156,12 @@ jobs:
               exit 1
             fi
             local carrier_url="https://github.com/${REPO}/pull/${repair_pr}"
+            contract="$(cat .github/kilo-machine-repair-contract.md)"
+            test -n "$contract" || { echo "::error::Kilo machine repair contract is empty."; exit 1; }
             payload="$(jq -n --arg repo "$REPO" --arg pr "$carrier_url" \
-              --arg sha "$HEAD_SHA" --arg run "$RUN_URL" --arg workflow "$RUN_NAME" \
+              --arg sha "$HEAD_SHA" --arg run "$RUN_URL" --arg workflow "$RUN_NAME" --arg contract "$contract" \
               '{repository:$repo,carrier_pr:$pr,failed_sha:$sha,failed_run:$run,workflow:$workflow,
-                task:("Investigate the failed workflow " + $workflow + " at " + $run +
+                task:($contract + "\n\n" + "Investigate the failed workflow " + $workflow + " at " + $run +
                 ". Repair the smallest verified code/manifest/lockfile defect on a new branch. " +
                 "Open one implementation PR against the default branch and include " + $pr +
                 " in its PR body. Do not merge or deploy, dismiss alerts, weaken security checks, " +
