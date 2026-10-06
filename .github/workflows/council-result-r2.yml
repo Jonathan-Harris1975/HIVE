@@ -97,4 +97,5 @@ jobs:
           EVIDENCE_RUN_ID: ${{ inputs.source_council_run_id }}
           EVIDENCE_RUN_ATTEMPT: ${{ inputs.source_council_run_attempt }}
           EVIDENCE_STATUS: ${{ inputs.disposition }}
-        run: python3 .github/scripts/persist_ci_report_r2.py council "${{ inputs.target_sha }}" "$RUNNER_TEMP/council-r2"
+          TARGET_SHA: ${{ inputs.target_sha }}
+        run: python3 .github/scripts/persist_ci_report_r2.py council "$TARGET_SHA" "$RUNNER_TEMP/council-r2"
