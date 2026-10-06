@@ -7,8 +7,8 @@ on:
     types: [submitted, edited]
   pull_request_review_comment:
     types: [created, edited]
-  workflow_run:
-    workflows: ["CI", "CodeQL", "Security and repository quality", "Branch PR signal"]
+  workflow_run: # zizmor: ignore[dangerous-triggers] trusted default-branch metadata router; PR code is never checked out or executed
+    workflows: ["CI", "CodeQL", "Security and repository quality", "Item 6 hardening", "Branch PR signal"]
     types: [requested, completed]
   # Retain repair reconciliation slots and add hourly branch signal recovery.
   schedule:
@@ -17,7 +17,7 @@ on:
     - cron: "17 6 * * *"
     - cron: "23 * * * *"
   # Recover branch signals dropped by GitHub concurrency/event delivery.
-  pull_request_target:
+  pull_request_target: # zizmor: ignore[dangerous-triggers] trusted default-branch metadata only; no PR checkout or execution
     types: [labeled, unlabeled, converted_to_draft, ready_for_review, synchronize, reopened]
   workflow_dispatch:
 
@@ -123,6 +123,6 @@ jobs:
           REPAIR_APP_LOGIN: ${{ steps.app_token.outputs.repair_app_login }}
           KILO_REPAIR_PR_LOGIN: ${{ vars.KILO_REPAIR_PR_LOGIN }}
           CURRENT_RUN_ID: ${{ github.run_id }}
-          REQUIRED_WORKFLOWS: "CI|CodeQL|Security and repository quality"
+          REQUIRED_WORKFLOWS: "CI|CodeQL|Security and repository quality|Item 6 hardening"
         run: python .github/scripts/trusted_automation.py
 
