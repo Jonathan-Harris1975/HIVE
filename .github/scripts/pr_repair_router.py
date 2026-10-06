@@ -13,6 +13,7 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from pathlib import Path
 from kilo_webhook_url import valid_kilo_webhook_url
 from kilo_failure_classifier import repairable_failed_steps
 
@@ -23,6 +24,7 @@ DEFAULT = os.environ["DEFAULT_BRANCH"]
 KILO = {"kilo-code-bot", "kilo-code-bot[bot]"}
 KILO_IMPLEMENTER = os.environ.get("KILO_REPAIR_PR_LOGIN") or "kilo-code-bot[bot]"
 REPAIR_APP_LOGIN = os.environ.get("REPAIR_APP_LOGIN", "")
+KILO_MACHINE_CONTRACT = Path(__file__).resolve().parents[1] / "kilo-machine-repair-contract.md"
 REPAIRABLE = re.compile(r"\b(fail(?:s|ed|ure)?|break(?:s|ing)?|broken|regression|mismatch|"
                         r"vulnerab\w*|security|unsafe|incorrect|bug|error|risk|suggest|"
                         r"should|fix|bump|update|regenerat\w*|missing|stale)\b", re.I)
@@ -195,6 +197,13 @@ def extract(event: dict) -> tuple[dict, str, list[str]] | None:
     return pr, "review", [evidence]
 
 
+def machine_contract() -> str:
+    text = KILO_MACHINE_CONTRACT.read_text(encoding="utf-8").strip()
+    if not text:
+        raise RuntimeError("Kilo machine repair contract is empty")
+    return text
+
+
 def dispatch(pr: dict, kind: str, findings: list[str]) -> str:
     number, sha = pr["number"], pr["head"]["sha"]
     marker = f"<!-- kilo-auto-repair:{sha}:{kind} -->"
@@ -255,6 +264,7 @@ def dispatch(pr: dict, kind: str, findings: list[str]) -> str:
         "If the finding is stale, not reproducible, unsafe to repair, or requires credentials, explain it "
         "without opening a speculative PR."
     )
+    instruction = machine_contract() + "\n\n" + instruction
     payload = {"repository": REPO, "source_pr": source, "source_sha": sha,
                "kind": kind, "task": instruction, "findings": findings[:12]}
     request = urllib.request.Request(url, data=json.dumps(payload).encode(), method="POST",

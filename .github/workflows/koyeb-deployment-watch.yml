@@ -1,7 +1,7 @@
 name: Koyeb production deployment watch
 
 on:
-  workflow_run:
+  workflow_run: # zizmor: ignore[dangerous-triggers] exact-main successful same-repository CI gate enforced below
     workflows: ["CI"]
     types: [completed]
   workflow_dispatch:

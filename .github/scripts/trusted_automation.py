@@ -33,6 +33,7 @@ URL_END = r"(?![A-Za-z0-9/_-])"
 KILO_SENSITIVE_PREFIXES = (
     ".github/workflows/",
     ".github/actions/",
+    ".github/scripts/",
     ".github/CODEOWNERS",
     ".github/dependabot.yml",
     ".mergify.yml",
@@ -43,6 +44,7 @@ KILO_SENSITIVE_PREFIXES = (
     "CI_SETUP.txt",
 )
 KILO_SENSITIVE_EXACT = {
+    "kilo.jsonc",
     "scripts/secret_scan.py",
     "scripts/install_ci_tools.py",
     "scripts/verify_ci_tool_checksums.py",
@@ -448,10 +450,10 @@ def reconcile_pr(pr: dict[str, Any]) -> None:
         # Renovate eligibility is explicit metadata; manual/unlabelled updates remain human merge decisions.
         return
 
-    if kind in {"kilo", "branch-pr"}:
+    if kind in {"kilo", "branch-pr", "renovate"}:
         sensitive = [path for path in pr_files(int(pr["number"])) if sensitive_file(path)]
         if sensitive:
-            source = "repair" if kind == "kilo" else "managed branch"
+            source = {"kilo": "repair", "branch-pr": "managed branch", "renovate": "Renovate"}[kind]
             place_human_hold(
                 pr,
                 f"the {source} PR changes governance/security automation files: " + ", ".join(sensitive[:8]),

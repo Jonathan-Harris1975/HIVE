@@ -1,9 +1,7 @@
 commands_restrictions:
   queue:
     conditions:
-      - or:
-          - sender-permission >= write
-          - sender = renovate[bot]
+      - sender-permission >= write
 
 merge_protections_settings:
   reporting_method: check-runs

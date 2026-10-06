@@ -116,7 +116,7 @@ jobs:
       pull-requests: write
       security-events: read
 'on':
-  workflow_run:
+  workflow_run: # zizmor: ignore[dangerous-triggers] trusted metadata router; PR code is never checked out or executed
     workflows:
     - CI
     - CodeQL
