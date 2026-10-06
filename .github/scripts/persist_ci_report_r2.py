@@ -39,7 +39,7 @@ def main():
     if not re.fullmatch(r"[0-9a-fA-F]{40}",a.sha): raise SystemExit("exact 40-character SHA required")
     if not run.isdigit() or not attempt.isdigit(): raise SystemExit("numeric run id/attempt required")
     if not a.source.is_dir(): raise SystemExit("evidence source directory required")
-    endpoint=os.environ.get("R2_ENDPOINT",os.environ.get("R2_ENDPOINT_URL","")).strip()
+    endpoint=(os.environ.get("R2_ENDPOINT","").strip() or os.environ.get("R2_ENDPOINT_URL","").strip())
     if not endpoint.startswith("https://") or urllib.parse.urlsplit(endpoint).query: raise SystemExit("credential-free HTTPS R2 endpoint required")
     now=dt.datetime.now(dt.timezone.utc); iso=now.isocalendar()
     prefix=f"ci-reports/{repo}/{iso.year}/{iso.week:02d}/{a.sha}/{a.phase}/{run}/attempt-{attempt}"
