@@ -24,7 +24,7 @@ DEFAULT_BRANCH = os.environ.get("DEFAULT_BRANCH", "main")
 REPAIR_APP_LOGIN = os.environ.get("REPAIR_APP_LOGIN", "")
 
 RENOVATE_LOGIN = "renovate[bot]"
-KILO_LOGIN = os.environ.get("KILO_REPAIR_PR_LOGIN", "").strip()
+KILO_LOGIN = (os.environ.get("KILO_REPAIR_PR_LOGIN") or "kilo-code-bot[bot]").strip()
 CTO_LOGIN = os.environ.get("CTO_NEW_PR_LOGIN", "").strip()
 CTO_TASK_LABEL = "autonomy:cto-task"
 CTO_IMPLEMENTATION_LABEL = "autonomy:cto-implementation"
@@ -560,9 +560,11 @@ def main() -> int:
     if (not re.fullmatch(r"[A-Za-z0-9-]+(?:\[bot\])?", KILO_LOGIN) or
             KILO_LOGIN in {REPAIR_APP_LOGIN, RENOVATE_LOGIN, "github-actions[bot]"}):
         raise RuntimeError("KILO_REPAIR_PR_LOGIN must name the distinct, verified Kilo PR creator")
-    if (not re.fullmatch(r"[A-Za-z0-9-]+(?:\[bot\])?", CTO_LOGIN) or
+    if CTO_LOGIN and (not re.fullmatch(r"[A-Za-z0-9-]+(?:\[bot\])?", CTO_LOGIN) or
             CTO_LOGIN in {REPAIR_APP_LOGIN, RENOVATE_LOGIN, KILO_LOGIN, "github-actions[bot]"}):
         raise RuntimeError("CTO_NEW_PR_LOGIN must name the distinct, verified cto.new PR creator")
+    if not CTO_LOGIN:
+        log("cto.new lane unavailable: CTO_NEW_PR_LOGIN is not configured; Kilo and Renovate remain operational.")
     ensure_label("dependency:auto-eligible", "0E8A16", "Renovate update class is eligible for trusted admission after exact-head gates")
     ensure_label("dependency:manual", "FBCA04", "Renovate update class requires a human merge decision")
     ensure_label("autonomy:kilo-implementation", "5319E7", "Kilo implementation PR linked to an autonomous repair carrier")
