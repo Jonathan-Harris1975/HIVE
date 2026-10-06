@@ -151,7 +151,116 @@ jobs:
           set -euo pipefail
           echo "::add-mask::$COUNCIL_RESULT_PUT_URL"
           prompt="$(cat .council/council.md)"
-          IMPORTANT COMPLETION RETURN CONTRACT: after producing the real completed Council assessment, return it to this repository by dispatching workflow "council-result-r2.yml" on the default branch. Supply target_sha=${TARGET_SHA}, source_council_run_id=${GITHUB_RUN_ID}, disposition=<real Council disposition>, report_md_b64=<base64 of the completed Markdown report>, and report_json_b64=<base64 of the completed JSON report>. The JSON must include repository and exact_evaluated_sha. Do not report Council persistence complete unless that return workflow succeeds and verifies R2 storage.
+          prompt="${prompt}"
+          test -n "${prompt//[[:space:]]/}" || { echo "::error::Council contract is empty."; exit 1; }
+          task="$(cat <<EOF
+          Run the repository Council defined below against exact SHA ${TARGET_SHA} in ${REPO}.
+          The checked-in .council/council.md is the authoritative Council contract.
+          Inspect live GitHub Actions, security, pull-request, merge, deployment and repository evidence tied to that SHA.
+          Do not infer missing evidence and do not weaken checks.
+          Renovate updates still waiting on minimumReleaseAge at this run: ${PENDING_MINIMUM_AGE}. Record them as PENDING_MINIMUM_AGE (not a failure).
+          If a safe repository change is required, make the smallest justified change on one branch and open one PR against the default branch. Do not merge or deploy it yourself.
+          If no code change is required, do not create a cosmetic PR.
+
+          When the Council review is complete, write a sanitised JSON file named council-final.json containing:
+          {"kind":"council-final","repository":"${REPO}","sha":"${TARGET_SHA}","run_id":${RUN_ID},"run_attempt":${RUN_ATTEMPT},"certification_complete":true,"disposition":"READY|HOLD|PENDING_MINIMUM_AGE","evidence":[],"blockers":[]}
+          Populate evidence and blockers with concise non-secret strings. Do not include credentials, tokens, raw secret scanner output, or the upload URL in the JSON.
+          Then upload that exact file with:
+          curl --fail --silent --show-error --request PUT --header 'Content-Type: application/json' --data-binary @council-final.json '${COUNCIL_RESULT_PUT_URL}'
+          The URL is a short-lived capability for this one Council result object only. Do not print, persist, echo, commit, or reuse it.
+          The GitHub Council workflow will validate the exact repository/SHA/run binding before accepting the result.
+
+          ${prompt}
+          EOF
+          )"
+          payload="$(jq -n \
+            --arg repository "$REPO" \
+            --arg sha "$TARGET_SHA" \
+            --arg run "$RUN_URL" \
+            --arg task "$task" \
+            '{repository:$repository,target_sha:$sha,council_run:$run,kind:"repository-council",task:$task}')"
+          status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 30 \
+            --request POST --header 'Content-Type: application/json' --data "$payload" "$KILO_REPAIR_TRIGGER_URL")"
+          if [[ "$status" != 2?? ]]; then
+            echo "::error::Kilo Council trigger returned HTTP ${status}."
+            exit 1
+          fi
+          echo "Council dispatched for ${REPO}@${TARGET_SHA}."
+
+      - name: Wait for and validate final Council result
+        env:
+          REPOSITORY: ${{ github.repository }}
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          RESULT_KEY: ${{ steps.result_channel.outputs.key }}
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID || vars.CF_R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || secrets.CF_R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || secrets.CF_R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: hive-repositories
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/r2_result_channel.py wait-get \
+            --bucket "$R2_BUCKET" \
+            --key "$RESULT_KEY" \
+            --output council-final.json \
+            --timeout 2700 \
+            --interval 15
+          python3 .github/scripts/r2_result_channel.py validate-result council-final.json \
+            --repository "$REPOSITORY" \
+            --sha "$TARGET_SHA" \
+            --run-id "$RUN_ID" \
+            --run-attempt "$RUN_ATTEMPT"
+          disposition="$(jq -r '.disposition' council-final.json)"
+          echo "Final Council disposition: $disposition"
+
+      - name: Build exact-run Council evidence receipt
+        env:
+          REPOSITORY: ${{ github.repository }}
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          PENDING_MINIMUM_AGE: ${{ inputs.pending_minimum_age || 'unknown' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          payload = {
+              "schema_version": 1,
+              "kind": "council",
+              "repository": os.environ["REPOSITORY"],
+              "sha": os.environ["TARGET_SHA"],
+              "run_id": int(os.environ["RUN_ID"]),
+              "run_attempt": int(os.environ["RUN_ATTEMPT"]),
+              "workflow": "Repository Council",
+              "preflight_exact_sha_verified": True,
+              "required_ci_security_verified": True,
+              "unresolved_autonomy_state": False,
+              "external_council_dispatch": "accepted",
+              "certification_complete": True,
+              "pending_minimum_release_age": os.environ.get("PENDING_MINIMUM_AGE", "unknown"),
+              "note": "Final Council result was returned through the bounded exact-run R2 result channel and validated before this receipt was written.",
+          }
+          Path("council-r2-evidence.json").write_text(
+              json.dumps(payload, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Persist Council run evidence to hive-repositories R2
+        env:
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID || vars.CF_R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || secrets.CF_R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || secrets.CF_R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: hive-repositories
+          R2_EVIDENCE_PREFIX: ci-evidence
+        run: python3 .github/scripts/r2_evidence_store.py council-r2-evidence.json
+\\n\\n'"IMPORTANT COMPLETION RETURN CONTRACT: after producing the real completed Council assessment, return it to this repository by dispatching workflow council-result-r2.yml on the default branch. Supply target_sha=${TARGET_SHA}, source_council_run_id=${GITHUB_RUN_ID}, disposition=<real Council disposition>, report_md_b64=<base64 of the completed Markdown report>, and report_json_b64=<base64 of the completed JSON report>. The JSON must include repository and exact_evaluated_sha. Do not report Council persistence complete unless that return workflow succeeds and verifies R2 storage."
 
           test -n "${prompt//[[:space:]]/}" || { echo "::error::Council contract is empty."; exit 1; }
           task="$(cat <<EOF
