@@ -52,7 +52,7 @@ jobs:
           R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          GITHUB_RUN_ID: ${{ github.event.workflow_run.id }}
-          GITHUB_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          EVIDENCE_RUN_ID: ${{ github.event.workflow_run.id }}
+          EVIDENCE_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
           EVIDENCE_STATUS: ${{ github.event.workflow_run.conclusion }}
         run: python3 .github/scripts/persist_ci_report_r2.py dast "${{ github.event.workflow_run.head_sha }}" "$RUNNER_TEMP/r2-dast"
