@@ -35,7 +35,13 @@ def request(method, endpoint, key, body=b"", ctype=None):
         raise RuntimeError(f"R2 {method} failed with HTTP {e.code}") from e
 def main():
     p=argparse.ArgumentParser(); p.add_argument("phase",choices=("dast","council")); p.add_argument("sha"); p.add_argument("source",type=Path); a=p.parse_args()
-    repo=req("GITHUB_REPOSITORY").split("/")[-1]; run=(os.environ.get("EVIDENCE_RUN_ID","").strip() or req("GITHUB_RUN_ID")); attempt=(os.environ.get("EVIDENCE_RUN_ATTEMPT","").strip() or req("GITHUB_RUN_ATTEMPT"))
+    repository = req("GITHUB_REPOSITORY")
+    repo = repository.split("/")[-1]
+    run = os.environ.get("EVIDENCE_RUN_ID", "").strip() or req("GITHUB_RUN_ID")
+    attempt = (
+        os.environ.get("EVIDENCE_RUN_ATTEMPT", "").strip()
+        or req("GITHUB_RUN_ATTEMPT")
+    )
     if not re.fullmatch(r"[0-9a-fA-F]{40}",a.sha): raise SystemExit("exact 40-character SHA required")
     if not run.isdigit() or not attempt.isdigit(): raise SystemExit("numeric run id/attempt required")
     if not a.source.is_dir(): raise SystemExit("evidence source directory required")
@@ -51,7 +57,18 @@ def main():
         request("PUT",endpoint,key,body,mimetypes.guess_type(f.name)[0] or "application/octet-stream")
         request("HEAD",endpoint,key)
         objects.append({"key":key,"sha256":hashlib.sha256(body).hexdigest(),"bytes":len(body)})
-    manifest={"schema_version":1,"repository":repo,"phase":a.phase,"default_branch_sha":a.sha,"workflow_run_id":run,"workflow_run_attempt":attempt,"created_at":now.isoformat(),"status":os.environ.get("EVIDENCE_STATUS","UNKNOWN"),"objects":objects,"source_run":f"https://github.com/{req('GITHUB_REPOSITORY')}/actions/runs/{run}"}
+    manifest = {
+        "schema_version": 1,
+        "repository": repo,
+        "phase": a.phase,
+        "default_branch_sha": a.sha,
+        "workflow_run_id": run,
+        "workflow_run_attempt": attempt,
+        "created_at": now.isoformat(),
+        "status": os.environ.get("EVIDENCE_STATUS", "UNKNOWN"),
+        "objects": objects,
+        "source_run": f"https://github.com/{repository}/actions/runs/{run}",
+    }
     mb=(json.dumps(manifest,indent=2,sort_keys=True)+"\n").encode(); mkey=f"{prefix}/evidence-manifest.json"
     request("PUT",endpoint,mkey,mb,"application/json"); request("HEAD",endpoint,mkey)
     print(json.dumps({"verified":True,"bucket":BUCKET,"prefix":prefix,"manifest_key":mkey,"objects":len(objects)+1},sort_keys=True))
