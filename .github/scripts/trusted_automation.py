@@ -451,10 +451,10 @@ def reconcile_pr(pr: dict[str, Any]) -> None:
         # Renovate eligibility is explicit metadata; manual/unlabelled updates remain human merge decisions.
         return
 
-    if kind in {"kilo", "branch-pr"}:
+    if kind in {"kilo", "branch-pr", "renovate"}:
         sensitive = [path for path in pr_files(int(pr["number"])) if sensitive_file(path)]
         if sensitive:
-            source = "repair" if kind == "kilo" else "managed branch"
+            source = {"kilo": "repair", "branch-pr": "managed branch", "renovate": "Renovate"}[kind]
             place_human_hold(
                 pr,
                 f"the {source} PR changes governance/security automation files: " + ", ".join(sensitive[:8]),
