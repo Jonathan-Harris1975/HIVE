@@ -57,7 +57,17 @@ def main():
         account_id = os.environ.get("R2_ACCOUNT_ID", "").strip()
         if account_id:
             endpoint = f"https://{account_id}.r2.cloudflarestorage.com"
-    if not endpoint.startswith("https://") or urllib.parse.urlsplit(endpoint).query: raise SystemExit("credential-free HTTPS R2 endpoint required")
+    parsed_endpoint = urllib.parse.urlsplit(endpoint)
+    if (
+        parsed_endpoint.scheme != "https"
+        or not parsed_endpoint.hostname
+        or parsed_endpoint.username
+        or parsed_endpoint.password
+        or parsed_endpoint.query
+        or parsed_endpoint.fragment
+        or parsed_endpoint.path not in ("", "/")
+    ):
+        raise SystemExit("credential-free bare HTTPS R2 endpoint required")
     now=dt.datetime.now(dt.timezone.utc); iso=now.isocalendar()
     prefix=f"ci-reports/{repo}/{iso.year}/{iso.week:02d}/{a.sha}/{a.phase}/{run}/attempt-{attempt}"
     files=[x for x in sorted(a.source.rglob("*")) if x.is_file() and x.name!="evidence-manifest.json"]
