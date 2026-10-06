@@ -38,6 +38,8 @@ jobs:
     - name: Test diagnostic redaction and failure handling
       id: security_tests
       run: python3 .github/scripts/test_security_diagnostics.py
+    - name: Test exact-run R2 evidence persistence helper
+      run: python3 .github/scripts/test_r2_evidence_store.py
     - name: Install pinned CI tools
       run: python scripts/install_ci_tools.py trivy gitleaks actionlint
       id: install_security_tools
