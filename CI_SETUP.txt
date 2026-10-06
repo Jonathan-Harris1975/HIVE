@@ -49,12 +49,23 @@ AUTONOMOUS PROVING-GROUP SETUP
 - Kilo may repair deterministic application/build compatibility defects exposed by a Renovate update, but it must not independently select or change the dependency version. All changes remain PR-only and must pass existing gates.
 - Mergify is the sole automated merge arbiter for trusted admitted automation PRs and may also handle explicit superseded/obsolete lifecycle cleanup.
 - GitHub native branch/ruleset protections remain authoritative gates. Native GitHub auto-merge / Merge Queue must not race Mergify on automation PRs.
-- R2 Council ingestion/publishing is deferred to the HIVE Council implementation; no R2 credentials are introduced by this phase.
-- Codecov and OWASP ZAP are intentionally NOT enabled.
+- DAST and Repository Council GitHub-run evidence is persisted to the existing private `hive-repositories` R2 bucket under exact repository/SHA/run-ID/run-attempt keys. Persistence failure is blocking and is verified with a post-write HEAD request.
+- The DAST job is an observer only: OWASP ZAP issue-writing is disabled. The stored DAST receipt contains sanitised result metadata and no credentials.
+- The current Repository Council workflow stores a preflight/dispatch receipt only. That receipt explicitly does not claim final certification; final Council-result persistence remains required before the repository may be declared READY.
+- GitHub Actions R2 persistence requires an existing write-capable credential pair exposed as `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` (or the `CF_R2_*` aliases) and `R2_ACCOUNT_ID` (or `CF_R2_ACCOUNT_ID`) as a repository variable. The bucket is fixed to `hive-repositories`; these credentials are not added to application runtime access by this CI work.
+- Codecov remains intentionally not enabled by this CI programme. OWASP ZAP is enabled only in the authorised DAST workflow.
 
 - GitHub Actions must be allowed to create pull requests in repository Actions settings for the autonomous repair-PR workflow.
 - Enable Kilo Code Reviews for this repository and enable REVIEW.md guidance in the Kilo Code Reviews configuration.
 - Kilo Code Reviewer remains review-only. `.github/workflows/pr-issue-repair.yml` starts an implementation session from actionable review comments and failed PR checks; no `@kilocode-bot fix it` reply is required.
+
+CTO.NEW PLANNED-ENGINEERING LANE
+--------------------------------
+- cto.new is issue/task driven only. Do not use GitHub Issues as programme ledgers, leases, CI checkpoints or generic orchestration storage.
+- A cto.new implementation may begin only from genuine actionable repository work intentionally handed to the supported cto.new GitHub integration.
+- The exact live cto.new GitHub bot/assignment/PR identity must be verified from a real supported handoff before trusted admission recognises it. No guessed bot login or synthetic assignment convention is permitted.
+- Until that live identity and handoff are verified, the cto.new mutation lane is fail-closed and Kilo must not silently absorb planned-engineering work merely because cto.new is unavailable.
+- Kilo/cto.new same-fingerprint mutation requires a durable external lease/transfer record before either agent is allowed to replace the other as writer. Generic GitHub Issues are not that durable-state mechanism.
 
 AUTONOMOUS REPAIR + TRUSTED PR AUTOMATION
 -----------------------------------------
