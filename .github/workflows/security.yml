@@ -29,6 +29,8 @@ jobs:
       run: |
         python3 .github/scripts/test_autonomy_lifecycle.py
         python3 .github/scripts/test_weekend_orchestrator.py
+    - name: Verify R2 evidence persistence helper
+      run: python3 .github/scripts/test_r2_evidence.py
     - name: Verify PR blocker recovery regressions
       id: blocker_recovery_tests
       continue-on-error: true
