@@ -1,0 +1,44 @@
+{
+  "$schema": "https://app.kilo.ai/config.json",
+  "permission": {
+    "*": "allow",
+    "edit": {
+      "*": "allow",
+      "kilo.jsonc": "deny",
+      ".github/workflows/*": "deny",
+      ".github/actions/*": "deny",
+      ".github/scripts/*": "deny",
+      ".github/CODEOWNERS": "deny",
+      ".github/dependabot.yml": "deny",
+      ".mergify.yml": "deny",
+      "renovate.json": "deny",
+      "SECURITY.md": "deny",
+      "AUTONOMY.md": "deny",
+      "CI_SETUP.txt": "deny"
+    },
+    "write": {
+      "*": "allow",
+      "kilo.jsonc": "deny",
+      ".github/workflows/*": "deny",
+      ".github/actions/*": "deny",
+      ".github/scripts/*": "deny",
+      ".github/CODEOWNERS": "deny",
+      ".github/dependabot.yml": "deny",
+      ".mergify.yml": "deny",
+      "renovate.json": "deny",
+      "SECURITY.md": "deny",
+      "AUTONOMY.md": "deny",
+      "CI_SETUP.txt": "deny"
+    },
+    "external_directory": "deny",
+    "question": "deny",
+    "bash": {
+      "*": "allow",
+      "git push +*": "deny",
+      "git push *--force*": "deny",
+      "git push * -f*": "deny",
+      "gh pr merge *": "deny",
+      "koyeb *": "deny"
+    }
+  }
+}
