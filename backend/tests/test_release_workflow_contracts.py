@@ -7,6 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).parents[2]
 WATCHER_PATH = ROOT / ".github/workflows/koyeb-deployment-watch.yml"
 CI_PATH = ROOT / ".github/workflows/ci.yml"
+DAST_PATH = ROOT / ".github/workflows/dast.yml"
 
 
 def _step(text: str, name: str) -> str:
@@ -64,8 +65,20 @@ def test_ci_scans_the_built_hive_image_and_retains_the_report() -> None:
 
 
 def test_all_workflow_actions_are_immutably_pinned() -> None:
-    for path in (WATCHER_PATH, CI_PATH):
+    for path in (WATCHER_PATH, CI_PATH, DAST_PATH):
         uses = re.findall(r"^\s*- uses:\s*([^\s#]+)", path.read_text(encoding="utf-8"), re.MULTILINE)
         assert uses
         for action in uses:
             assert re.search(r"@[0-9a-f]{40}$", action), action
+
+
+def test_dast_checks_out_exact_revision_before_persisting_r2_evidence() -> None:
+    text = DAST_PATH.read_text(encoding="utf-8")
+    checkout = text.index("- name: Check out exact DAST workflow revision")
+    zap = text.index("- name: Run OWASP ZAP full scan")
+    persist = text.index("- name: Persist DAST evidence to hive-repositories R2")
+
+    assert checkout < zap < persist
+    assert "ref: ${{ github.sha }}" in text
+    assert "persist-credentials: false" in text
+    assert "python3 .github/scripts/r2_evidence_store.py dast-r2-evidence.json" in text
