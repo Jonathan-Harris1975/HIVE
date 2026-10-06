@@ -18,29 +18,22 @@ def london(y, m, d, hh, mm):
 
 
 class TimeTests(unittest.TestCase):
-    def test_window_close_is_sunday_0230_london(self):
-        # Sunday 4 October 2026 is BST; Sunday 1 November 2026 is GMT.
-        self.assertEqual(wo.window_close_for(london(2026, 10, 4, 3, 0)), london(2026, 10, 4, 2, 30))
-        self.assertEqual(wo.window_close_for(london(2026, 11, 1, 3, 0)), london(2026, 11, 1, 2, 30))
+    def test_ci_boundary_is_saturday_1100_london(self):
+        self.assertEqual(wo.ci_window_close_for(london(2026, 10, 3, 12, 0)), london(2026, 10, 3, 11, 0))
+        self.assertEqual(wo.ci_window_close_for(london(2026, 10, 10, 12, 0)), london(2026, 10, 10, 11, 0))
 
-    def test_council_is_one_hour_after_close(self):
-        self.assertEqual(wo.council_not_before(london(2026, 10, 4, 5, 0)), london(2026, 10, 4, 3, 30))
+    def test_council_not_before_sunday_1600(self):
+        self.assertEqual(wo.council_not_before(london(2026, 10, 3, 12, 0)), london(2026, 10, 4, 16, 0))
 
-    def test_guard_accepts_only_the_post_window_hour(self):
-        # BST: cron 01:30 UTC is 02:30 London (inside); cron 02:30 UTC is 03:30 London (outside).
-        self.assertTrue(wo.in_launch_window(datetime(2026, 10, 4, 1, 30, tzinfo=UTC)))
-        self.assertFalse(wo.in_launch_window(datetime(2026, 10, 4, 2, 30, tzinfo=UTC)))
-        # GMT: cron 01:30 UTC is 01:30 London (outside); cron 02:30 UTC is 02:30 London (inside).
-        self.assertFalse(wo.in_launch_window(datetime(2026, 11, 1, 1, 30, tzinfo=UTC)))
-        self.assertTrue(wo.in_launch_window(datetime(2026, 11, 1, 2, 30, tzinfo=UTC)))
+    def test_guard_accepts_only_first_hour_of_ci_slot(self):
+        # BST: Saturday 10:00 UTC is 11:00 London (inside); 11:00 UTC is 12:00 London (outside).
+        self.assertTrue(wo.in_launch_window(datetime(2026, 10, 3, 10, 0, tzinfo=UTC)))
+        self.assertFalse(wo.in_launch_window(datetime(2026, 10, 3, 11, 0, tzinfo=UTC)))
+        # GMT: Saturday 11:00 UTC is 11:00 London.
+        self.assertTrue(wo.in_launch_window(datetime(2026, 11, 7, 11, 0, tzinfo=UTC)))
 
     def test_guard_rejects_other_days(self):
-        self.assertFalse(wo.in_launch_window(datetime(2026, 10, 5, 1, 30, tzinfo=UTC)))
-
-    def test_dst_change_sunday(self):
-        # 25 October 2026: clocks go back at 02:00 BST -> 01:00 GMT; 02:30 London is then GMT.
-        self.assertTrue(wo.in_launch_window(datetime(2026, 10, 25, 2, 30, tzinfo=UTC)))
-        self.assertFalse(wo.in_launch_window(datetime(2026, 10, 25, 1, 30, tzinfo=UTC)))
+        self.assertFalse(wo.in_launch_window(datetime(2026, 10, 5, 10, 0, tzinfo=UTC)))
 
 
 class DashboardTests(unittest.TestCase):
@@ -156,35 +149,35 @@ class CouncilGateTests(unittest.TestCase):
         api = FakeApi()
         api.prs = [pr(3, labels=["autonomy:repair"])]
         orch, _ = make(api)
-        orch.now = lambda: datetime(2026, 10, 4, 3, 0, tzinfo=UTC)  # 04:00 London BST, past 03:30
+        orch.now = lambda: datetime(2026, 10, 4, 15, 30, tzinfo=UTC)  # 16:30 London BST, inside Council slot
         self.assertFalse(orch.release_council(api.sha, "0"))
         self.assertEqual(orch.stages[-1]["outcome"], "blocked")
 
     def test_defers_if_head_moved(self):
         api = FakeApi()
         orch, _ = make(api)
-        orch.now = lambda: datetime(2026, 10, 4, 3, 0, tzinfo=UTC)
+        orch.now = lambda: datetime(2026, 10, 4, 15, 30, tzinfo=UTC)
         self.assertFalse(orch.release_council("b" * 40, "0"))
         self.assertEqual(orch.stages[-1]["outcome"], "deferred")
 
     def test_dry_run_never_dispatches(self):
         api = FakeApi()
         orch, _ = make(api, dry_run=True)
-        orch.now = lambda: datetime(2026, 10, 4, 3, 0, tzinfo=UTC)
+        orch.now = lambda: datetime(2026, 10, 4, 15, 30, tzinfo=UTC)
         self.assertTrue(orch.release_council(api.sha, "0"))
         self.assertFalse([p for p in api.posts if "council.yml" in p[1]])
 
     def test_waits_until_one_hour_after_window(self):
         api = FakeApi()
         orch, clock = make(api, dry_run=True)
-        state = {"t": datetime(2026, 10, 4, 1, 40, tzinfo=UTC)}  # 02:40 London
+        state = {"t": datetime(2026, 10, 4, 14, 40, tzinfo=UTC)}  # 15:40 London BST
         orch.now = lambda: state["t"]
 
         def sleep(seconds):
             state["t"] += timedelta(seconds=seconds)
         orch.sleep = sleep
         self.assertTrue(orch.release_council(api.sha, "0"))
-        self.assertGreaterEqual(state["t"].astimezone(LONDON), london(2026, 10, 4, 3, 30))
+        self.assertGreaterEqual(state["t"].astimezone(LONDON), london(2026, 10, 4, 16, 0))
 
 
 if __name__ == "__main__":
