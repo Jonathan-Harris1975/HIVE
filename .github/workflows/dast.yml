@@ -114,6 +114,9 @@ jobs:
           R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID || vars.CF_R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || secrets.CF_R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || secrets.CF_R2_SECRET_ACCESS_KEY }}
-          R2_BUCKET: hive-repositories
-          R2_EVIDENCE_PREFIX: ci-evidence
-        run: python3 .github/scripts/r2_evidence_store.py dast-r2-evidence.json
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/dast-r2"
+          cp dast-r2-evidence.json "$RUNNER_TEMP/dast-r2/summary.json"
+          python3 .github/scripts/persist_ci_report_r2.py dast "$GITHUB_SHA" "$RUNNER_TEMP/dast-r2"

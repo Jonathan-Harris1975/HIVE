@@ -1,0 +1,101 @@
+name: Persist completed Council report to R2
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_sha:
+        description: Exact default-branch SHA assessed by Council
+        required: true
+        type: string
+      source_council_run_id:
+        description: Repository Council workflow run ID that dispatched this assessment
+        required: true
+        type: string
+      source_council_run_attempt:
+        description: Repository Council workflow run attempt
+        required: true
+        type: string
+      disposition:
+        description: Council disposition/status
+        required: true
+        type: string
+      report_md_b64:
+        description: Base64-encoded completed human-readable Council report
+        required: true
+        type: string
+      report_json_b64:
+        description: Base64-encoded completed machine-readable Council report
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  checks: read
+  contents: read
+  pull-requests: read
+  statuses: read
+
+concurrency:
+  group: council-result-r2-${{ inputs.target_sha }}-${{ inputs.source_council_run_id }}-${{ inputs.source_council_run_attempt }}
+  cancel-in-progress: false
+
+jobs:
+  persist:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2
+        with:
+          egress-policy: audit
+      - name: Check out trusted persistence helper
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Validate returned Council result and collect supporting evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ inputs.target_sha }}
+          SOURCE_COUNCIL_RUN_ID: ${{ inputs.source_council_run_id }}
+          SOURCE_COUNCIL_RUN_ATTEMPT: ${{ inputs.source_council_run_attempt }}
+          DISPOSITION: ${{ inputs.disposition }}
+          REPORT_MD_B64: ${{ inputs.report_md_b64 }}
+          REPORT_JSON_B64: ${{ inputs.report_json_b64 }}
+          REPO: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$TARGET_SHA" =~ ^[0-9a-fA-F]{40}$ ]] || { echo "::error::Invalid exact SHA."; exit 1; }
+          [[ "$SOURCE_COUNCIL_RUN_ID" =~ ^[0-9]+$ ]] || { echo "::error::Invalid source Council run ID."; exit 1; }
+          current="$(gh api "repos/$REPO/commits/$DEFAULT_BRANCH" --jq .sha)"
+          test "$current" = "$TARGET_SHA" || { echo "::error::Returned Council result is stale; current default SHA is $current."; exit 1; }
+          source_name="$(gh api "repos/$REPO/actions/runs/$SOURCE_COUNCIL_RUN_ID" --jq .name)"
+          source_sha="$(gh api "repos/$REPO/actions/runs/$SOURCE_COUNCIL_RUN_ID" --jq .head_sha)"
+          source_attempt="$(gh api "repos/$REPO/actions/runs/$SOURCE_COUNCIL_RUN_ID" --jq .run_attempt)"
+          test "$source_name" = "Repository Council" || { echo "::error::Source run is not Repository Council."; exit 1; }
+          test "$source_sha" = "$TARGET_SHA" || { echo "::error::Source Council run SHA does not match returned result."; exit 1; }
+          test "$source_attempt" = "$SOURCE_COUNCIL_RUN_ATTEMPT" || { echo "::error::Source Council run attempt does not match returned result."; exit 1; }
+          mkdir -p "$RUNNER_TEMP/council-r2"
+          printf '%s' "$REPORT_MD_B64" | base64 --decode > "$RUNNER_TEMP/council-r2/council-report.md"
+          printf '%s' "$REPORT_JSON_B64" | base64 --decode > "$RUNNER_TEMP/council-r2/council-report.json"
+          jq -e . "$RUNNER_TEMP/council-r2/council-report.json" >/dev/null
+          json_repo="$(jq -r '.repository // empty' "$RUNNER_TEMP/council-r2/council-report.json")"
+          json_sha="$(jq -r '.exact_evaluated_sha // .default_branch_sha // .targetSha // .sha // empty' "$RUNNER_TEMP/council-r2/council-report.json")"
+          test "$json_repo" = "$REPO" || { echo "::error::Council JSON repository mismatch."; exit 1; }
+          test "$json_sha" = "$TARGET_SHA" || { echo "::error::Council JSON SHA mismatch."; exit 1; }
+          gh api --paginate --slurp "repos/$REPO/actions/runs?head_sha=$TARGET_SHA&per_page=100" --jq 'map(.workflow_runs) | add | map({id,name,status,conclusion,event,head_sha,run_number,run_attempt,html_url,created_at,updated_at})' > "$RUNNER_TEMP/council-r2/exact-sha-workflow-evidence.json"
+          gh pr list --repo "$REPO" --state open --limit 1000 --json number,title,labels,url,headRefName,baseRefName > "$RUNNER_TEMP/council-r2/open-pr-state.json"
+          jq -n --arg repository "$REPO" --arg sha "$TARGET_SHA" --arg source_run_id "$SOURCE_COUNCIL_RUN_ID" --arg source_run_attempt "$SOURCE_COUNCIL_RUN_ATTEMPT" --arg disposition "$DISPOSITION" --arg collected_at "$(date -u +%FT%TZ)"             '{repository:$repository,exact_evaluated_sha:$sha,source_council_run_id:$source_run_id,source_council_run_attempt:$source_run_attempt,council_disposition:$disposition,collected_at:$collected_at}' > "$RUNNER_TEMP/council-r2/council-return-context.json"
+      - name: Persist and verify completed Council evidence
+        env:
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          EVIDENCE_RUN_ID: ${{ inputs.source_council_run_id }}
+          EVIDENCE_RUN_ATTEMPT: ${{ inputs.source_council_run_attempt }}
+          EVIDENCE_STATUS: ${{ inputs.disposition }}
+          TARGET_SHA: ${{ inputs.target_sha }}
+        run: python3 .github/scripts/persist_ci_report_r2.py council "$TARGET_SHA" "$RUNNER_TEMP/council-r2"

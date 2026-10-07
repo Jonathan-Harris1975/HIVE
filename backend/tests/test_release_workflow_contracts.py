@@ -81,4 +81,4 @@ def test_dast_checks_out_exact_revision_before_persisting_r2_evidence() -> None:
     assert checkout < zap < persist
     assert "ref: ${{ github.sha }}" in text
     assert "persist-credentials: false" in text
-    assert "python3 .github/scripts/r2_evidence_store.py dast-r2-evidence.json" in text
+    assert 'python3 .github/scripts/persist_ci_report_r2.py dast "$GITHUB_SHA" "$RUNNER_TEMP/dast-r2"' in text
