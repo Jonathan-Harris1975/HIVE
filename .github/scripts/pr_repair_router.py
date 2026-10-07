@@ -63,7 +63,7 @@ def pr_details(number: int) -> dict | None:
             pr.get("head", {}).get("repo", {}).get("full_name") != REPO):
         return None
     labels = {label.get("name") for label in pr.get("labels", [])}
-    if labels.intersection({"autonomy:obsolete", "autonomy:superseded", "autonomy:human-hold"}):
+    if labels.intersection({"autonomy:obsolete", "autonomy:superseded"}):
         return None
     # Carrier PRs only record a failed run; Kilo must fix a separate branch.
     head = pr.get("head", {})
@@ -235,7 +235,7 @@ def dispatch(pr: dict, kind: str, findings: list[str]) -> str:
         fresh = pr_details(int(number))
         current_base = api('GET', f'/repos/{REPO}/commits/{urllib.parse.quote(DEFAULT, safe="")}')['sha']
         if (not fresh or fresh['head']['sha'] != sha or current_base != base_sha or
-                {x.get('name') for x in fresh.get('labels', [])} & {'hold', 'do-not-merge', 'needs-manual-review', 'autonomy:human-hold'}):
+                {x.get('name') for x in fresh.get('labels', [])} & {'hold', 'do-not-merge', 'needs-manual-review'}):
             print(f"PR #{number} or its base moved before dispatch; defer to the next sweep.")
             return 'changed-before-dispatch'
         destination = (
