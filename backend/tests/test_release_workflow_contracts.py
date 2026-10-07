@@ -76,9 +76,9 @@ def test_dast_checks_out_exact_revision_before_persisting_r2_evidence() -> None:
     text = DAST_PATH.read_text(encoding="utf-8")
     checkout = text.index("- name: Check out exact DAST workflow revision")
     zap = text.index("- name: Run OWASP ZAP full scan")
-    persist = text.index("- name: Persist DAST evidence to hive-repositories R2")
+    persist = text.index("- name: Persist and verify DAST evidence in canonical R2 layout")
 
     assert checkout < zap < persist
     assert "ref: ${{ github.sha }}" in text
     assert "persist-credentials: false" in text
-    assert "python3 .github/scripts/r2_evidence_store.py dast-r2-evidence.json" in text
+    assert 'python3 .github/scripts/persist_ci_report_r2.py dast "$GITHUB_SHA" "$RUNNER_TEMP/dast-r2"' in text
