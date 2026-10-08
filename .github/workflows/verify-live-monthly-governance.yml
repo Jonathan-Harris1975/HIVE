@@ -64,6 +64,12 @@ jobs:
                       if isinstance(section, dict) and section.get("ok") is False:
                           print("FAILED section:", section_name)
                   print("Council OK:", council.get("ok"))
+                  print("Council failure stage:", council.get("failure_stage"))
+                  print("Council qualified models:", council.get("qualified_model_count"))
+                  print("Council cycle completion:", council.get("completion_status"))
+                  print("Council downstream enabled:", (council.get("downstream_sync") or {}).get("enabled"))
+                  print("Council downstream OK:", (council.get("downstream_sync") or {}).get("ok"))
+                  print("Council reused:", council.get("reused"))
                   print("Council completion:", run.get("completion_status"))
                   print("Downstream enabled:", sync.get("enabled"))
                   print("Downstream OK:", sync.get("ok"))
