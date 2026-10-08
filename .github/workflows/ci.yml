@@ -14,8 +14,9 @@ permissions:
 
 concurrency:
   group: hive-ci-${{ github.ref }}
-  # Only superseded PR pushes are cancelled; main, queue and weekend evidence runs finish.
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # Exact-SHA evidence must be allowed to finish. Superseded SHA results are harmless
+  # because release and Production Manager checks only consume the current exact SHA.
+  cancel-in-progress: false
 
 jobs:
   changes:
