@@ -486,6 +486,7 @@ def test_repository_memory_readiness_requires_profile_and_persisted_intelligence
     httpx.Response(200, json={}),
     httpx.Response(200, text="not-json"),
     httpx.Response(302, headers={"location": "https://example.test/login"}),
+    httpx.Response(304),
 ])
 async def test_model_sync_requires_explicit_downstream_acknowledgement(response) -> None:
     async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: response)) as client:
