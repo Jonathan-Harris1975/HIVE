@@ -66,6 +66,13 @@ jobs:
                   print("Council OK:", council.get("ok"))
                   print("Council failure stage:", council.get("failure_stage"))
                   print("Council qualified models:", council.get("qualified_model_count"))
+                  council_run = council.get("run") or {}
+                  print("Providers discovered:", council_run.get("providers_discovered"))
+                  print("Models discovered:", council_run.get("models_seen"))
+                  print("Models promoted:", len(council_run.get("promotions") or []))
+                  for source in council_run.get("benchmark_sources") or []:
+                      if isinstance(source, dict):
+                          print("Benchmark source:", {k: source.get(k) for k in ("provider", "source", "status", "ok") if k in source})
                   print("Council cycle completion:", council.get("completion_status"))
                   print("Council downstream enabled:", (council.get("downstream_sync") or {}).get("enabled"))
                   print("Council downstream OK:", (council.get("downstream_sync") or {}).get("ok"))
