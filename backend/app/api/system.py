@@ -12,6 +12,7 @@ from app.services import model_registry
 from app.services.ops_events import list_ops_events
 from app.services.providers.registry import discover_providers
 from app.services.repo_health import build_repo_health_report
+from app.services.production_manager import build_production_manager_report
 from app.services.repo_hygiene import repo_hygiene_report
 from app.storage.d1 import D1MetadataStore
 from app.storage.r2 import R2Storage
@@ -42,6 +43,16 @@ async def repo_health(
     """Return compact liveness/readiness status for the governed repo ecosystem."""
 
     return await build_repo_health_report(settings, force_refresh=force_refresh)
+
+
+@router.get("/system/production-manager")
+async def production_manager(
+    force_refresh: bool = Query(False),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    """Return HIVE's authoritative ecosystem production decision."""
+
+    return await build_production_manager_report(settings, force_refresh=force_refresh)
 
 
 @router.get("/system/ops-events")
