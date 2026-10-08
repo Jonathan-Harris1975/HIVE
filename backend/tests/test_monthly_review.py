@@ -356,3 +356,13 @@ def test_ai_council_status_rejects_disabled_downstream_sync(monkeypatch):
     result = monthly_review._ai_council_status(settings)
     assert result["ok"] is False
     assert "no verified completion state" in result["reason"]
+
+
+@pytest.mark.asyncio
+async def test_invalid_period_rejected_before_council_side_effects(monkeypatch):
+    async def forbidden_council(*args, **kwargs):
+        raise AssertionError("Council must not run for invalid period")
+
+    monkeypatch.setattr(monthly_review, "execute_council_cycle", forbidden_council)
+    with pytest.raises(ValueError, match="Invalid period"):
+        await monthly_review.generate_and_archive_monthly_review(_settings(), period="2026-99")
