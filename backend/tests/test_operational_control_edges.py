@@ -478,3 +478,18 @@ def test_repository_memory_readiness_requires_profile_and_persisted_intelligence
     assert result["HIVE"]["memory_ready"] is True
     assert result["AIMS"]["memory_status"] == "empty"
     assert result["AIMS"]["memory_ready"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("response", [
+    httpx.Response(200, json={"ok": False}),
+    httpx.Response(200, json={}),
+    httpx.Response(200, text="not-json"),
+    httpx.Response(302, headers={"location": "https://example.test/login"}),
+])
+async def test_model_sync_requires_explicit_downstream_acknowledgement(response) -> None:
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: response)) as client:
+        with pytest.raises(model_sync.ModelSyncError):
+            await model_sync._post_with_retry(
+                client, url="https://example.test/apply", token="token", payload={}, attempts=1
+            )
