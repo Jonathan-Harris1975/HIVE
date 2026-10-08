@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import httpx
 import pytest
 
 from app.core.config import Settings
@@ -212,3 +213,84 @@ def test_production_governance_contract_separates_execution_from_certification()
         "rule": "The remediation executor must not certify its own repair. Repository gates and live verification remain authoritative.",
     }
     assert "security_policy_exception" in contract["owner_only_triggers"]
+
+
+@pytest.mark.asyncio
+async def test_github_gate_evidence_requires_exact_main_sha_and_accepts_explicit_deployment_skip() -> None:
+    sha = "c" * 40
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/commits/main"):
+            return httpx.Response(200, json={"sha": sha})
+        if request.url.path.endswith("/actions/runs"):
+            runs = [
+                {
+                    "id": index + 1,
+                    "name": name,
+                    "head_sha": sha,
+                    "status": "completed",
+                    "conclusion": "success",
+                }
+                for index, name in enumerate(production_manager.REQUIRED_WORKFLOWS["HIVE"])
+            ]
+            runs.append(
+                {
+                    "id": 99,
+                    "name": production_manager.DEPLOYMENT_WORKFLOWS["HIVE"],
+                    "head_sha": sha,
+                    "status": "completed",
+                    "conclusion": "skipped",
+                }
+            )
+            return httpx.Response(200, json={"workflow_runs": runs})
+        raise AssertionError(f"unexpected request: {request.url}")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        evidence = await production_manager._github_repo_evidence(
+            client, repo_id="HIVE", branch="main"
+        )
+
+    assert evidence["sha"] == sha
+    assert evidence["state"] == "GREEN"
+    assert evidence["deployment"]["status"] == "skipped"
+
+
+@pytest.mark.asyncio
+async def test_github_gate_evidence_blocks_failed_required_workflow() -> None:
+    sha = "d" * 40
+    failed_name = production_manager.REQUIRED_WORKFLOWS["HIVE"][0]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/commits/main"):
+            return httpx.Response(200, json={"sha": sha})
+        if request.url.path.endswith("/actions/runs"):
+            runs = []
+            for index, name in enumerate(production_manager.REQUIRED_WORKFLOWS["HIVE"]):
+                runs.append(
+                    {
+                        "id": index + 1,
+                        "name": name,
+                        "head_sha": sha,
+                        "status": "completed",
+                        "conclusion": "failure" if name == failed_name else "success",
+                    }
+                )
+            runs.append(
+                {
+                    "id": 99,
+                    "name": production_manager.DEPLOYMENT_WORKFLOWS["HIVE"],
+                    "head_sha": sha,
+                    "status": "completed",
+                    "conclusion": "success",
+                }
+            )
+            return httpx.Response(200, json={"workflow_runs": runs})
+        raise AssertionError(f"unexpected request: {request.url}")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        evidence = await production_manager._github_repo_evidence(
+            client, repo_id="HIVE", branch="main"
+        )
+
+    assert evidence["state"] == "BLOCKED"
+    assert evidence["required_workflows"][failed_name]["state"] == "BLOCKED"
