@@ -315,12 +315,13 @@ OpenRouter-shaped provider, added purely through
 
 **Phase 5 - AI Council** (`services/ai_council.py`): discovers providers,
 refreshes catalogues, diffs new/retired models against the last snapshot,
-scores coding-capable models with the Benchmark Engine, auto-promotes above
-`AI_COUNCIL_PROMOTION_THRESHOLD` into the Model Registry, and notifies
-downstream services via the existing ops-event inbox. **Scoring caveat**: no
-live coding/reasoning benchmark data source is wired in; metrics are derived
-only from price/context/declared-capability signals until a real benchmark
-integration exists.
+scores eligible models with the Benchmark Engine, auto-promotes above
+`AI_COUNCIL_PROMOTION_THRESHOLD` only when the configured evidence-confidence
+gate is also satisfied, and propagates the governed Model Registry to AIMS and
+RAMS. OpenRouter's authenticated Artificial Analysis benchmark feed supplies
+measured coding, intelligence and agentic evidence when available. Retrieval
+uses bounded retries plus a bounded-age last-known-good D1 snapshot; catalogue-
+only evidence remains below the automatic-promotion confidence gate.
 
 **Phase 6 - Benchmark Engine** (`services/benchmark_engine.py`): configurable
 weighted scoring across ten metric axes (coding/reasoning benchmarks, cost,
