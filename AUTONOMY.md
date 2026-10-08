@@ -15,6 +15,14 @@ All changes from humans, Renovate, autofix.ci, KiloConnect/Kilo Code, RAMS/OpenR
 
 Kilo may diagnose and prepare deterministic code/configuration compatibility fixes. When a Renovate update exposes a dependency compatibility defect, Renovate retains sole authority over the selected dependency version; Kilo must not independently choose or bump that version. Kilo must not merge directly to protected branches or deploy directly to production.
 
+## Ecosystem production authority
+- HIVE is the Ecosystem Production Manager for HIVE, HIVE-UI, AIMS, AIMS-UI, RAMS, MAST, IRS and Website.
+- Deterministic repository CI, security, deployment and runtime checks certify readiness; HIVE consumes that evidence and emits GREEN, DEGRADED or BLOCKED.
+- Kilo is the bounded remediation executor and must not certify its own repair.
+- CTO is the high-risk technical/architectural escalation authority.
+- The owner is required only for secrets/credentials, irreversible production actions, security-policy exceptions, legal/commercial decisions and destructive data operations.
+- HIVE must fail closed when governed health evidence is missing or monitoring is disabled.
+
 ## Guardrails
 - GREEN: deterministic formatter/lint/import/generated-file repairs may be automated.
 - AMBER: application code, dependency compatibility, build/deployment configuration and ordinary bug fixes may be prepared automatically as PRs.
