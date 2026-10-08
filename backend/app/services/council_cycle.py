@@ -52,7 +52,7 @@ def _qualified_registry(settings: Settings) -> tuple[dict[str, list[dict[str, ob
 def latest_verified_run(
     settings: Settings, *, since: datetime | None = None
 ) -> dict[str, Any] | None:
-    """Return the newest fully-synchronised Council run, optionally bounded by freshness."""
+    """Return the latest run only if verified; later failures supersede earlier success."""
     runs = get_run_history(settings, limit=50)
     if not runs or not isinstance(runs[-1], dict):
         return None
