@@ -35,6 +35,13 @@ REQUIRED_WORKFLOWS: dict[str, tuple[str, ...]] = {
     "Website": ("Production readiness", "Security and repository quality", "CodeQL", "Item 6 hardening"),
 }
 
+GITHUB_API_TIMEOUT = httpx.Timeout(15.0, connect=5.0)
+GITHUB_CLIENT_LIMITS = httpx.Limits(max_connections=16, max_keepalive_connections=8)
+GITHUB_RUNS_PER_PAGE = 100
+GITHUB_RUNS_MAX_PAGES = 10
+GITHUB_RETRY_ATTEMPTS = 3
+GITHUB_RETRYABLE_STATUSES = {429, 500, 502, 503, 504}
+
 DEPLOYMENT_WORKFLOWS: dict[str, str] = {
     "HIVE": "Koyeb production deployment watch",
     "HIVE-UI": "HIVE-UI deployed integration",
@@ -57,7 +64,6 @@ _BLOCKED_HEALTH = {
     "error",
     "not_ready",
     "forbidden",
-    "unauthorised",
     "unauthorized",
 }
 
@@ -135,6 +141,41 @@ def _run_state(run: dict[str, Any] | None, *, allow_skipped: bool = False) -> tu
     return "DEGRADED", conclusion or "unknown"
 
 
+async def _github_get(
+    client: httpx.AsyncClient,
+    url: str,
+    *,
+    params: dict[str, object] | None = None,
+) -> httpx.Response:
+    """Read GitHub with bounded retries for transient provider failures."""
+
+    for attempt in range(1, GITHUB_RETRY_ATTEMPTS + 1):
+        try:
+            response = await client.get(url, params=params)
+        except httpx.TransportError:
+            if attempt >= GITHUB_RETRY_ATTEMPTS:
+                raise
+            await asyncio.sleep(0.5 * (2 ** (attempt - 1)))
+            continue
+
+        rate_limited = response.status_code == 403 and (
+            response.headers.get("x-ratelimit-remaining") == "0"
+            or bool(response.headers.get("retry-after"))
+        )
+        if response.status_code not in GITHUB_RETRYABLE_STATUSES and not rate_limited:
+            return response
+        if attempt >= GITHUB_RETRY_ATTEMPTS:
+            return response
+
+        delay = 0.5 * (2 ** (attempt - 1))
+        retry_after = response.headers.get("retry-after", "").strip()
+        if retry_after.isdigit():
+            delay = min(max(float(retry_after), 0.5), 5.0)
+        await asyncio.sleep(delay)
+
+    raise RuntimeError("GitHub retry loop exited unexpectedly")
+
+
 async def _github_repo_evidence(
     client: httpx.AsyncClient,
     *,
@@ -143,8 +184,9 @@ async def _github_repo_evidence(
 ) -> dict[str, Any]:
     source = DEFAULT_GITHUB_SOURCES[repo_id]
     encoded_repo = quote(source, safe="/")
-    commit_response = await client.get(
-        f"https://api.github.com/repos/{encoded_repo}/commits/{quote(branch, safe='')}"
+    commit_response = await _github_get(
+        client,
+        f"https://api.github.com/repos/{encoded_repo}/commits/{quote(branch, safe='')}",
     )
     if commit_response.status_code != 200:
         return {
@@ -167,32 +209,59 @@ async def _github_repo_evidence(
             "deployment": {"workflow": DEPLOYMENT_WORKFLOWS[repo_id], "status": "unavailable"},
         }
 
-    runs_response = await client.get(
-        f"https://api.github.com/repos/{encoded_repo}/actions/runs",
-        params={"branch": branch, "per_page": 100},
-    )
-    if runs_response.status_code != 200:
+    required_names = {*REQUIRED_WORKFLOWS[repo_id], DEPLOYMENT_WORKFLOWS[repo_id]}
+    runs: list[dict[str, Any]] = []
+    exhausted = False
+    for page in range(1, GITHUB_RUNS_MAX_PAGES + 1):
+        runs_response = await _github_get(
+            client,
+            f"https://api.github.com/repos/{encoded_repo}/actions/runs",
+            params={"branch": branch, "per_page": GITHUB_RUNS_PER_PAGE, "page": page},
+        )
+        if runs_response.status_code != 200:
+            return {
+                "configured": True,
+                "state": "DEGRADED",
+                "reason": f"GitHub workflow evidence returned HTTP {runs_response.status_code}.",
+                "sha": sha,
+                "required_workflows": {},
+                "deployment": {"workflow": DEPLOYMENT_WORKFLOWS[repo_id], "status": "unavailable"},
+            }
+
+        raw_runs = runs_response.json()
+        chunk = raw_runs.get("workflow_runs") if isinstance(raw_runs, dict) else None
+        if not isinstance(chunk, list):
+            chunk = []
+        runs.extend(run for run in chunk if isinstance(run, dict))
+
+        matched_names = {
+            str(run.get("name") or "")
+            for run in runs
+            if str(run.get("head_sha") or "") == sha
+        }
+        if required_names.issubset(matched_names):
+            exhausted = True
+            break
+        if len(chunk) < GITHUB_RUNS_PER_PAGE:
+            exhausted = True
+            break
+
+    if not exhausted:
         return {
             "configured": True,
             "state": "DEGRADED",
-            "reason": f"GitHub workflow evidence returned HTTP {runs_response.status_code}.",
+            "reason": "GitHub workflow evidence exceeded the safe 1,000-run pagination window.",
             "sha": sha,
             "required_workflows": {},
             "deployment": {"workflow": DEPLOYMENT_WORKFLOWS[repo_id], "status": "unavailable"},
         }
-
-    raw_runs = runs_response.json()
-    runs = raw_runs.get("workflow_runs") if isinstance(raw_runs, dict) else None
-    if not isinstance(runs, list):
-        runs = []
 
     def latest(name: str) -> dict[str, Any] | None:
         return next(
             (
                 run
                 for run in runs
-                if isinstance(run, dict)
-                and str(run.get("name") or "") == name
+                if str(run.get("name") or "") == name
                 and str(run.get("head_sha") or "") == sha
             ),
             None,
@@ -234,7 +303,6 @@ async def _github_repo_evidence(
         },
     }
 
-
 async def _collect_all_gate_evidence(
     settings: Settings,
     *,
@@ -256,8 +324,8 @@ async def _collect_all_gate_evidence(
 
     owns_client = client is None
     active_client = client or httpx.AsyncClient(
-        timeout=httpx.Timeout(8.0),
-        limits=httpx.Limits(max_connections=16, max_keepalive_connections=8),
+        timeout=GITHUB_API_TIMEOUT,
+        limits=GITHUB_CLIENT_LIMITS,
         headers={
             "Authorization": f"Bearer {token}",
             "Accept": "application/vnd.github+json",
@@ -344,7 +412,7 @@ async def build_production_manager_report(
             detail = str(item.get("detail") or "")
 
         evidence = gate_evidence[repo_id]
-        state = _combine_states(runtime_state, str(evidence.get("state") or "DEGRADED"))
+        state = _combine_states(runtime_state, evidence.get("state") or "DEGRADED")
         repositories.append(
             {
                 **_repo_contract(repo_id),
