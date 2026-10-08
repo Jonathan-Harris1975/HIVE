@@ -81,6 +81,7 @@ jobs:
                   print("Council downstream enabled:", (council.get("downstream_sync") or {}).get("enabled"))
                   print("Council downstream OK:", (council.get("downstream_sync") or {}).get("ok"))
                   print("Council reused:", council.get("reused"))
+                  print("Council run ID:", run.get("run_id"))
                   print("R2 OK:", (report.get("r2_object") or {}).get("ok"))
                   print("D1 OK:", (report.get("d1_index") or {}).get("ok"))
               except (ValueError, TypeError, AttributeError):
