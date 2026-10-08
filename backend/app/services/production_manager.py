@@ -41,6 +41,7 @@ GITHUB_RUNS_PER_PAGE = 100
 GITHUB_RUNS_MAX_PAGES = 10
 GITHUB_RETRY_ATTEMPTS = 3
 GITHUB_RETRYABLE_STATUSES = {429, 500, 502, 503, 504}
+GITHUB_EVIDENCE_BUDGET_SECONDS = 40.0
 
 DEPLOYMENT_WORKFLOWS: dict[str, str] = {
     "HIVE": "Koyeb production deployment watch",
@@ -52,6 +53,11 @@ DEPLOYMENT_WORKFLOWS: dict[str, str] = {
     "IRS": "IRS Cloudflare Pages deployment watch",
     "Website": "Website deployed integration",
 }
+
+if set(REQUIRED_WORKFLOWS) != set(GOVERNED_REPOSITORY_IDS):
+    raise RuntimeError("Production workflow catalogue must cover every governed repository exactly once.")
+if set(DEPLOYMENT_WORKFLOWS) != set(GOVERNED_REPOSITORY_IDS):
+    raise RuntimeError("Deployment workflow catalogue must cover every governed repository exactly once.")
 
 _GREEN_HEALTH = {"healthy", "ready", "standby", "maintenance"}
 _DEGRADED_HEALTH = {"degraded", "starting", "not_configured", "partial", "missing", "unknown"}
@@ -158,9 +164,12 @@ async def _github_get(
             await asyncio.sleep(0.5 * (2 ** (attempt - 1)))
             continue
 
+        response_text = response.text.lower() if response.status_code == 403 else ""
         rate_limited = response.status_code == 403 and (
             response.headers.get("x-ratelimit-remaining") == "0"
             or bool(response.headers.get("retry-after"))
+            or "rate limit" in response_text
+            or "abuse detection" in response_text
         )
         if response.status_code not in GITHUB_RETRYABLE_STATUSES and not rate_limited:
             return response
@@ -212,12 +221,13 @@ async def _github_repo_evidence(
     required_names = {*REQUIRED_WORKFLOWS[repo_id], DEPLOYMENT_WORKFLOWS[repo_id]}
     runs: list[dict[str, Any]] = []
     exhausted = False
-    for page in range(1, GITHUB_RUNS_MAX_PAGES + 1):
-        runs_response = await _github_get(
-            client,
-            f"https://api.github.com/repos/{encoded_repo}/actions/runs",
-            params={"branch": branch, "per_page": GITHUB_RUNS_PER_PAGE, "page": page},
-        )
+    next_url = f"https://api.github.com/repos/{encoded_repo}/actions/runs"
+    next_params: dict[str, str | int] | None = {
+        "branch": branch,
+        "per_page": GITHUB_RUNS_PER_PAGE,
+    }
+    for _page in range(1, GITHUB_RUNS_MAX_PAGES + 1):
+        runs_response = await _github_get(client, next_url, params=next_params)
         if runs_response.status_code != 200:
             return {
                 "configured": True,
@@ -242,9 +252,12 @@ async def _github_repo_evidence(
         if required_names.issubset(matched_names):
             exhausted = True
             break
-        if len(chunk) < GITHUB_RUNS_PER_PAGE:
+        next_link = runs_response.links.get("next", {}).get("url")
+        if not next_link:
             exhausted = True
             break
+        next_url = str(next_link)
+        next_params = None
 
     if not exhausted:
         return {
@@ -335,20 +348,36 @@ async def _collect_all_gate_evidence(
     )
     branch = settings.repository_github_branch.strip() or "main"
     try:
-        results = await asyncio.gather(
-            *[
-                _github_repo_evidence(active_client, repo_id=repo_id, branch=branch)
+        try:
+            results = await asyncio.wait_for(
+                asyncio.gather(
+                    *[
+                        _github_repo_evidence(active_client, repo_id=repo_id, branch=branch)
+                        for repo_id in GOVERNED_REPOSITORY_IDS
+                    ],
+                    return_exceptions=True,
+                ),
+                timeout=GITHUB_EVIDENCE_BUDGET_SECONDS,
+            )
+        except TimeoutError:
+            return {
+                repo_id: {
+                    "configured": True,
+                    "state": "DEGRADED",
+                    "reason": "GitHub evidence collection exceeded the bounded production-manager deadline.",
+                    "sha": None,
+                    "required_workflows": {},
+                    "deployment": {"workflow": DEPLOYMENT_WORKFLOWS[repo_id], "status": "unavailable"},
+                }
                 for repo_id in GOVERNED_REPOSITORY_IDS
-            ],
-            return_exceptions=True,
-        )
+            }
     finally:
         if owns_client:
             await active_client.aclose()
 
     evidence: dict[str, dict[str, Any]] = {}
     for repo_id, result in zip(GOVERNED_REPOSITORY_IDS, results, strict=True):
-        if isinstance(result, BaseException):
+        if isinstance(result, Exception):
             evidence[repo_id] = {
                 "configured": True,
                 "state": "DEGRADED",
