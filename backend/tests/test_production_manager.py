@@ -294,3 +294,77 @@ async def test_github_gate_evidence_blocks_failed_required_workflow() -> None:
 
     assert evidence["state"] == "BLOCKED"
     assert evidence["required_workflows"][failed_name]["state"] == "BLOCKED"
+
+
+@pytest.mark.asyncio
+async def test_github_gate_evidence_paginates_for_exact_sha() -> None:
+    sha = "e" * 40
+    calls = {"runs": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/commits/main"):
+            return httpx.Response(200, json={"sha": sha})
+        if request.url.path.endswith("/actions/runs"):
+            calls["runs"] += 1
+            if calls["runs"] == 1:
+                return httpx.Response(
+                    200,
+                    json={
+                        "workflow_runs": [
+                            {
+                                "id": index + 1,
+                                "name": "unrelated",
+                                "head_sha": "f" * 40,
+                                "status": "completed",
+                                "conclusion": "success",
+                            }
+                            for index in range(production_manager.GITHUB_RUNS_PER_PAGE)
+                        ]
+                    },
+                )
+            runs = [
+                {
+                    "id": index + 101,
+                    "name": name,
+                    "head_sha": sha,
+                    "status": "completed",
+                    "conclusion": "success",
+                }
+                for index, name in enumerate(production_manager.REQUIRED_WORKFLOWS["HIVE"])
+            ]
+            runs.append(
+                {
+                    "id": 199,
+                    "name": production_manager.DEPLOYMENT_WORKFLOWS["HIVE"],
+                    "head_sha": sha,
+                    "status": "completed",
+                    "conclusion": "success",
+                }
+            )
+            return httpx.Response(200, json={"workflow_runs": runs})
+        raise AssertionError(f"unexpected request: {request.url}")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        evidence = await production_manager._github_repo_evidence(
+            client, repo_id="HIVE", branch="main"
+        )
+
+    assert calls["runs"] == 2
+    assert evidence["state"] == "GREEN"
+
+
+@pytest.mark.asyncio
+async def test_github_get_retries_transient_provider_failure() -> None:
+    attempts = {"count": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            return httpx.Response(503, json={"message": "temporary"})
+        return httpx.Response(200, json={"ok": True})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        response = await production_manager._github_get(client, "https://api.github.com/test")
+
+    assert response.status_code == 200
+    assert attempts["count"] == 2
