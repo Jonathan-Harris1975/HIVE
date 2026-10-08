@@ -93,7 +93,7 @@ async def test_generate_monthly_review_assembles_all_sections(monkeypatch):
             {
                 "run_id": "r1",
                 "completion_status": "completed",
-                "downstream_sync": {"ok": True},
+                "downstream_sync": {"ok": True, "enabled": True},
             }
         ],
     )
@@ -155,7 +155,7 @@ async def test_generate_monthly_review_isolates_a_failing_section(monkeypatch):
             {
                 "run_id": "r1",
                 "completion_status": "completed",
-                "downstream_sync": {"ok": True},
+                "downstream_sync": {"ok": True, "enabled": True},
             }
         ],
     )
@@ -256,7 +256,7 @@ def test_ai_council_status_rejects_stale_completed_run(monkeypatch):
                 "run_id": "old-run",
                 "occurred_at": "2026-08-31T23:59:59+00:00",
                 "completion_status": "completed",
-                "downstream_sync": {"ok": True},
+                "downstream_sync": {"ok": True, "enabled": True},
             }
         ],
     )
@@ -315,7 +315,7 @@ async def test_generate_and_archive_writes_r2_and_indexes_d1(monkeypatch, tmp_pa
             "reused": False,
             "run": {"run_id": "council-test"},
             "completion_status": "completed",
-            "downstream_sync": {"ok": True},
+            "downstream_sync": {"ok": True, "enabled": True},
         }
 
     monkeypatch.setattr(monthly_review, "generate_monthly_review", fake_generate)
@@ -338,3 +338,21 @@ async def test_generate_and_archive_writes_r2_and_indexes_d1(monkeypatch, tmp_pa
     assert history["items"][0]["source_id"] == "2026-06"
     assert history["items"][0]["metadata"]["cost_usd_total"] == 1.23
     assert history["items"][0]["metadata"]["open_execution_reviews"] == 3
+
+
+def test_ai_council_status_rejects_disabled_downstream_sync(monkeypatch):
+    settings = _settings()
+    monkeypatch.setattr(
+        monthly_review,
+        "get_run_history",
+        lambda settings, limit=5: [
+            {
+                "run_id": "disabled-run",
+                "completion_status": "completed",
+                "downstream_sync": {"ok": True, "enabled": False},
+            }
+        ],
+    )
+    result = monthly_review._ai_council_status(settings)
+    assert result["ok"] is False
+    assert "no verified completion state" in result["reason"]
