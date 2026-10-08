@@ -25,8 +25,8 @@ from app.storage.sql_store import SqlStore
 MONTHLY_REVIEW_LANE = "hive_monthly_reviews"
 
 # Cap how many past reports we keep indexed/listed by default.
-DEFAULT_HISTORY_LIMIT = 24
 logger = logging.getLogger(__name__)
+DEFAULT_HISTORY_LIMIT = 24
 
 
 def _period_bounds(period: str | None) -> tuple[str, str, str]:
