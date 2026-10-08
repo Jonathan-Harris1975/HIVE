@@ -4,7 +4,7 @@
   "github_repository": "Jonathan-Harris1975/HIVE",
   "ecosystem_manager": "HIVE",
   "role": "ecosystem_production_manager",
-  "readiness_authority": "deterministic_ci_and_runtime_gates",
+  "readiness_authority": "deterministic_ci_security_deployment_runtime_gates",
   "remediation_executor": "Kilo",
   "technical_escalation": "CTO",
   "human_authority": "owner",
@@ -23,5 +23,12 @@
     "legal_or_commercial_decision",
     "destructive_data_operation"
   ],
-  "certification_rule": "The remediation executor must not certify its own repair. Repository gates and live verification remain authoritative."
+  "certification_rule": "The remediation executor must not certify its own repair. Repository gates and live verification remain authoritative.",
+  "required_workflows": [
+    "CI",
+    "Security and repository quality",
+    "CodeQL",
+    "Item 6 hardening"
+  ],
+  "deployment_workflow": "Koyeb production deployment watch"
 }
