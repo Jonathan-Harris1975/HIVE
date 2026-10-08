@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import time
 import tempfile
 import uuid
 from datetime import UTC, datetime, timezone
@@ -23,6 +25,7 @@ from app.storage.sql_store import SqlStore
 MONTHLY_REVIEW_LANE = "hive_monthly_reviews"
 
 # Cap how many past reports we keep indexed/listed by default.
+logger = logging.getLogger(__name__)
 DEFAULT_HISTORY_LIMIT = 24
 
 
@@ -321,18 +324,34 @@ async def generate_and_archive_monthly_review(
     the same month reuse the already verified Council run.
     """
     cycle_start = _monthly_cycle_start()
-    council_cycle = await execute_council_cycle(settings, reuse_since=cycle_start)
-    report = await generate_monthly_review(
-        settings,
-        period=period,
-        council_required_since=cycle_start,
-    )
+    council_started = time.monotonic()
+    try:
+        council_cycle = await execute_council_cycle(settings, reuse_since=cycle_start)
+    finally:
+        logger.info("monthly_review stage elapsed", extra={"stage": "council", "elapsed_seconds": time.monotonic() - council_started})
+    report_started = time.monotonic()
+    try:
+        report = await generate_monthly_review(
+            settings,
+            period=period,
+            council_required_since=cycle_start,
+        )
+    finally:
+        logger.info("monthly_review stage elapsed", extra={"stage": "report", "elapsed_seconds": time.monotonic() - report_started})
     report["council_cycle"] = council_cycle
     if not council_cycle.get("ok"):
         report["ok"] = False
 
-    r2_object = _write_report_to_r2(settings, report)
-    index_result = _index_report_in_d1(settings, report, r2_object)
+    archive_started = time.monotonic()
+    try:
+        r2_object = _write_report_to_r2(settings, report)
+    finally:
+        logger.info("monthly_review stage elapsed", extra={"stage": "r2", "elapsed_seconds": time.monotonic() - archive_started})
+    index_started = time.monotonic()
+    try:
+        index_result = _index_report_in_d1(settings, report, r2_object)
+    finally:
+        logger.info("monthly_review stage elapsed", extra={"stage": "d1", "elapsed_seconds": time.monotonic() - index_started})
     report["r2_object"] = r2_object
     report["d1_index"] = index_result
     report["ok"] = bool(
