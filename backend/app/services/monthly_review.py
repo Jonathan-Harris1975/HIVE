@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import time
 import tempfile
 import uuid
 from datetime import UTC, datetime, timezone
@@ -24,6 +26,7 @@ MONTHLY_REVIEW_LANE = "hive_monthly_reviews"
 
 # Cap how many past reports we keep indexed/listed by default.
 DEFAULT_HISTORY_LIMIT = 24
+logger = logging.getLogger(__name__)
 
 
 def _period_bounds(period: str | None) -> tuple[str, str, str]:
@@ -321,7 +324,11 @@ async def generate_and_archive_monthly_review(
     the same month reuse the already verified Council run.
     """
     cycle_start = _monthly_cycle_start()
-    council_cycle = await execute_council_cycle(settings, reuse_since=cycle_start)
+    council_started = time.monotonic()
+    try:
+        council_cycle = await execute_council_cycle(settings, reuse_since=cycle_start)
+    finally:
+        logger.info("monthly_review council elapsed_seconds=%.2f", time.monotonic() - council_started)
     report = await generate_monthly_review(
         settings,
         period=period,
