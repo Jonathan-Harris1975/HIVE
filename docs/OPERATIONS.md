@@ -24,7 +24,7 @@ The authenticated `GET /v1/ai-council/status` endpoint is the standing freshness
 
 The 07:25 monthly review is a second recovery and verification boundary. It executes the same idempotent Council cycle when a verified run for the current month is absent, and it refuses to publish a successful monthly review unless Council governance, R2 archival and D1 indexing all succeed.
 
-Production readiness also fails closed when `MODEL_GOVERNANCE_SYNC_ENABLED=true` but the AIMS/RAMS destinations or runtime credentials needed for downstream propagation are unavailable.
+Production HIVE requires `MODEL_GOVERNANCE_SYNC_ENABLED=true` and fails closed unless the AIMS/RAMS destinations, runtime credentials and Koyeb wake-control configuration needed for downstream propagation are all available.
 
 
 ## Repository Intelligence and controlled improvements
