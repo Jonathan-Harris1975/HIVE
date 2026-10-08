@@ -1,5 +1,4 @@
 {
-  "schema_version": 1,
   "repository_id": "HIVE",
   "github_repository": "Jonathan-Harris1975/HIVE",
   "ecosystem_manager": "HIVE",
@@ -24,11 +23,5 @@
     "destructive_data_operation"
   ],
   "certification_rule": "The remediation executor must not certify its own repair. Repository gates and live verification remain authoritative.",
-  "required_workflows": [
-    "CI",
-    "Security and repository quality",
-    "CodeQL",
-    "Item 6 hardening"
-  ],
-  "deployment_workflow": "Koyeb production deployment watch"
+  "gate_catalogue_authority": "HIVE production_manager.py"
 }
