@@ -162,6 +162,7 @@ def _ai_council_status(
     verified_complete = bool(
         completion_status == "completed"
         and downstream_sync is not None
+        and downstream_sync.get("enabled") is True
         and downstream_sync.get("ok") is True
         and fresh
     )
