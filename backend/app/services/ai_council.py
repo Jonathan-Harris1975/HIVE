@@ -57,6 +57,7 @@ class CouncilRunReport:
     category_weights_used: dict[str, dict[str, float]] = field(default_factory=dict)
     alias_changes: list[dict[str, str | None]] = field(default_factory=list)
     qualification_counts: dict[str, int] = field(default_factory=dict)
+    benchmark_match_counts: dict[str, int] = field(default_factory=dict)
 
     def public_payload(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -636,6 +637,7 @@ async def run_council(settings: Settings, *, run_id: str | None = None) -> Counc
     category_weights_used: dict[str, dict[str, float]] = {}
     alias_changes: list[dict[str, str | None]] = []
     models_seen = 0
+    benchmark_match_counts = {"benchmark_rows": 0, "matched_model_ids": 0, "matched_canonical_slugs": 0, "unmatched_models": 0}
     qualification_counts = {"candidates": 0, "ineligible_lifecycle": 0, "below_score": 0, "below_confidence": 0, "eligible": 0}
 
     for provider in providers:
@@ -651,6 +653,14 @@ async def run_council(settings: Settings, *, run_id: str | None = None) -> Counc
             source="artificial-analysis",
         )
         benchmark_sources.append(benchmark_status)
+        benchmark_match_counts["benchmark_rows"] += len(benchmark_by_model)
+        for discovered in models:
+            if discovered.model_id in benchmark_by_model:
+                benchmark_match_counts["matched_model_ids"] += 1
+            elif discovered.canonical_slug and discovered.canonical_slug in benchmark_by_model:
+                benchmark_match_counts["matched_canonical_slugs"] += 1
+            else:
+                benchmark_match_counts["unmatched_models"] += 1
 
         current_ids = [model.model_id for model in models if model.model_id]
         previous_ids, previous_canonical_by_id = _previous_snapshot(store, provider.name)
@@ -808,6 +818,7 @@ async def run_council(settings: Settings, *, run_id: str | None = None) -> Counc
         category_weights_used=category_weights_used,
         alias_changes=alias_changes,
         qualification_counts=qualification_counts,
+        benchmark_match_counts=benchmark_match_counts,
     )
     _record_run_history(store, report)
 
