@@ -23,5 +23,5 @@
     "destructive_data_operation"
   ],
   "certification_rule": "The remediation executor must not certify its own repair. Repository gates and live verification remain authoritative.",
-  "gate_catalogue_authority": "HIVE production_manager.py"
+  "gate_catalogue_authority": "hive:production-manager"
 }
