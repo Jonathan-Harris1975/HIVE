@@ -23,6 +23,7 @@ def _production_settings(**overrides: object) -> Settings:
         "MAX_UPLOAD_BYTES": 1024,
         "MAX_REQUEST_BODY_BYTES": 32768,
         "REPO_HEALTH_ENABLED": False,
+        "MODEL_GOVERNANCE_SYNC_ENABLED": False,
     }
     values.update(overrides)
     return Settings(**values)
@@ -34,6 +35,42 @@ def test_production_readiness_accepts_minimal_hardened_configuration() -> None:
     assert report.ready is True
     assert report.errors == ()
     assert report.public_payload()["app_version"] == "test-production"
+
+
+
+def test_production_readiness_requires_monthly_model_sync_configuration() -> None:
+    settings = _production_settings(
+        MODEL_GOVERNANCE_SYNC_ENABLED=True,
+        AIMS_API_KEY="{{ secret.AIMS_API_KEY }}",
+        RAMS_API_KEY="",
+        AIMS_BASE_URL="https://aims.example",
+        RAMS_BASE_URL="https://rams.example",
+    )
+
+    report = build_readiness_report(settings)
+
+    assert report.ready is False
+    check = next(item for item in report.errors if item.name == "model_governance_sync")
+    assert check.required is True
+    assert "AIMS_API_KEY" in check.message
+    assert "RAMS_API_KEY" in check.message
+
+
+def test_production_readiness_accepts_complete_monthly_model_sync_configuration() -> None:
+    settings = _production_settings(
+        MODEL_GOVERNANCE_SYNC_ENABLED=True,
+        AIMS_API_KEY="a" * 48,
+        RAMS_API_KEY="r" * 48,
+        AIMS_BASE_URL="https://aims.example",
+        RAMS_BASE_URL="https://rams.example",
+    )
+
+    report = build_readiness_report(settings)
+
+    assert report.ready is True
+    check = next(item for item in report.checks if item.name == "model_governance_sync")
+    assert check.status == "ok"
+    assert check.required is True
 
 
 def test_production_readiness_rejects_default_admin_token() -> None:
