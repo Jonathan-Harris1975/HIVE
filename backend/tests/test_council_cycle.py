@@ -128,7 +128,7 @@ def test_monthly_governance_status_requires_current_month_verified_sync(monkeypa
         "occurred_at": "2026-10-01T07:00:00+00:00",
         "completed_at": "2026-10-01T07:04:00+00:00",
         "completion_status": "completed",
-        "downstream_sync": {"ok": True},
+        "downstream_sync": {"ok": True, "enabled": True},
     }
     monkeypatch.setattr(council_cycle, "get_run_history", lambda settings, limit=50: [stale, verified])
 
