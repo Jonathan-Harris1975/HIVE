@@ -377,7 +377,9 @@ async def _collect_all_gate_evidence(
 
     evidence: dict[str, dict[str, Any]] = {}
     for repo_id, result in zip(GOVERNED_REPOSITORY_IDS, results, strict=True):
-        if isinstance(result, Exception):
+        if isinstance(result, BaseException):
+            if not isinstance(result, Exception):
+                raise result
             evidence[repo_id] = {
                 "configured": True,
                 "state": "DEGRADED",
