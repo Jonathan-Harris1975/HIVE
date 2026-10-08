@@ -13,9 +13,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: hive-ci-${{ github.ref }}
-  # Exact-SHA evidence must be allowed to finish. Superseded SHA results are harmless
-  # because release and Production Manager checks only consume the current exact SHA.
+  # Include the immutable source SHA so evidence for a newer PR commit cannot evict a
+  # pending run for an older SHA from GitHub's one-pending-run concurrency slot.
+  group: hive-ci-${{ github.ref }}-${{ github.event.pull_request.head.sha || github.sha }}
   cancel-in-progress: false
 
 jobs:
