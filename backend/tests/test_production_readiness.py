@@ -23,7 +23,12 @@ def _production_settings(**overrides: object) -> Settings:
         "MAX_UPLOAD_BYTES": 1024,
         "MAX_REQUEST_BODY_BYTES": 32768,
         "REPO_HEALTH_ENABLED": False,
-        "MODEL_GOVERNANCE_SYNC_ENABLED": False,
+        "MODEL_GOVERNANCE_SYNC_ENABLED": True,
+        "AIMS_API_KEY": "a" * 48,
+        "RAMS_API_KEY": "r" * 48,
+        "KOYEB_TOKEN": "k" * 48,
+        "KOYEB_SERVICE_ID_AIMS": "aims-service-id",
+        "KOYEB_SERVICE_ID_RAMS": "rams-service-id",
     }
     values.update(overrides)
     return Settings(**values)
@@ -40,7 +45,6 @@ def test_production_readiness_accepts_minimal_hardened_configuration() -> None:
 
 def test_production_readiness_requires_monthly_model_sync_configuration() -> None:
     settings = _production_settings(
-        MODEL_GOVERNANCE_SYNC_ENABLED=True,
         AIMS_API_KEY="{{ secret.AIMS_API_KEY }}",
         RAMS_API_KEY="",
         AIMS_BASE_URL="https://aims.example",
@@ -56,11 +60,27 @@ def test_production_readiness_requires_monthly_model_sync_configuration() -> Non
     assert "RAMS_API_KEY" in check.message
 
 
+
+def test_production_readiness_rejects_disabled_monthly_model_sync() -> None:
+    settings = _production_settings(MODEL_GOVERNANCE_SYNC_ENABLED=False)
+
+    report = build_readiness_report(settings)
+
+    assert report.ready is False
+    assert any(item.name == "model_governance_sync" for item in report.errors)
+
+
+def test_production_readiness_requires_model_sync_wake_control() -> None:
+    settings = _production_settings(KOYEB_TOKEN="", KOYEB_SERVICE_ID_RAMS="")
+
+    report = build_readiness_report(settings)
+
+    assert report.ready is False
+    assert any(item.name == "model_governance_sync" for item in report.errors)
+
+
 def test_production_readiness_accepts_complete_monthly_model_sync_configuration() -> None:
     settings = _production_settings(
-        MODEL_GOVERNANCE_SYNC_ENABLED=True,
-        AIMS_API_KEY="a" * 48,
-        RAMS_API_KEY="r" * 48,
         AIMS_BASE_URL="https://aims.example",
         RAMS_BASE_URL="https://rams.example",
     )
