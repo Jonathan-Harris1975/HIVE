@@ -65,3 +65,37 @@ def get_job(store: D1MetadataStore, *, period: str) -> dict[str, Any]:
     return {"ok": True, "found": True, "job_id": row["id"],
             "period": row["source_id"], "state": json.loads(row.get("metadata_json") or "{}"),
             "created_at": row["created_at"], "updated_at": row["updated_at"]}
+
+
+def complete_job(
+    store: D1MetadataStore, *, period: str, owner: str, succeeded: bool
+) -> dict[str, Any]:
+    """Finish only a job claimed by this owner, exactly once.
+
+    Ambiguous worker failures remain claimed for manual investigation. This
+    operation does not automatically reclaim or repeat downstream writes.
+    """
+    if not store.enabled:
+        return {"ok": False, "completed": False, "error": "D1 unavailable"}
+    from app.services.monthly_review import _period_bounds
+    _period_bounds(period)
+    if not owner.strip():
+        raise ValueError("job owner is required")
+    now = datetime.now(UTC).isoformat()
+    status = "completed" if succeeded else "failed"
+    result = store.query(
+        """
+        UPDATE hive_ecosystem_metadata
+        SET metadata_json = json_set(metadata_json, '$.status', ?, '$.finished_at', ?),
+            updated_at = ?
+        WHERE id = ? AND lane = ?
+          AND json_extract(metadata_json, '$.status') = 'claimed'
+          AND json_extract(metadata_json, '$.owner') = ?
+        RETURNING id
+        """,
+        [status, now, now, _job_id(period), LANE, owner],
+    )
+    if not result.get("ok"):
+        return {"ok": False, "completed": False, "error": "D1 completion failed"}
+    return {"ok": True, "completed": bool(_extract_d1_rows(result.get("result"))),
+            "status": status}
