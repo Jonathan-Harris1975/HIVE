@@ -49,9 +49,12 @@ jobs:
           except urllib.error.HTTPError as error:
               print("Governance endpoint HTTP failure:", error.code)
               try:
-                  body = json.load(error)
-                  detail = body.get("detail", {}) if isinstance(body, dict) else {}
-                  report = detail.get("report", {}) if isinstance(detail, dict) else {}
+                  body = json.loads(error.read().decode("utf-8"))
+                  detail = body.get("detail") if isinstance(body, dict) else None
+                  report = detail.get("report") if isinstance(detail, dict) else None
+                  if not isinstance(report, dict):
+                      print("HTTP response did not contain a governance report")
+                      sys.exit(1)
                   council = report.get("council_cycle") or {}
                   run = council.get("run") or {}
                   sync = run.get("downstream_sync") or {}
