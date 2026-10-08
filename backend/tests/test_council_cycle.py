@@ -229,3 +229,33 @@ async def test_cycle_degrades_when_downstream_sync_is_not_verified(monkeypatch, 
     assert result["completion_status"] == "degraded"
     assert result["failure_stage"] == "downstream_sync"
     assert completions[-1]["completion_status"] == "degraded"
+
+
+def test_latest_verified_run_rejects_success_superseded_by_failure(monkeypatch):
+    settings = Settings()
+    previous = {
+        "run_id": "previous",
+        "completed_at": "2026-10-01T01:00:00+00:00",
+        "completion_status": "completed",
+        "downstream_sync": {"ok": True, "enabled": True},
+    }
+    failed = {
+        "run_id": "failed",
+        "completed_at": "2026-10-02T01:00:00+00:00",
+        "completion_status": "degraded",
+        "downstream_sync": {"ok": False, "enabled": True},
+    }
+    monkeypatch.setattr(council_cycle, "get_run_history", lambda settings, limit=50: [previous, failed])
+    assert council_cycle.latest_verified_run(settings) is None
+
+
+def test_latest_verified_run_rejects_disabled_sync(monkeypatch):
+    settings = Settings()
+    latest = {
+        "run_id": "disabled",
+        "completed_at": "2026-10-02T01:00:00+00:00",
+        "completion_status": "completed",
+        "downstream_sync": {"ok": True, "enabled": False},
+    }
+    monkeypatch.setattr(council_cycle, "get_run_history", lambda settings, limit=50: [latest])
+    assert council_cycle.latest_verified_run(settings) is None
