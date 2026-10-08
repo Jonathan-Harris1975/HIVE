@@ -65,7 +65,7 @@ def _configured_runtime_secret(value: object) -> bool:
     if not text:
         return False
     compact = text.lower().replace(" ", "")
-    return not (compact.startswith("{{secret.") and compact.endsWith("}}"))
+    return not (compact.startswith("{{secret.") and compact.endswith("}}"))
 
 
 def _check(
