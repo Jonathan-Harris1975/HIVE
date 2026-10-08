@@ -1,5 +1,7 @@
 name: Security and repository quality
 'on':
+  push:
+    branches: [main]
   pull_request: null
   workflow_dispatch: null
 permissions:
