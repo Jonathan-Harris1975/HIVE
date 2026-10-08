@@ -12,6 +12,19 @@ class FakeD1:
         self.rows = {}
 
     def query(self, sql, params):
+        if "UPDATE hive_ecosystem_metadata" in sql:
+            status, finished, updated, job_id, lane, owner = params
+            row = self.rows.get(job_id)
+            if not row:
+                return {"ok": True, "result": [{"results": []}]}
+            import json
+            state = json.loads(row["metadata_json"])
+            if state["owner"] != owner or state["status"] != "claimed":
+                return {"ok": True, "result": [{"results": []}]}
+            state.update(status=status, finished_at=finished)
+            row["metadata_json"] = json.dumps(state)
+            row["updated_at"] = updated
+            return {"ok": True, "result": [{"results": [{"id": job_id}]}]}
         if "INSERT INTO" in sql:
             job_id, lane, period, owner, now, _, _ = params
             if job_id in self.rows:
@@ -63,3 +76,12 @@ def test_get_job_d1_unavailable_fails_closed():
     assert get_job(store, period="2026-09") == {
         "ok": False, "found": False, "error": "D1 unavailable"
     }
+
+
+def test_completion_is_owner_fenced_and_single_use():
+    store = FakeD1()
+    assert claim_job(store, period="2026-09", owner="worker-1")["claimed"]
+    assert not complete_job(store, period="2026-09", owner="worker-2", succeeded=True)["completed"]
+    assert complete_job(store, period="2026-09", owner="worker-1", succeeded=True)["completed"]
+    assert not complete_job(store, period="2026-09", owner="worker-1", succeeded=True)["completed"]
+    assert get_job(store, period="2026-09")["state"]["status"] == "completed"
