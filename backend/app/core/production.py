@@ -60,6 +60,14 @@ def minimum_base64_request_body_bytes(max_upload_bytes: int) -> int:
     return encoded_bytes + _BASE64_JSON_OVERHEAD_BYTES
 
 
+def _configured_runtime_secret(value: object) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+    compact = text.lower().replace(" ", "")
+    return not (compact.startswith("{{secret.") and compact.endsWith("}}"))
+
+
 def _check(
     name: str, ok: bool, success: str, failure: str, *, required: bool = False
 ) -> ReadinessCheck:
@@ -210,6 +218,28 @@ def build_readiness_report(settings: Settings) -> ReadinessReport:
         )
     )
 
+
+    model_governance_sync_ready = (
+        not settings.model_governance_sync_enabled
+        or (
+            _configured_runtime_secret(settings.aims_api_key)
+            and _configured_runtime_secret(settings.rams_api_key)
+            and bool(settings.aims_base_url.strip())
+            and bool(settings.rams_base_url.strip())
+        )
+    )
+    checks.append(
+        _check(
+            "model_governance_sync",
+            model_governance_sync_ready,
+            "Monthly model-governance sync destinations and credentials are configured or sync is disabled.",
+            (
+                "MODEL_GOVERNANCE_SYNC_ENABLED=true requires usable AIMS_API_KEY and "
+                "RAMS_API_KEY/RMS_API_KEY values plus AIMS_BASE_URL and RAMS_BASE_URL."
+            ),
+            required=production and settings.model_governance_sync_enabled,
+        )
+    )
 
     checks.append(
         _check(
