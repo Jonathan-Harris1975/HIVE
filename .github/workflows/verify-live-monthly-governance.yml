@@ -70,6 +70,7 @@ jobs:
                   print("Providers discovered:", council_run.get("providers_discovered"))
                   print("Models discovered:", council_run.get("models_seen"))
                   print("Models promoted:", len(council_run.get("promotions") or []))
+                  print("Qualification counts:", council_run.get("qualification_counts"))
                   for source in council_run.get("benchmark_sources") or []:
                       if isinstance(source, dict):
                           print("Benchmark source:", {k: source.get(k) for k in ("provider", "source", "status", "ok") if k in source})
