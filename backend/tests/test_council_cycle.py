@@ -83,7 +83,7 @@ async def test_cycle_reuses_verified_fresh_run(monkeypatch):
     existing = {
         "run_id": "existing",
         "completion_status": "completed",
-        "downstream_sync": {"ok": True},
+        "downstream_sync": {"ok": True, "enabled": True},
     }
 
     monkeypatch.setattr(council_cycle, "latest_verified_run", lambda settings, since=None: existing)
@@ -157,3 +157,45 @@ def test_monthly_governance_status_exposes_failed_downstream_sync(monkeypatch):
     assert status["ok"] is False
     assert status["completion_status"] == "degraded"
     assert status["downstream_sync_ok"] is False
+
+
+def test_monthly_governance_status_latest_run_supersedes_earlier_success(monkeypatch):
+    settings = Settings()
+    now = council_cycle.datetime(2026, 10, 8, 12, 0, tzinfo=council_cycle.UTC)
+    success = {
+        "run_id": "oct-good",
+        "completed_at": "2026-10-01T07:04:00+00:00",
+        "completion_status": "completed",
+        "downstream_sync": {"ok": True, "enabled": True},
+    }
+    degraded = {
+        "run_id": "oct-bad",
+        "completed_at": "2026-10-08T10:00:00+00:00",
+        "completion_status": "degraded",
+        "downstream_sync": {"ok": False, "enabled": True},
+    }
+    monkeypatch.setattr(council_cycle, "get_run_history", lambda settings, limit=50: [success, degraded])
+
+    status = council_cycle.monthly_governance_status(settings, now=now)
+
+    assert status["ok"] is False
+    assert status["latest_run_id"] == "oct-bad"
+    assert status["completion_status"] == "degraded"
+
+
+def test_monthly_governance_status_rejects_disabled_downstream_sync(monkeypatch):
+    settings = Settings()
+    now = council_cycle.datetime(2026, 10, 8, 12, 0, tzinfo=council_cycle.UTC)
+    disabled = {
+        "run_id": "oct-disabled",
+        "completed_at": "2026-10-01T07:04:00+00:00",
+        "completion_status": "completed",
+        "downstream_sync": {"ok": True, "enabled": False},
+    }
+    monkeypatch.setattr(council_cycle, "get_run_history", lambda settings, limit=50: [disabled])
+
+    status = council_cycle.monthly_governance_status(settings, now=now)
+
+    assert status["ok"] is False
+    assert status["downstream_sync_enabled"] is False
+    assert "did not enable" in status["reason"]
