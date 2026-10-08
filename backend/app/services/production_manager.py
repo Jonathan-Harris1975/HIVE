@@ -53,7 +53,7 @@ DEPLOYMENT_WORKFLOWS: dict[str, str] = {
     "Website": "Website deployed integration",
 }
 
-_GREEN_HEALTH = {"healthy", "standby", "maintenance"}
+_GREEN_HEALTH = {"healthy", "ready", "standby", "maintenance"}
 _DEGRADED_HEALTH = {"degraded", "starting", "not_configured", "partial", "missing", "unknown"}
 _BLOCKED_HEALTH = {
     "down",
@@ -145,7 +145,7 @@ async def _github_get(
     client: httpx.AsyncClient,
     url: str,
     *,
-    params: dict[str, object] | None = None,
+    params: dict[str, str | int] | None = None,
 ) -> httpx.Response:
     """Read GitHub with bounded retries for transient provider failures."""
 
@@ -348,7 +348,7 @@ async def _collect_all_gate_evidence(
 
     evidence: dict[str, dict[str, Any]] = {}
     for repo_id, result in zip(GOVERNED_REPOSITORY_IDS, results, strict=True):
-        if isinstance(result, Exception):
+        if isinstance(result, BaseException):
             evidence[repo_id] = {
                 "configured": True,
                 "state": "DEGRADED",
@@ -403,7 +403,8 @@ async def build_production_manager_report(
             readiness_status = "missing"
         else:
             health_status = str(item.get("status") or "unknown")
-            readiness = item.get("readiness") if isinstance(item.get("readiness"), dict) else {}
+            raw_readiness = item.get("readiness")
+            readiness: dict[str, Any] = raw_readiness if isinstance(raw_readiness, dict) else {}
             readiness_status = str(readiness.get("status") or "").strip().lower()
             runtime_state = _combine_states(
                 _production_state(health_status),
