@@ -71,6 +71,82 @@ def latest_verified_run(
     return None
 
 
+def monthly_governance_status(
+    settings: Settings,
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Return freshness of the newest Council run for the current month.
+
+    A later degraded run must supersede an earlier success.  Production model
+    governance is only healthy when the newest current-month run completed and
+    actually propagated to both downstream services.
+    """
+
+    current = (now or datetime.now(UTC)).astimezone(UTC)
+    required_since = current.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    runs = get_run_history(settings, limit=50)
+    latest = runs[-1] if runs and isinstance(runs[-1], dict) else {}
+    latest_completed = _parse_timestamp(latest.get("completed_at") or latest.get("occurred_at"))
+    latest_sync = latest.get("downstream_sync") if isinstance(latest, dict) else None
+    completion_status = str(latest.get("completion_status") or "missing") if latest else "missing"
+    sync_enabled = bool(isinstance(latest_sync, dict) and latest_sync.get("enabled") is True)
+    downstream_sync_ok = bool(
+        isinstance(latest_sync, dict)
+        and latest_sync.get("ok") is True
+        and sync_enabled
+    )
+    fresh = bool(latest_completed and latest_completed >= required_since)
+    verified = bool(
+        latest
+        and fresh
+        and completion_status == "completed"
+        and downstream_sync_ok
+    )
+
+    if verified:
+        return {
+            "ok": True,
+            "fresh": True,
+            "period": required_since.strftime("%Y-%m"),
+            "required_since": required_since.isoformat(),
+            "latest_verified_run_id": latest.get("run_id"),
+            "latest_verified_at": latest_completed.isoformat() if latest_completed else None,
+            "completion_status": completion_status,
+            "downstream_sync_enabled": True,
+            "downstream_sync_ok": True,
+            "reason": None,
+        }
+
+    if not runs:
+        reason = "no AI Council run history available"
+    elif not fresh:
+        reason = "no verified AI Council run exists for the current monthly governance period"
+    elif completion_status != "completed":
+        reason = f"latest AI Council run is {completion_status}"
+    elif not sync_enabled:
+        reason = "latest AI Council run did not enable downstream AIMS/RAMS model propagation"
+    elif not downstream_sync_ok:
+        reason = "latest AI Council run did not verify downstream AIMS/RAMS model propagation"
+    else:
+        reason = "latest AI Council run is not verified complete"
+
+    return {
+        "ok": False,
+        "fresh": fresh,
+        "period": required_since.strftime("%Y-%m"),
+        "required_since": required_since.isoformat(),
+        "latest_verified_run_id": None,
+        "latest_verified_at": None,
+        "latest_run_id": latest.get("run_id") if latest else None,
+        "latest_run_at": latest_completed.isoformat() if latest_completed else None,
+        "completion_status": completion_status,
+        "downstream_sync_enabled": sync_enabled,
+        "downstream_sync_ok": downstream_sync_ok,
+        "reason": reason,
+    }
+
+
 async def execute_council_cycle(
     settings: Settings,
     *,

@@ -83,7 +83,7 @@ async def test_cycle_reuses_verified_fresh_run(monkeypatch):
     existing = {
         "run_id": "existing",
         "completion_status": "completed",
-        "downstream_sync": {"ok": True},
+        "downstream_sync": {"ok": True, "enabled": True},
     }
 
     monkeypatch.setattr(council_cycle, "latest_verified_run", lambda settings, since=None: existing)
@@ -101,3 +101,101 @@ async def test_cycle_reuses_verified_fresh_run(monkeypatch):
     assert result["ok"] is True
     assert result["reused"] is True
     assert result["run"]["run_id"] == "existing"
+
+
+def test_monthly_governance_status_requires_current_month_verified_sync(monkeypatch):
+    settings = Settings()
+    now = council_cycle.datetime(2026, 10, 8, 12, 0, tzinfo=council_cycle.UTC)
+
+    stale = {
+        "run_id": "sep-run",
+        "occurred_at": "2026-09-30T23:00:00+00:00",
+        "completed_at": "2026-09-30T23:05:00+00:00",
+        "completion_status": "completed",
+        "downstream_sync": {"ok": True},
+    }
+    monkeypatch.setattr(council_cycle, "get_run_history", lambda settings, limit=50: [stale])
+
+    stale_status = council_cycle.monthly_governance_status(settings, now=now)
+
+    assert stale_status["ok"] is False
+    assert stale_status["fresh"] is False
+    assert stale_status["period"] == "2026-10"
+    assert "current monthly governance period" in stale_status["reason"]
+
+    verified = {
+        "run_id": "oct-run",
+        "occurred_at": "2026-10-01T07:00:00+00:00",
+        "completed_at": "2026-10-01T07:04:00+00:00",
+        "completion_status": "completed",
+        "downstream_sync": {"ok": True, "enabled": True},
+    }
+    monkeypatch.setattr(council_cycle, "get_run_history", lambda settings, limit=50: [stale, verified])
+
+    fresh_status = council_cycle.monthly_governance_status(settings, now=now)
+
+    assert fresh_status["ok"] is True
+    assert fresh_status["fresh"] is True
+    assert fresh_status["latest_verified_run_id"] == "oct-run"
+    assert fresh_status["downstream_sync_ok"] is True
+
+
+def test_monthly_governance_status_exposes_failed_downstream_sync(monkeypatch):
+    settings = Settings()
+    now = council_cycle.datetime(2026, 10, 8, 12, 0, tzinfo=council_cycle.UTC)
+    failed = {
+        "run_id": "oct-failed",
+        "occurred_at": "2026-10-01T07:00:00+00:00",
+        "completed_at": "2026-10-01T07:02:00+00:00",
+        "completion_status": "degraded",
+        "downstream_sync": {"ok": False},
+    }
+    monkeypatch.setattr(council_cycle, "get_run_history", lambda settings, limit=50: [failed])
+
+    status = council_cycle.monthly_governance_status(settings, now=now)
+
+    assert status["ok"] is False
+    assert status["completion_status"] == "degraded"
+    assert status["downstream_sync_ok"] is False
+
+
+def test_monthly_governance_status_latest_run_supersedes_earlier_success(monkeypatch):
+    settings = Settings()
+    now = council_cycle.datetime(2026, 10, 8, 12, 0, tzinfo=council_cycle.UTC)
+    success = {
+        "run_id": "oct-good",
+        "completed_at": "2026-10-01T07:04:00+00:00",
+        "completion_status": "completed",
+        "downstream_sync": {"ok": True, "enabled": True},
+    }
+    degraded = {
+        "run_id": "oct-bad",
+        "completed_at": "2026-10-08T10:00:00+00:00",
+        "completion_status": "degraded",
+        "downstream_sync": {"ok": False, "enabled": True},
+    }
+    monkeypatch.setattr(council_cycle, "get_run_history", lambda settings, limit=50: [success, degraded])
+
+    status = council_cycle.monthly_governance_status(settings, now=now)
+
+    assert status["ok"] is False
+    assert status["latest_run_id"] == "oct-bad"
+    assert status["completion_status"] == "degraded"
+
+
+def test_monthly_governance_status_rejects_disabled_downstream_sync(monkeypatch):
+    settings = Settings()
+    now = council_cycle.datetime(2026, 10, 8, 12, 0, tzinfo=council_cycle.UTC)
+    disabled = {
+        "run_id": "oct-disabled",
+        "completed_at": "2026-10-01T07:04:00+00:00",
+        "completion_status": "completed",
+        "downstream_sync": {"ok": True, "enabled": False},
+    }
+    monkeypatch.setattr(council_cycle, "get_run_history", lambda settings, limit=50: [disabled])
+
+    status = council_cycle.monthly_governance_status(settings, now=now)
+
+    assert status["ok"] is False
+    assert status["downstream_sync_enabled"] is False
+    assert "did not enable" in status["reason"]

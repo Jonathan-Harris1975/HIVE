@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from app.core.config import Settings, get_settings
 from app.core.security import require_admin
 from app.services.ai_council import get_run_history
-from app.services.council_cycle import execute_council_cycle
+from app.services.council_cycle import execute_council_cycle, monthly_governance_status
 
 router = APIRouter(tags=["ai-council"], dependencies=[Depends(require_admin)])
 
@@ -45,6 +45,13 @@ async def post_run_council(settings: Settings = Depends(get_settings)) -> dict[s
         "downstream_sync": cycle.get("downstream_sync"),
         "reused": bool(cycle.get("reused")),
     }
+
+
+@router.get("/ai-council/status")
+async def get_council_status(settings: Settings = Depends(get_settings)) -> dict[str, object]:
+    """Return current-month verified model-governance freshness."""
+
+    return monthly_governance_status(settings)
 
 
 @router.get("/ai-council/history")
