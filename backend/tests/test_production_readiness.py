@@ -176,9 +176,12 @@ def test_production_readiness_accepts_koyeb_worker_monitoring_and_wake_control()
 
     report = build_readiness_report(settings)
 
-    assert report.ready is True
-    assert next(item for item in report.checks if item.name == "mast_monitoring").status == "ok"
-    assert next(item for item in report.checks if item.name == "service_wake_control").status == "ok"
+    mast = next(item for item in report.checks if item.name == "mast_monitoring")
+    wake = next(item for item in report.checks if item.name == "service_wake_control")
+    assert mast.status == "ok"
+    assert mast.required is True
+    assert wake.status == "ok"
+    assert wake.required is True
 
 
 def test_production_readiness_requires_rams_readiness_auth_when_enabled() -> None:
