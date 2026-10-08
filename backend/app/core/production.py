@@ -219,25 +219,27 @@ def build_readiness_report(settings: Settings) -> ReadinessReport:
     )
 
 
-    model_governance_sync_ready = (
-        not settings.model_governance_sync_enabled
-        or (
-            _configured_runtime_secret(settings.aims_api_key)
-            and _configured_runtime_secret(settings.rams_api_key)
-            and bool(settings.aims_base_url.strip())
-            and bool(settings.rams_base_url.strip())
-        )
+    model_governance_sync_ready = bool(
+        settings.model_governance_sync_enabled
+        and _configured_runtime_secret(settings.aims_api_key)
+        and _configured_runtime_secret(settings.rams_api_key)
+        and settings.aims_base_url.strip()
+        and settings.rams_base_url.strip()
+        and settings.koyeb_token.strip()
+        and settings.koyeb_service_id_aims.strip()
+        and settings.koyeb_service_id_rams.strip()
     )
     checks.append(
         _check(
             "model_governance_sync",
-            model_governance_sync_ready,
-            "Monthly model-governance sync destinations and credentials are configured or sync is disabled.",
+            model_governance_sync_ready or not production,
+            "Monthly model-governance sync, downstream credentials, and wake control are configured.",
             (
-                "MODEL_GOVERNANCE_SYNC_ENABLED=true requires usable AIMS_API_KEY and "
-                "RAMS_API_KEY/RMS_API_KEY values plus AIMS_BASE_URL and RAMS_BASE_URL."
+                "Production requires MODEL_GOVERNANCE_SYNC_ENABLED=true plus usable AIMS_API_KEY, "
+                "RAMS_API_KEY/RMS_API_KEY, AIMS_BASE_URL, RAMS_BASE_URL, KOYEB_TOKEN, "
+                "KOYEB_SERVICE_ID_AIMS, and KOYEB_SERVICE_ID_RAMS."
             ),
-            required=production and settings.model_governance_sync_enabled,
+            required=production,
         )
     )
 
