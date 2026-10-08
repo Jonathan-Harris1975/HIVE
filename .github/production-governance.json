@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "repository_id": "HIVE",
+  "github_repository": "Jonathan-Harris1975/HIVE",
+  "ecosystem_manager": "HIVE",
+  "role": "ecosystem_production_manager",
+  "readiness_authority": "deterministic_ci_and_runtime_gates",
+  "remediation_executor": "Kilo",
+  "technical_escalation": "CTO",
+  "human_authority": "owner",
+  "autonomous_actions": [
+    "observe",
+    "validate",
+    "gate",
+    "report",
+    "bounded_repair_pr",
+    "deployment_verification"
+  ],
+  "owner_only_triggers": [
+    "secrets_or_credentials",
+    "irreversible_production_action",
+    "security_policy_exception",
+    "legal_or_commercial_decision",
+    "destructive_data_operation"
+  ],
+  "certification_rule": "The remediation executor must not certify its own repair. Repository gates and live verification remain authoritative."
+}
