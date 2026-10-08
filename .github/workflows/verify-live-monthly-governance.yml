@@ -48,6 +48,8 @@ jobs:
                   data = json.load(response)
           except urllib.error.HTTPError as error:
               print("Governance endpoint HTTP failure:", error.code)
+              if error.code in (502, 503, 504):
+                  print("Upstream request failed; no automatic retry because the operation may have committed writes")
               try:
                   body = json.loads(error.read().decode("utf-8"))
                   detail = body.get("detail") if isinstance(body, dict) else None
@@ -92,14 +94,14 @@ jobs:
               sys.exit(1)
           council = data.get("council_cycle") or {}
           run = council.get("run") or {}
-          sync = run.get("downstream_sync") or {}
+          sync = council.get("downstream_sync") or {}
           r2 = data.get("r2_object") or {}
           d1 = data.get("d1_index") or {}
           checks = {
               "report_ok": data.get("ok") is True,
               "sections_complete": data.get("sections_total", 0) > 0 and data.get("sections_ok") == data.get("sections_total"),
               "council_ok": council.get("ok") is True,
-              "council_completed": run.get("completion_status") == "completed",
+              "council_completed": council.get("completion_status") == "completed",
               "downstream_enabled": sync.get("enabled") is True,
               "downstream_ok": sync.get("ok") is True,
               "r2_archived": r2.get("ok") is True,
