@@ -11,6 +11,10 @@ Routine operations: review readiness, repository health and operational events; 
 
 Model Registry reconciliation uses private R2 objects in the `meta_system` lane. During a D1 incident, a mutation may report `pending` only after that external write succeeds. If both stores are unavailable, the mutation is rejected. A replacement instance reloads and overlays R2 pending operations before reconciliation; local Koyeb disk is irrelevant. Use authenticated `POST /v1/model-registry/reconcile`, then confirm `pending_count=0` and the intended D1 state before closing the incident.
 
+## Ecosystem production authority
+
+HIVE is the formal Ecosystem Production Manager for the eight governed repositories. The authoritative decision is exposed at `GET /v1/system/production-manager` and is derived from the existing repository-health/readiness evidence rather than a second monitoring stack. GREEN permits ecosystem release, DEGRADED holds it, and BLOCKED prevents it. Kilo may execute bounded repairs but never certifies its own work; repository CI/security/deployment gates remain the readiness authority. See [production-manager.md](production-manager.md).
+
 ## Repository Intelligence and controlled improvements
 
 Single and bulk repository uploads and monthly governed-repository refreshes run the Repository Intelligence pipeline automatically. The canonical estate is the eight repositories defined in `app.core.governed_repositories`; `GET /v1/repositories/estate/readiness` is the operator view for snapshot freshness across all eight. See [`repository-management.md`](repository-management.md) for the ingestion, freshness, work-scope and recovery contract.
