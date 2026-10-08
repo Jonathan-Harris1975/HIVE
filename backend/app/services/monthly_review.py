@@ -329,17 +329,29 @@ async def generate_and_archive_monthly_review(
         council_cycle = await execute_council_cycle(settings, reuse_since=cycle_start)
     finally:
         logger.info("monthly_review council elapsed_seconds=%.2f", time.monotonic() - council_started)
-    report = await generate_monthly_review(
-        settings,
-        period=period,
-        council_required_since=cycle_start,
-    )
+    report_started = time.monotonic()
+    try:
+        report = await generate_monthly_review(
+            settings,
+            period=period,
+            council_required_since=cycle_start,
+        )
+    finally:
+        logger.info("monthly_review report elapsed_seconds=%.2f", time.monotonic() - report_started)
     report["council_cycle"] = council_cycle
     if not council_cycle.get("ok"):
         report["ok"] = False
 
-    r2_object = _write_report_to_r2(settings, report)
-    index_result = _index_report_in_d1(settings, report, r2_object)
+    archive_started = time.monotonic()
+    try:
+        r2_object = _write_report_to_r2(settings, report)
+    finally:
+        logger.info("monthly_review r2 elapsed_seconds=%.2f", time.monotonic() - archive_started)
+    index_started = time.monotonic()
+    try:
+        index_result = _index_report_in_d1(settings, report, r2_object)
+    finally:
+        logger.info("monthly_review d1 elapsed_seconds=%.2f", time.monotonic() - index_started)
     report["r2_object"] = r2_object
     report["d1_index"] = index_result
     report["ok"] = bool(
