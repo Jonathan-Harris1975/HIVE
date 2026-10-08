@@ -46,3 +46,20 @@ def test_unavailable_d1_fails_closed():
     store = FakeD1()
     store.enabled = False
     assert claim_job(store, period="2026-09", owner="worker-1")["claimed"] is False
+
+
+def test_get_job_missing_period():
+    assert get_job(FakeD1(), period="2026-09") == {"ok": True, "found": False}
+
+
+def test_get_job_invalid_period_raises():
+    with pytest.raises(ValueError):
+        get_job(FakeD1(), period="2026-13")
+
+
+def test_get_job_d1_unavailable_fails_closed():
+    store = FakeD1()
+    store.enabled = False
+    assert get_job(store, period="2026-09") == {
+        "ok": False, "found": False, "error": "D1 unavailable"
+    }
