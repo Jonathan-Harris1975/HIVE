@@ -14,7 +14,8 @@
       "renovate.json": "deny",
       "SECURITY.md": "deny",
       "AUTONOMY.md": "deny",
-      "CI_SETUP.txt": "deny"
+      "CI_SETUP.txt": "deny",
+      ".github/production-governance.json": "deny"
     },
     "write": {
       "*": "allow",
@@ -28,7 +29,8 @@
       "renovate.json": "deny",
       "SECURITY.md": "deny",
       "AUTONOMY.md": "deny",
-      "CI_SETUP.txt": "deny"
+      "CI_SETUP.txt": "deny",
+      ".github/production-governance.json": "deny"
     },
     "apply_patch": {
       "*": "allow",
@@ -42,7 +44,8 @@
       "renovate.json": "deny",
       "SECURITY.md": "deny",
       "AUTONOMY.md": "deny",
-      "CI_SETUP.txt": "deny"
+      "CI_SETUP.txt": "deny",
+      ".github/production-governance.json": "deny"
     },
     "external_directory": "deny",
     "question": "deny",
