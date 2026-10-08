@@ -47,11 +47,13 @@ async def _post_with_retry(
                 },
                 json=payload,
             )
-            if response.status_code < 400:
+            if 200 <= response.status_code < 300:
                 try:
                     body = response.json()
-                except ValueError:
-                    body = {"ok": True, "http_status": response.status_code}
+                except ValueError as exc:
+                    raise ModelSyncError("Downstream model governance response was not valid JSON") from exc
+                if not isinstance(body, dict) or body.get("ok") is not True:
+                    raise ModelSyncError(f"Downstream model governance did not confirm application: {str(body)[:500]}")
                 return {"ok": True, "attempt": attempt, "http_status": response.status_code, "response": body}
             last_error = f"HTTP {response.status_code}: {response.text[:500]}"
             if response.status_code not in _TRANSIENT:
