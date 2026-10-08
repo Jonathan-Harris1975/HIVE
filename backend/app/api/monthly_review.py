@@ -38,6 +38,24 @@ async def generate_monthly_review_endpoint(
     return report
 
 
+@router.get("/monthly-review/jobs/{period}")
+def monthly_review_job_status(
+    period: str,
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    """Read persistent worker status; never starts or repeats governance writes."""
+    try:
+        canonical, _, _ = _period_bounds(period)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    result = get_job(D1MetadataStore(settings), period=canonical)
+    if not result.get("ok"):
+        raise HTTPException(status_code=503, detail=result)
+    if not result.get("found"):
+        raise HTTPException(status_code=404, detail="Monthly governance job not found")
+    return result
+
+
 @router.get("/monthly-review/history")
 def list_monthly_review_history(
     limit: int = Query(24, ge=1, le=200),
