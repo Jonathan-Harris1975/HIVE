@@ -199,3 +199,33 @@ def test_monthly_governance_status_rejects_disabled_downstream_sync(monkeypatch)
     assert status["ok"] is False
     assert status["downstream_sync_enabled"] is False
     assert "did not enable" in status["reason"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sync_result", [
+    {"ok": True, "enabled": False, "reason": "disabled"},
+    {"ok": False, "enabled": True, "reason": "downstream rejected update"},
+])
+async def test_cycle_degrades_when_downstream_sync_is_not_verified(monkeypatch, sync_result):
+    settings = Settings(model_registry_min_visible_score=0.72)
+    completions = []
+
+    async def fake_run(_settings):
+        return _report()
+
+    async def fake_sync(_settings, **kwargs):
+        return sync_result
+
+    monkeypatch.setattr(council_cycle, "run_council", fake_run)
+    monkeypatch.setattr(council_cycle, "list_categories", lambda: {
+        "coding": [{"model_id": "acme/coder", "score": 0.91}]
+    })
+    monkeypatch.setattr(council_cycle, "sync_model_registry_downstream", fake_sync)
+    monkeypatch.setattr(council_cycle, "record_run_completion", lambda _settings, **kwargs: completions.append(kwargs))
+
+    result = await council_cycle.execute_council_cycle(settings)
+
+    assert result["ok"] is False
+    assert result["completion_status"] == "degraded"
+    assert result["failure_stage"] == "downstream_sync"
+    assert completions[-1]["completion_status"] == "degraded"
