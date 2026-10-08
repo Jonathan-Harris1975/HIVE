@@ -323,6 +323,8 @@ async def generate_and_archive_monthly_review(
     monthly governance operation rather than a report-only step. Repeated calls in
     the same month reuse the already verified Council run.
     """
+    # Reject malformed reporting periods before triggering Council or downstream writes.
+    _period_bounds(period)
     cycle_start = _monthly_cycle_start()
     council_started = time.monotonic()
     try:
