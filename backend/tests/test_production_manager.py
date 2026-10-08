@@ -309,6 +309,12 @@ async def test_github_gate_evidence_paginates_for_exact_sha() -> None:
             if calls["runs"] == 1:
                 return httpx.Response(
                     200,
+                    headers={
+                        "Link": (
+                            '<https://api.github.com/repos/Jonathan-Harris1975/HIVE/actions/runs'
+                            '?branch=main&per_page=100&page=2>; rel="next"'
+                        )
+                    },
                     json={
                         "workflow_runs": [
                             {
