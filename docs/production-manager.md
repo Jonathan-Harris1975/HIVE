@@ -12,7 +12,7 @@ GET /v1/system/production-manager
 GET /v1/system/production-manager?force_refresh=true
 ```
 
-The manager consumes the existing eight-repository health/readiness snapshot. It does not replace repository CI, security or deployment gates.
+The manager combines the existing eight-repository health/readiness snapshot with live GitHub evidence for the exact current `main` SHA in each repository. It does not replace repository CI, security or deployment gates; it verifies that their latest exact-SHA outcomes are present and acceptable.
 
 | Responsibility | Authority |
 | --- | --- |
@@ -34,7 +34,7 @@ HIVE publishes one of three ecosystem states:
 
 Intentional `standby` and `maintenance` lifecycle states remain GREEN when the underlying lifecycle ledger says the state is deliberate.
 
-The manager fails closed. Disabled repository-health monitoring or a governed repository missing from the current snapshot cannot produce GREEN.
+The manager fails closed. Disabled repository-health monitoring, missing `GITHUB_TOKEN`, a governed repository missing from the current health snapshot, missing/pending required workflow evidence, or missing/pending deployment evidence cannot produce GREEN. A failed required workflow or failed deployment verifier produces BLOCKED. A deployment verifier may explicitly report `skipped` when repository policy determines that the exact commit did not require a provider deployment.
 
 ## Governed repositories
 
@@ -68,8 +68,8 @@ Routine failures should not reach the owner merely because automation encountere
 The Production Manager deliberately reuses the controls already in place:
 
 - HIVE repository-health probes and production readiness;
-- repository CI and security gates;
-- exact-SHA Koyeb/Cloudflare deployment verification;
+- repository CI and security gates read from GitHub for the exact current `main` SHA;
+- exact-SHA Koyeb/Cloudflare deployment verification, including explicit policy-driven skips;
 - MAST ecosystem smoke;
 - HIVE operational-event ingestion;
 - Repository QA/Council/Intelligence evidence.
