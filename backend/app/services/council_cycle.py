@@ -54,21 +54,21 @@ def latest_verified_run(
 ) -> dict[str, Any] | None:
     """Return the newest fully-synchronised Council run, optionally bounded by freshness."""
     runs = get_run_history(settings, limit=50)
-    for run in reversed(runs):
-        if not isinstance(run, dict):
-            continue
-        sync = run.get("downstream_sync")
-        if (
-            run.get("completion_status") != "completed"
-            or not isinstance(sync, dict)
-            or sync.get("ok") is not True
-        ):
-            continue
-        occurred = _parse_timestamp(run.get("completed_at") or run.get("occurred_at"))
-        if since is not None and (occurred is None or occurred < since.astimezone(UTC)):
-            continue
-        return run
-    return None
+    if not runs or not isinstance(runs[-1], dict):
+        return None
+    latest = runs[-1]
+    sync = latest.get("downstream_sync")
+    if (
+        latest.get("completion_status") != "completed"
+        or not isinstance(sync, dict)
+        or sync.get("enabled") is not True
+        or sync.get("ok") is not True
+    ):
+        return None
+    occurred = _parse_timestamp(latest.get("completed_at") or latest.get("occurred_at"))
+    if since is not None and (occurred is None or occurred < since.astimezone(UTC)):
+        return None
+    return latest
 
 
 def monthly_governance_status(
@@ -228,6 +228,24 @@ async def execute_council_cycle(
             "failure_stage": "downstream_sync",
             "qualified_model_count": qualified_count,
             "error": str(exc),
+        }
+
+    if downstream_sync.get("enabled") is not True or downstream_sync.get("ok") is not True:
+        record_run_completion(
+            settings,
+            run_id=report.run_id,
+            completion_status="degraded",
+            downstream_sync=downstream_sync,
+        )
+        return {
+            "ok": False,
+            "reused": False,
+            "run": report.public_payload(),
+            "completion_status": "degraded",
+            "downstream_sync": downstream_sync,
+            "failure_stage": "downstream_sync",
+            "qualified_model_count": qualified_count,
+            "error": "Downstream model synchronisation is disabled or unverified",
         }
 
     record_run_completion(
