@@ -230,6 +230,24 @@ async def execute_council_cycle(
             "error": str(exc),
         }
 
+    if downstream_sync.get("enabled") is not True or downstream_sync.get("ok") is not True:
+        record_run_completion(
+            settings,
+            run_id=report.run_id,
+            completion_status="degraded",
+            downstream_sync=downstream_sync,
+        )
+        return {
+            "ok": False,
+            "reused": False,
+            "run": report.public_payload(),
+            "completion_status": "degraded",
+            "downstream_sync": downstream_sync,
+            "failure_stage": "downstream_sync",
+            "qualified_model_count": qualified_count,
+            "error": "Downstream model synchronisation is disabled or unverified",
+        }
+
     record_run_completion(
         settings,
         run_id=report.run_id,
