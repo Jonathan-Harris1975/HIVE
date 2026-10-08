@@ -6,6 +6,7 @@ must never be silently retried after an ambiguous worker failure.
 """
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from typing import Any
 
@@ -46,6 +47,8 @@ def claim_job(store: D1MetadataStore, *, period: str, owner: str) -> dict[str, A
 
 
 def get_job(store: D1MetadataStore, *, period: str) -> dict[str, Any]:
+    if not store.enabled:
+        return {"ok": False, "found": False, "error": "D1 unavailable"}
     from app.services.monthly_review import _period_bounds
     _period_bounds(period)
     result = store.query(
@@ -58,8 +61,7 @@ def get_job(store: D1MetadataStore, *, period: str) -> dict[str, Any]:
     rows = _extract_d1_rows(result.get("result"))
     if not rows:
         return {"ok": True, "found": False}
-    import json
     row = rows[0]
     return {"ok": True, "found": True, "job_id": row["id"],
-            "period": row["source_id"], "state": json.loads(row["metadata_json"]),
+            "period": row["source_id"], "state": json.loads(row.get("metadata_json") or "{}"),
             "created_at": row["created_at"], "updated_at": row["updated_at"]}
