@@ -20,7 +20,7 @@ HIVE is the formal Ecosystem Production Manager for the eight governed repositor
 
 HIVE owns model selection through the AI Council and the D1-backed Model Registry. MAST triggers the formal monthly cycle on the first day of each month at 07:00 Europe/London. The cycle refreshes configured provider catalogues, loads measured benchmark evidence where available, applies governed category scoring and lifecycle rules, persists qualified promotions, and verifies propagation of the resulting governed registry to AIMS and RAMS.
 
-The authenticated `GET /v1/ai-council/status` endpoint is the standing freshness control. It is healthy only when the current month has a verified completed Council run whose downstream AIMS/RAMS synchronisation succeeded. MAST checks that status every day after the monthly governance window, so a missed or failed monthly cycle remains operationally visible until corrected.
+The authenticated `GET /v1/ai-council/status` endpoint is the standing freshness control. It is healthy only when the current month has a verified completed Council run whose downstream AIMS/RAMS synchronisation succeeded. MAST checks that status every day after the monthly governance window, so a missed or failed monthly cycle remains operationally visible until corrected. MAST also checks `GET /v1/system/production-manager` daily and requires `GREEN / ALLOW`, so model-governance freshness and ecosystem production authority are both continuously supervised.
 
 The 07:25 monthly review is a second recovery and verification boundary. It executes the same idempotent Council cycle when a verified run for the current month is absent, and it refuses to publish a successful monthly review unless Council governance, R2 archival and D1 indexing all succeed.
 
