@@ -29,10 +29,12 @@ def test_governance_and_model_optimisation_routes_are_shipped() -> None:
     required = {
         ("/v1/runtime/readiness", "GET"),
         ("/v1/system/repo-health", "GET"),
+        ("/v1/system/production-manager", "GET"),
         ("/v1/providers/health", "GET"),
         ("/v1/environment/audit", "GET"),
         ("/v1/model-registry", "GET"),
         ("/v1/ai-council/run", "POST"),
+        ("/v1/ai-council/status", "GET"),
         ("/v1/optimisation/stats", "GET"),
         ("/v1/monthly-review/generate", "POST"),
     }
