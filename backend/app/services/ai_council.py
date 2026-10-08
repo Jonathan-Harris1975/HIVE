@@ -56,6 +56,7 @@ class CouncilRunReport:
     retirement_watch: list[dict[str, Any]] = field(default_factory=list)
     category_weights_used: dict[str, dict[str, float]] = field(default_factory=dict)
     alias_changes: list[dict[str, str | None]] = field(default_factory=list)
+    qualification_counts: dict[str, int] = field(default_factory=dict)
 
     def public_payload(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -635,6 +636,7 @@ async def run_council(settings: Settings, *, run_id: str | None = None) -> Counc
     category_weights_used: dict[str, dict[str, float]] = {}
     alias_changes: list[dict[str, str | None]] = []
     models_seen = 0
+    qualification_counts = {"candidates": 0, "ineligible_lifecycle": 0, "below_score": 0, "below_confidence": 0, "eligible": 0}
 
     for provider in providers:
         try:
@@ -730,15 +732,22 @@ async def run_council(settings: Settings, *, run_id: str | None = None) -> Counc
             category_weights = benchmark_engine.weights_for_category(category, weights)
             category_weights_used[category] = category_weights
             for model in candidates:
+                qualification_counts["candidates"] += 1
                 state, _days_to_expiry = lifecycle_by_model.get(model.model_id, ("active", None))
                 if not lifecycle_is_routable(state):
+                    qualification_counts["ineligible_lifecycle"] += 1
                     continue
                 metrics = _metrics_for_model(model, benchmark_by_model.get(model.model_id))
                 result = benchmark_engine.score_model(metrics, weights=category_weights)
+                if result.score < settings.ai_council_promotion_threshold:
+                    qualification_counts["below_score"] += 1
+                if result.confidence < settings.ai_council_auto_promotion_min_confidence:
+                    qualification_counts["below_confidence"] += 1
                 if (
                     result.score >= settings.ai_council_promotion_threshold
                     and result.confidence >= settings.ai_council_auto_promotion_min_confidence
                 ):
+                    qualification_counts["eligible"] += 1
                     governed_model_id = model.canonical_slug or model.model_id
                     model_registry.register_model(
                         category,
@@ -798,6 +807,7 @@ async def run_council(settings: Settings, *, run_id: str | None = None) -> Counc
         retirement_watch=retirement_watch,
         category_weights_used=category_weights_used,
         alias_changes=alias_changes,
+        qualification_counts=qualification_counts,
     )
     _record_run_history(store, report)
 
