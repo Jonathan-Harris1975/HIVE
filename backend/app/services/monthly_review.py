@@ -327,11 +327,13 @@ async def generate_and_archive_monthly_review(
     _period_bounds(period)
     cycle_start = _monthly_cycle_start()
     council_started = time.monotonic()
+    logger.info("monthly_review stage started", extra={"stage": "council"})
     try:
         council_cycle = await execute_council_cycle(settings, reuse_since=cycle_start)
     finally:
         logger.info("monthly_review stage elapsed", extra={"stage": "council", "elapsed_seconds": time.monotonic() - council_started})
     report_started = time.monotonic()
+    logger.info("monthly_review stage started", extra={"stage": "report"})
     try:
         report = await generate_monthly_review(
             settings,
@@ -345,11 +347,13 @@ async def generate_and_archive_monthly_review(
         report["ok"] = False
 
     archive_started = time.monotonic()
+    logger.info("monthly_review stage started", extra={"stage": "r2"})
     try:
         r2_object = _write_report_to_r2(settings, report)
     finally:
         logger.info("monthly_review stage elapsed", extra={"stage": "r2", "elapsed_seconds": time.monotonic() - archive_started})
     index_started = time.monotonic()
+    logger.info("monthly_review stage started", extra={"stage": "d1"})
     try:
         index_result = _index_report_in_d1(settings, report, r2_object)
     finally:
