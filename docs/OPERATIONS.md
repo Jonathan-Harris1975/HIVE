@@ -15,6 +15,18 @@ Model Registry reconciliation uses private R2 objects in the `meta_system` lane.
 
 HIVE is the formal Ecosystem Production Manager for the eight governed repositories. The authoritative decision is exposed at `GET /v1/system/production-manager` and is derived from the existing repository-health/readiness evidence rather than a second monitoring stack. GREEN permits ecosystem release, DEGRADED holds it, and BLOCKED prevents it. Kilo may execute bounded repairs but never certifies its own work; repository CI/security/deployment gates remain the readiness authority. See [production-manager.md](production-manager.md).
 
+
+## Model governance operating cycle
+
+HIVE owns model selection through the AI Council and the D1-backed Model Registry. MAST triggers the formal monthly cycle on the first day of each month at 07:00 Europe/London. The cycle refreshes configured provider catalogues, loads measured benchmark evidence where available, applies governed category scoring and lifecycle rules, persists qualified promotions, and verifies propagation of the resulting governed registry to AIMS and RAMS.
+
+The authenticated `GET /v1/ai-council/status` endpoint is the standing freshness control. It is healthy only when the current month has a verified completed Council run whose downstream AIMS/RAMS synchronisation succeeded. MAST checks that status every day after the monthly governance window, so a missed or failed monthly cycle remains operationally visible until corrected.
+
+The 07:25 monthly review is a second recovery and verification boundary. It executes the same idempotent Council cycle when a verified run for the current month is absent, and it refuses to publish a successful monthly review unless Council governance, R2 archival and D1 indexing all succeed.
+
+Production readiness also fails closed when `MODEL_GOVERNANCE_SYNC_ENABLED=true` but the AIMS/RAMS destinations or runtime credentials needed for downstream propagation are unavailable.
+
+
 ## Repository Intelligence and controlled improvements
 
 Single and bulk repository uploads and monthly governed-repository refreshes run the Repository Intelligence pipeline automatically. The canonical estate is the eight repositories defined in `app.core.governed_repositories`; `GET /v1/repositories/estate/readiness` is the operator view for snapshot freshness across all eight. See [`repository-management.md`](repository-management.md) for the ingestion, freshness, work-scope and recovery contract.
