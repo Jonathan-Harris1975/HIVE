@@ -6,7 +6,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.core.config import Settings, get_settings
 from app.core.security import require_admin
-from app.services.monthly_review import generate_and_archive_monthly_review, list_monthly_reviews
+from app.services.monthly_governance_jobs import get_job
+from app.services.monthly_review import _period_bounds, generate_and_archive_monthly_review, list_monthly_reviews
+from app.storage.d1 import D1MetadataStore
 from app.storage.r2 import R2Storage
 
 router = APIRouter(tags=["monthly-review"], dependencies=[Depends(require_admin)])
@@ -36,6 +38,24 @@ async def generate_monthly_review_endpoint(
             },
         )
     return report
+
+
+@router.get("/monthly-review/jobs/{period}")
+def monthly_review_job_status(
+    period: str,
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    """Read persistent worker status; never starts or repeats governance writes."""
+    try:
+        canonical, _, _ = _period_bounds(period)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    result = get_job(D1MetadataStore(settings), period=canonical)
+    if not result.get("ok"):
+        raise HTTPException(status_code=503, detail=result)
+    if not result.get("found"):
+        raise HTTPException(status_code=404, detail="Monthly governance job not found")
+    return result
 
 
 @router.get("/monthly-review/history")
