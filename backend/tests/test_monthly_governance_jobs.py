@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.monthly_governance_jobs import claim_job, get_job
+from app.services.monthly_governance_jobs import claim_job, complete_job, get_job
 
 
 class FakeD1:
