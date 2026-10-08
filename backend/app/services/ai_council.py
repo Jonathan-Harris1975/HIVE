@@ -747,7 +747,12 @@ async def run_council(settings: Settings, *, run_id: str | None = None) -> Counc
                 if not lifecycle_is_routable(state):
                     qualification_counts["ineligible_lifecycle"] += 1
                     continue
-                metrics = _metrics_for_model(model, benchmark_by_model.get(model.model_id))
+                # Benchmark feeds identify some models by canonical permaslug rather than provider ID.
+                # Prefer exact provider IDs and only fall back to the provider-supplied canonical slug.
+                measured = benchmark_by_model.get(model.model_id)
+                if measured is None and model.canonical_slug:
+                    measured = benchmark_by_model.get(model.canonical_slug)
+                metrics = _metrics_for_model(model, measured)
                 result = benchmark_engine.score_model(metrics, weights=category_weights)
                 if result.score < settings.ai_council_promotion_threshold:
                     qualification_counts["below_score"] += 1
