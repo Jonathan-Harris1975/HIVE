@@ -20,10 +20,41 @@ from app.storage.d1 import D1MetadataStore
 logger = logging.getLogger(__name__)
 
 
-async def execute(period: str, *, owner: str | None = None) -> int:
+def check_readiness(settings) -> list[str]:
+    """Validate required worker configuration without printing secret values."""
+    missing = []
+    if not D1MetadataStore(settings).enabled:
+        missing.append("D1_ENABLED, D1_ACCOUNT_ID, D1_DATABASE_ID and D1_API_KEY")
+    for attribute, label in (
+        ("cf_r2_account_id", "CF_R2_ACCOUNT_ID"),
+        ("cf_r2_access_key_id", "CF_R2_ACCESS_KEY_ID"),
+        ("cf_r2_secret_access_key", "CF_R2_SECRET_ACCESS_KEY"),
+        ("r2_bucket_audits", "R2_BUCKET_AUDITS"),
+        ("aims_base_url", "AIMS_BASE_URL"),
+        ("aims_api_key", "AIMS_API_KEY"),
+        ("rams_base_url", "RAMS_BASE_URL"),
+        ("rams_api_key", "RAMS_API_KEY"),
+    ):
+        if not str(getattr(settings, attribute, "") or "").strip():
+            missing.append(label)
+    return missing
+
+
+async def execute(period: str, *, owner: str | None = None, preflight_only: bool = False) -> int:
     canonical, _, _ = _period_bounds(period)
     settings = get_settings()
+    missing = check_readiness(settings)
+    if missing:
+        logger.error("Monthly governance worker missing configuration: %s", ", ".join(missing))
+        return 5
     store = D1MetadataStore(settings)
+    if preflight_only:
+        probe = await asyncio.to_thread(store.diagnostics)
+        if not probe.get("ok") or not probe.get("schema_ready"):
+            logger.error("Monthly governance D1 schema/connectivity preflight failed")
+            return 6
+        logger.info("Monthly governance worker preflight passed")
+        return 0
     worker = owner or uuid.uuid4().hex
     claim = await asyncio.to_thread(claim_job, store, period=canonical, owner=worker)
     if not claim.get("ok"):
@@ -58,8 +89,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run monthly governance outside the HTTP gateway")
     parser.add_argument("--period", required=True, help="Reporting month YYYY-MM")
     parser.add_argument("--owner", help="Unique worker invocation identifier")
+    parser.add_argument("--preflight-only", action="store_true", help="Check settings and D1 without governance writes")
     args = parser.parse_args()
-    return asyncio.run(execute(args.period, owner=args.owner))
+    return asyncio.run(execute(args.period, owner=args.owner, preflight_only=args.preflight_only))
 
 
 if __name__ == "__main__":
