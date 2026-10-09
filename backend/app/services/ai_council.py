@@ -474,11 +474,11 @@ async def _load_provider_benchmarks(
     for attempt in range(1, attempts + 1):
         try:
             raw = await loader(source=source)
-            items = (
-                [dict(item) for item in raw if isinstance(item, dict)]
-                if isinstance(raw, list)
-                else []
-            )
+            if not isinstance(raw, list):
+                raise ValueError("benchmark feed returned a non-list payload")
+            if any(not isinstance(item, dict) for item in raw):
+                raise ValueError("benchmark feed contains malformed rows")
+            items = [dict(item) for item in raw]
             if not items:
                 raise RuntimeError("benchmark feed returned no rows")
             cache_written = _store_benchmark_snapshot(
