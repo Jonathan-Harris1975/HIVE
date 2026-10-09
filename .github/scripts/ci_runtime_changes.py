@@ -1,17 +1,25 @@
 #!/usr/bin/env python3
-"""Conservative CI runtime change classification."""
+"""Fail-closed CI runtime change classification."""
 from __future__ import annotations
 
 import sys
 
 DOC_ROOT = {"README.md", "CHANGELOG.md", "CONTRIBUTING.md"}
+DOC_SUFFIXES = (".md", ".rst", ".txt")
 
 
 def needs_runtime_gates(paths: list[str]) -> bool:
-    """Unknown or empty diffs fail closed; only known documentation is exempt."""
+    """Skip runtime gates only for a non-empty set of known documentation files."""
     if not paths:
         return True
-    return any(not (path.startswith("docs/") and path != "docs/" or path in DOC_ROOT) for path in paths)
+    for path in paths:
+        if path in DOC_ROOT:
+            continue
+        # Documentation directories can contain executable scripts or configs.
+        if path.startswith("docs/") and path.endswith(DOC_SUFFIXES):
+            continue
+        return True
+    return False
 
 
 if __name__ == "__main__":
