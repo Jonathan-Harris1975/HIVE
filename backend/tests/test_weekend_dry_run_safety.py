@@ -2,13 +2,13 @@
 from __future__ import annotations
 
 import importlib.util
+import sys
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[2] / ".github/scripts/weekend_orchestrator.py"
 spec = importlib.util.spec_from_file_location("weekend_orchestrator", SCRIPT)
 assert spec and spec.loader
 module = importlib.util.module_from_spec(spec)
-import sys
 sys.modules[spec.name] = module
 spec.loader.exec_module(module)
 
