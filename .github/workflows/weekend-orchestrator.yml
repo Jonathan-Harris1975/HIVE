@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: "Settle and verify, but do not dispatch the Repository Council"
+        description: "Read-only preview; do not dispatch CI, repairs or Council"
         required: false
         default: true
         type: boolean
