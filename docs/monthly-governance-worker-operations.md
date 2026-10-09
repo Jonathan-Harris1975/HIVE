@@ -35,6 +35,23 @@ code and production configuration. Merging the worker does not deploy it.
    does not participate in the worker's D1 claim.
 7. Do not manually trigger a run until previous 504 activity has been reconciled.
 
+## GitHub read-only worker preflight
+
+The manual **Worker D1 preflight (read only)** Actions workflow runs the
+worker's existing `--previous-month --preflight-only` mode in a temporary
+GitHub runner. Configure the production GitHub environment with secrets
+`D1_ACCOUNT_ID`, `D1_DATABASE_ID`, `D1_API_KEY`,
+`CF_R2_ACCOUNT_ID`, `CF_R2_ACCESS_KEY_ID`, `CF_R2_SECRET_ACCESS_KEY`,
+`AIMS_API_KEY`, `RAMS_API_KEY`, and environment variables
+`R2_BUCKET_AUDITS`, `AIMS_BASE_URL`, `RAMS_BASE_URL`.
+The workflow sets `D1_ENABLED=true` explicitly.
+
+A green result confirms settings are present and that the runner can query
+D1 diagnostics/schema. It **does not** establish R2 or downstream write
+permissions, confirm the deployed worker has the same secrets, or install a
+scheduler. Do not schedule a write-producing GitHub workflow as a substitute
+for the persistent independent worker without a separate deployment decision.
+
 ## Monitoring and incident handling
 
 - GitHub Actions: `Inspect monthly governance job (read only)` accepts
