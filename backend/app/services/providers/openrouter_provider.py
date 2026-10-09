@@ -51,8 +51,14 @@ class OpenRouterProvider:
             )
             response.raise_for_status()
             payload: Any = response.json()
-        data = payload.get("data") if isinstance(payload, dict) else None
-        return [item for item in (data or []) if isinstance(item, dict)]
+        # An unexpected upstream response must not be mistaken for a valid,
+        # empty benchmark feed: that hides provider/API regressions.
+        if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
+            raise ValueError("OpenRouter benchmarks response missing data array")
+        data = payload["data"]
+        if any(not isinstance(item, dict) for item in data):
+            raise ValueError("OpenRouter benchmarks response contains invalid entries")
+        return data
 
     async def health(self) -> ProviderHealth:
         start = time.perf_counter()
