@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -230,7 +231,10 @@ def _percentile_scores(items: list[dict[str, Any]], key: str) -> dict[str, float
             raw = item.get(key)
             if raw is None:
                 continue
-            values.append((model_id, float(raw)))
+            value = float(raw)
+            if not math.isfinite(value):
+                continue
+            values.append((model_id, value))
         except (TypeError, ValueError):
             continue
     # A tiny partial feed is not enough evidence for population normalisation.
