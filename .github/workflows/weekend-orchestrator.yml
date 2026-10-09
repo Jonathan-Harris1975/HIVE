@@ -27,7 +27,7 @@ concurrency:
 
 jobs:
   orchestrate:
-    name: Settle, verify and release Council
+    name: Inspect or run weekend orchestration
     runs-on: ubuntu-latest
     timeout-minutes: 355
     steps:
@@ -50,7 +50,7 @@ jobs:
           fi
 
       - name: Mint autonomous repair GitHub App token
-        if: steps.guard.outputs.run == 'true'
+        if: steps.guard.outputs.run == 'true' && inputs.dry_run != true
         id: app_token
         env:
           APP_ID: ${{ vars.AUTONOMY_REPAIR_APP_ID }}
@@ -98,11 +98,11 @@ jobs:
           echo "::add-mask::${app_token}"
           printf 'token=%s\n' "$app_token" >> "$GITHUB_OUTPUT"
 
-      - name: Settle Mergify, verify exact-SHA evidence and release Council
+      - name: Inspect (dry run) or settle, verify and release Council
         if: steps.guard.outputs.run == 'true'
         id: orchestrate
         env:
-          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          GH_TOKEN: ${{ inputs.dry_run == true && github.token || steps.app_token.outputs.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
