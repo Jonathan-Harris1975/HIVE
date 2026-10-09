@@ -21,6 +21,8 @@ class ReadOnlyApi:
         self.calls.append(("GET", path))
         if path.endswith("/commits/main"):
             return {"sha": "a" * 40}
+        if "/issues?state=open" in path:
+            return []
         raise AssertionError(f"Unexpected GET: {path}")
 
     def pages(self, path, key=None):
