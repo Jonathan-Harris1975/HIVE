@@ -50,7 +50,7 @@ code and production configuration. Merging the worker does not deploy it.
   endpoint or another process did not execute.
 - Worker exit codes: 0 completed/preflight passed; 1 report failed;
   2 claim unavailable; 3 duplicate; 4 terminal status persistence failed;
-  5 missing configuration; 6 D1 preflight failed.
+  5 missing configuration; 6 D1 preflight failed; 7 reporting month is not yet completed.
 
 ## Release acceptance checklist
 
