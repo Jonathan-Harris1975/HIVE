@@ -45,7 +45,7 @@ jobs:
           printf '%s\n' "$changed"
           # Only documentation-only changes may skip runtime gates. Unknown files,
           # workflow changes and infrastructure changes fail closed.
-          if printf '%s\n' "$changed" | grep -Ev '^(docs/|.*\.md$|.*\.rst$|.*\.txt$)' | grep -q .; then
+          if printf '%s\n' "$changed" | grep -Ev '^(docs/|README\.md$|CHANGELOG\.md$|CONTRIBUTING\.md$)' | grep -q .; then
             echo "runtime=true" >> "$GITHUB_OUTPUT"
           else
             echo "runtime=false" >> "$GITHUB_OUTPUT"
