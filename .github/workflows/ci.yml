@@ -43,13 +43,8 @@ jobs:
           # On pull_request the checkout is the merge commit: HEAD^1 is the base tip.
           changed="$(git diff --name-only HEAD^1 HEAD)"
           printf '%s\n' "$changed"
-          # Only documentation-only changes may skip runtime gates. Unknown files,
-          # workflow changes and infrastructure changes fail closed.
-          if printf '%s\n' "$changed" | grep -Ev '^(docs/|README\.md$|CHANGELOG\.md$|CONTRIBUTING\.md$)' | grep -q .; then
-            echo "runtime=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "runtime=false" >> "$GITHUB_OUTPUT"
-          fi
+          runtime="$(printf '%s\n' "$changed" | python3 .github/scripts/ci_runtime_changes.py)"
+          echo "runtime=$runtime" >> "$GITHUB_OUTPUT"
 
   test:
     needs: changes
