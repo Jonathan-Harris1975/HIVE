@@ -352,7 +352,8 @@ class Orchestrator:
             # Mergify, dispatches CI/Council, or waits for live repair side effects.
             sha = self.head_sha()
             prs = self.automation_prs(self.open_prs())
-            self.record("dry-run", "read-only", f"sha {sha[:12]}; open automation PRs: {len(prs)}")
+            pending = self.pending_minimum_age()
+            self.record("dry-run", "read-only", f"sha {sha[:12]}; open automation PRs: {len(prs)}; pending minimum-age updates: {pending}")
             self.record("dry-run", "not-verified", "CI, deployment, repairs and Council were not dispatched")
             return 0
         pending = self.pending_minimum_age()
