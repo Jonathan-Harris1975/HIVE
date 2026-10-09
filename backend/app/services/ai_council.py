@@ -643,7 +643,17 @@ async def run_council(settings: Settings, *, run_id: str | None = None) -> Counc
     for provider in providers:
         try:
             models = await provider.list_models(force_refresh=True)
-        except Exception:  # noqa: BLE001 - one provider failing must not sink the run
+        except Exception as exc:  # noqa: BLE001 - isolate provider discovery failures
+            benchmark_sources.append(
+                {
+                    "provider": str(getattr(provider, "name", "unknown")),
+                    "source": "model_catalogue",
+                    "ok": False,
+                    "mode": "discovery_failed",
+                    "item_count": 0,
+                    "error": type(exc).__name__,
+                }
+            )
             continue
 
         benchmark_by_model, benchmark_status = await _load_provider_benchmarks(
