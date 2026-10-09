@@ -12,6 +12,7 @@ from app import monthly_governance_worker as worker
 @pytest.mark.asyncio
 async def test_duplicate_claim_never_runs_governance(monkeypatch):
     monkeypatch.setattr(worker, "get_settings", lambda: object())
+    monkeypatch.setattr(worker, "check_readiness", lambda settings: [])
     monkeypatch.setattr(worker, "D1MetadataStore", lambda settings: object())
     monkeypatch.setattr(worker, "claim_job", lambda *a, **kw: {"ok": True, "claimed": False})
     monkeypatch.setattr(worker, "get_job", lambda *a, **kw: {"ok": True, "found": True})
@@ -24,6 +25,7 @@ async def test_duplicate_claim_never_runs_governance(monkeypatch):
 @pytest.mark.asyncio
 async def test_d1_claim_failure_never_runs_governance(monkeypatch):
     monkeypatch.setattr(worker, "get_settings", lambda: object())
+    monkeypatch.setattr(worker, "check_readiness", lambda settings: [])
     monkeypatch.setattr(worker, "D1MetadataStore", lambda settings: object())
     monkeypatch.setattr(worker, "claim_job", lambda *a, **kw: {"ok": False, "error": "D1 unavailable"})
     generate = AsyncMock()
@@ -35,6 +37,7 @@ async def test_d1_claim_failure_never_runs_governance(monkeypatch):
 @pytest.mark.asyncio
 async def test_successful_run_marks_completed(monkeypatch):
     monkeypatch.setattr(worker, "get_settings", lambda: object())
+    monkeypatch.setattr(worker, "check_readiness", lambda settings: [])
     monkeypatch.setattr(worker, "D1MetadataStore", lambda settings: object())
     monkeypatch.setattr(worker, "claim_job", lambda *a, **kw: {
         "ok": True, "claimed": True, "job_id": "monthly-governance:2026-09"
@@ -55,6 +58,7 @@ async def test_successful_run_marks_completed(monkeypatch):
 @pytest.mark.asyncio
 async def test_crash_keeps_claim_for_manual_reconciliation(monkeypatch):
     monkeypatch.setattr(worker, "get_settings", lambda: object())
+    monkeypatch.setattr(worker, "check_readiness", lambda settings: [])
     monkeypatch.setattr(worker, "D1MetadataStore", lambda settings: object())
     monkeypatch.setattr(worker, "claim_job", lambda *a, **kw: {
         "ok": True, "claimed": True, "job_id": "monthly-governance:2026-09"
