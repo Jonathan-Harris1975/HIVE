@@ -1,0 +1,72 @@
+name: Inspect monthly governance job (read only)
+on:
+  workflow_dispatch:
+    inputs:
+      period:
+        description: "Reporting month YYYY-MM"
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    environment: production
+    env:
+      HIVE_BASE_URL: ${{ vars.HIVE_BASE_URL }}
+      HIVE_ADMIN_TOKEN: ${{ secrets.HIVE_ADMIN_TOKEN }}
+      PERIOD: ${{ inputs.period }}
+    steps:
+      - name: Inspect job state without starting governance
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import sys
+          import urllib.error
+          import urllib.request
+
+          base = os.environ.get("HIVE_BASE_URL", "").strip().rstrip("/")
+          token = os.environ.get("HIVE_ADMIN_TOKEN", "")
+          period = os.environ.get("PERIOD", "")
+          if not re.fullmatch(r"20[0-9]{2}-(0[1-9]|1[0-2])", period):
+              sys.exit("Reporting period must be YYYY-MM")
+          if not base.startswith("https://") or not token:
+              sys.exit("HIVE_BASE_URL (production variable) and HIVE_ADMIN_TOKEN (secret) are required")
+          endpoint = f"{base}/v1/monthly-review/jobs/{period}"
+          request = urllib.request.Request(endpoint, headers={
+              "Authorization": f"Bearer {token}", "Accept": "application/json",
+          })
+          try:
+              with urllib.request.urlopen(request, timeout=25) as response:
+                  payload = json.load(response)
+          except urllib.error.HTTPError as exc:
+              if exc.code == 404:
+                  sys.exit("No job recorded for this period. No execution attempted.")
+              sys.exit(f"Job inspection failed: HTTP {exc.code}")
+          except (TimeoutError, urllib.error.URLError, ValueError):
+              sys.exit("Job inspection failed: connection or response error")
+          if not isinstance(payload, dict):
+              sys.exit("Invalid job status response")
+          state = payload.get("state") or {}
+          status = state.get("status") if isinstance(state, dict) else None
+          print("Reporting period:", period)
+          print("Job found:", payload.get("found"))
+          print("Job status:", status)
+          print("Claimed at:", state.get("claimed_at") if isinstance(state, dict) else None)
+          print("Finished at:", state.get("finished_at") if isinstance(state, dict) else None)
+          if payload.get("ok") is not True or payload.get("found") is not True:
+              sys.exit("Job status not available")
+          if status == "completed":
+              print("Governance job completed (this does not verify downstream report contents)")
+          elif status == "claimed":
+              sys.exit("Governance job remains claimed; do not rerun until investigated")
+          elif status == "failed":
+              sys.exit("Governance job failed; investigate before any retry")
+          else:
+              sys.exit("Unknown job status; investigate before any retry")
+          PY
