@@ -13,7 +13,7 @@
 ## Numbered weekend proving plan
 
 1. **Release engineer:** Capture the `main` SHA and enumerate eight governed repository names and SHAs from the authoritative configuration. Fail if any repository is missing or its default branch changed.
-2. **Automation owner:** Manually dispatch `weekend-orchestrator.yml` with `dry_run=true` and `skip_time_guard=true`. Record the run URL and retained JSON orchestration artifact. A dry run must not dispatch Council or merge repair PRs.
+2. **Automation owner:** Manually dispatch `weekend-orchestrator.yml` with `dry_run=true` and `skip_time_guard=true`. Record the run URL and retained JSON orchestration artifact. **Important: this flag only suppresses Council dispatch; it does not guarantee a side-effect-free dry run.** CI, CodeQL or security dispatches can trigger autonomous repair and guarded merges on failure. Do not run this against production when no writes/merges are permitted. Use an isolated test installation with repair disabled, or obtain explicit approval for possible repair side effects.
 3. **Release engineer:** Check the phase launcher resolves the Saturday CI, Sunday DAST and Sunday Council windows correctly across GMT/BST transitions. Confirm phase ordering and reject early Council dispatch.
 4. **Release engineer:** For each governed repository, verify the expected SHA, CI/CodeQL/security conclusions, deployment evidence and per-repository timeout/partial-failure classification. A green dispatcher is insufficient.
 5. **Automation owner:** Exercise a safe synthetic failed-run fixture in a non-production test environment. Verify diagnosis, one bounded repair PR, required checks, guarded merge decision and human hold after retry exhaustion. Do not deliberately fail live production.
