@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from unittest.mock import AsyncMock
+from types import SimpleNamespace
 
 import pytest
 
@@ -66,3 +67,35 @@ async def test_crash_keeps_claim_for_manual_reconciliation(monkeypatch):
     with pytest.raises(RuntimeError, match="unknown partial write"):
         await worker.execute("2026-09", owner="worker-one")
     assert completed == []
+
+
+def test_readiness_lists_missing_config_without_values():
+    settings = SimpleNamespace(d1_enabled=False, d1_account_id="", d1_database_id="", d1_api_key="")
+    missing = worker.check_readiness(settings)
+    assert any("D1_ENABLED" in item for item in missing)
+    assert "AIMS_API_KEY" in missing
+    assert "RAMS_API_KEY" in missing
+
+
+@pytest.mark.asyncio
+async def test_preflight_does_not_claim_or_execute(monkeypatch):
+    settings = SimpleNamespace(
+        d1_enabled=True, d1_account_id="account", d1_database_id="database",
+        d1_api_key="secret", cf_r2_account_id="account",
+        cf_r2_access_key_id="access", cf_r2_secret_access_key="secret",
+        r2_bucket_audits="audits", aims_base_url="https://aims.test",
+        aims_api_key="secret", rams_base_url="https://rams.test", rams_api_key="secret",
+    )
+    monkeypatch.setattr(worker, "get_settings", lambda: settings)
+    class Store:
+        enabled = True
+        def diagnostics(self):
+            return {"ok": True, "schema_ready": True}
+    monkeypatch.setattr(worker, "D1MetadataStore", lambda value: Store())
+    claim = []
+    monkeypatch.setattr(worker, "claim_job", lambda *a, **kw: claim.append(kw))
+    generate = AsyncMock()
+    monkeypatch.setattr(worker, "generate_and_archive_monthly_review", generate)
+    assert await worker.execute("2026-09", preflight_only=True) == 0
+    assert claim == []
+    generate.assert_not_awaited()
