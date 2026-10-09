@@ -11,6 +11,7 @@ import asyncio
 import json
 import logging
 import uuid
+from datetime import UTC, datetime
 
 from app.core.config import get_settings
 from app.services.monthly_governance_jobs import claim_job, complete_job, get_job
@@ -42,6 +43,9 @@ def check_readiness(settings) -> list[str]:
 
 async def execute(period: str, *, owner: str | None = None, preflight_only: bool = False) -> int:
     canonical, _, _ = _period_bounds(period)
+    if canonical >= datetime.now(UTC).strftime("%Y-%m"):
+        logger.error("Monthly governance period must be a completed UTC month")
+        return 7
     settings = get_settings()
     missing = check_readiness(settings)
     if missing:
