@@ -346,6 +346,15 @@ class Orchestrator:
 
     # --------------------------------------------------------------------- main
     def run(self) -> int:
+        if self.cfg.dry_run:
+            # A real dispatch can trigger workflow_run autonomous repair and merges.
+            # A safe dry run therefore performs only GET requests and never nudges
+            # Mergify, dispatches CI/Council, or waits for live repair side effects.
+            sha = self.head_sha()
+            prs = self.automation_prs(self.open_prs())
+            self.record("dry-run", "read-only", f"sha {sha[:12]}; open automation PRs: {len(prs)}")
+            self.record("dry-run", "not-verified", "CI, deployment, repairs and Council were not dispatched")
+            return 0
         pending = self.pending_minimum_age()
         repairs = 0
         while True:
