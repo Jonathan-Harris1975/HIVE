@@ -43,7 +43,9 @@ jobs:
           # On pull_request the checkout is the merge commit: HEAD^1 is the base tip.
           changed="$(git diff --name-only HEAD^1 HEAD)"
           printf '%s\n' "$changed"
-          if printf '%s\n' "$changed" | grep -Eq '^(backend/|scripts/|Dockerfile|\.dockerignore|requirements|runtime\.txt|nixpacks\.toml|Procfile|\.github/workflows/ci\.yml|\.github/scripts/)'; then
+          # Only documentation-only changes may skip runtime gates. Unknown files,
+          # workflow changes and infrastructure changes fail closed.
+          if printf '%s\n' "$changed" | grep -Ev '^(docs/|.*\.md$|.*\.rst$|.*\.txt$)' | grep -q .; then
             echo "runtime=true" >> "$GITHUB_OUTPUT"
           else
             echo "runtime=false" >> "$GITHUB_OUTPUT"
