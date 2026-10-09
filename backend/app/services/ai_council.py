@@ -409,11 +409,11 @@ def _load_benchmark_snapshot(
         raw_metadata = row.get("metadata")
         metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
         raw_items = metadata.get("items")
-        items = (
-            [dict(item) for item in raw_items if isinstance(item, dict)]
-            if isinstance(raw_items, list)
-            else []
-        )
+        if not isinstance(raw_items, list) or any(
+            not isinstance(item, dict) for item in raw_items
+        ):
+            return [], {"ok": False, "reason": "benchmark cache contains malformed rows"}
+        items = [dict(item) for item in raw_items]
         fetched_text = str(metadata.get("fetched_at") or row.get("updated_at") or "").strip()
         try:
             fetched_at = datetime.fromisoformat(fetched_text.replace("Z", "+00:00"))
