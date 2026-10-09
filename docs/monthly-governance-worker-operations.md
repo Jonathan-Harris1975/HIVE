@@ -25,10 +25,10 @@ code and production configuration. Merging the worker does not deploy it.
 5. Configure the scheduler to run **once monthly**, after the reporting month
    closes (for example 03:00 UTC on day 1), with a single active instance and
    a runtime budget longer than the expected governance cycle. Use:
-   `python -m app.monthly_governance_worker --period YYYY-MM`.
-   The scheduler must resolve YYYY-MM to the **previous completed UTC month**.
-   Avoid hardcoded months. A scheduler that cannot interpolate the month should
-   use a wrapper that computes it explicitly.
+   `python -m app.monthly_governance_worker --previous-month`.
+   The worker resolves the **previous completed UTC month** itself, including
+   January year rollover. Keep `--period YYYY-MM` for deliberate operator-led
+   investigation only. Never schedule a fixed reporting period.
 6. Turn off the old MAST job group's automatic POST to
    `/v1/monthly-review/generate` **before** enabling the new scheduler.
    Otherwise two independent execution paths can race, and the legacy POST

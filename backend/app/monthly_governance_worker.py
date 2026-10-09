@@ -11,7 +11,7 @@ import asyncio
 import json
 import logging
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from app.core.config import get_settings
 from app.services.monthly_governance_jobs import claim_job, complete_job, get_job
@@ -89,13 +89,22 @@ async def execute(period: str, *, owner: str | None = None, preflight_only: bool
     return 0 if report.get("ok") is True else 1
 
 
+def previous_completed_utc_month(now: datetime | None = None) -> str:
+    """Resolve the prior completed UTC month, including January rollover."""
+    today = (now or datetime.now(UTC)).astimezone(UTC).date()
+    return (today.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run monthly governance outside the HTTP gateway")
-    parser.add_argument("--period", required=True, help="Reporting month YYYY-MM")
+    selection = parser.add_mutually_exclusive_group(required=True)
+    selection.add_argument("--period", help="Reporting month YYYY-MM")
+    selection.add_argument("--previous-month", action="store_true", help="Use the previous completed UTC month")
     parser.add_argument("--owner", help="Unique worker invocation identifier")
     parser.add_argument("--preflight-only", action="store_true", help="Check settings and D1 without governance writes")
     args = parser.parse_args()
-    return asyncio.run(execute(args.period, owner=args.owner, preflight_only=args.preflight_only))
+    period = previous_completed_utc_month() if args.previous_month else args.period
+    return asyncio.run(execute(period, owner=args.owner, preflight_only=args.preflight_only))
 
 
 if __name__ == "__main__":
