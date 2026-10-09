@@ -41,7 +41,12 @@ jobs:
             exit 0
           fi
           # On pull_request the checkout is the merge commit: HEAD^1 is the base tip.
-          changed="$(git diff --name-only HEAD^1 HEAD)"
+          # A missing merge parent or git error must not bypass runtime checks.
+          if ! changed="$(git diff --name-only HEAD^1 HEAD)"; then
+            echo "::warning::Unable to classify changed files; running all runtime gates."
+            echo "runtime=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           printf '%s\n' "$changed"
           runtime="$(printf '%s\n' "$changed" | python3 .github/scripts/ci_runtime_changes.py)"
           echo "runtime=$runtime" >> "$GITHUB_OUTPUT"
