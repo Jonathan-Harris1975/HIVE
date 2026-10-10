@@ -3,6 +3,8 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 import unittest
+from unittest import mock
+import datetime as dt
 
 SCRIPT = Path(__file__).with_name("r2_mutation_lease.py")
 SPEC = importlib.util.spec_from_file_location("r2_mutation_lease", SCRIPT)
@@ -25,6 +27,50 @@ class R2MutationLeaseTests(unittest.TestCase):
     def test_invalid_owner_rejected_before_network(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "owner"):
             M.acquire("Jonathan-Harris1975/HIVE", "x", "someone-else", 300, "hive-repositories")
+
+
+    def test_renew_rejects_expired_lease_without_writing(self) -> None:
+        expired = {
+            "repository": "Jonathan-Harris1975/HIVE",
+            "fingerprint_sha256": M.hashlib.sha256(b"fingerprint").hexdigest(),
+            "owner": "kilo",
+            "token": "token",
+            "expires_at": "2020-01-01T00:00:00Z",
+            "generation": 1,
+        }
+        with mock.patch.object(M, "_read", return_value=(expired, '"etag"')), mock.patch.object(M, "_put") as put:
+            with self.assertRaisesRegex(RuntimeError, "expired"):
+                M.renew("Jonathan-Harris1975/HIVE", "fingerprint", "kilo", "token", 300, "bucket")
+            put.assert_not_called()
+
+    def test_renew_requires_owner_token_and_uses_conditional_etag(self) -> None:
+        current = {
+            "repository": "Jonathan-Harris1975/HIVE",
+            "fingerprint_sha256": M.hashlib.sha256(b"fingerprint").hexdigest(),
+            "owner": "kilo",
+            "token": "secret-token",
+            "expires_at": (dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=10)).isoformat(),
+            "generation": 4,
+        }
+        with mock.patch.object(M, "_read", return_value=(current, '"etag"')), mock.patch.object(M, "_put", return_value='"new"') as put:
+            with self.assertRaisesRegex(RuntimeError, "mismatch"):
+                M.renew("Jonathan-Harris1975/HIVE", "fingerprint", "kilo", "wrong", 300, "bucket")
+            put.assert_not_called()
+            result = M.renew("Jonathan-Harris1975/HIVE", "fingerprint", "kilo", "secret-token", 300, "bucket")
+            self.assertEqual(result["generation"], 4)
+            self.assertEqual(put.call_args.args[3], {"if-match": '"etag"'})
+
+    def test_renew_fails_closed_on_etag_race(self) -> None:
+        current = {
+            "repository": "Jonathan-Harris1975/HIVE",
+            "fingerprint_sha256": M.hashlib.sha256(b"fingerprint").hexdigest(),
+            "owner": "kilo",
+            "token": "secret-token",
+            "expires_at": (dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=10)).isoformat(),
+        }
+        with mock.patch.object(M, "_read", return_value=(current, '"etag"')), mock.patch.object(M, "_put", return_value=None):
+            with self.assertRaisesRegex(RuntimeError, "concurrent race"):
+                M.renew("Jonathan-Harris1975/HIVE", "fingerprint", "kilo", "secret-token", 300, "bucket")
 
 
 if __name__ == "__main__":
