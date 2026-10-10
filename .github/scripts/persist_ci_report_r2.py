@@ -21,6 +21,7 @@ def request(method, endpoint, key, body=b"", ctype=None, expected_length=None):
     ph=hashlib.sha256(body).hexdigest()
     headers={"host":parsed.netloc,"x-amz-content-sha256":ph,"x-amz-date":amz}
     if ctype: headers["content-type"]=ctype
+    if method == "PUT": headers["if-none-match"] = "*"
     names=sorted(headers); canon="".join(f"{n}:{headers[n]}\n" for n in names); signed=";".join(names)
     creq="\n".join([method,parsed.path,"",canon,signed,ph]); scope=f"{day}/auto/s3/aws4_request"
     sts="\n".join(["AWS4-HMAC-SHA256",amz,scope,hashlib.sha256(creq.encode()).hexdigest()])

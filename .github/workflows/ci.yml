@@ -135,6 +135,8 @@ jobs:
         with:
           python-version: "3.14.7"
           cache: "pip"
+      - name: Test orchestration and recovery helpers offline
+        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py'
       - name: Reject committed literal secrets
         run: python scripts/secret_scan.py
       - name: Install tooling
