@@ -159,6 +159,31 @@ def release(repository: str, fingerprint: str, owner: str, token: str, bucket: s
 
 
 
+
+def validate(repository: str, fingerprint: str, owner: str, token: str, generation: int, bucket: str) -> dict[str, object]:
+    """Fail-closed current-holder check for mutation consumers.
+
+    Consumers must check immediately before each privileged write. This does
+    not replace atomic fencing at the downstream resource.
+    """
+    if owner not in {"kilo", "cto.new"} or generation < 1 or not token:
+        raise RuntimeError("invalid lease authority")
+    key = _key_for(repository, fingerprint)
+    current, etag = _read(bucket, key)
+    if not current or not etag:
+        raise RuntimeError("lease missing or unreadable")
+    if current.get("repository") != repository or current.get("fingerprint_sha256") != hashlib.sha256(fingerprint.encode()).hexdigest():
+        raise RuntimeError("lease identity mismatch")
+    if current.get("owner") != owner or not hmac.compare_digest(str(current.get("token", "")), token):
+        raise RuntimeError("lease owner/token mismatch")
+    if int(current.get("generation", 0)) != generation:
+        raise RuntimeError("stale lease generation")
+    expires = dt.datetime.fromisoformat(str(current["expires_at"]).replace("Z", "+00:00"))
+    if expires <= dt.datetime.now(dt.timezone.utc):
+        raise RuntimeError("expired lease")
+    return {"valid": True, "key": key, "generation": generation, "owner": owner}
+
+
 def renew(repository: str, fingerprint: str, owner: str, token: str, ttl_seconds: int, bucket: str) -> dict[str, object]:
     """Extend an unexpired lease using its ETag as a compare-and-swap guard."""
     if owner not in {"kilo", "cto.new"}:
@@ -188,11 +213,12 @@ def renew(repository: str, fingerprint: str, owner: str, token: str, ttl_seconds
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=["acquire", "renew", "release"])
+    parser.add_argument("command", choices=["acquire", "renew", "release", "validate"])
     parser.add_argument("--repository", required=True)
     parser.add_argument("--fingerprint", required=True)
     parser.add_argument("--owner", required=True)
     parser.add_argument("--token")
+    parser.add_argument("--generation", type=int)
     parser.add_argument("--ttl-seconds", type=int, default=1800)
     parser.add_argument("--bucket", default=os.environ.get("R2_BUCKET", "hive-repositories"))
     args = parser.parse_args()
@@ -202,7 +228,11 @@ def main() -> int:
     else:
         if not args.token:
             raise RuntimeError("--token is required for renewal or release")
-        if args.command == "renew":
+        if args.command == "validate":
+            if args.generation is None:
+                raise RuntimeError("--generation is required for validation")
+            result = validate(args.repository, args.fingerprint, args.owner, args.token, args.generation, args.bucket)
+        elif args.command == "renew":
             result = renew(args.repository, args.fingerprint, args.owner, args.token, args.ttl_seconds, args.bucket)
         else:
             result = release(args.repository, args.fingerprint, args.owner, args.token, args.bucket)
