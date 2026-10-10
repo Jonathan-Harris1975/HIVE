@@ -29,10 +29,11 @@ jobs:
           EXPECTED_REPOSITORY: ${{ github.repository }}
           EXPECTED_REF: refs/heads/main
           EXPECTED_OWNER: ${{ github.repository_owner }}
+          EXPECTED_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import base64, json, os, urllib.parse, urllib.request
+          import base64, json, os, time, urllib.parse, urllib.request
           audience = f"https://github.com/{os.environ['EXPECTED_OWNER']}"
           request_url = os.environ["ACTIONS_ID_TOKEN_REQUEST_URL"]
           request_url += ("&" if "?" in request_url else "?") + "audience=" + urllib.parse.quote(audience, safe="")
@@ -44,12 +45,20 @@ jobs:
               raise RuntimeError("GitHub OIDC endpoint returned a malformed JWT")
           payload = parts[1] + "=" * (-len(parts[1]) % 4)
           claims = json.loads(base64.urlsafe_b64decode(payload))
-          expected = {"iss": "https://token.actions.githubusercontent.com", "aud": audience, "repository": os.environ["EXPECTED_REPOSITORY"], "ref": os.environ["EXPECTED_REF"]}
+          expected = {"iss": "https://token.actions.githubusercontent.com", "aud": audience, "repository": os.environ["EXPECTED_REPOSITORY"], "ref": os.environ["EXPECTED_REF"], "sha": os.environ["EXPECTED_SHA"]}
           for key, value in expected.items():
               if claims.get(key) != value:
                   raise RuntimeError(f"OIDC claim {key!r} did not match the expected value")
+          now = int(time.time())
+          if not isinstance(claims.get("iat"), int) or not isinstance(claims.get("exp"), int):
+              raise RuntimeError("OIDC token lacks numeric issuance/expiry timestamps")
+          if claims["iat"] > now + 60 or claims["exp"] <= now or claims["exp"] - claims["iat"] > 600:
+              raise RuntimeError("OIDC token is stale, future-dated or unreasonably long-lived")
+          # Decoding claims does NOT verify the JWT signature. The token must be
+          # verified against the issuer JWKS by the relying-party evidence consumer.
           safe_claims = {k: claims.get(k) for k in ("iss","aud","repository","repository_id","repository_owner","ref","sha","workflow","job_workflow_ref","event_name","run_id","run_attempt")}
-          safe_claims["verified"] = True
+          safe_claims["claims_inspected"] = True
+          safe_claims["signature_verified"] = False
           with open("oidc-readiness.json", "w", encoding="utf-8") as handle:
               json.dump(safe_claims, handle, indent=2, sort_keys=True)
               handle.write("\n")
