@@ -100,5 +100,25 @@ class R2MutationLeaseTests(unittest.TestCase):
             put.assert_not_called()
 
 
+    def test_validate_current_generation_and_reject_stale(self) -> None:
+        current = {
+            "repository": "Jonathan-Harris1975/HIVE",
+            "fingerprint_sha256": M.hashlib.sha256(b"fingerprint").hexdigest(),
+            "owner": "kilo",
+            "token": "secret-token",
+            "generation": 5,
+            "expires_at": (dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=10)).isoformat(),
+        }
+        with mock.patch.object(M, "_read", return_value=(current, '"etag"')):
+            self.assertTrue(M.validate("Jonathan-Harris1975/HIVE", "fingerprint", "kilo", "secret-token", 5, "bucket")["valid"])
+            with self.assertRaisesRegex(RuntimeError, "stale lease generation"):
+                M.validate("Jonathan-Harris1975/HIVE", "fingerprint", "kilo", "secret-token", 4, "bucket")
+
+    def test_validate_missing_lease_fails_closed(self) -> None:
+        with mock.patch.object(M, "_read", return_value=(None, None)):
+            with self.assertRaisesRegex(RuntimeError, "missing or unreadable"):
+                M.validate("Jonathan-Harris1975/HIVE", "fingerprint", "kilo", "secret-token", 1, "bucket")
+
+
 if __name__ == "__main__":
     unittest.main()
