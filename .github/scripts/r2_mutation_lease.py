@@ -140,9 +140,14 @@ def release(repository: str, fingerprint: str, owner: str, token: str, bucket: s
     current, etag = _read(bucket, key)
     if not current or not etag:
         raise RuntimeError("lease does not exist")
-    if current.get("owner") != owner or current.get("token") != token:
+    if current.get("owner") != owner or not hmac.compare_digest(str(current.get("token", "")), token):
         raise RuntimeError("lease owner/token mismatch")
+    if current.get("repository") != repository or current.get("fingerprint_sha256") != hashlib.sha256(fingerprint.encode()).hexdigest():
+        raise RuntimeError("lease identity mismatch")
     now = dt.datetime.now(dt.timezone.utc)
+    expires = dt.datetime.fromisoformat(str(current["expires_at"]).replace("Z", "+00:00"))
+    if expires <= now:
+        raise RuntimeError("expired lease cannot be released as active authority")
     payload = dict(current)
     payload["released_at"] = now.isoformat().replace("+00:00", "Z")
     payload["expires_at"] = payload["released_at"]
