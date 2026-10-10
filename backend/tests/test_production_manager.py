@@ -216,7 +216,7 @@ def test_production_governance_contract_separates_execution_from_certification()
 
 
 @pytest.mark.asyncio
-async def test_github_gate_evidence_requires_exact_main_sha_and_accepts_explicit_deployment_skip() -> None:
+async def test_github_gate_evidence_requires_exact_main_sha_and_rejects_deployment_skip() -> None:
     sha = "c" * 40
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -251,7 +251,7 @@ async def test_github_gate_evidence_requires_exact_main_sha_and_accepts_explicit
         )
 
     assert evidence["sha"] == sha
-    assert evidence["state"] == "GREEN"
+    assert evidence["state"] == "DEGRADED"
     assert evidence["deployment"]["status"] == "skipped"
 
 

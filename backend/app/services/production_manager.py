@@ -133,14 +133,14 @@ def production_governance_contract() -> dict[str, Any]:
     }
 
 
-def _run_state(run: dict[str, Any] | None, *, allow_skipped: bool = False) -> tuple[str, str]:
+def _run_state(run: dict[str, Any] | None) -> tuple[str, str]:
     if not run:
         return "DEGRADED", "missing"
     status = str(run.get("status") or "").lower()
     conclusion = str(run.get("conclusion") or "").lower()
     if status != "completed":
         return "DEGRADED", "pending"
-    if conclusion == "success" or (allow_skipped and conclusion == "skipped"):
+    if conclusion == "success":
         return "GREEN", conclusion
     if conclusion in {"failure", "timed_out", "startup_failure", "action_required"}:
         return "BLOCKED", conclusion
@@ -294,7 +294,7 @@ async def _github_repo_evidence(
 
     deployment_name = DEPLOYMENT_WORKFLOWS[repo_id]
     deployment_run = latest(deployment_name)
-    deployment_state, deployment_status = _run_state(deployment_run, allow_skipped=True)
+    deployment_state, deployment_status = _run_state(deployment_run)
     gate_states.append(deployment_state)
 
     state = _combine_states(*gate_states) if gate_states else "DEGRADED"
