@@ -33,7 +33,7 @@ def _signing_key(secret: str, date: str, region: str, service: str) -> bytes:
     return hmac.new(k_service, b"aws4_request", hashlib.sha256).digest()
 
 
-def _signed_request(method: str, url: str, body: bytes, content_type: str | None = None) -> urllib.request.Request:
+def _signed_request(method: str, url: str, body: bytes, content_type: str | None = None, *, create_only: bool = False) -> urllib.request.Request:
     access_key = _required_env("R2_ACCESS_KEY_ID")
     secret_key = _required_env("R2_SECRET_ACCESS_KEY")
     region = os.environ.get("R2_REGION", "auto").strip() or "auto"
@@ -52,6 +52,8 @@ def _signed_request(method: str, url: str, body: bytes, content_type: str | None
     }
     if content_type:
         headers["content-type"] = content_type
+    if create_only:
+        headers["if-none-match"] = "*"
 
     signed_header_names = sorted(headers)
     canonical_headers = "".join(f"{name}:{headers[name].strip()}\n" for name in signed_header_names)
@@ -136,7 +138,7 @@ def main() -> int:
     url = f"https://{account_id}.r2.cloudflarestorage.com{path}"
 
     body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    _request(_signed_request("PUT", url, body, "application/json"), (200,))
+    _request(_signed_request("PUT", url, body, "application/json", create_only=True), (200,))
     _request(_signed_request("HEAD", url, b""), (200,))
     print(json.dumps({"stored": True, "bucket": bucket, "key": key}, sort_keys=True))
     return 0
