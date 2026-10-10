@@ -73,5 +73,32 @@ class R2MutationLeaseTests(unittest.TestCase):
                 M.renew("Jonathan-Harris1975/HIVE", "fingerprint", "kilo", "secret-token", 300, "bucket")
 
 
+    def test_release_rejects_expired_holder(self) -> None:
+        current = {
+            "repository": "Jonathan-Harris1975/HIVE",
+            "fingerprint_sha256": M.hashlib.sha256(b"fingerprint").hexdigest(),
+            "owner": "kilo",
+            "token": "secret-token",
+            "expires_at": "2020-01-01T00:00:00Z",
+        }
+        with mock.patch.object(M, "_read", return_value=(current, '"etag"')), mock.patch.object(M, "_put") as put:
+            with self.assertRaisesRegex(RuntimeError, "expired lease"):
+                M.release("Jonathan-Harris1975/HIVE", "fingerprint", "kilo", "secret-token", "bucket")
+            put.assert_not_called()
+
+    def test_release_rejects_mismatched_identity(self) -> None:
+        current = {
+            "repository": "different/repository",
+            "fingerprint_sha256": M.hashlib.sha256(b"fingerprint").hexdigest(),
+            "owner": "kilo",
+            "token": "secret-token",
+            "expires_at": (dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=10)).isoformat(),
+        }
+        with mock.patch.object(M, "_read", return_value=(current, '"etag"')), mock.patch.object(M, "_put") as put:
+            with self.assertRaisesRegex(RuntimeError, "identity mismatch"):
+                M.release("Jonathan-Harris1975/HIVE", "fingerprint", "kilo", "secret-token", "bucket")
+            put.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
