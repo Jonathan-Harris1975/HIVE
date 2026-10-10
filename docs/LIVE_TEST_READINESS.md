@@ -1,11 +1,11 @@
 # Controlled live-test readiness
 
-Baseline: main commit `52fe2c12f7d4db86db29522e14b784512cffcee3` (2026-10-10).
+Baseline: main commit `20d87ef79d5918d2982e169afaa020146cb8e41e` (2026-10-10; checked against GitHub).
 Status: **NOT READY FOR CONTROLLED LIVE TESTING** until every blocking gate below has recorded evidence.
 
 | Gate | Current evidence | Status |
 |---|---|---|
-| Immutable evidence writes | PR #400 uses signed `If-None-Match: *` and regression tests | Pending CI and R2 integration |
+| Immutable evidence writes | PR #403 proposes signed conditional writes and regression tests; unmerged | Pending CI and R2 integration |
 | Exact run binding | `r2_evidence_store.py` checks SHA and run identifiers | Partial; external identity binding unverified |
 | Concurrent mutation leases | `r2_mutation_lease.py` uses conditional ETag writes | Needs live race and failure injection |
 | Stale-holder fencing | Generation and token stored; downstream enforcement not proven | Blocked |
@@ -13,7 +13,7 @@ Status: **NOT READY FOR CONTROLLED LIVE TESTING** until every blocking gate belo
 | Weekend orchestration | `test_weekend_orchestrator.py` contains offline scenarios | Needs full end-to-end run |
 | Downstream AIMS/MAST/RAMS/IRS/UI signals | No exact-SHA, fail-closed receipts verified in this review | Blocked |
 | Ecosystem OIDC | Provider trust and per-repository claims not independently verified | Blocked |
-| CI/security and required review | PR #400 checks and merge protections in progress | Pending |
+| CI/security and required review | PR #403 and #404 have successful PR CI, CodeQL and security workflow conclusions; review/merge and post-merge main checks outstanding | Pending |
 | Rollback / incident escalation | No executed rehearsal evidence | Blocked |
 
 ## Reproducible offline test commands
@@ -38,3 +38,22 @@ python3 -m unittest discover -s .github/scripts -p 'test_weekend_orchestrator.py
 **Abort and rollback** on any duplicate mutation, stale-holder acceptance, missing identity proof, unexpected production write, evidence overwrite, or unbounded retry. Disable the relevant dispatch, revoke temporary credentials, restore the last verified deployment and preserve incident evidence.
 
 This ledger deliberately does not convert skipped checks or unexecuted scenarios into passing results.
+
+## 2026-10-10 verified GitHub checkpoint
+
+- Default branch: `main`, commit `20d87ef79d5918d2982e169afaa020146cb8e41e`.
+- PR #403 (draft): https://github.com/Jonathan-Harris1975/HIVE/pull/403 ; head `5e222844e767d1f571ae048e277984c186284c71`. PR CI https://github.com/Jonathan-Harris1975/HIVE/actions/runs/38069940295 ; CodeQL https://github.com/Jonathan-Harris1975/HIVE/actions/runs/38069940217 ; Security https://github.com/Jonathan-Harris1975/HIVE/actions/runs/38069940280 : completed/success. These are PR-head checks, **not** merged-main or provider proof.
+- PR #404: https://github.com/Jonathan-Harris1975/HIVE/pull/404 ; head `9cfdd4c1666056b146d64a89af345b8732ee5ca7`. PR CI https://github.com/Jonathan-Harris1975/HIVE/actions/runs/38083366271 ; CodeQL https://github.com/Jonathan-Harris1975/HIVE/actions/runs/38083366261 ; Security https://github.com/Jonathan-Harris1975/HIVE/actions/runs/38083366344 : completed/success. JWT signature validation does **not** establish provider trust.
+- PR #402: https://github.com/Jonathan-Harris1975/HIVE/pull/402 ; dependency update; reconcile overlap with #404 before merging.
+- Owner for repository integration and protected-branch review: HIVE repository maintainer. Owners for provider OIDC trust and downstream atomic fencing: corresponding provider administrator and downstream mutation service maintainers (individuals not verified).
+
+### Four-area acceptance ledger
+
+| Area | Requirement | Implementation reference | Verification | Status | Remaining dependency / owner |
+|---|---|---|---|---|---|
+| Autonomous detection | Exact-head failures, skipped runs, deduplication and escalation | `.github/workflows/autonomous-repair.yml` | Controlled workflow-run failure matrix not yet witnessed | blocked | HIVE maintainer |
+| Self-repair | Atomic R2 lease acquisition/renewal/release and stale-holder fencing | `.github/scripts/r2_mutation_lease.py` | Code inspected; downstream atomic fencing not demonstrated | blocked | HIVE and downstream maintainers |
+| Production safeguards | Non-overwrite evidence, authenticated Council verdict and OIDC | `.github/scripts/r2_evidence_store.py`, `.github/workflows/council.yml`, PRs #403/#404 | PR checks green; R2 replay, provider trust and merged-main runs unverified | blocked | HIVE maintainer / R2 and identity administrators |
+| Ecosystem coordination | Exact SHA and deployment identity across AIMS, AIMS-UI, HIVE-UI, IRS, MAST, RAMS and website | `.github/workflows/weekend-orchestrator.yml`, `.github/workflows/weekend-phase-launcher.yml` | End-to-end receipts and non-production rehearsal absent | blocked | Ecosystem repository maintainers |
+
+Do not promote this ledger to READY until all mandatory gates have exact-run URLs, observed results, and responsible approvals. No production mutation is authorised by this document.
