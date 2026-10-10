@@ -54,6 +54,8 @@ jobs:
               raise RuntimeError("OIDC token lacks numeric issuance/expiry timestamps")
           if claims["iat"] > now + 60 or claims["exp"] <= now or claims["exp"] - claims["iat"] > 600:
               raise RuntimeError("OIDC token is stale, future-dated or unreasonably long-lived")
+          # This local readiness check cannot authenticate the issuer signature.
+          # Do not export an unauthenticated claims payload as a trusted receipt.
           # Decoding claims does NOT verify the JWT signature. The token must be
           # verified against the issuer JWKS by the relying-party evidence consumer.
           safe_claims = {k: claims.get(k) for k in ("iss","aud","repository","repository_id","repository_owner","ref","sha","workflow","job_workflow_ref","event_name","run_id","run_attempt")}
