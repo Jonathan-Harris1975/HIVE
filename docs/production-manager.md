@@ -70,7 +70,7 @@ The Production Manager deliberately reuses the controls already in place:
 - HIVE repository-health probes and production readiness;
 - repository CI and security gates read from GitHub for the exact current `main` SHA;
 - exact-SHA Koyeb/Cloudflare deployment verification, including explicit policy-driven skips;
-- MAST ecosystem smoke;
+- ecosystem-wide OIDC evidence, subject to independent verification of issuer, audience, repository, environment, exact SHA, expiry, replay protection and freshness; legacy MAST ecosystem smoke is not a substitute for this evidence;
 - HIVE operational-event ingestion;
 - Repository QA/Council/Intelligence evidence.
 
