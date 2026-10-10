@@ -165,7 +165,7 @@ jobs:
           {"kind":"council-final","repository":"${REPO}","sha":"${TARGET_SHA}","run_id":${RUN_ID},"run_attempt":${RUN_ATTEMPT},"certification_complete":true,"disposition":"READY|HOLD|PENDING_MINIMUM_AGE","evidence":[],"blockers":[]}
           Populate evidence and blockers with concise non-secret strings. Do not include credentials, tokens, raw secret scanner output, or the upload URL in the JSON.
           Then upload that exact file with:
-          curl --fail --silent --show-error --request PUT --header 'Content-Type: application/json' --data-binary @council-final.json '${COUNCIL_RESULT_PUT_URL}'
+          curl --fail --silent --show-error --request PUT --header 'Content-Type: application/json' --header 'If-None-Match: *' --data-binary @council-final.json '${COUNCIL_RESULT_PUT_URL}'
           The URL is a short-lived capability for this one Council result object only. Do not print, persist, echo, commit, or reuse it.
           The GitHub Council workflow will validate the exact repository/SHA/run binding before accepting the result.
 
@@ -231,6 +231,7 @@ jobs:
 
           payload = {
               "schema_version": 1,
+              "disposition": json.loads(Path("council-final.json").read_text())["disposition"],
               "kind": "council",
               "repository": os.environ["REPOSITORY"],
               "sha": os.environ["TARGET_SHA"],
@@ -259,3 +260,11 @@ jobs:
           R2_BUCKET: hive-repositories
           R2_EVIDENCE_PREFIX: ci-evidence
         run: python3 .github/scripts/r2_evidence_store.py council-r2-evidence.json
+
+      - name: Require a ready Council verdict before advancing
+        env:
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+        run: >-
+          python3 .github/scripts/r2_result_channel.py validate-result council-final.json
+          --repository "$GITHUB_REPOSITORY" --sha "$TARGET_SHA"
+          --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" --require-ready

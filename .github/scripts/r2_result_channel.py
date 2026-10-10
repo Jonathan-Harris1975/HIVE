@@ -59,15 +59,15 @@ def presign_put(bucket: str, key: str, expires: int) -> str:
         "X-Amz-Credential": f"{access}/{scope}",
         "X-Amz-Date": amz_date,
         "X-Amz-Expires": str(expires),
-        "X-Amz-SignedHeaders": "content-type;host",
+        "X-Amz-SignedHeaders": "content-type;host;if-none-match",
     }
     canonical_query = urllib.parse.urlencode(sorted(query.items()), quote_via=urllib.parse.quote)
     canonical_request = "\n".join([
         "PUT",
         path,
         canonical_query,
-        f"content-type:application/json\nhost:{host}\n",
-        "content-type;host",
+        f"content-type:application/json\nhost:{host}\nif-none-match:*\n",
+        "content-type;host;if-none-match",
         "UNSIGNED-PAYLOAD",
     ])
     string_to_sign = "\n".join([
@@ -120,20 +120,21 @@ def _signed_request(method: str, bucket: str, key: str) -> urllib.request.Reques
 
 
 def wait_get(bucket: str, key: str, output: Path, timeout: int, interval: int) -> None:
+    if not 1 <= interval <= timeout <= 2700:
+        raise RuntimeError("invalid bounded polling interval/timeout")
     deadline = time.monotonic() + timeout
     while True:
         try:
             with urllib.request.urlopen(_signed_request("GET", bucket, key), timeout=30) as response:
                 if response.status == 200:
-                    data = response.read()
+                    data = response.read(262_145)
                     if len(data) > 262_144:
                         raise RuntimeError("Council result exceeds 256 KiB")
                     output.write_bytes(data)
                     return
         except urllib.error.HTTPError as exc:
             if exc.code != 404:
-                body = exc.read().decode("utf-8", "replace")[:500]
-                raise RuntimeError(f"R2 GET failed with HTTP {exc.code}: {body}") from exc
+                raise RuntimeError(f"R2 GET failed with HTTP {exc.code}") from exc
         if time.monotonic() >= deadline:
             raise RuntimeError("timed out waiting for final Council result in R2")
         time.sleep(interval)
@@ -141,6 +142,8 @@ def wait_get(bucket: str, key: str, output: Path, timeout: int, interval: int) -
 
 def validate_result(path: Path, repository: str, sha: str, run_id: int, run_attempt: int) -> None:
     payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise RuntimeError("Council result must be an object")
     expected = {
         "kind": "council-final",
         "repository": repository,
@@ -150,7 +153,7 @@ def validate_result(path: Path, repository: str, sha: str, run_id: int, run_atte
         "certification_complete": True,
     }
     for key, value in expected.items():
-        if payload.get(key) != value:
+        if type(payload.get(key)) is not type(value) or payload.get(key) != value:
             raise RuntimeError(f"Council result field {key!r} does not match the exact run")
     if payload.get("disposition") not in {"READY", "HOLD", "PENDING_MINIMUM_AGE"}:
         raise RuntimeError("Council result disposition is invalid")
@@ -158,6 +161,18 @@ def validate_result(path: Path, repository: str, sha: str, run_id: int, run_atte
         raise RuntimeError("Council result evidence must be a list")
     if not isinstance(payload.get("blockers"), list):
         raise RuntimeError("Council result blockers must be a list")
+
+
+def require_ready(path: Path) -> None:
+    """A completed review is distinct from authority to advance a phase."""
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if payload.get("disposition") != "READY" or payload.get("blockers"):
+        raise RuntimeError("Council is on hold; no release authority granted")
+    evidence = payload.get("evidence")
+    if not isinstance(evidence, list) or not evidence or any(
+        not isinstance(item, str) or not item.strip() for item in evidence
+    ):
+        raise RuntimeError("Council readiness requires non-empty evidence")
 
 
 def main() -> int:
@@ -183,6 +198,8 @@ def main() -> int:
     v.add_argument("--run-id", type=int, required=True)
     v.add_argument("--run-attempt", type=int, required=True)
 
+    v.add_argument("--require-ready", action="store_true")
+
     args = parser.parse_args()
     if args.command == "presign-put":
         print(presign_put(args.bucket, args.key, args.expires))
@@ -190,6 +207,8 @@ def main() -> int:
         wait_get(args.bucket, args.key, args.output, args.timeout, args.interval)
     else:
         validate_result(args.json_file, args.repository, args.sha, args.run_id, args.run_attempt)
+        if args.require_ready:
+            require_ready(args.json_file)
     return 0
 
 
