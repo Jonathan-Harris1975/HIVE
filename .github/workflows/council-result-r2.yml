@@ -69,14 +69,19 @@ jobs:
           set -euo pipefail
           [[ "$TARGET_SHA" =~ ^[0-9a-fA-F]{40}$ ]] || { echo "::error::Invalid exact SHA."; exit 1; }
           [[ "$SOURCE_COUNCIL_RUN_ID" =~ ^[0-9]+$ ]] || { echo "::error::Invalid source Council run ID."; exit 1; }
+          [[ "$SOURCE_COUNCIL_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]] || { echo "::error::Invalid source Council attempt."; exit 1; }
           current="$(gh api "repos/$REPO/commits/$DEFAULT_BRANCH" --jq .sha)"
           test "$current" = "$TARGET_SHA" || { echo "::error::Returned Council result is stale; current default SHA is $current."; exit 1; }
           source_name="$(gh api "repos/$REPO/actions/runs/$SOURCE_COUNCIL_RUN_ID" --jq .name)"
           source_sha="$(gh api "repos/$REPO/actions/runs/$SOURCE_COUNCIL_RUN_ID" --jq .head_sha)"
           source_attempt="$(gh api "repos/$REPO/actions/runs/$SOURCE_COUNCIL_RUN_ID" --jq .run_attempt)"
+          source_event="$(gh api "repos/$REPO/actions/runs/$SOURCE_COUNCIL_RUN_ID" --jq .event)"
+          source_branch="$(gh api "repos/$REPO/actions/runs/$SOURCE_COUNCIL_RUN_ID" --jq .head_branch)"
           test "$source_name" = "Repository Council" || { echo "::error::Source run is not Repository Council."; exit 1; }
           test "$source_sha" = "$TARGET_SHA" || { echo "::error::Source Council run SHA does not match returned result."; exit 1; }
           test "$source_attempt" = "$SOURCE_COUNCIL_RUN_ATTEMPT" || { echo "::error::Source Council run attempt does not match returned result."; exit 1; }
+          test "$source_branch" = "$DEFAULT_BRANCH" || { echo "::error::Source Council run did not target the default branch."; exit 1; }
+          case "$source_event" in workflow_dispatch|schedule|workflow_run) ;; *) echo "::error::Unexpected Council source event."; exit 1 ;; esac
           mkdir -p "$RUNNER_TEMP/council-r2"
           printf '%s' "$REPORT_MD_B64" | base64 --decode > "$RUNNER_TEMP/council-r2/council-report.md"
           printf '%s' "$REPORT_JSON_B64" | base64 --decode > "$RUNNER_TEMP/council-r2/council-report.json"
