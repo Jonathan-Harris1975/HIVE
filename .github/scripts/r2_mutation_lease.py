@@ -153,9 +153,37 @@ def release(repository: str, fingerprint: str, owner: str, token: str, bucket: s
     return payload
 
 
+
+def renew(repository: str, fingerprint: str, owner: str, token: str, ttl_seconds: int, bucket: str) -> dict[str, object]:
+    """Extend an unexpired lease using its ETag as a compare-and-swap guard."""
+    if owner not in {"kilo", "cto.new"}:
+        raise RuntimeError("owner must be kilo or cto.new")
+    if not 60 <= ttl_seconds <= 7200:
+        raise RuntimeError("lease ttl must be 60..7200 seconds")
+    key = _key_for(repository, fingerprint)
+    current, etag = _read(bucket, key)
+    if not current or not etag:
+        raise RuntimeError("lease does not exist")
+    if current.get("owner") != owner or not hmac.compare_digest(str(current.get("token", "")), token):
+        raise RuntimeError("lease owner/token mismatch")
+    if current.get("repository") != repository or current.get("fingerprint_sha256") != hashlib.sha256(fingerprint.encode()).hexdigest():
+        raise RuntimeError("lease identity mismatch")
+    now = dt.datetime.now(dt.timezone.utc)
+    expires = dt.datetime.fromisoformat(str(current["expires_at"]).replace("Z", "+00:00"))
+    if expires <= now:
+        raise RuntimeError("expired lease cannot be renewed")
+    payload = dict(current)
+    payload["expires_at"] = (now + dt.timedelta(seconds=ttl_seconds)).isoformat().replace("+00:00", "Z")
+    new_etag = _put(bucket, key, payload, {"if-match": etag})
+    if new_etag is None:
+        raise RuntimeError("lease renewal lost a concurrent race")
+    payload["key"] = key
+    return payload
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=["acquire", "release"])
+    parser.add_argument("command", choices=["acquire", "renew", "release"])
     parser.add_argument("--repository", required=True)
     parser.add_argument("--fingerprint", required=True)
     parser.add_argument("--owner", required=True)
@@ -168,8 +196,11 @@ def main() -> int:
         result = acquire(args.repository, args.fingerprint, args.owner, args.ttl_seconds, args.bucket)
     else:
         if not args.token:
-            raise RuntimeError("--token is required for release")
-        result = release(args.repository, args.fingerprint, args.owner, args.token, args.bucket)
+            raise RuntimeError("--token is required for renewal or release")
+        if args.command == "renew":
+            result = renew(args.repository, args.fingerprint, args.owner, args.token, args.ttl_seconds, args.bucket)
+        else:
+            result = release(args.repository, args.fingerprint, args.owner, args.token, args.bucket)
     print(json.dumps(result, sort_keys=True))
     return 0
 
