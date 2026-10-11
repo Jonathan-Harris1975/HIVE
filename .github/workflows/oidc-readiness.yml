@@ -31,6 +31,7 @@ jobs:
           EXPECTED_REPOSITORY: ${{ github.repository }}
           EXPECTED_REF: refs/heads/main
           EXPECTED_OWNER: ${{ github.repository_owner }}
+          EXPECTED_OWNER_ID: ${{ github.repository_owner_id }}
           EXPECTED_REPOSITORY_ID: ${{ github.repository_id }}
           EXPECTED_RUN_ID: ${{ github.run_id }}
         run: |
@@ -86,20 +87,25 @@ jobs:
             repository: process.env.EXPECTED_REPOSITORY,
             repository_owner: process.env.EXPECTED_OWNER,
             repository_id: process.env.EXPECTED_REPOSITORY_ID,
-            sub: `repo:${process.env.EXPECTED_REPOSITORY}:ref:${process.env.EXPECTED_REF}`,
+            repository_owner_id: process.env.EXPECTED_OWNER_ID,
             ref: process.env.EXPECTED_REF, sha: process.env.GITHUB_SHA,
             run_id: process.env.EXPECTED_RUN_ID,
             event_name: process.env.GITHUB_EVENT_NAME };
           for (const [name, value] of Object.entries(expected)) {
             if (claims[name] !== value) throw new Error(`OIDC claim ${name} mismatch`);
           }
-          const fields = ["iss", "aud", "sub", "repository", "repository_id", "repository_owner",
+          const legacySubject = `repo:${process.env.EXPECTED_REPOSITORY}:ref:${process.env.EXPECTED_REF}`;
+          const immutableSubject = `repo:${process.env.EXPECTED_OWNER}@${process.env.EXPECTED_OWNER_ID}/${process.env.EXPECTED_REPOSITORY.split("/")[1]}@${process.env.EXPECTED_REPOSITORY_ID}:ref:${process.env.EXPECTED_REF}`;
+          if (claims.sub !== legacySubject && claims.sub !== immutableSubject) {
+            throw new Error("OIDC subject claim mismatch; check the repository subject template");
+          }
+          const fields = ["iss", "aud", "sub", "repository", "repository_id", "repository_owner", "repository_owner_id",
             "ref", "sha", "workflow", "job_workflow_ref", "event_name", "run_id", "run_attempt"];
           const safe = Object.fromEntries(fields.map(field => [field, claims[field] ?? null]));
           safe.claims_checked = true;
           safe.signature_verified = true;
           safe.verification_method = "issuer-jwks-rs256";
-          safe.verification_scope = "GitHub JWT only; RS256 issuer JWKS signature, exact repository identity and subject, commit, run and event, and bounded lifetime verified; no cloud provider trust verified";
+          safe.verification_scope = "GitHub JWT only; RS256 issuer JWKS signature, exact repository identity, legacy or immutable default subject, commit, run and event, and bounded lifetime verified; no cloud provider trust verified";
           writeFileSync("oidc-readiness.json", JSON.stringify(safe, null, 2) + "\n");
           NODE
 
