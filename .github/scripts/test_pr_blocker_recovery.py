@@ -125,6 +125,7 @@ class Recovery(unittest.TestCase):
         dispatch.assert_not_called()
 
     def test_every_owner_hold_is_respected(self):
+        self.assertIn("autonomy:human-hold", m.HOLD_LABELS)
         for label in m.HOLD_LABELS:
             self.pr["labels"] = [{"name": label}]
             with (
