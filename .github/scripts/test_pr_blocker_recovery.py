@@ -1,5 +1,6 @@
 """Behavioural blocker-recovery tests; all network calls are mocked."""
 
+from io import StringIO
 import copy
 import json
 import os
@@ -466,6 +467,19 @@ class Recovery(unittest.TestCase):
         ):
             m.router.dispatch(self.pr, "merge-conflict-" + "b" * 40, ["conflict"])
             openurl.assert_not_called()
+
+
+    def test_router_failure_exits_nonzero_and_redacts_secrets(self):
+        error = RuntimeError(
+            "Configure KILO_REPAIR_TRIGGER_URL with "
+            "https://hooks.kilosessions.ai/repair?token=sentinel-secret"
+        )
+        with patch("sys.stderr", new_callable=StringIO) as error_log:
+            with self.assertRaises(SystemExit) as raised:
+                m.router.fail_routing(error)
+        self.assertEqual(raised.exception.code, 1)
+        self.assertIn("::error::PR repair routing failed:", error_log.getvalue())
+        self.assertNotIn("sentinel-secret", error_log.getvalue())
 
 
 if __name__ == "__main__":
