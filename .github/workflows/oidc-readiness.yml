@@ -99,7 +99,7 @@ jobs:
           safe.claims_checked = true;
           safe.signature_verified = true;
           safe.verification_method = "issuer-jwks-rs256";
-          safe.verification_scope = "GitHub JWT only; RS256 issuer JWKS signature, exact repository identity and subject, commit, run and event, and bounded lifetime verified; cloud provider trust is not verified";
+          safe.verification_scope = "GitHub JWT only; RS256 issuer JWKS signature, exact repository identity and subject, commit, run and event, and bounded lifetime verified; no cloud provider trust verified";
           writeFileSync("oidc-readiness.json", JSON.stringify(safe, null, 2) + "\n");
           NODE
 
