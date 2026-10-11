@@ -66,7 +66,7 @@ jobs:
           set -euo pipefail
           IFS='|' read -r -a required <<< "$REQUIRED_WORKFLOWS"
           for _ in $(seq 1 60); do
-            runs="$(gh api --paginate --slurp "repos/${REPO}/actions/runs?head_sha=${TARGET_SHA}&per_page=100" --jq 'map(.workflow_runs) | add')"
+            runs="$(gh api --paginate "repos/${REPO}/actions/runs?head_sha=${TARGET_SHA}&per_page=100" | jq -s 'map(.workflow_runs) | add')"
             ready=true
             for workflow in "${required[@]}"; do
               result="$(jq -r --arg name "$workflow" --arg branch "$DEFAULT_BRANCH" --arg sha "$TARGET_SHA" \
