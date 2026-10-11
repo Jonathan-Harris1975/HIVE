@@ -114,4 +114,4 @@ merge_queue:
   status_comments: outcomes
   queue_controls_comment: false
   skip_intermediate_results: false
-  reset_on_external_merge: never
+  reset_on_external_merge: always
