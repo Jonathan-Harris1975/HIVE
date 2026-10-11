@@ -180,5 +180,37 @@ class CouncilGateTests(unittest.TestCase):
         self.assertGreaterEqual(state["t"].astimezone(LONDON), london(2026, 10, 4, 16, 0))
 
 
+class VerifyTests(unittest.TestCase):
+    def test_missed_watcher_retries_ci_without_dispatching_credentialed_watcher(self):
+        api = FakeApi()
+        now = "2026-10-04T01:40:00+00:00"
+        for workflow in ("ci.yml", "codeql.yml", "security.yml"):
+            api.runs[workflow] = [{
+                "id": 1, "created_at": now, "event": "workflow_dispatch",
+                "status": "completed", "conclusion": "success",
+            }]
+
+        original_call = api.call
+        def call(method, path, payload=None, expected=None):
+            original_call(method, path, payload, expected)
+            ci_dispatches = [post for post in api.posts
+                             if post[1].endswith("/workflows/ci.yml/dispatches")]
+            if len(ci_dispatches) == 2:
+                api.runs[wo.DEPLOY_WORKFLOW_FILE] = [{
+                    "id": 2, "created_at": now, "event": "workflow_run",
+                    "status": "completed", "conclusion": "success",
+                }]
+        api.call = call
+
+        orch, _ = make(api)
+        self.assertEqual(orch.verify(api.sha), [])
+        ci_dispatches = [post for post in api.posts
+                         if post[1].endswith("/workflows/ci.yml/dispatches")]
+        deployment_dispatches = [post for post in api.posts
+                                 if post[1].endswith(f"/workflows/{wo.DEPLOY_WORKFLOW_FILE}/dispatches")]
+        self.assertEqual(len(ci_dispatches), 2)
+        self.assertEqual(deployment_dispatches, [])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

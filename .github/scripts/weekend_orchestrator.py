@@ -288,21 +288,30 @@ class Orchestrator:
         if failures:
             return failures
 
-        # The Koyeb watcher normally starts from CI's workflow_run completion; if it does
-        # not appear, dispatch it so the exact-SHA deployment proof is never skipped.
+        # The Koyeb watcher is triggered by CI workflow_run. If GitHub misses that
+        # event, retry CI once on the trusted branch; never dispatch the credentialed
+        # deployment watcher directly. Exact-SHA matching fails closed if main moved.
         since = started["CI"]
+        events = ("workflow_run",)
         result = self.wait_run(DEPLOY_WORKFLOW_NAME, DEPLOY_WORKFLOW_FILE, sha, since,
-                               ("workflow_run", "workflow_dispatch"), 10)
+                               events, 10)
         if result == "timeout":
-            self.record("verify:deployment", "dispatching", "watcher did not start from CI completion")
-            since = self.dispatch(DEPLOY_WORKFLOW_FILE)
-            result = self.wait_run(DEPLOY_WORKFLOW_NAME, DEPLOY_WORKFLOW_FILE, sha, since,
-                                   ("workflow_dispatch",), self.cfg.deploy_timeout)
+            self.record("verify:deployment", "retrying-ci",
+                        "watcher did not start from CI completion; retrying CI once")
+            retry_since = self.dispatch(REQUIRED_WORKFLOWS["CI"])
+            retry = self.wait_run("CI", REQUIRED_WORKFLOWS["CI"], sha, retry_since,
+                                  ("workflow_dispatch",), self.cfg.ci_timeout)
+            self.record("verify:CI retry", retry)
+            if retry == "success":
+                result = self.wait_run(DEPLOY_WORKFLOW_NAME, DEPLOY_WORKFLOW_FILE, sha,
+                                       retry_since, events, self.cfg.deploy_timeout)
+            else:
+                result = f"ci-retry-{retry}"
         else:
-            run = self.find_run(DEPLOY_WORKFLOW_FILE, sha, since, ("workflow_run", "workflow_dispatch"))
+            run = self.find_run(DEPLOY_WORKFLOW_FILE, sha, since, events)
             if run is not None and run.get("status") != "completed":
-                result = self.wait_run(DEPLOY_WORKFLOW_NAME, DEPLOY_WORKFLOW_FILE, sha, since,
-                                       ("workflow_run", "workflow_dispatch"), self.cfg.deploy_timeout)
+                result = self.wait_run(DEPLOY_WORKFLOW_NAME, DEPLOY_WORKFLOW_FILE, sha,
+                                       since, events, self.cfg.deploy_timeout)
         self.record("verify:deployment", result)
         if result != "success":
             failures.append(DEPLOY_WORKFLOW_NAME)
