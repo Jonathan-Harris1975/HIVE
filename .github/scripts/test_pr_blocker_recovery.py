@@ -377,7 +377,8 @@ class Recovery(unittest.TestCase):
                 m.router,
                 "api",
                 side_effect=lambda method, path, payload=None: (
-                    {"sha": "b" * 40} if method == "GET" else None
+                    {"sha": "b" * 40} if method == "GET" else
+                    {"id": 99} if method == "POST" else {}
                 ),
             ),
             patch.object(m.router.urllib.request, "urlopen") as openurl,
@@ -433,7 +434,11 @@ class Recovery(unittest.TestCase):
 
             # The acknowledgement write is mocked separately from base reads.
             def api(method, path, payload=None):
-                return {"sha": "b" * 40} if method == "GET" else None
+                if method == "GET":
+                    return {"sha": "b" * 40}
+                if method == "POST":
+                    return {"id": 99}
+                return {}
 
             with patch.object(m.router, "api", side_effect=api):
                 m.router.dispatch(self.pr, "merge-conflict-" + "b" * 40, ["conflict"])
