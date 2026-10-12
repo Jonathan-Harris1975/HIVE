@@ -10,5 +10,11 @@ def test_every_governed_repository_requires_oidc_readiness_evidence() -> None:
     )
 
 
-def test_mast_must_refresh_cross_repository_oidc_evidence() -> None:
-    assert "OIDC estate readiness" in REQUIRED_WORKFLOWS["MAST"]
+def test_mast_requires_its_exact_sha_estate_refresh_workflow() -> None:
+    assert REQUIRED_WORKFLOWS["MAST"] == (
+        "MAST CI",
+        "Security and repository quality",
+        "CodeQL",
+        "OIDC readiness",
+        "OIDC estate readiness",
+    )
