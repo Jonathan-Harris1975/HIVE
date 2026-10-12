@@ -1,5 +1,6 @@
 """Behavioural blocker-recovery tests; all network calls are mocked."""
 
+from io import BytesIO, StringIO
 import copy
 import json
 import os
@@ -7,7 +8,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("GITHUB_REPOSITORY", "owner/repo")
 os.environ.setdefault("GH_TOKEN", "test-token")
@@ -377,7 +378,8 @@ class Recovery(unittest.TestCase):
                 m.router,
                 "api",
                 side_effect=lambda method, path, payload=None: (
-                    {"sha": "b" * 40} if method == "GET" else None
+                    {"sha": "b" * 40} if method == "GET" else
+                    {"id": 99} if method == "POST" else {}
                 ),
             ),
             patch.object(m.router.urllib.request, "urlopen") as openurl,
@@ -433,7 +435,11 @@ class Recovery(unittest.TestCase):
 
             # The acknowledgement write is mocked separately from base reads.
             def api(method, path, payload=None):
-                return {"sha": "b" * 40} if method == "GET" else None
+                if method == "GET":
+                    return {"sha": "b" * 40}
+                if method == "POST":
+                    return {"id": 99}
+                return {}
 
             with patch.object(m.router, "api", side_effect=api):
                 m.router.dispatch(self.pr, "merge-conflict-" + "b" * 40, ["conflict"])
@@ -455,6 +461,21 @@ class Recovery(unittest.TestCase):
             m.router.dispatch(self.pr, "merge-conflict-" + "b" * 40, ["conflict"])
             openurl.assert_not_called()
 
+    def test_human_hold_added_before_dispatch_prevents_kilo_request(self):
+        held = copy.deepcopy(self.pr)
+        held["labels"] = [{"name": "autonomy:human-hold"}]
+        with (
+            patch.object(m.router, "all_pages", return_value=[]),
+            patch.object(m.router, "valid_kilo_webhook_url", return_value=True),
+            patch.object(m.router, "pr_details", return_value=held),
+            patch.object(m.router, "api", return_value={"sha": "b" * 40}) as api,
+            patch.object(m.router.urllib.request, "urlopen") as openurl,
+        ):
+            result = m.router.dispatch(self.pr, "merge-conflict-" + "b" * 40, ["conflict"])
+        self.assertEqual(result, "changed-before-dispatch")
+        api.assert_called_once_with("GET", "/repos/owner/repo/commits/main")
+        openurl.assert_not_called()
+
     def test_duplicate_exact_head_base_is_not_dispatched(self):
         marker = "<!-- kilo-auto-repair:" + "a" * 40 + ":merge-conflict-" + "b" * 40 + " -->"
         with (
@@ -468,6 +489,113 @@ class Recovery(unittest.TestCase):
             m.router.dispatch(self.pr, "merge-conflict-" + "b" * 40, ["conflict"])
             openurl.assert_not_called()
 
+
+    def test_router_failure_exits_nonzero_and_redacts_secrets(self):
+        error = RuntimeError(
+            "Configure KILO_REPAIR_TRIGGER_URL with "
+            "https://hooks.kilosessions.ai/repair?token=sentinel-secret"
+        )
+        with patch("sys.stderr", new_callable=StringIO) as error_log:
+            with self.assertRaises(SystemExit) as raised:
+                m.router.fail_routing(error)
+        self.assertEqual(raised.exception.code, 1)
+        self.assertIn("::error::PR repair routing failed:", error_log.getvalue())
+        self.assertNotIn("sentinel-secret", error_log.getvalue())
+
+
+
+    def test_persisted_marker_precedes_dispatch_and_survives_ack_failure(self):
+        events = []
+        saved = []
+        def api(method, path, payload=None):
+            if method == "POST" and path.endswith("/comments"):
+                saved.append(payload["body"])
+                events.append("reservation")
+                return {"id": 99}
+            if method == "PATCH" and path.endswith("/comments/99"):
+                events.append("acknowledgement")
+                raise RuntimeError("transient GitHub failure")
+            raise AssertionError((method, path, payload))
+
+        response = MagicMock()
+        response.__enter__.return_value.status = 202
+        def send(*args, **kwargs):
+            events.append("webhook")
+            return response
+
+        with (
+            patch.object(m.router, "all_pages", return_value=[]),
+            patch.object(m.router, "valid_kilo_webhook_url", return_value=True),
+            patch.object(m.router, "machine_contract", return_value="machine contract"),
+            patch.object(m.router, "api", side_effect=api),
+            patch.object(m.router.urllib.request, "urlopen", side_effect=send),
+            patch.dict(os.environ, {"KILO_REPAIR_TRIGGER_URL": "https://example.invalid/repair"}),
+            patch("builtins.print"),
+        ):
+            self.assertEqual(m.router.dispatch(self.pr, "review", ["finding"]), "requested")
+        self.assertEqual(events, ["reservation", "webhook", "acknowledgement", "acknowledgement"])
+        self.assertIn("<!-- kilo-auto-repair:" + "a" * 40 + ":review -->", saved[0])
+
+        with (
+            patch.object(
+                m.router,
+                "all_pages",
+                return_value=[{"user": {"login": "github-actions[bot]"}, "body": saved[0]}],
+            ),
+            patch.object(m.router.urllib.request, "urlopen") as retry,
+        ):
+            self.assertEqual(m.router.dispatch(self.pr, "review", ["finding"]), "already-requested")
+            retry.assert_not_called()
+
+
+
+    def test_patch_reservation_retries_once(self):
+        with patch.object(m.router, "api", side_effect=[RuntimeError("temporary"), {}]) as api, \
+             patch("builtins.print"):
+            self.assertTrue(m.router.patch_reservation(123, "marker"))
+        self.assertEqual(api.call_count, 2)
+
+    def test_explicit_http_rejection_allows_only_bounded_retry(self):
+        marker = "<!-- kilo-auto-repair:" + "a" * 40 + ":review -->"
+        comments = []
+        events = []
+        def api(method, path, payload=None):
+            if method == "POST" and path.endswith("/comments"):
+                comments.append({"user": {"login": "github-actions[bot]"}, "body": payload["body"]})
+                events.append("reserve")
+                return {"id": len(comments)}
+            if method == "PATCH" and path.endswith("/issues/comments/1"):
+                comments[0]["body"] = payload["body"]
+                events.append("mark-rejected")
+                return {}
+            if method == "PATCH" and path.endswith("/issues/comments/2"):
+                comments[1]["body"] = payload["body"]
+                events.append("ack")
+                return {}
+            raise AssertionError((method, path, payload))
+
+        accepted = MagicMock()
+        accepted.__enter__.return_value.status = 202
+        rejected = m.router.urllib.error.HTTPError(
+            "https://example.invalid/repair", 429, "rate limited", {"Content-Type": "application/json"}, BytesIO(b"{}")
+        )
+        with (
+            patch.object(m.router, "all_pages", side_effect=[[], comments]),
+            patch.object(m.router, "api", side_effect=api),
+            patch.object(m.router, "valid_kilo_webhook_url", return_value=True),
+            patch.object(m.router, "machine_contract", return_value="machine contract"),
+            patch.object(m.router.urllib.request, "urlopen", side_effect=[rejected, accepted]),
+            patch.dict(os.environ, {"KILO_REPAIR_TRIGGER_URL": "https://example.invalid/repair"}),
+            patch("builtins.print"),
+        ):
+            with self.assertRaises(RuntimeError):
+                m.router.dispatch(self.pr, "review", ["finding"])
+            self.assertIn("dispatch-state: rejected-http-429", comments[0]["body"])
+            self.assertEqual(m.router.dispatch(self.pr, "review", ["finding"]), "requested")
+
+        self.assertEqual(events, ["reserve", "mark-rejected", "reserve", "ack"])
+        self.assertIn("dispatch-state: accepted", comments[1]["body"])
+        self.assertEqual(len(comments), 2)
 
 if __name__ == "__main__":
     unittest.main()
