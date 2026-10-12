@@ -623,5 +623,46 @@ class Recovery(unittest.TestCase):
         self.assertEqual(record["reason"], "Kilo trigger returned HTTP 403")
         self.assertNotIn("private-trigger", json.dumps(record))
 
+    def test_recovery_error_classification_is_bounded_and_actionable(self):
+        cases = [
+            (
+                RuntimeError("Kilo trigger returned HTTP 403"),
+                "repair-agent-provider-error",
+                403,
+            ),
+            (
+                RuntimeError("Kilo trigger returned HTTP 503"),
+                "repair-agent-provider-error",
+                503,
+            ),
+            (
+                RuntimeError("Kilo trigger could not be reached"),
+                "repair-agent-unavailable",
+                None,
+            ),
+            (
+                RuntimeError("Configure KILO_REPAIR_TRIGGER_URL with an allowed webhook URL"),
+                "repair-agent-configuration",
+                None,
+            ),
+            (
+                RuntimeError("https://private.invalid/path?token=do-not-print"),
+                "recovery-error",
+                None,
+            ),
+        ]
+        for error, expected_code, expected_status in cases:
+            detail = m.recovery_error_detail(error)
+            self.assertEqual(detail["error_code"], expected_code)
+            self.assertEqual(detail.get("http_status"), expected_status)
+            self.assertNotIn("do-not-print", json.dumps(detail))
+            self.assertNotIn("private.invalid", json.dumps(detail))
+        self.assertIn("no repair completed", m.recovery_error_detail(cases[0][0])["guidance"])
+        self.assertIn(
+            "Provider acceptance is uncertain",
+            m.recovery_error_detail(cases[1][0])["guidance"],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
