@@ -7,6 +7,7 @@ merge_protections_settings:
   reporting_method: check-runs
   post_comment: true
   auto_merge_conditions:
+    - approved-reviews-by = Jonathan-Harris1975
     - base = main
     - label = autonomy:admitted
     - check-success = ci-gate
@@ -29,6 +30,7 @@ merge_protections:
       - base = main
       - label = autonomy:admitted
     success_conditions:
+      - approved-reviews-by = Jonathan-Harris1975
       - check-success = ci-gate
       - check-success = CodeQL security alert gate
       - check-success = Trivy, Gitleaks and actionlint
@@ -49,6 +51,7 @@ queue_rules:
     batch_size: 1
     max_checks_retries: 0
     queue_conditions:
+      - approved-reviews-by = Jonathan-Harris1975
       - base = main
       - label = autonomy:admitted
       - check-success = ci-gate
@@ -60,6 +63,7 @@ queue_rules:
       - -label = autonomy:obsolete
       - -label = autonomy:superseded
     merge_conditions:
+      - approved-reviews-by = Jonathan-Harris1975
       - base = main
       - label = autonomy:admitted
       - check-success = ci-gate
