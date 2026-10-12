@@ -204,6 +204,21 @@ def machine_contract() -> str:
     return text
 
 
+def patch_reservation(reservation_id: int, body: str) -> bool:
+    """Retry marker bookkeeping once; never remove the reservation after dispatch."""
+    for attempt in range(2):
+        try:
+            api("PATCH", f"/repos/{REPO}/issues/comments/{reservation_id}", {"body": body})
+            return True
+        except Exception as exc:
+            if attempt == 1:
+                print(
+                    "::warning::Could not update the Kilo repair reservation after two attempts "
+                    f"({type(exc).__name__}); the existing pending marker remains fail-closed."
+                )
+    return False
+
+
 def dispatch(pr: dict, kind: str, findings: list[str]) -> str:
     number, sha = pr["number"], pr["head"]["sha"]
     marker = f"<!-- kilo-auto-repair:{sha}:{kind} -->"
@@ -211,12 +226,12 @@ def dispatch(pr: dict, kind: str, findings: list[str]) -> str:
     markers = [c for c in comments if c.get("user", {}).get("login") == "github-actions[bot]" and
                "<!-- kilo-auto-repair:" in (c.get("body") or "")]
     matching_markers = [c for c in markers if marker in c["body"]]
-    if matching_markers and any("dispatch-state: rejected-http-" not in c["body"] for c in matching_markers):
+    if matching_markers and not all("dispatch-state: rejected-http-" in c["body"] for c in matching_markers):
         print(f"PR #{number} already has its current {kind} repair request; skipping.")
         return 'already-requested'
     if matching_markers:
         print(f"PR #{number} has an explicit rejected handoff; a bounded retry is eligible.")
-    if sum(f":{kind} -->" in c["body"] for c in markers) >= 2:
+    if len(matching_markers) >= 2:
         print(f"::warning::PR #{number} exhausted its two {kind} repair attempts; inspect the repair agent's results.")
         return 'attempt-limit'
     url = os.environ.get("KILO_REPAIR_TRIGGER_URL", "")
@@ -288,25 +303,23 @@ def dispatch(pr: dict, kind: str, findings: list[str]) -> str:
                 raise RuntimeError(f"Kilo trigger returned HTTP {response.status}")
     except urllib.error.HTTPError as exc:
         if 400 <= exc.code < 500:
-            try:
-                api("PATCH", f"/repos/{REPO}/issues/comments/{reservation_id}", {"body":
-                    f"{marker}\ndispatch-state: rejected-http-{exc.code}\n"
-                    f"Kilo explicitly rejected this repair handoff with HTTP {exc.code}; "
-                    "one bounded retry remains available after correcting or clearing the rejection."})
-            except Exception:
-                print("::warning::Kilo rejected the repair handoff, but its reservation could not be marked retryable; automatic retry remains suppressed.")
+            patch_reservation(
+                reservation_id,
+                f"{marker}\\ndispatch-state: rejected-http-{exc.code}\\n"
+                f"Kilo explicitly rejected this repair handoff with HTTP {exc.code}; "
+                "one bounded retry remains available after correcting or clearing the rejection.",
+            )
         raise RuntimeError(f"Kilo trigger returned HTTP {exc.code}") from None
     except urllib.error.URLError:
         # The provider may have accepted before the connection failed; keep the
         # pending marker and require inspection before another dispatch.
         raise RuntimeError("Kilo trigger could not be reached") from None
 
-    try:
-        api("PATCH", f"/repos/{REPO}/issues/comments/{reservation_id}", {"body":
-            f"{marker}\ndispatch-state: accepted\nKilo accepted the repair request for {kind}. "
-            "The source PR remains governed by its normal checks."})
-    except Exception:
-        print("::warning::Kilo accepted the repair request, but its acknowledgement could not be updated; the persisted marker still suppresses duplicate dispatch.")
+    patch_reservation(
+        reservation_id,
+        f"{marker}\\ndispatch-state: accepted\\nKilo accepted the repair request for {kind}. "
+        "The source PR remains governed by its normal checks.",
+    )
     print(f"Sent {kind} repair for PR #{number} at {sha[:12]} to Kilo.")
     return 'requested'
 
