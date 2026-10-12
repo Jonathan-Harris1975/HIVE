@@ -533,7 +533,7 @@ class Recovery(unittest.TestCase):
             patch("builtins.print"),
         ):
             self.assertEqual(m.router.dispatch(self.pr, "review", ["finding"]), "requested")
-        self.assertEqual(events, ["reservation", "webhook", "acknowledgement"])
+        self.assertEqual(events, ["reservation", "webhook", "acknowledgement", "acknowledgement"])
         self.assertIn("<!-- kilo-auto-repair:" + "a" * 40 + ":review -->", saved[0])
 
         with (
