@@ -599,5 +599,29 @@ class Recovery(unittest.TestCase):
         self.assertIn("dispatch-state: accepted", comments[1]["body"])
         self.assertEqual(len(comments), 2)
 
+
+    def test_failed_kilo_handoff_persists_redacted_operational_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "pr-repair-routing.json"
+            with patch.dict(os.environ, {
+                "GITHUB_RUN_ID": "98765",
+                "KILO_REPAIR_TRIGGER_URL": "https://example.invalid/private-trigger",
+            }):
+                reason = m.router.safe_route_error(
+                    RuntimeError("Kilo trigger returned HTTP 403")
+                )
+                m.router.write_routing_evidence(
+                    "failed", pr=self.pr, kind="review", reason=reason, path=target
+                )
+            record = json.loads(target.read_text())
+        self.assertEqual(record["state"], "failed")
+        self.assertEqual(record["repository"], "owner/repo")
+        self.assertEqual(record["run_id"], "98765")
+        self.assertEqual(record["pull_request"], 7)
+        self.assertEqual(record["head_sha"], "a" * 40)
+        self.assertEqual(record["kind"], "review")
+        self.assertEqual(record["reason"], "Kilo trigger returned HTTP 403")
+        self.assertNotIn("private-trigger", json.dumps(record))
+
 if __name__ == "__main__":
     unittest.main()
