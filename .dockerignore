@@ -21,3 +21,6 @@ build
 *.zip
 backend/tests
 docs
+
+# Local deployment credential bundle must never enter the image build context.
+HIVE-KOYEB-SECRETS-ONLY.env
