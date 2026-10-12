@@ -8,3 +8,7 @@ def test_every_governed_repository_requires_oidc_readiness_evidence() -> None:
         "OIDC readiness" in workflows
         for workflows in REQUIRED_WORKFLOWS.values()
     )
+
+
+def test_mast_must_refresh_cross_repository_oidc_evidence() -> None:
+    assert "OIDC estate readiness" in REQUIRED_WORKFLOWS["MAST"]
