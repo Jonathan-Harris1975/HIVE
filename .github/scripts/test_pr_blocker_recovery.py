@@ -60,7 +60,11 @@ class Recovery(unittest.TestCase):
         self.comment_pages = patch.object(
             m.router,
             "all_pages",
-            side_effect=lambda path: [] if path.endswith("/issues/7/comments") else original_all_pages(path),
+            side_effect=lambda path: (
+                []
+                if path.endswith("/issues/7/comments")
+                else original_all_pages(path)
+            ),
         )
         self.comment_pages.start()
         self.addCleanup(self.comment_pages.stop)
