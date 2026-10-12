@@ -363,7 +363,7 @@ def write_routing_evidence(
         "kind": kind or None,
         "reason": reason or None,
     }
-    Path(path).write_text(json.dumps(record, sort_keys=True, indent=2) + "\\n", encoding="utf-8")
+    Path(path).write_text(json.dumps(record, sort_keys=True, indent=2) + "\n", encoding="utf-8")
 
 
 def fail_routing(exc: Exception) -> None:
