@@ -210,9 +210,12 @@ def dispatch(pr: dict, kind: str, findings: list[str]) -> str:
     comments = all_pages(f"/repos/{REPO}/issues/{number}/comments")
     markers = [c for c in comments if c.get("user", {}).get("login") == "github-actions[bot]" and
                "<!-- kilo-auto-repair:" in (c.get("body") or "")]
-    if any(marker in c["body"] for c in markers):
+    matching_markers = [c for c in markers if marker in c["body"]]
+    if matching_markers and any("dispatch-state: rejected-http-" not in c["body"] for c in matching_markers):
         print(f"PR #{number} already has its current {kind} repair request; skipping.")
         return 'already-requested'
+    if matching_markers:
+        print(f"PR #{number} has an explicit rejected handoff; a bounded retry is eligible.")
     if sum(f":{kind} -->" in c["body"] for c in markers) >= 2:
         print(f"::warning::PR #{number} exhausted its two {kind} repair attempts; inspect the repair agent's results.")
         return 'attempt-limit'
@@ -271,9 +274,8 @@ def dispatch(pr: dict, kind: str, findings: list[str]) -> str:
     # acknowledgement update fails after Kilo accepts the request, a rerun still
     # sees this reservation and cannot dispatch a competing repair.
     reservation = api("POST", f"/repos/{REPO}/issues/{number}/comments", {"body":
-        f"{marker}\nAutonomous Kilo repair handoff reserved for the current {kind} findings. "
-        "Check the linked workflow run for the dispatch outcome; repeat dispatch is suppressed. "
-        "The source PR remains governed by its normal checks."})
+        f"{marker}\ndispatch-state: pending\nAutonomous Kilo repair handoff reserved for the current {kind} findings. "
+        "If delivery outcome is uncertain, inspect Kilo before retrying; the source PR remains governed by its normal checks."})
     reservation_id = (reservation or {}).get("id") if isinstance(reservation, dict) else None
     if not isinstance(reservation_id, int):
         raise RuntimeError("Could not persist the repair handoff deduplication marker")
@@ -285,8 +287,18 @@ def dispatch(pr: dict, kind: str, findings: list[str]) -> str:
             if response.status not in (200, 201, 202, 204):
                 raise RuntimeError(f"Kilo trigger returned HTTP {response.status}")
     except urllib.error.HTTPError as exc:
+        if 400 <= exc.code < 500:
+            try:
+                api("PATCH", f"/repos/{REPO}/issues/comments/{reservation_id}", {"body":
+                    f"{marker}\ndispatch-state: rejected-http-{exc.code}\n"
+                    f"Kilo explicitly rejected this repair handoff with HTTP {exc.code}; "
+                    "one bounded retry remains available after correcting or clearing the rejection."})
+            except Exception:
+                print("::warning::Kilo rejected the repair handoff, but its reservation could not be marked retryable; automatic retry remains suppressed.")
         raise RuntimeError(f"Kilo trigger returned HTTP {exc.code}") from None
     except urllib.error.URLError:
+        # The provider may have accepted before the connection failed; keep the
+        # pending marker and require inspection before another dispatch.
         raise RuntimeError("Kilo trigger could not be reached") from None
 
     try:
