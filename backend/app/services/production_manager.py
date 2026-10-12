@@ -25,14 +25,14 @@ OWNER_ONLY_TRIGGERS: tuple[str, ...] = (
 )
 
 REQUIRED_WORKFLOWS: dict[str, tuple[str, ...]] = {
-    "HIVE": ("CI", "Security and repository quality", "CodeQL", "Item 6 hardening"),
-    "HIVE-UI": ("HIVE-UI CI", "Security and repository quality", "CodeQL", "Item 6 hardening"),
-    "AIMS": ("AIMS CI", "Security and repository quality", "CodeQL", "Item 6 hardening"),
-    "AIMS-UI": ("Validate AIMS UI", "Security and repository quality", "CodeQL", "Item 6 hardening"),
-    "RAMS": ("CI", "Security and repository quality", "CodeQL", "Item 6 hardening"),
-    "MAST": ("MAST CI", "Security and repository quality", "CodeQL"),
-    "IRS": ("Production verification", "Security and repository quality", "CodeQL", "Item 6 hardening"),
-    "Website": ("Production readiness", "Security and repository quality", "CodeQL", "Item 6 hardening"),
+    "HIVE": ("CI", "Security and repository quality", "CodeQL", "Item 6 hardening", "OIDC readiness"),
+    "HIVE-UI": ("HIVE-UI CI", "Security and repository quality", "CodeQL", "Item 6 hardening", "OIDC readiness"),
+    "AIMS": ("AIMS CI", "Security and repository quality", "CodeQL", "Item 6 hardening", "OIDC readiness"),
+    "AIMS-UI": ("Validate AIMS UI", "Security and repository quality", "CodeQL", "Item 6 hardening", "OIDC readiness"),
+    "RAMS": ("CI", "Security and repository quality", "CodeQL", "Item 6 hardening", "OIDC readiness"),
+    "MAST": ("MAST CI", "Security and repository quality", "CodeQL", "OIDC readiness"),
+    "IRS": ("Production verification", "Security and repository quality", "CodeQL", "Item 6 hardening", "OIDC readiness"),
+    "Website": ("Production readiness", "Security and repository quality", "CodeQL", "Item 6 hardening", "OIDC readiness"),
 }
 
 GITHUB_API_TIMEOUT = httpx.Timeout(15.0, connect=5.0)
