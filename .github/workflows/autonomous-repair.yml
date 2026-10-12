@@ -146,14 +146,14 @@ jobs:
             local repair_pr="$1" marker marker_rows latest_state rejected_attempts payload status
             marker="<!-- kilo-main-repair:${RUN_ID} -->"
             marker_rows="$(gh api --paginate "repos/${REPO}/issues/${repair_pr}/comments" \
-              --jq ".[] | select(.user.login == \\"${REPAIR_APP_LOGIN}\\" and (.body | contains(\\"${marker}\\"))) | [.id, (if (.body | contains(\\"dispatch-state: rejected-http-\\")) then \\"rejected\\" else \\"pending\\" end)] | @tsv")"
+              --jq ".[] | select(.user.login == \"${REPAIR_APP_LOGIN}\" and (.body | contains(\"${marker}\"))) | [.id, (if (.body | contains(\"dispatch-state: rejected-http-\")) then \"rejected\" else \"pending\" end)] | @tsv")"
             if [ -n "$marker_rows" ]; then
-              latest_state="$(printf '%s\\n' "$marker_rows" | tail -n1 | cut -f2)"
+              latest_state="$(printf '%s\n' "$marker_rows" | tail -n1 | cut -f2)"
               if [ "$latest_state" != "rejected" ]; then
                 echo "Kilo already has a pending or accepted handoff for run $RUN_ID."
                 return
               fi
-              rejected_attempts="$(printf '%s\\n' "$marker_rows" | awk '$2 == "rejected" { count++ } END { print count + 0 }')"
+              rejected_attempts="$(printf '%s\n' "$marker_rows" | awk '$2 == "rejected" { count++ } END { print count + 0 }')"
               if [ "$rejected_attempts" -ge 2 ]; then
                 echo "::warning::Kilo repair handoff for run $RUN_ID exhausted its two rejected attempts."
                 return
