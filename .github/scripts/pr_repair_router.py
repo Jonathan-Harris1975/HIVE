@@ -309,6 +309,8 @@ def dispatch(pr: dict, kind: str, findings: list[str]) -> str:
                 f"Kilo explicitly rejected this repair handoff with HTTP {exc.code}; "
                 "one bounded retry remains available after correcting or clearing the rejection.",
             )
+        # Keep 5xx markers pending: the provider's response does not prove no
+        # repair side effect occurred, so a retry could dispatch a duplicate.
         raise RuntimeError(f"Kilo trigger returned HTTP {exc.code}") from None
     except urllib.error.URLError:
         # The provider may have accepted before the connection failed; keep the
@@ -347,6 +349,7 @@ def fail_routing(exc: Exception) -> None:
         "The source CI/security result remains authoritative.",
         file=sys.stderr,
     )
+    # SystemExit inherits from BaseException, so main() does not catch this failure.
     raise SystemExit(1)
 
 
