@@ -1,6 +1,6 @@
 """Behavioural blocker-recovery tests; all network calls are mocked."""
 
-from io import StringIO
+from io import BytesIO, StringIO
 import copy
 import json
 import os
@@ -549,6 +549,12 @@ class Recovery(unittest.TestCase):
 
 
 
+    def test_patch_reservation_retries_once(self):
+        with patch.object(m.router, "api", side_effect=[RuntimeError("temporary"), {}]) as api, \
+             patch("builtins.print"):
+            self.assertTrue(m.router.patch_reservation(123, "marker"))
+        self.assertEqual(api.call_count, 2)
+
     def test_explicit_http_rejection_allows_only_bounded_retry(self):
         marker = "<!-- kilo-auto-repair:" + "a" * 40 + ":review -->"
         comments = []
@@ -571,7 +577,7 @@ class Recovery(unittest.TestCase):
         accepted = MagicMock()
         accepted.__enter__.return_value.status = 202
         rejected = m.router.urllib.error.HTTPError(
-            "https://example.invalid/repair", 429, "rate limited", {}, None
+            "https://example.invalid/repair", 429, "rate limited", {"Content-Type": "application/json"}, BytesIO(b"{}")
         )
         with (
             patch.object(m.router, "all_pages", side_effect=[[], comments]),
