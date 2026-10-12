@@ -342,6 +342,30 @@ def safe_route_error(exc: Exception) -> str:
 
 
 
+def write_routing_evidence(
+    state: str,
+    *,
+    pr: dict | None = None,
+    kind: str = "",
+    reason: str = "",
+    path: str | Path = "pr-repair-routing.json",
+) -> None:
+    """Persist redacted routing state even when an external handoff is rejected."""
+    head = (pr or {}).get("head", {})
+    record = {
+        "schema_version": 1,
+        "repository": REPO,
+        "run_id": os.environ.get("GITHUB_RUN_ID", ""),
+        "event": EVENT,
+        "state": state,
+        "pull_request": (pr or {}).get("number"),
+        "head_sha": head.get("sha"),
+        "kind": kind or None,
+        "reason": reason or None,
+    }
+    Path(path).write_text(json.dumps(record, sort_keys=True, indent=2) + "\\n", encoding="utf-8")
+
+
 def fail_routing(exc: Exception) -> None:
     """Surface a failed repair handoff as a failed workflow step without leaking secrets."""
     print(
@@ -357,10 +381,19 @@ def main() -> None:
     with open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8") as stream:
         event = json.load(stream)
     result = extract(event)
-    if result:
-        dispatch(*result)
-    else:
+    if not result:
+        write_routing_evidence("no-actionable-issue")
         print("No verified, actionable, current PR issue to route.")
+        return
+    pr, kind, findings = result
+    try:
+        state = dispatch(pr, kind, findings)
+    except Exception as exc:
+        write_routing_evidence(
+            "failed", pr=pr, kind=kind, reason=safe_route_error(exc)
+        )
+        raise
+    write_routing_evidence(state, pr=pr, kind=kind)
 
 
 if __name__ == "__main__":
