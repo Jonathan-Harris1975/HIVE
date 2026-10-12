@@ -75,9 +75,6 @@ def required_checks_pass(pr):
     if not required:
         return False
     sha = pr["head"]["sha"]
-    comments = router.all_pages(f"/repos/{router.REPO}/issues/{number}/comments")
-    if has_unresolved_repair_handoff(comments, sha):
-        return {"pr": number, "state": "repair-handoff-pending", "head": sha}
     checks = []
     for page in range(1, 11):
         part = router.api(
@@ -147,6 +144,9 @@ def recover(number):
         "GET", f"/repos/{router.REPO}/commits/{router.urllib.parse.quote(router.DEFAULT, safe='')}"
     )["sha"]
     sha = pr["head"]["sha"]
+    comments = router.all_pages(f"/repos/{router.REPO}/issues/{number}/comments")
+    if has_unresolved_repair_handoff(comments, sha):
+        return {"pr": number, "state": "repair-handoff-pending", "head": sha}
     if pr.get("mergeable") is False or pr.get("mergeable_state") == "dirty":
         # Include base SHA in the deduplication identity: a later base change is
         # a new conflict, rather than a lifetime two-attempt limit for this PR.
