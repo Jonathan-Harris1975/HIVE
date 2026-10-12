@@ -192,7 +192,7 @@ jobs:
                   echo "::warning::Could not mark the rejected Kilo handoff retryable; the pending reservation remains fail-closed."
                 fi
               fi
-              echo "::error::Kilo main repair trigger returned HTTP $status for run $RUN_ID."
+              echo "::error::Kilo Cloud Agent trigger returned HTTP $status for run $RUN_ID."
               exit 1
             fi
             if ! gh api --method PATCH "repos/${REPO}/issues/comments/${reservation_id}" \
