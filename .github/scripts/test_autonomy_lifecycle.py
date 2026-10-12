@@ -229,5 +229,20 @@ class RenovateGovernanceTests(unittest.TestCase):
         admit.assert_not_called()
 
 
+
+    def test_main_repair_reserves_marker_before_kilo_and_acknowledges_after(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / "workflows/autonomous-repair.yml").read_text(encoding="utf-8")
+        dispatch = workflow.split("dispatch_kilo() {", 1)[1].split("\n          }", 1)[0]
+        reservation = dispatch.index("gh api --method POST")
+        request = dispatch.index('status="$(curl')
+        acknowledgement = dispatch.index("gh api --method PATCH")
+        self.assertLess(reservation, request)
+        self.assertLess(request, acknowledgement)
+        self.assertIn('--field body="$marker', dispatch)
+        self.assertIn('--jq '.id'', dispatch)
+        self.assertIn("if ! gh api --method PATCH", dispatch)
+
+
 if __name__ == "__main__":
     unittest.main()
