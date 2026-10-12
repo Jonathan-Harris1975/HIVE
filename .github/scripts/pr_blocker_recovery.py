@@ -130,11 +130,14 @@ def verified_receipts(comments, sha, base_sha):
 
 def has_unresolved_repair_handoff(comments, sha):
     prefix = f"<!-- kilo-auto-repair:{sha}:"
+    trusted = {login("github-actions[bot]")} - {""}
     return any(
-        prefix in (comment.get("body") or "")
+        login(comment.get("user", {}).get("login")) in trusted
+        and prefix in (comment.get("body") or "")
         and "dispatch-state: rejected-http-" not in (comment.get("body") or "")
         for comment in comments
     )
+
 
 def recover(number):
     pr = router.pr_details(number)

@@ -635,6 +635,47 @@ class Recovery(unittest.TestCase):
         self.assertEqual(record["reason"], "Kilo trigger returned HTTP 403")
         self.assertNotIn("private-trigger", json.dumps(record))
 
+    def test_recovery_error_classification_is_bounded_and_actionable(self):
+        cases = [
+            (
+                RuntimeError("Kilo trigger returned HTTP 403"),
+                "repair-agent-provider-error",
+                403,
+            ),
+            (
+                RuntimeError("Kilo trigger returned HTTP 503"),
+                "repair-agent-provider-error",
+                503,
+            ),
+            (
+                RuntimeError("Kilo trigger could not be reached"),
+                "repair-agent-unavailable",
+                None,
+            ),
+            (
+                RuntimeError("Configure KILO_REPAIR_TRIGGER_URL with an allowed webhook URL"),
+                "repair-agent-configuration",
+                None,
+            ),
+            (
+                RuntimeError("https://private.invalid/path?token=do-not-print"),
+                "recovery-error",
+                None,
+            ),
+        ]
+        for error, expected_code, expected_status in cases:
+            detail = m.recovery_error_detail(error)
+            self.assertEqual(detail["error_code"], expected_code)
+            self.assertEqual(detail.get("http_status"), expected_status)
+            self.assertNotIn("do-not-print", json.dumps(detail))
+            self.assertNotIn("private.invalid", json.dumps(detail))
+        self.assertIn("no repair completed", m.recovery_error_detail(cases[0][0])["guidance"])
+        self.assertIn(
+            "Provider acceptance is uncertain",
+            m.recovery_error_detail(cases[1][0])["guidance"],
+        )
+
+
     def test_blocker_recovery_runs_after_router_failure_without_bypassing_safety(self):
         workflow = (Path(__file__).parents[1] / "workflows/pr-issue-repair.yml").read_text()
         lines = workflow.splitlines()
@@ -650,17 +691,28 @@ class Recovery(unittest.TestCase):
 
         self.assertIn("      id: blocker_recovery_safety", step_body("Verify blocker recovery safety"))
         self.assertIn("      id: repair_router", step_body("Extract actionable PR findings and start Kilo repair"))
-        self.assertIn("if: ${{ !cancelled() && steps.blocker_recovery_safety.outcome == 'success' && steps.repair_router.outcome != 'skipped' }}", step_body("Recover merge conflicts and verified review blockers"))
+        recovery_step = step_body("Recover merge conflicts and verified review blockers")
+        self.assertIn(
+            "if: ${{ !cancelled() && "
+            "steps.blocker_recovery_safety.outcome == 'success' && "
+            "steps.repair_router.outcome != 'skipped' }}",
+            recovery_step,
+        )
 
     def test_unresolved_repair_handoff_blocks_duplicate_recovery(self):
         sha = "a" * 40
         marker = "<!-- kilo-auto-repair:" + sha + ":review -->"
-        pending = {"body": marker + "\ndispatch-state: pending"}
-        rejected = {"body": marker + "\ndispatch-state: rejected-http-403"}
-        stale = {"body": "<!-- kilo-auto-repair:" + "b" * 40 + ":review -->\ndispatch-state: pending"}
+        bot = {"user": {"login": "github-actions[bot]"}}
+        pending = {**bot, "body": marker + "\ndispatch-state: pending"}
+        accepted = {**bot, "body": marker + "\ndispatch-state: accepted"}
+        rejected = {**bot, "body": marker + "\ndispatch-state: rejected-http-403"}
+        stale = {**bot, "body": "<!-- kilo-auto-repair:" + "b" * 40 + ":review -->\ndispatch-state: pending"}
+        forged = {"user": {"login": "contributor"}, "body": marker + "\ndispatch-state: pending"}
         self.assertTrue(m.has_unresolved_repair_handoff([pending], sha))
+        self.assertTrue(m.has_unresolved_repair_handoff([accepted], sha))
         self.assertFalse(m.has_unresolved_repair_handoff([rejected], sha))
         self.assertFalse(m.has_unresolved_repair_handoff([stale], sha))
+        self.assertFalse(m.has_unresolved_repair_handoff([forged], sha))
 
 if __name__ == "__main__":
     unittest.main()
