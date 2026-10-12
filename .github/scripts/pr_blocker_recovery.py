@@ -75,6 +75,9 @@ def required_checks_pass(pr):
     if not required:
         return False
     sha = pr["head"]["sha"]
+    comments = router.all_pages(f"/repos/{router.REPO}/issues/{number}/comments")
+    if has_unresolved_repair_handoff(comments, sha):
+        return {"pr": number, "state": "repair-handoff-pending", "head": sha}
     checks = []
     for page in range(1, 11):
         part = router.api(
@@ -147,9 +150,6 @@ def recover(number):
         "GET", f"/repos/{router.REPO}/commits/{router.urllib.parse.quote(router.DEFAULT, safe='')}"
     )["sha"]
     sha = pr["head"]["sha"]
-    comments = router.all_pages(f"/repos/{router.REPO}/issues/{number}/comments")
-    if has_unresolved_repair_handoff(comments, sha):
-        return {"pr": number, "state": "repair-handoff-pending", "head": sha}
     if pr.get("mergeable") is False or pr.get("mergeable_state") == "dirty":
         # Include base SHA in the deduplication identity: a later base change is
         # a new conflict, rather than a lifetime two-attempt limit for this PR.
@@ -256,6 +256,43 @@ def candidate_numbers(event):
     return [int(pr["number"]) for pr in router.all_pages(f"/repos/{router.REPO}/pulls?state=open")]
 
 
+def recovery_error_detail(exc):
+    """Map safe router outcomes to actionable bounded recovery diagnostics."""
+    if isinstance(exc, router.urllib.error.HTTPError):
+        return {
+            "error_code": "github-api-http",
+            "http_status": exc.code,
+            "guidance": "Check the recovery job's GitHub token permissions and repository access.",
+        }
+    reason = router.safe_route_error(exc)
+    match = re.fullmatch(r"Kilo trigger returned HTTP ([0-9]{3})", reason)
+    if match:
+        status = int(match.group(1))
+        if 400 <= status < 500:
+            guidance = "Kilo rejected the handoff; no repair completed. Verify provider authorization before the bounded retry."
+        else:
+            guidance = "Provider acceptance is uncertain; inspect the pending handoff marker with Kilo before retrying."
+        return {
+            "error_code": "repair-agent-provider-error",
+            "http_status": status,
+            "guidance": guidance,
+        }
+    if reason == "Kilo trigger could not be reached":
+        return {
+            "error_code": "repair-agent-unavailable",
+            "guidance": "Provider acceptance is uncertain; inspect the pending handoff marker with Kilo before retrying.",
+        }
+    if reason == "Kilo webhook configuration is missing, unsupported or invalid":
+        return {
+            "error_code": "repair-agent-configuration",
+            "guidance": "Check the stored Kilo webhook configuration without printing its value.",
+        }
+    return {
+        "error_code": "recovery-error",
+        "guidance": "Inspect trusted recovery metadata and permissions; raw exception details are withheld.",
+    }
+
+
 def main():
     event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
     results = []
@@ -265,17 +302,37 @@ def main():
             results.append(recover(number))
         except Exception as exc:
             errors += 1
+            detail = recovery_error_detail(exc)
             results.append(
-                {"pr": number, "state": "recovery-error", "error_type": type(exc).__name__}
+                {
+                    "pr": number,
+                    "state": "recovery-error",
+                    "error_type": type(exc).__name__,
+                    **detail,
+                }
             )
             print(
-                f"::error::Blocker recovery for PR #{number} failed ({type(exc).__name__}). Inspect API permissions and the configured repair webhook."
+                f"::error::Blocker recovery for PR #{number}: {detail['error_code']}"
+                + (f" (HTTP {detail['http_status']})" if "http_status" in detail else "")
+                + ". "
+                + detail["guidance"]
             )
     text = json.dumps({"repository": router.REPO, "results": results}, indent=2) + "\n"
     Path("pr-blocker-recovery.json").write_text(text)
     summary = (
         "# Automatic PR blocker recovery\n\n"
-        + "\n".join(f"- PR #{r['pr']}: {r['state']}" for r in results)
+        + "\n".join(
+            f"- PR #{r['pr']}: {r['state']}"
+            + (
+                f" — {r['error_code']}"
+                + (f" (HTTP {r['http_status']})" if "http_status" in r else "")
+                + ". "
+                + r["guidance"]
+                if "error_code" in r
+                else ""
+            )
+            for r in results
+        )
         + "\n"
     )
     with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a") as stream:
