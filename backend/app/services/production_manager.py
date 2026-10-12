@@ -30,7 +30,7 @@ REQUIRED_WORKFLOWS: dict[str, tuple[str, ...]] = {
     "AIMS": ("AIMS CI", "Security and repository quality", "CodeQL", "Item 6 hardening", "OIDC readiness"),
     "AIMS-UI": ("Validate AIMS UI", "Security and repository quality", "CodeQL", "Item 6 hardening", "OIDC readiness"),
     "RAMS": ("CI", "Security and repository quality", "CodeQL", "Item 6 hardening", "OIDC readiness"),
-    "MAST": ("MAST CI", "Security and repository quality", "CodeQL", "OIDC readiness"),
+    "MAST": ("MAST CI", "Security and repository quality", "CodeQL", "OIDC readiness", "OIDC estate readiness"),
     "IRS": ("Production verification", "Security and repository quality", "CodeQL", "Item 6 hardening", "OIDC readiness"),
     "Website": ("Production readiness", "Security and repository quality", "CodeQL", "Item 6 hardening", "OIDC readiness"),
 }
