@@ -1,10 +1,13 @@
 name: Inspect monthly governance job (read only)
 on:
+  # Inspect after the first-day worker window has had time to finish.
+  schedule:
+    - cron: "0 12 2 * *"
   workflow_dispatch:
     inputs:
       period:
-        description: "Reporting month YYYY-MM"
-        required: true
+        description: "Previously completed reporting month YYYY-MM (blank uses previous UTC month)"
+        required: false
         type: string
 permissions:
   contents: read
@@ -29,16 +32,22 @@ jobs:
           import sys
           import urllib.error
           import urllib.request
+          from datetime import datetime, timedelta, timezone
 
           base = os.environ.get("HIVE_BASE_URL", "").strip().rstrip("/")
           token = os.environ.get("HIVE_ADMIN_TOKEN", "")
-          period = os.environ.get("PERIOD", "")
+          period = os.environ.get("PERIOD", "").strip()
+          now = datetime.now(timezone.utc)
+          if not period:
+              period = (now.date().replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
           if not re.fullmatch(r"20[0-9]{2}-(0[1-9]|1[0-2])", period):
               sys.exit("Reporting period must be YYYY-MM")
+          if period >= now.strftime("%Y-%m"):
+              sys.exit("Reporting period must be a previously completed UTC month")
           if not base.startswith("https://") or not token:
               sys.exit("HIVE_BASE_URL (production variable) and HIVE_ADMIN_TOKEN (secret) are required")
           endpoint = f"{base}/v1/monthly-review/jobs/{period}"
-          request = urllib.request.Request(endpoint, headers={
+          request = urllib.request.Request(endpoint, method="GET", headers={
               "Authorization": f"Bearer {token}", "Accept": "application/json",
           })
           try:
