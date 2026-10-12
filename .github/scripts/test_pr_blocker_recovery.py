@@ -625,7 +625,7 @@ class Recovery(unittest.TestCase):
 
     def test_blocker_recovery_runs_after_failed_router_without_cancellation(self):
         workflow = (Path(__file__).parents[1] / "workflows/pr-issue-repair.yml").read_text()
-        step = workflow.split("    - name: Recover merge conflicts and verified review blockers\\n", 1)[1].split("    - name:", 1)[0]
+        step = workflow.split("    - name: Recover merge conflicts and verified review blockers\n", 1)[1].split("    - name:", 1)[0]
         self.assertIn("if: ${{ !cancelled() }}", step)
 
 
