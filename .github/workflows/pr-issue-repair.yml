@@ -98,12 +98,14 @@ jobs:
         KILO_REPAIR_PR_LOGIN: ${{ vars.KILO_REPAIR_PR_LOGIN }}
         REPAIR_APP_LOGIN: ${{ needs.authenticate_actor.outputs.repair_app_login }}
       run: python3 .github/scripts/pr_blocker_recovery.py
-    - name: Preserve PR blocker recovery report
+    - name: Preserve autonomous repair routing evidence
       if: always()
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       with:
-        name: pr-blocker-recovery-${{ github.run_id }}-${{ github.run_attempt }}
-        path: pr-blocker-recovery.json
+        name: pr-repair-operations-${{ github.run_id }}-${{ github.run_attempt }}
+        path: |
+          pr-repair-routing.json
+          pr-blocker-recovery.json
         retention-days: 30
         if-no-files-found: warn
     needs: authenticate_actor
