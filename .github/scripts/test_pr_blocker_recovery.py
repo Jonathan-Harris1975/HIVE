@@ -623,11 +623,32 @@ class Recovery(unittest.TestCase):
         self.assertEqual(record["reason"], "Kilo trigger returned HTTP 403")
         self.assertNotIn("private-trigger", json.dumps(record))
 
-    def test_blocker_recovery_runs_after_failed_router_without_cancellation(self):
+    def test_blocker_recovery_runs_after_router_failure_without_bypassing_safety(self):
         workflow = (Path(__file__).parents[1] / "workflows/pr-issue-repair.yml").read_text()
-        step = workflow.split("    - name: Recover merge conflicts and verified review blockers\n", 1)[1].split("    - name:", 1)[0]
-        self.assertIn("if: ${{ !cancelled() }}", step)
+        lines = workflow.splitlines()
 
+        def step_body(name):
+            start = lines.index("    - name: " + name)
+            body = []
+            for line in lines[start + 1:]:
+                if line.startswith("    - name:"):
+                    break
+                body.append(line)
+            return "\n".join(body)
+
+        self.assertIn("      id: blocker_recovery_safety", step_body("Verify blocker recovery safety"))
+        self.assertIn("      id: repair_router", step_body("Extract actionable PR findings and start Kilo repair"))
+        self.assertIn("if: ${{ !cancelled() && steps.blocker_recovery_safety.outcome == 'success' && steps.repair_router.outcome != 'skipped' }}", step_body("Recover merge conflicts and verified review blockers"))
+
+    def test_unresolved_repair_handoff_blocks_duplicate_recovery(self):
+        sha = "a" * 40
+        marker = "<!-- kilo-auto-repair:" + sha + ":review -->"
+        pending = {"body": marker + "\ndispatch-state: pending"}
+        rejected = {"body": marker + "\ndispatch-state: rejected-http-403"}
+        stale = {"body": "<!-- kilo-auto-repair:" + "b" * 40 + ":review -->\ndispatch-state: pending"}
+        self.assertTrue(m.has_unresolved_repair_handoff([pending], sha))
+        self.assertFalse(m.has_unresolved_repair_handoff([rejected], sha))
+        self.assertFalse(m.has_unresolved_repair_handoff([stale], sha))
 
 if __name__ == "__main__":
     unittest.main()
