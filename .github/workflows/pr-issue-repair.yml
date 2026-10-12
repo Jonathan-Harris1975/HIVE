@@ -81,8 +81,10 @@ jobs:
         ref: ${{ github.event.repository.default_branch }}
         persist-credentials: false
     - name: Verify blocker recovery safety
+      id: blocker_recovery_safety
       run: python3 .github/scripts/test_pr_blocker_recovery.py
     - name: Extract actionable PR findings and start Kilo repair
+      id: repair_router
       env:
         GH_TOKEN: ${{ github.token }}
         DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -91,6 +93,7 @@ jobs:
         REPAIR_APP_LOGIN: ${{ needs.authenticate_actor.outputs.repair_app_login }}
       run: python3 .github/scripts/pr_repair_router.py
     - name: Recover merge conflicts and verified review blockers
+      if: ${{ !cancelled() && steps.blocker_recovery_safety.outcome == 'success' && steps.repair_router.outcome != 'skipped' }}
       env:
         GH_TOKEN: ${{ github.token }}
         DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}

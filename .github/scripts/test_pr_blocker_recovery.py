@@ -56,6 +56,18 @@ class Recovery(unittest.TestCase):
         )
         self.config.start()
         self.addCleanup(self.config.stop)
+        original_all_pages = m.router.all_pages
+        self.comment_pages = patch.object(
+            m.router,
+            "all_pages",
+            side_effect=lambda path: (
+                []
+                if path.endswith("/issues/7/comments")
+                else original_all_pages(path)
+            ),
+        )
+        self.comment_pages.start()
+        self.addCleanup(self.comment_pages.stop)
 
     def receipt(self, author="repair[bot]", sha=None, base=None):
         return {
@@ -663,6 +675,44 @@ class Recovery(unittest.TestCase):
             m.recovery_error_detail(cases[1][0])["guidance"],
         )
 
+
+    def test_blocker_recovery_runs_after_router_failure_without_bypassing_safety(self):
+        workflow = (Path(__file__).parents[1] / "workflows/pr-issue-repair.yml").read_text()
+        lines = workflow.splitlines()
+
+        def step_body(name):
+            start = lines.index("    - name: " + name)
+            body = []
+            for line in lines[start + 1:]:
+                if line.startswith("    - name:"):
+                    break
+                body.append(line)
+            return "\n".join(body)
+
+        self.assertIn("      id: blocker_recovery_safety", step_body("Verify blocker recovery safety"))
+        self.assertIn("      id: repair_router", step_body("Extract actionable PR findings and start Kilo repair"))
+        recovery_step = step_body("Recover merge conflicts and verified review blockers")
+        self.assertIn(
+            "if: ${{ !cancelled() && "
+            "steps.blocker_recovery_safety.outcome == 'success' && "
+            "steps.repair_router.outcome != 'skipped' }}",
+            recovery_step,
+        )
+
+    def test_unresolved_repair_handoff_blocks_duplicate_recovery(self):
+        sha = "a" * 40
+        marker = "<!-- kilo-auto-repair:" + sha + ":review -->"
+        bot = {"user": {"login": "github-actions[bot]"}}
+        pending = {**bot, "body": marker + "\ndispatch-state: pending"}
+        accepted = {**bot, "body": marker + "\ndispatch-state: accepted"}
+        rejected = {**bot, "body": marker + "\ndispatch-state: rejected-http-403"}
+        stale = {**bot, "body": "<!-- kilo-auto-repair:" + "b" * 40 + ":review -->\ndispatch-state: pending"}
+        forged = {"user": {"login": "contributor"}, "body": marker + "\ndispatch-state: pending"}
+        self.assertTrue(m.has_unresolved_repair_handoff([pending], sha))
+        self.assertTrue(m.has_unresolved_repair_handoff([accepted], sha))
+        self.assertFalse(m.has_unresolved_repair_handoff([rejected], sha))
+        self.assertFalse(m.has_unresolved_repair_handoff([stale], sha))
+        self.assertFalse(m.has_unresolved_repair_handoff([forged], sha))
 
 if __name__ == "__main__":
     unittest.main()
