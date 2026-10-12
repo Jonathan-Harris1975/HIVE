@@ -1,5 +1,4 @@
 from pathlib import Path
-import re
 
 
 WORKFLOW = (
@@ -13,7 +12,7 @@ WORKFLOW = (
 def test_monthly_job_inspection_runs_after_worker_window():
     source = WORKFLOW.read_text(encoding="utf-8")
 
-    assert re.search(r'cron: "0 12 2 \\* \\*"', source)
+    assert 'cron: "0 12 2 * *"' in source
     assert "required: false" in source
     assert 'PERIOD: ${{ inputs.period }}' in source
 
