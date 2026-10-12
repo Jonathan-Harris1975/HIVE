@@ -56,6 +56,9 @@ class Recovery(unittest.TestCase):
         )
         self.config.start()
         self.addCleanup(self.config.stop)
+        self.comment_pages = patch.object(m.router, "all_pages", return_value=[])
+        self.comment_pages.start()
+        self.addCleanup(self.comment_pages.stop)
 
     def receipt(self, author="repair[bot]", sha=None, base=None):
         return {
