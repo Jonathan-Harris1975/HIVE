@@ -1,2 +1,3 @@
 # Automation and security policy changes require owner review.
 /.github/ @Jonathan-Harris1975
+/.mergify.yml @Jonathan-Harris1975
