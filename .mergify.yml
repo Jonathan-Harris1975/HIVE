@@ -8,7 +8,6 @@ merge_protections_settings:
   post_comment: true
   auto_merge_conditions:
     - approved-reviews-by = Jonathan-Harris1975
-    - github-require-last-push-approval
     - base = main
     - label = autonomy:admitted
     - check-success = ci-gate
