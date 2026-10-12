@@ -26,6 +26,3 @@ coverage/
 playwright-report/
 
 test-results/
-
-# Local deployment credential bundle; keep out of Git and Docker build context.
-/HIVE-KOYEB-SECRETS-ONLY.env
