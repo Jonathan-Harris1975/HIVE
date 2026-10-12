@@ -461,6 +461,21 @@ class Recovery(unittest.TestCase):
             m.router.dispatch(self.pr, "merge-conflict-" + "b" * 40, ["conflict"])
             openurl.assert_not_called()
 
+    def test_human_hold_added_before_dispatch_prevents_kilo_request(self):
+        held = copy.deepcopy(self.pr)
+        held["labels"] = [{"name": "autonomy:human-hold"}]
+        with (
+            patch.object(m.router, "all_pages", return_value=[]),
+            patch.object(m.router, "valid_kilo_webhook_url", return_value=True),
+            patch.object(m.router, "pr_details", return_value=held),
+            patch.object(m.router, "api", return_value={"sha": "b" * 40}) as api,
+            patch.object(m.router.urllib.request, "urlopen") as openurl,
+        ):
+            result = m.router.dispatch(self.pr, "merge-conflict-" + "b" * 40, ["conflict"])
+        self.assertEqual(result, "changed-before-dispatch")
+        api.assert_called_once_with("GET", "/repos/owner/repo/commits/main")
+        openurl.assert_not_called()
+
     def test_duplicate_exact_head_base_is_not_dispatched(self):
         marker = "<!-- kilo-auto-repair:" + "a" * 40 + ":merge-conflict-" + "b" * 40 + " -->"
         with (
