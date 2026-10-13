@@ -299,5 +299,38 @@ class TrustedAdmissionProofTests(unittest.TestCase):
         self.assertEqual(request.call_args.args[0], "GET")
 
 
+class AdmissionLifecycleProofTests(unittest.TestCase):
+    def test_label_alone_is_withdrawn_when_trusted_validation_did_not_admit(self):
+        number = 201
+        sha = "d" * 40
+        pr = {"number": number, "head": {"sha": sha}, "labels": [{"name": "autonomy:admitted"}]}
+        with (
+            patch.object(automation, "_reconcile_pr_candidate"),
+            patch.object(automation, "set_admission_check") as set_check,
+            patch.object(automation, "remove_label") as remove_label,
+        ):
+            automation.reconcile_pr(pr)
+        set_check.assert_called_once()
+        args, kwargs = set_check.call_args
+        self.assertEqual(args[:3], (number, sha, "failure"))
+        self.assertTrue(kwargs["create_if_missing"])
+        remove_label.assert_called_once_with(number, "autonomy:admitted")
+
+    def test_only_successful_trusted_validation_keeps_admission(self):
+        number = 202
+        sha = "e" * 40
+        pr = {"number": number, "head": {"sha": sha}, "labels": [{"name": "autonomy:admitted"}]}
+        def verified(candidate):
+            automation.VERIFIED_ADMISSION_HEADS.add((number, sha))
+        with (
+            patch.object(automation, "_reconcile_pr_candidate", side_effect=verified),
+            patch.object(automation, "set_admission_check") as set_check,
+            patch.object(automation, "remove_label") as remove_label,
+        ):
+            automation.reconcile_pr(pr)
+        set_check.assert_not_called()
+        remove_label.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
