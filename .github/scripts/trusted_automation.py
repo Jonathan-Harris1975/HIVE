@@ -646,7 +646,8 @@ def main() -> int:
     # Reconcile current trusted PRs. Runs admitted above will normally become ready on a later
     # workflow_run completion or scheduled reconciliation.
     for pr in open_prs:
-        reconcile_pr(pr)
+        if automation_kind(pr) is not None or "autonomy:admitted" in issue_labels(pr):
+            reconcile_pr(pr)
     return 0
 
 
