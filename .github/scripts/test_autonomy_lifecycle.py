@@ -474,5 +474,51 @@ class NativeAutoMergeCurrentLabelTests(unittest.TestCase):
             native_auto_merge.reconcile(summary)
         disable.assert_called_once_with("PR_node_7")
 
+    def test_uncomputed_mergeability_preserves_existing_auto_merge(self):
+        summary = {
+            "number": 7,
+            "labels": [{"name": "autonomy:admitted"}],
+            "node_id": "PR_node_7",
+        }
+        detail = {
+            "state": "open",
+            "draft": False,
+            "base": {"ref": "main"},
+            "head": {"sha": "a" * 40},
+            "mergeable": None,
+            "labels": [{"name": "autonomy:admitted"}],
+        }
+        active = {"enabledAt": "2026-01-01T00:00:00Z", "mergeMethod": "SQUASH"}
+        with (
+            patch.object(native_auto_merge, "merge_request", return_value=active),
+            patch.object(native_auto_merge, "request", return_value=detail),
+            patch.object(native_auto_merge, "admission_check", return_value=(True, True)),
+            patch.object(native_auto_merge, "enable") as enable,
+            patch.object(native_auto_merge, "disable") as disable,
+        ):
+            native_auto_merge.reconcile(summary)
+        enable.assert_not_called()
+        disable.assert_not_called()
+
+    def test_admission_evidence_from_another_pr_does_not_count(self):
+        sha = "a" * 40
+        runs = [{
+            "app": {"slug": "github-actions"},
+            "name": native_auto_merge.ADMISSION_CHECK,
+            "external_id": f"trusted-autonomy-admission:99:{sha}",
+            "status": "completed",
+            "conclusion": "success",
+        }]
+        with patch.object(native_auto_merge, "request", return_value={"check_runs": runs}):
+            self.assertEqual(native_auto_merge.admission_check(7, sha), (False, False))
+
+    def test_open_pr_listing_fails_closed_at_safety_limit(self):
+        page = [{"number": number} for number in range(100)]
+        with patch.object(native_auto_merge, "request", side_effect=[page] * 10) as request:
+            with self.assertRaisesRegex(RuntimeError, "1,000-item safety limit"):
+                native_auto_merge.pages("/repos/owner/repo/pulls?state=open")
+        self.assertEqual(request.call_count, 10)
+
+
 if __name__ == "__main__":
     unittest.main()
