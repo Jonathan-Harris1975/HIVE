@@ -158,7 +158,11 @@ jobs:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           if [[ ! -f .github/scripts/native_auto_merge.py ]]; then
-            echo "Native auto-merge controller is not on the trusted default branch yet; skipping pre-merge reconciliation."
-            exit 0
+            if [[ -f .mergify.yml ]]; then
+              echo "Native auto-merge controller is not on the trusted default branch yet; skipping pre-merge reconciliation."
+              exit 0
+            fi
+            echo "::error::Mergify configuration is absent but native auto-merge controller is missing."
+            exit 1
           fi
           python .github/scripts/native_auto_merge.py
