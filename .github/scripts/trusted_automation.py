@@ -577,8 +577,12 @@ def reconcile_pr(pr: dict[str, Any]) -> None:
     try:
         _reconcile_pr_candidate(pr)
     finally:
-        if key not in VERIFIED_ADMISSION_HEADS:
-            labels = issue_labels(pr)
+        labels = issue_labels(pr)
+        if not os.environ.get("ADMISSION_TOKEN"):
+            # Fail closed in local tests or misconfigured runs; production workflows supply this token.
+            if "autonomy:admitted" in labels:
+                remove_label(number, "autonomy:admitted")
+        elif key not in VERIFIED_ADMISSION_HEADS:
             try:
                 set_admission_check(
                     number,
