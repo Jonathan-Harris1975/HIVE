@@ -487,10 +487,25 @@ def admit_to_mergify(number: int, expected_sha: str) -> None:
         log(f"PR #{number} head changed before admission evidence could be published.")
         return
     labels = issue_labels(pr)
+    blocking_labels = {
+        "autonomy:human-hold",
+        "autonomy:council-freeze",
+        "autonomy:superseded",
+        "autonomy:obsolete",
+        "do-not-merge",
+        "needs-manual-review",
+        "needs-human-review",
+        "hold",
+    }
+    if labels.intersection(blocking_labels):
+        if "autonomy:admitted" in labels:
+            remove_label(number, "autonomy:admitted")
+        log(f"PR #{number} has a blocking hold label; withholding admission.")
+        return
     try:
         set_admission_check(
             number,
-            sha,
+            expected_sha,
             "success",
             "The trusted default-branch workflow verified the PR identity, eligibility, exact-head CI/security checks, and current hold labels.",
         )
@@ -500,7 +515,7 @@ def admit_to_mergify(number: int, expected_sha: str) -> None:
         raise
     if "autonomy:admitted" not in labels:
         add_labels(number, ["autonomy:admitted"])
-    VERIFIED_ADMISSION_HEADS.add((number, sha))
+    VERIFIED_ADMISSION_HEADS.add((number, expected_sha))
     log(f"Admitted PR #{number} to Mergify after trusted exact-head verification.")
 
 def reconcile_stale_carriers(open_prs: list[dict[str, Any]]) -> None:
