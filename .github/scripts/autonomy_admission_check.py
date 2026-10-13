@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import time
@@ -10,11 +11,47 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 API = "https://api.github.com"
 CHECK_NAME = "Trusted autonomy admission"
 CHECKS_APP_SLUG = "github-actions"
+
+
+def _retry_delay(
+    retry_after: str | None,
+    reset_at: str | None,
+    rate_limit_remaining: str | None,
+    attempt: int,
+) -> float:
+    """Return a bounded delay for delta-seconds or HTTP-date retry headers."""
+    if retry_after:
+        try:
+            delay = float(retry_after)
+        except (TypeError, ValueError):
+            try:
+                retry_at = parsedate_to_datetime(retry_after)
+            except (TypeError, ValueError, OverflowError):
+                retry_at = None
+            if retry_at is not None:
+                if retry_at.tzinfo is None:
+                    retry_at = retry_at.replace(tzinfo=timezone.utc)
+                delay = retry_at.timestamp() - time.time()
+            else:
+                delay = None
+        if delay is not None and math.isfinite(delay):
+            return min(30.0, max(0.0, delay))
+
+    if reset_at and rate_limit_remaining == "0":
+        try:
+            delay = float(reset_at) - time.time() + 1.0
+        except (TypeError, ValueError, OverflowError):
+            delay = None
+        if delay is not None and math.isfinite(delay):
+            return min(30.0, max(1.0, delay))
+
+    return min(8.0, 2.0 ** attempt)
 
 
 def _request(method: str, path: str, data: dict[str, Any] | None = None) -> Any:
@@ -48,18 +85,17 @@ def _request(method: str, path: str, data: dict[str, Any] | None = None) -> Any:
                 raise RuntimeError(f"GitHub admission check API HTTP {exc.code}: {body[:500]}") from exc
             retry_after = exc.headers.get("Retry-After")
             reset_at = exc.headers.get("X-RateLimit-Reset")
-            if retry_after:
-                delay = min(30.0, max(0.0, float(retry_after)))
-            elif reset_at and exc.headers.get("X-RateLimit-Remaining") == "0":
-                delay = min(30.0, max(1.0, float(reset_at) - time.time() + 1.0))
-            else:
-                delay = min(8.0, 2.0 ** attempt)
+            delay = _retry_delay(
+                retry_after,
+                reset_at,
+                exc.headers.get("X-RateLimit-Remaining"),
+                attempt,
+            )
             time.sleep(delay)
         except urllib.error.URLError:
             if attempt == 4:
                 raise
             time.sleep(min(8.0, 2.0 ** attempt))
-    raise RuntimeError("GitHub admission check request exhausted retries")
 
 
 def set_admission_check(
