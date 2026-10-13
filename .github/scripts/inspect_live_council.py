@@ -1,0 +1,92 @@
+#!/usr/bin/env python3
+"""Read and summarize live HIVE Council state without starting governance writes."""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import sys
+import urllib.error
+import urllib.request
+from typing import Any
+
+
+def get_json(base: str, token: str, path: str) -> dict[str, Any]:
+    request = urllib.request.Request(
+        base.rstrip("/") + path,
+        method="GET",
+        headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=25) as response:
+            payload = json.load(response)
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(f"GET {path} failed with HTTP {exc.code}") from None
+    except (TimeoutError, urllib.error.URLError, ValueError):
+        raise RuntimeError(f"GET {path} failed with a connection or response error") from None
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"GET {path} returned an invalid response")
+    return payload
+
+
+def summarize(status: dict[str, Any], history: dict[str, Any]) -> list[str]:
+    lines = [
+        "Council status:",
+        f"  ok={status.get('ok')} fresh={status.get('fresh')} period={status.get('period')}",
+        f"  completion_status={status.get('completion_status')} downstream_sync_enabled={status.get('downstream_sync_enabled')} downstream_sync_ok={status.get('downstream_sync_ok')}",
+        f"  reason={status.get('reason')}",
+    ]
+    runs = history.get("runs")
+    latest = runs[-1] if isinstance(runs, list) and runs and isinstance(runs[-1], dict) else {}
+    sync = latest.get("downstream_sync")
+    sync = sync if isinstance(sync, dict) else {}
+    lines.extend(
+        [
+            "Latest Council run:",
+            f"  run_id={latest.get('run_id')} completion_status={latest.get('completion_status')}",
+            f"  completed_at={latest.get('completed_at') or latest.get('occurred_at')}",
+            f"  sync_enabled={sync.get('enabled')} sync_ok={sync.get('ok')}",
+        ]
+    )
+    error = str(sync.get("error") or "")
+    status_match = re.search(r"\bHTTP\s+(\d{3})\b", error, flags=re.IGNORECASE)
+    if status_match:
+        lines.append(f"  downstream_http_status={status_match.group(1)}")
+    elif error:
+        if "readiness" in error.lower():
+            category = "service_readiness"
+        elif "configuration is missing" in error.lower():
+            category = "configuration"
+        else:
+            category = "downstream_error"
+        lines.append(f"  downstream_failure_category={category}")
+    targets = sync.get("targets")
+    if isinstance(targets, dict):
+        for name in ("aims", "rams"):
+            target = targets.get(name)
+            if isinstance(target, dict):
+                lines.append(
+                    f"  {name}_ok={target.get('ok')} {name}_http_status={target.get('http_status')} {name}_attempt={target.get('attempt')}"
+                )
+    return lines
+
+
+def main() -> int:
+    base = os.environ.get("HIVE_BASE_URL", "").strip().rstrip("/")
+    token = os.environ.get("HIVE_ADMIN_TOKEN", "")
+    if not base.startswith("https://") or not token:
+        print("HIVE_BASE_URL (https) and HIVE_ADMIN_TOKEN are required", file=sys.stderr)
+        return 2
+    try:
+        status = get_json(base, token, "/v1/ai-council/status")
+        history = get_json(base, token, "/v1/ai-council/history?limit=5")
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    print("\n".join(summarize(status, history)))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
