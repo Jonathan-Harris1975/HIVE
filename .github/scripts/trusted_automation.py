@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Admit only verified automation pull requests to Mergify.
+"""Admit only verified automation pull requests to GitHub native auto-merge.
 
 Runs from the trusted default-branch workflow. It never checks out or executes PR code.
 """
@@ -422,7 +422,7 @@ def all_required_checks_green(pr: dict[str, Any]) -> tuple[bool, str]:
         if run.get("status") != "completed" or run.get("conclusion") != "success":
             return False, f"required workflow {name!r} is {run.get('status')}/{run.get('conclusion')}"
 
-    # Mergify and the repository ruleset evaluate any additional required contexts.
+    # GitHub native auto-merge and the repository ruleset evaluate any additional required contexts.
     # Optional review, link and external-service checks cannot become an extra gate here.
     return True, "required CI and security workflows succeeded"
 
@@ -478,7 +478,7 @@ def approve_pr(number: int, sha: str) -> None:
     log(f"Approved PR #{number} at {sha[:12]} after trusted checks passed.")
 
 
-def admit_to_mergify(number: int, expected_sha: str) -> None:
+def admit_to_native_merge(number: int, expected_sha: str) -> None:
     pr = get(f"/repos/{REPO}/pulls/{number}")
     if pr.get("state") != "open":
         return
@@ -516,10 +516,10 @@ def admit_to_mergify(number: int, expected_sha: str) -> None:
     if "autonomy:admitted" not in labels:
         add_labels(number, ["autonomy:admitted"])
     VERIFIED_ADMISSION_HEADS.add((number, expected_sha))
-    log(f"Admitted PR #{number} to Mergify after trusted exact-head verification.")
+    log(f"Admitted PR #{number} to GitHub native auto-merge after trusted exact-head verification.")
 
 def reconcile_stale_carriers(open_prs: list[dict[str, Any]]) -> None:
-    """Close verified retired carriers directly, without waiting for Mergify.
+    """Close verified retired carriers directly, without waiting for GitHub native auto-merge.
 
     Retired carrier branches are retained as failure evidence. Implementations
     and arbitrary PRs are never closed by this lifecycle reconciler.
@@ -606,7 +606,7 @@ def _reconcile_pr_candidate(pr: dict[str, Any]) -> None:
         if current_head_unchanged(number, sha) is None:
             return
 
-    admit_to_mergify(number, sha)
+    admit_to_native_merge(number, sha)
 
 
 def reconcile_pr(pr: dict[str, Any]) -> None:
@@ -656,7 +656,7 @@ def main() -> int:
     ensure_label(CTO_IMPLEMENTATION_LABEL, "5319E7", "cto.new implementation PR linked to an explicitly assigned task")
     ensure_label("autonomy:human-hold", "FBCA04", "Automation must stop for human action")
     ensure_label("autonomy:obsolete", "D4C5F9", "Repair carrier is no longer current")
-    ensure_label("autonomy:admitted", "0E8A16", "Exact-head CI/security verification complete; Mergify may merge")
+    ensure_label("autonomy:admitted", "0E8A16", "Exact-head CI/security verification complete; GitHub native auto-merge may merge")
 
     open_prs = list_open_prs()
     reconcile_stale_carriers(open_prs)
