@@ -374,7 +374,6 @@ class OwnerCodexAdmissionTests(unittest.TestCase):
     def test_sensitive_owner_codex_changes_are_held(self):
         with (
             patch.dict(os.environ, {"ADMISSION_TOKEN": "unit-test", "REPO": "owner/repo"}),
-            patch.object(automation, "council_evidence_freeze", return_value=(False, "clear"), create=True),
             patch.object(automation, "pr_files", return_value=[".github/workflows/ci.yml"]),
             patch.object(automation, "place_human_hold") as hold,
             patch.object(automation, "admit_to_mergify") as admit,
@@ -384,6 +383,27 @@ class OwnerCodexAdmissionTests(unittest.TestCase):
             automation.reconcile_pr(self.pr)
         hold.assert_called_once()
         admit.assert_not_called()
+
+
+
+
+class AdmissionRetryDelayTests(unittest.TestCase):
+    @patch("autonomy_admission_check.time.time", return_value=30)
+    def test_retry_after_http_date_is_parsed(self, _now):
+        self.assertEqual(
+            admission_check._retry_delay(
+                "Thu, 01 Jan 1970 00:00:45 GMT", None, None, 0
+            ),
+            15.0,
+        )
+
+    def test_delta_seconds_and_invalid_headers(self):
+        self.assertEqual(admission_check._retry_delay("5", None, None, 0), 5.0)
+        self.assertEqual(admission_check._retry_delay("invalid", None, None, 2), 4.0)
+
+    @patch("autonomy_admission_check.time.time", return_value=30)
+    def test_rate_limit_reset_is_bounded(self, _now):
+        self.assertEqual(admission_check._retry_delay(None, "100", "0", 1), 30.0)
 
 
 if __name__ == "__main__":
