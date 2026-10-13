@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import os
 import unittest
+import native_auto_merge
 from unittest.mock import patch
 
 os.environ.setdefault("GH_TOKEN", "unit-test")
@@ -420,6 +421,58 @@ class AdmissionRetryDelayTests(unittest.TestCase):
     def test_rate_limit_reset_is_bounded(self, _now):
         self.assertEqual(admission_check._retry_delay(None, "100", "0", 1), 30.0)
 
+
+
+class NativeAutoMergeCurrentLabelTests(unittest.TestCase):
+    def test_fresh_hold_label_blocks_auto_merge_enable(self):
+        summary = {
+            "number": 7,
+            "labels": [{"name": "autonomy:admitted"}],
+            "node_id": "PR_node_7",
+        }
+        detail = {
+            "state": "open",
+            "draft": False,
+            "base": {"ref": "main"},
+            "head": {"sha": "a" * 40},
+            "mergeable": True,
+            "labels": [
+                {"name": "autonomy:admitted"},
+                {"name": "autonomy:human-hold"},
+            ],
+        }
+        with (
+            patch.object(native_auto_merge, "merge_request", return_value=None),
+            patch.object(native_auto_merge, "request", return_value=detail),
+            patch.object(native_auto_merge, "admission_check", return_value=(True, True)),
+            patch.object(native_auto_merge, "enable") as enable,
+        ):
+            native_auto_merge.reconcile(summary)
+        enable.assert_not_called()
+
+    def test_removed_admission_label_revokes_existing_auto_merge(self):
+        summary = {
+            "number": 7,
+            "labels": [{"name": "autonomy:admitted"}],
+            "node_id": "PR_node_7",
+        }
+        detail = {
+            "state": "open",
+            "draft": False,
+            "base": {"ref": "main"},
+            "head": {"sha": "a" * 40},
+            "mergeable": True,
+            "labels": [],
+        }
+        active = {"enabledAt": "2026-01-01T00:00:00Z", "mergeMethod": "SQUASH"}
+        with (
+            patch.object(native_auto_merge, "merge_request", return_value=active),
+            patch.object(native_auto_merge, "request", return_value=detail),
+            patch.object(native_auto_merge, "admission_check", return_value=(False, True)),
+            patch.object(native_auto_merge, "disable") as disable,
+        ):
+            native_auto_merge.reconcile(summary)
+        disable.assert_called_once_with("PR_node_7")
 
 if __name__ == "__main__":
     unittest.main()
