@@ -46,6 +46,9 @@ def send_event(event: dict[str, Any]) -> bool:
             ok = 200 <= response.status < 300
             print(f"Operational event delivery status: {response.status}")
             return ok
+    except urllib.error.HTTPError as exc:
+        print(f"Operational event delivery failed: HTTP {exc.code}", file=sys.stderr)
+        return False
     except (urllib.error.URLError, TimeoutError) as exc:
         print(f"Operational event delivery failed: {exc.__class__.__name__}", file=sys.stderr)
         return False
