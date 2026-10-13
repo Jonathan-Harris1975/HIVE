@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+from urllib.request import Request
 
 
 SCRIPT = Path(__file__).resolve().parents[2] / ".github" / "scripts" / "inspect_live_council.py"
@@ -9,6 +10,24 @@ SPEC = importlib.util.spec_from_file_location("inspect_live_council", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
 module = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(module)
+
+
+def test_redirect_handler_refuses_redirect_with_authorization_header():
+    request = Request(
+        "https://hive.example/v1/ai-council/status",
+        headers={"Authorization": "Bearer secret"},
+    )
+
+    redirected = module.NoRedirectHandler().redirect_request(
+        request,
+        None,
+        302,
+        "Found",
+        {},
+        "https://attacker.example/collect",
+    )
+
+    assert redirected is None
 
 
 def test_council_summary_reports_http_status_without_response_body():
