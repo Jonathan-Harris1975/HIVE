@@ -269,6 +269,21 @@ class TrustedAdmissionProofTests(unittest.TestCase):
 
     @patch.dict(os.environ, {"ADMISSION_TOKEN": "unit-test", "REPO": "owner/repo"})
     @patch("autonomy_admission_check._request")
+    def test_uppercase_head_sha_is_normalized_before_publication(self, request):
+        request.side_effect = [{"check_runs": []}, {"id": 1}]
+        sha = "A" * 40
+        self.assertTrue(
+            admission_check.set_admission_check(20, sha, "success", "verified")
+        )
+        payload = request.call_args_list[1].args[2]
+        self.assertEqual(payload["head_sha"], sha.lower())
+        self.assertEqual(
+            payload["external_id"],
+            f"trusted-autonomy-admission:20:{sha.lower()}",
+        )
+
+    @patch.dict(os.environ, {"ADMISSION_TOKEN": "unit-test", "REPO": "owner/repo"})
+    @patch("autonomy_admission_check._request")
     def test_existing_check_is_updated_only_when_owned_by_actions(self, request):
         request.side_effect = [
             {"check_runs": [
