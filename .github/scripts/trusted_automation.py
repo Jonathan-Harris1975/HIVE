@@ -16,12 +16,15 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
+from autonomy_admission_check import set_admission_check
+
 API = "https://api.github.com"
 TOKEN = os.environ["GH_TOKEN"]
 REPO = os.environ.get("REPO") or os.environ["GITHUB_REPOSITORY"]
 REQUIRED_WORKFLOWS = [x.strip() for x in os.environ.get("REQUIRED_WORKFLOWS", "").split("|") if x.strip()]
 DEFAULT_BRANCH = os.environ.get("DEFAULT_BRANCH", "main")
 REPAIR_APP_LOGIN = os.environ.get("REPAIR_APP_LOGIN", "")
+VERIFIED_ADMISSION_HEADS: set[tuple[int, str]] = set()
 
 RENOVATE_LOGIN = "renovate[bot]"
 KILO_LOGIN = (os.environ.get("KILO_REPAIR_PR_LOGIN") or "kilo-code-bot[bot]").strip()
@@ -450,17 +453,30 @@ def approve_pr(number: int, sha: str) -> None:
     log(f"Approved PR #{number} at {sha[:12]} after trusted checks passed.")
 
 
-def admit_to_mergify(number: int) -> None:
+def admit_to_mergify(number: int, expected_sha: str) -> None:
     pr = get(f"/repos/{REPO}/pulls/{number}")
     if pr.get("state") != "open":
         return
-    labels = issue_labels(pr)
-    if "autonomy:admitted" in labels:
-        log(f"PR #{number} is already admitted to Mergify.")
+    sha = str(pr.get("head", {}).get("sha", ""))
+    if sha != expected_sha:
+        log(f"PR #{number} head changed before admission evidence could be published.")
         return
-    add_labels(number, ["autonomy:admitted"])
-    log(f"Admitted PR #{number} to Mergify after exact-head CI, CodeQL and security verification.")
-
+    labels = issue_labels(pr)
+    try:
+        set_admission_check(
+            number,
+            sha,
+            "success",
+            "The trusted default-branch workflow verified the PR identity, eligibility, exact-head CI/security checks, and current hold labels.",
+        )
+    except Exception:
+        if "autonomy:admitted" in labels:
+            remove_label(number, "autonomy:admitted")
+        raise
+    if "autonomy:admitted" not in labels:
+        add_labels(number, ["autonomy:admitted"])
+    VERIFIED_ADMISSION_HEADS.add((number, sha))
+    log(f"Admitted PR #{number} to Mergify after trusted exact-head verification.")
 
 def reconcile_stale_carriers(open_prs: list[dict[str, Any]]) -> None:
     """Close verified retired carriers directly, without waiting for Mergify.
@@ -493,7 +509,7 @@ def reconcile_stale_carriers(open_prs: list[dict[str, Any]]) -> None:
         log(f"Closed retired repair carrier PR #{number}.")
 
 
-def reconcile_pr(pr: dict[str, Any]) -> None:
+def _reconcile_pr_candidate(pr: dict[str, Any]) -> None:
     kind = automation_kind(pr)
     if kind is None or pr.get("draft"):
         return
@@ -550,7 +566,30 @@ def reconcile_pr(pr: dict[str, Any]) -> None:
         if current_head_unchanged(number, sha) is None:
             return
 
-    admit_to_mergify(number)
+    admit_to_mergify(number, sha)
+
+
+def reconcile_pr(pr: dict[str, Any]) -> None:
+    number = int(pr["number"])
+    sha = str(pr.get("head", {}).get("sha", ""))
+    key = (number, sha)
+    VERIFIED_ADMISSION_HEADS.discard(key)
+    try:
+        _reconcile_pr_candidate(pr)
+    finally:
+        if key not in VERIFIED_ADMISSION_HEADS:
+            labels = issue_labels(pr)
+            try:
+                set_admission_check(
+                    number,
+                    sha,
+                    "failure",
+                    "Trusted automation did not verify this PR as eligible for autonomous merging. A label alone cannot grant admission.",
+                    create_if_missing="autonomy:admitted" in labels,
+                )
+            finally:
+                if "autonomy:admitted" in labels:
+                    remove_label(number, "autonomy:admitted")
 
 
 def main() -> int:
