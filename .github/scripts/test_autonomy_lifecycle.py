@@ -222,6 +222,7 @@ class RenovateGovernanceTests(unittest.TestCase):
             patch.object(automation, "REPO", "owner/repo"),
             patch.object(automation, "DEFAULT_BRANCH", "main"),
             patch.object(automation, "pr_files", return_value=[".github/workflows/ci.yml"]),
+            patch.object(automation, "has_current_approval", return_value=False),
             patch.object(automation, "place_human_hold") as hold,
             patch.object(automation, "admit_to_mergify") as admit,
         ):
