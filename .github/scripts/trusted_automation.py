@@ -323,10 +323,26 @@ def adopt_linked_cto_prs(open_prs: list[dict[str, Any]]) -> None:
         add_labels(int(pr["number"]), [CTO_IMPLEMENTATION_LABEL])
         log(f"Trusted cto.new implementation PR #{pr['number']} linked to task #{task}.")
 
+def is_owner_codex_pr(pr: dict[str, Any]) -> bool:
+    """Recognise owner-authored, same-repository Codex branches for trusted admission."""
+    branch = str(pr.get("head", {}).get("ref", ""))
+    return (
+        pr.get("user", {}).get("login") == REPO.split("/", 1)[0]
+        and pr.get("state") == "open"
+        and not pr.get("draft")
+        and is_same_repo(pr)
+        and pr.get("base", {}).get("ref") == DEFAULT_BRANCH
+        and branch.startswith("codex/")
+        and BRANCH_PR_RE.fullmatch(branch) is not None
+    )
+
+
 def automation_kind(pr: dict[str, Any]) -> str | None:
     labels = issue_labels(pr)
     if is_renovate(pr):
         return "renovate"
+    if is_owner_codex_pr(pr):
+        return "codex"
     if is_managed_branch_pr(pr):
         return "branch-pr"
     if is_carrier(pr):
@@ -526,10 +542,10 @@ def _reconcile_pr_candidate(pr: dict[str, Any]) -> None:
         # Renovate eligibility is explicit metadata; manual/unlabelled updates remain human merge decisions.
         return
 
-    if kind in {"kilo", "cto", "branch-pr", "renovate"}:
+    if kind in {"kilo", "cto", "branch-pr", "renovate", "codex"}:
         sensitive = [path for path in pr_files(int(pr["number"])) if sensitive_file(path)]
         if sensitive:
-            source = {"kilo": "repair", "cto": "cto.new", "branch-pr": "managed branch", "renovate": "Renovate"}[kind]
+            source = {"kilo": "repair", "cto": "cto.new", "branch-pr": "managed branch", "renovate": "Renovate", "codex": "owner-authorized Codex"}[kind]
             place_human_hold(
                 pr,
                 f"the {source} PR changes governance/security automation files: " + ", ".join(sensitive[:8]),
