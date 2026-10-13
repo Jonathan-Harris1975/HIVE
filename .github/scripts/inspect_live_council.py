@@ -12,14 +12,22 @@ import urllib.request
 from typing import Any
 
 
+class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Do not forward the admin bearer token to redirected endpoints."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 def get_json(base: str, token: str, path: str) -> dict[str, Any]:
     request = urllib.request.Request(
         base.rstrip("/") + path,
         method="GET",
         headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
     )
+    opener = urllib.request.build_opener(NoRedirectHandler)
     try:
-        with urllib.request.urlopen(request, timeout=25) as response:
+        with opener.open(request, timeout=25) as response:
             payload = json.load(response)
     except urllib.error.HTTPError as exc:
         raise RuntimeError(f"GET {path} failed with HTTP {exc.code}") from None
