@@ -12,6 +12,7 @@ os.environ.setdefault("GITHUB_REPOSITORY", "owner/repo")
 
 import branch_pr_automation as branch_controller  # noqa: E402
 import trusted_automation as automation  # noqa: E402
+import autonomy_admission_check as admission_check  # noqa: E402
 
 
 class RepairRetirementTests(unittest.TestCase):
@@ -246,6 +247,56 @@ class RenovateGovernanceTests(unittest.TestCase):
         self.assertIn("dispatch-state: accepted", dispatch)
         self.assertIn("dispatch-state: rejected-http-$status", dispatch)
         self.assertIn('rejected_attempts" -ge 2', dispatch)
+
+
+
+class TrustedAdmissionProofTests(unittest.TestCase):
+    @patch.dict(os.environ, {"ADMISSION_TOKEN": "unit-test", "REPO": "owner/repo"})
+    @patch("autonomy_admission_check._request")
+    def test_success_proof_is_created_for_exact_head(self, request):
+        request.side_effect = [{"check_runs": []}, {"id": 1}]
+        sha = "a" * 40
+        self.assertTrue(
+            admission_check.set_admission_check(17, sha, "success", "verified")
+        )
+        method, path, payload = request.call_args_list[1].args
+        self.assertEqual(method, "POST")
+        self.assertEqual(path, "/repos/owner/repo/check-runs")
+        self.assertEqual(payload["head_sha"], sha)
+        self.assertEqual(payload["name"], "Trusted autonomy admission")
+        self.assertEqual(payload["conclusion"], "success")
+
+    @patch.dict(os.environ, {"ADMISSION_TOKEN": "unit-test", "REPO": "owner/repo"})
+    @patch("autonomy_admission_check._request")
+    def test_existing_check_is_updated_only_when_owned_by_actions(self, request):
+        request.side_effect = [
+            {"check_runs": [
+                {"id": 11, "app": {"slug": "other-app"}, "started_at": "2026-01-01T00:00:00Z"},
+                {"id": 12, "app": {"slug": "github-actions"}, "started_at": "2026-01-02T00:00:00Z"},
+            ]},
+            {},
+        ]
+        sha = "b" * 40
+        self.assertTrue(
+            admission_check.set_admission_check(18, sha, "failure", "withheld")
+        )
+        method, path, payload = request.call_args_list[1].args
+        self.assertEqual(method, "PATCH")
+        self.assertEqual(path, "/repos/owner/repo/check-runs/12")
+        self.assertEqual(payload["head_sha"], sha)
+        self.assertEqual(payload["conclusion"], "failure")
+
+    @patch.dict(os.environ, {"ADMISSION_TOKEN": "unit-test", "REPO": "owner/repo"})
+    @patch("autonomy_admission_check._request")
+    def test_unverified_pr_does_not_create_a_failure_check_unless_label_was_forged(self, request):
+        request.return_value = {"check_runs": []}
+        self.assertFalse(
+            admission_check.set_admission_check(
+                19, "c" * 40, "failure", "not eligible", create_if_missing=False
+            )
+        )
+        self.assertEqual(request.call_count, 1)
+        self.assertEqual(request.call_args.args[0], "GET")
 
 
 if __name__ == "__main__":
