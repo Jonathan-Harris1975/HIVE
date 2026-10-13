@@ -8,6 +8,7 @@ permissions:
 
 jobs:
   inspect:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 3
     environment: production
@@ -15,9 +16,10 @@ jobs:
       HIVE_BASE_URL: ${{ vars.HIVE_BASE_URL }}
       HIVE_ADMIN_TOKEN: ${{ secrets.HIVE_ADMIN_TOKEN }}
     steps:
-      - name: Check out trusted diagnostic
+      - name: Check out trusted diagnostic from main
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: main
           persist-credentials: false
       - name: Read Council status and recent run history
         run: python3 .github/scripts/inspect_live_council.py
