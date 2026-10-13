@@ -97,9 +97,22 @@ def merge_request(pr_node_id: str) -> dict[str, Any] | None:
     return node.get("autoMergeRequest")
 
 
+def merge_method() -> str:
+    settings = request("GET", f"/repos/{REPO}")
+    for setting, method in (
+        ("allow_squash_merge", "SQUASH"),
+        ("allow_merge_commit", "MERGE"),
+        ("allow_rebase_merge", "REBASE"),
+    ):
+        if settings.get(setting):
+            return method
+    raise RuntimeError(f"Repository {REPO} allows no GitHub merge method")
+
+
 def enable(pr_node_id: str) -> None:
+    method = merge_method()
     graphql(
-        "mutation($id: ID!) { enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: SQUASH}) { pullRequest { number } } }",
+        "mutation($id: ID!) { enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: " + method + "}) { pullRequest { number } } }",
         {"id": pr_node_id},
     )
 
