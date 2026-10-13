@@ -121,6 +121,15 @@ def add_labels(number: int, labels: list[str]) -> None:
     post(f"/repos/{REPO}/issues/{number}/labels", {"labels": labels}, expected=(200,))
 
 
+def remove_label(number: int, label: str) -> None:
+    """Remove one issue label idempotently; absent labels are already in the desired state."""
+    encoded = urllib.parse.quote(label, safe="")
+    try:
+        delete(f"/repos/{REPO}/issues/{number}/labels/{encoded}", expected=(200, 204))
+    except ApiError as exc:
+        if exc.status != 404:
+            raise
+
 def comment(number: int, body: str) -> None:
     post(f"/repos/{REPO}/issues/{number}/comments", {"body": body}, expected=(201,))
 
