@@ -520,5 +520,14 @@ class NativeAutoMergeCurrentLabelTests(unittest.TestCase):
         self.assertEqual(request.call_count, 10)
 
 
+    def test_native_merge_method_uses_a_strategy_enabled_by_repo(self):
+        with patch.object(
+            native_auto_merge,
+            "request",
+            return_value={"allow_squash_merge": False, "allow_merge_commit": True, "allow_rebase_merge": True},
+        ):
+            self.assertEqual(native_auto_merge.merge_method(), "MERGE")
+
+
 if __name__ == "__main__":
     unittest.main()
