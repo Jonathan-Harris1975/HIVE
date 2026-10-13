@@ -17,13 +17,13 @@ on:
     - cron: "17 6 * * *"
     - cron: "23 * * * *"
   # Recover branch signals dropped by GitHub concurrency/event delivery.
-  pull_request_target: # zizmor: ignore[dangerous-triggers] trusted default-branch metadata only; no PR checkout or execution
-    types: [labeled, unlabeled, converted_to_draft, ready_for_review, synchronize, reopened]
+  pull_request_target: # zizmor: ignore[dangerous-triggers] trusted default-branch automation reads metadata only and never executes PR code
+    types: [opened, reopened, edited, synchronize, ready_for_review, converted_to_draft, labeled, unlabeled]
   workflow_dispatch:
 
 permissions:
   actions: read
-  checks: read
+  checks: write
   contents: read
   security-events: read
 
@@ -118,6 +118,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           READ_TOKEN: ${{ github.token }}
+          ADMISSION_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           REPAIR_APP_LOGIN: ${{ steps.app_token.outputs.repair_app_login }}
