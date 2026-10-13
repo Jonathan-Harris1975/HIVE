@@ -16,12 +16,15 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
+from autonomy_admission_check import set_admission_check
+
 API = "https://api.github.com"
 TOKEN = os.environ["GH_TOKEN"]
 REPO = os.environ.get("REPO") or os.environ["GITHUB_REPOSITORY"]
 REQUIRED_WORKFLOWS = [x.strip() for x in os.environ.get("REQUIRED_WORKFLOWS", "").split("|") if x.strip()]
 DEFAULT_BRANCH = os.environ.get("DEFAULT_BRANCH", "main")
 REPAIR_APP_LOGIN = os.environ.get("REPAIR_APP_LOGIN", "")
+VERIFIED_ADMISSION_HEADS: set[tuple[int, str]] = set()
 
 RENOVATE_LOGIN = "renovate[bot]"
 KILO_LOGIN = (os.environ.get("KILO_REPAIR_PR_LOGIN") or "kilo-code-bot[bot]").strip()
@@ -117,6 +120,15 @@ def ensure_label(name: str, color: str, description: str) -> None:
 def add_labels(number: int, labels: list[str]) -> None:
     post(f"/repos/{REPO}/issues/{number}/labels", {"labels": labels}, expected=(200,))
 
+
+def remove_label(number: int, label: str) -> None:
+    """Remove one issue label idempotently; absent labels are already in the desired state."""
+    encoded = urllib.parse.quote(label, safe="")
+    try:
+        delete(f"/repos/{REPO}/issues/{number}/labels/{encoded}", expected=(200, 204))
+    except ApiError as exc:
+        if exc.status != 404:
+            raise
 
 def comment(number: int, body: str) -> None:
     post(f"/repos/{REPO}/issues/{number}/comments", {"body": body}, expected=(201,))
@@ -320,10 +332,26 @@ def adopt_linked_cto_prs(open_prs: list[dict[str, Any]]) -> None:
         add_labels(int(pr["number"]), [CTO_IMPLEMENTATION_LABEL])
         log(f"Trusted cto.new implementation PR #{pr['number']} linked to task #{task}.")
 
+def is_owner_codex_pr(pr: dict[str, Any]) -> bool:
+    """Recognise owner-authored, same-repository Codex branches for trusted admission."""
+    branch = str(pr.get("head", {}).get("ref", ""))
+    return (
+        pr.get("user", {}).get("login") == REPO.split("/", 1)[0]
+        and pr.get("state") == "open"
+        and not pr.get("draft")
+        and is_same_repo(pr)
+        and pr.get("base", {}).get("ref") == DEFAULT_BRANCH
+        and branch.startswith("codex/")
+        and BRANCH_PR_RE.fullmatch(branch) is not None
+    )
+
+
 def automation_kind(pr: dict[str, Any]) -> str | None:
     labels = issue_labels(pr)
     if is_renovate(pr):
         return "renovate"
+    if is_owner_codex_pr(pr):
+        return "codex"
     if is_managed_branch_pr(pr):
         return "branch-pr"
     if is_carrier(pr):
@@ -450,17 +478,45 @@ def approve_pr(number: int, sha: str) -> None:
     log(f"Approved PR #{number} at {sha[:12]} after trusted checks passed.")
 
 
-def admit_to_mergify(number: int) -> None:
+def admit_to_mergify(number: int, expected_sha: str) -> None:
     pr = get(f"/repos/{REPO}/pulls/{number}")
     if pr.get("state") != "open":
         return
-    labels = issue_labels(pr)
-    if "autonomy:admitted" in labels:
-        log(f"PR #{number} is already admitted to Mergify.")
+    sha = str(pr.get("head", {}).get("sha", ""))
+    if sha != expected_sha:
+        log(f"PR #{number} head changed before admission evidence could be published.")
         return
-    add_labels(number, ["autonomy:admitted"])
-    log(f"Admitted PR #{number} to Mergify after exact-head CI, CodeQL and security verification.")
-
+    labels = issue_labels(pr)
+    blocking_labels = {
+        "autonomy:human-hold",
+        "autonomy:council-freeze",
+        "autonomy:superseded",
+        "autonomy:obsolete",
+        "do-not-merge",
+        "needs-manual-review",
+        "needs-human-review",
+        "hold",
+    }
+    if labels.intersection(blocking_labels):
+        if "autonomy:admitted" in labels:
+            remove_label(number, "autonomy:admitted")
+        log(f"PR #{number} has a blocking hold label; withholding admission.")
+        return
+    try:
+        set_admission_check(
+            number,
+            expected_sha,
+            "success",
+            "The trusted default-branch workflow verified the PR identity, eligibility, exact-head CI/security checks, and current hold labels.",
+        )
+    except Exception:
+        if "autonomy:admitted" in labels:
+            remove_label(number, "autonomy:admitted")
+        raise
+    if "autonomy:admitted" not in labels:
+        add_labels(number, ["autonomy:admitted"])
+    VERIFIED_ADMISSION_HEADS.add((number, expected_sha))
+    log(f"Admitted PR #{number} to Mergify after trusted exact-head verification.")
 
 def reconcile_stale_carriers(open_prs: list[dict[str, Any]]) -> None:
     """Close verified retired carriers directly, without waiting for Mergify.
@@ -493,7 +549,7 @@ def reconcile_stale_carriers(open_prs: list[dict[str, Any]]) -> None:
         log(f"Closed retired repair carrier PR #{number}.")
 
 
-def reconcile_pr(pr: dict[str, Any]) -> None:
+def _reconcile_pr_candidate(pr: dict[str, Any]) -> None:
     kind = automation_kind(pr)
     if kind is None or pr.get("draft"):
         return
@@ -510,10 +566,10 @@ def reconcile_pr(pr: dict[str, Any]) -> None:
         # Renovate eligibility is explicit metadata; manual/unlabelled updates remain human merge decisions.
         return
 
-    if kind in {"kilo", "cto", "branch-pr", "renovate"}:
+    if kind in {"kilo", "cto", "branch-pr", "renovate", "codex"}:
         sensitive = [path for path in pr_files(int(pr["number"])) if sensitive_file(path)]
         if sensitive:
-            source = {"kilo": "repair", "cto": "cto.new", "branch-pr": "managed branch", "renovate": "Renovate"}[kind]
+            source = {"kilo": "repair", "cto": "cto.new", "branch-pr": "managed branch", "renovate": "Renovate", "codex": "owner-authorized Codex"}[kind]
             place_human_hold(
                 pr,
                 f"the {source} PR changes governance/security automation files: " + ", ".join(sensitive[:8]),
@@ -550,7 +606,34 @@ def reconcile_pr(pr: dict[str, Any]) -> None:
         if current_head_unchanged(number, sha) is None:
             return
 
-    admit_to_mergify(number)
+    admit_to_mergify(number, sha)
+
+
+def reconcile_pr(pr: dict[str, Any]) -> None:
+    number = int(pr["number"])
+    sha = str(pr.get("head", {}).get("sha", ""))
+    key = (number, sha)
+    VERIFIED_ADMISSION_HEADS.discard(key)
+    try:
+        _reconcile_pr_candidate(pr)
+    finally:
+        labels = issue_labels(pr)
+        if not os.environ.get("ADMISSION_TOKEN"):
+            # Fail closed in local tests or misconfigured runs; production workflows supply this token.
+            if "autonomy:admitted" in labels:
+                remove_label(number, "autonomy:admitted")
+        elif key not in VERIFIED_ADMISSION_HEADS:
+            try:
+                set_admission_check(
+                    number,
+                    sha,
+                    "failure",
+                    "Trusted automation did not verify this PR as eligible for autonomous merging. A label alone cannot grant admission.",
+                    create_if_missing="autonomy:admitted" in labels,
+                )
+            finally:
+                if "autonomy:admitted" in labels:
+                    remove_label(number, "autonomy:admitted")
 
 
 def main() -> int:
@@ -587,7 +670,8 @@ def main() -> int:
     # Reconcile current trusted PRs. Runs admitted above will normally become ready on a later
     # workflow_run completion or scheduled reconciliation.
     for pr in open_prs:
-        reconcile_pr(pr)
+        if automation_kind(pr) is not None or "autonomy:admitted" in issue_labels(pr):
+            reconcile_pr(pr)
     return 0
 
 

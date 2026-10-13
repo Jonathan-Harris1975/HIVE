@@ -12,6 +12,7 @@ os.environ.setdefault("GITHUB_REPOSITORY", "owner/repo")
 
 import branch_pr_automation as branch_controller  # noqa: E402
 import trusted_automation as automation  # noqa: E402
+import autonomy_admission_check as admission_check  # noqa: E402
 
 
 class RepairRetirementTests(unittest.TestCase):
@@ -140,7 +141,7 @@ class ManagedBranchOwnershipTests(unittest.TestCase):
 
         automation.reconcile_pr(copy.deepcopy(self.pr))
 
-        admit.assert_called_once_with(22)
+        admit.assert_called_once_with(22, self.sha)
         approve.assert_not_called()
 
     def test_managed_branch_pr_touching_protected_controls_gets_human_hold(self):
@@ -221,6 +222,7 @@ class RenovateGovernanceTests(unittest.TestCase):
             patch.object(automation, "REPO", "owner/repo"),
             patch.object(automation, "DEFAULT_BRANCH", "main"),
             patch.object(automation, "pr_files", return_value=[".github/workflows/ci.yml"]),
+            patch.object(automation, "has_current_approval", return_value=False),
             patch.object(automation, "place_human_hold") as hold,
             patch.object(automation, "admit_to_mergify") as admit,
         ):
@@ -246,6 +248,177 @@ class RenovateGovernanceTests(unittest.TestCase):
         self.assertIn("dispatch-state: accepted", dispatch)
         self.assertIn("dispatch-state: rejected-http-$status", dispatch)
         self.assertIn('rejected_attempts" -ge 2', dispatch)
+
+
+
+class TrustedAdmissionProofTests(unittest.TestCase):
+    @patch.dict(os.environ, {"ADMISSION_TOKEN": "unit-test", "REPO": "owner/repo"})
+    @patch("autonomy_admission_check._request")
+    def test_success_proof_is_created_for_exact_head(self, request):
+        request.side_effect = [{"check_runs": []}, {"id": 1}]
+        sha = "a" * 40
+        self.assertTrue(
+            admission_check.set_admission_check(17, sha, "success", "verified")
+        )
+        method, path, payload = request.call_args_list[1].args
+        self.assertEqual(method, "POST")
+        self.assertEqual(path, "/repos/owner/repo/check-runs")
+        self.assertEqual(payload["head_sha"], sha)
+        self.assertEqual(payload["name"], "Trusted autonomy admission")
+        self.assertEqual(payload["conclusion"], "success")
+
+    @patch.dict(os.environ, {"ADMISSION_TOKEN": "unit-test", "REPO": "owner/repo"})
+    @patch("autonomy_admission_check._request")
+    def test_uppercase_head_sha_is_normalized_before_publication(self, request):
+        request.side_effect = [{"check_runs": []}, {"id": 1}]
+        sha = "A" * 40
+        self.assertTrue(
+            admission_check.set_admission_check(20, sha, "success", "verified")
+        )
+        payload = request.call_args_list[1].args[2]
+        self.assertEqual(payload["head_sha"], sha.lower())
+        self.assertEqual(
+            payload["external_id"],
+            f"trusted-autonomy-admission:20:{sha.lower()}",
+        )
+
+    @patch.dict(os.environ, {"ADMISSION_TOKEN": "unit-test", "REPO": "owner/repo"})
+    @patch("autonomy_admission_check._request")
+    def test_existing_check_is_updated_only_when_owned_by_actions(self, request):
+        request.side_effect = [
+            {"check_runs": [
+                {"id": 11, "app": {"slug": "other-app"}, "started_at": "2026-01-01T00:00:00Z"},
+                {"id": 12, "app": {"slug": "github-actions"}, "started_at": "2026-01-02T00:00:00Z"},
+            ]},
+            {},
+        ]
+        sha = "b" * 40
+        self.assertTrue(
+            admission_check.set_admission_check(18, sha, "failure", "withheld")
+        )
+        method, path, payload = request.call_args_list[1].args
+        self.assertEqual(method, "PATCH")
+        self.assertEqual(path, "/repos/owner/repo/check-runs/12")
+        self.assertEqual(payload["head_sha"], sha)
+        self.assertEqual(payload["conclusion"], "failure")
+
+    @patch.dict(os.environ, {"ADMISSION_TOKEN": "unit-test", "REPO": "owner/repo"})
+    @patch("autonomy_admission_check._request")
+    def test_unverified_pr_does_not_create_a_failure_check_unless_label_was_forged(self, request):
+        request.return_value = {"check_runs": []}
+        self.assertFalse(
+            admission_check.set_admission_check(
+                19, "c" * 40, "failure", "not eligible", create_if_missing=False
+            )
+        )
+        self.assertEqual(request.call_count, 1)
+        self.assertEqual(request.call_args.args[0], "GET")
+
+
+class AdmissionLifecycleProofTests(unittest.TestCase):
+    def test_label_alone_is_withdrawn_when_trusted_validation_did_not_admit(self):
+        number = 201
+        sha = "d" * 40
+        pr = {"number": number, "head": {"sha": sha}, "labels": [{"name": "autonomy:admitted"}]}
+        with (
+            patch.dict(os.environ, {"ADMISSION_TOKEN": "unit-test", "REPO": "owner/repo"}),
+            patch.object(automation, "_reconcile_pr_candidate"),
+            patch.object(automation, "set_admission_check") as set_check,
+            patch.object(automation, "remove_label") as remove_label,
+        ):
+            automation.reconcile_pr(pr)
+        set_check.assert_called_once()
+        args, kwargs = set_check.call_args
+        self.assertEqual(args[:3], (number, sha, "failure"))
+        self.assertTrue(kwargs["create_if_missing"])
+        remove_label.assert_called_once_with(number, "autonomy:admitted")
+
+    def test_only_successful_trusted_validation_keeps_admission(self):
+        number = 202
+        sha = "e" * 40
+        pr = {"number": number, "head": {"sha": sha}, "labels": [{"name": "autonomy:admitted"}]}
+        def verified(candidate):
+            automation.VERIFIED_ADMISSION_HEADS.add((number, sha))
+        with (
+            patch.dict(os.environ, {"ADMISSION_TOKEN": "unit-test", "REPO": "owner/repo"}),
+            patch.object(automation, "_reconcile_pr_candidate", side_effect=verified),
+            patch.object(automation, "set_admission_check") as set_check,
+            patch.object(automation, "remove_label") as remove_label,
+        ):
+            automation.reconcile_pr(pr)
+        set_check.assert_not_called()
+        remove_label.assert_not_called()
+
+
+class OwnerCodexAdmissionTests(unittest.TestCase):
+    def setUp(self):
+        self.sha = "f" * 40
+        self.pr = {
+            "number": 301,
+            "state": "open",
+            "draft": False,
+            "user": {"login": "owner"},
+            "head": {
+                "ref": "codex/fix-low-risk",
+                "sha": self.sha,
+                "repo": {"full_name": "owner/repo"},
+            },
+            "base": {"ref": "main"},
+            "labels": [],
+            "body": "Verified routine task",
+        }
+        self.enterContext(patch.object(automation, "REPO", "owner/repo"))
+        self.enterContext(patch.object(automation, "DEFAULT_BRANCH", "main"))
+        self.enterContext(patch.object(automation, "REPAIR_APP_LOGIN", "repair[bot]"))
+
+    def test_owner_authored_same_repo_codex_branch_is_recognized(self):
+        self.assertTrue(automation.is_owner_codex_pr(self.pr))
+        self.assertEqual(automation.automation_kind(self.pr), "codex")
+
+    def test_fork_author_draft_and_non_codex_branches_are_not_eligible(self):
+        for change in (
+            {"head": {"ref": "codex/fix-low-risk", "sha": self.sha, "repo": {"full_name": "fork/repo"}}},
+            {"user": {"login": "someone-else"}},
+            {"head": {"ref": "feature/fix-low-risk", "sha": self.sha, "repo": {"full_name": "owner/repo"}}},
+            {"draft": True},
+        ):
+            candidate = copy.deepcopy(self.pr)
+            candidate.update(change)
+            self.assertFalse(automation.is_owner_codex_pr(candidate))
+
+    def test_sensitive_owner_codex_changes_are_held(self):
+        with (
+            patch.dict(os.environ, {"ADMISSION_TOKEN": "unit-test", "REPO": "owner/repo"}),
+            patch.object(automation, "pr_files", return_value=[".github/workflows/ci.yml"]),
+            patch.object(automation, "place_human_hold") as hold,
+            patch.object(automation, "admit_to_mergify") as admit,
+            patch.object(automation, "set_admission_check"),
+            patch.object(automation, "remove_label"),
+        ):
+            automation.reconcile_pr(self.pr)
+        hold.assert_called_once()
+        admit.assert_not_called()
+
+
+
+
+class AdmissionRetryDelayTests(unittest.TestCase):
+    @patch("autonomy_admission_check.time.time", return_value=30)
+    def test_retry_after_http_date_is_parsed(self, _now):
+        self.assertEqual(
+            admission_check._retry_delay(
+                "Thu, 01 Jan 1970 00:00:45 GMT", None, None, 0
+            ),
+            15.0,
+        )
+
+    def test_delta_seconds_and_invalid_headers(self):
+        self.assertEqual(admission_check._retry_delay("5", None, None, 0), 5.0)
+        self.assertEqual(admission_check._retry_delay("invalid", None, None, 2), 4.0)
+
+    @patch("autonomy_admission_check.time.time", return_value=30)
+    def test_rate_limit_reset_is_bounded(self, _now):
+        self.assertEqual(admission_check._retry_delay(None, "100", "0", 1), 30.0)
 
 
 if __name__ == "__main__":
