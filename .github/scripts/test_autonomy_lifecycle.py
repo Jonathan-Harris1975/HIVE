@@ -373,7 +373,7 @@ class OwnerCodexAdmissionTests(unittest.TestCase):
     def test_sensitive_owner_codex_changes_are_held(self):
         with (
             patch.dict(os.environ, {"ADMISSION_TOKEN": "unit-test", "REPO": "owner/repo"}),
-            patch.object(automation, "council_evidence_freeze", return_value=(False, "clear")),
+            patch.object(automation, "council_evidence_freeze", return_value=(False, "clear"), create=True),
             patch.object(automation, "pr_files", return_value=[".github/workflows/ci.yml"]),
             patch.object(automation, "place_human_hold") as hold,
             patch.object(automation, "admit_to_mergify") as admit,
