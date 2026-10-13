@@ -9,7 +9,7 @@ merge_protections_settings:
   auto_merge_conditions:
     - base = main
     - label = autonomy:admitted
-    - label = autonomy:admitted
+    - check-success = Trusted autonomy admission
     - check-success = ci-gate
     - check-success = CodeQL security alert gate
     - check-success = Trivy, Gitleaks and actionlint
@@ -29,7 +29,7 @@ merge_protections:
     if:
       - base = main
       - label = autonomy:admitted
-      - label = autonomy:admitted
+      - check-success = Trusted autonomy admission
     success_conditions:
       - check-success = ci-gate
       - check-success = CodeQL security alert gate
@@ -53,7 +53,7 @@ queue_rules:
     queue_conditions:
       - base = main
       - label = autonomy:admitted
-      - label = autonomy:admitted
+      - check-success = Trusted autonomy admission
       - check-success = ci-gate
       - check-success = CodeQL security alert gate
       - check-success = Trivy, Gitleaks and actionlint
@@ -65,7 +65,7 @@ queue_rules:
     merge_conditions:
       - base = main
       - label = autonomy:admitted
-      - label = autonomy:admitted
+      - check-success = Trusted autonomy admission
       - check-success = ci-gate
       - check-success = CodeQL security alert gate
       - check-success = Trivy, Gitleaks and actionlint
