@@ -107,8 +107,10 @@ def set_admission_check(
     create_if_missing: bool = True,
 ) -> bool:
     """Create/update trusted evidence for exactly this PR head; never trusts the label."""
-    if not re.fullmatch(r"[0-9a-f]{40}", sha):
+    if not re.fullmatch(r"[0-9a-fA-F]{40}", sha):
         raise ValueError("Admission check requires a full 40-character commit SHA")
+    # GitHub returns lowercase SHAs; canonicalize valid case-insensitive hex input.
+    sha = sha.lower()
     if conclusion not in {"success", "failure"}:
         raise ValueError("Admission check conclusion must be success or failure")
 
