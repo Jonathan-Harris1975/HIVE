@@ -334,5 +334,56 @@ class AdmissionLifecycleProofTests(unittest.TestCase):
         remove_label.assert_not_called()
 
 
+class OwnerCodexAdmissionTests(unittest.TestCase):
+    def setUp(self):
+        self.sha = "f" * 40
+        self.pr = {
+            "number": 301,
+            "state": "open",
+            "draft": False,
+            "user": {"login": "owner"},
+            "head": {
+                "ref": "codex/fix-low-risk",
+                "sha": self.sha,
+                "repo": {"full_name": "owner/repo"},
+            },
+            "base": {"ref": "main"},
+            "labels": [],
+            "body": "Verified routine task",
+        }
+        self.enterContext(patch.object(automation, "REPO", "owner/repo"))
+        self.enterContext(patch.object(automation, "DEFAULT_BRANCH", "main"))
+        self.enterContext(patch.object(automation, "REPAIR_APP_LOGIN", "repair[bot]"))
+
+    def test_owner_authored_same_repo_codex_branch_is_recognized(self):
+        self.assertTrue(automation.is_owner_codex_pr(self.pr))
+        self.assertEqual(automation.automation_kind(self.pr), "codex")
+
+    def test_fork_author_draft_and_non_codex_branches_are_not_eligible(self):
+        for change in (
+            {"head": {"ref": "codex/fix-low-risk", "sha": self.sha, "repo": {"full_name": "fork/repo"}}},
+            {"user": {"login": "someone-else"}},
+            {"head": {"ref": "feature/fix-low-risk", "sha": self.sha, "repo": {"full_name": "owner/repo"}}},
+            {"draft": True},
+        ):
+            candidate = copy.deepcopy(self.pr)
+            candidate.update(change)
+            self.assertFalse(automation.is_owner_codex_pr(candidate))
+
+    def test_sensitive_owner_codex_changes_are_held(self):
+        with (
+            patch.dict(os.environ, {"ADMISSION_TOKEN": "unit-test", "REPO": "owner/repo"}),
+            patch.object(automation, "council_evidence_freeze", return_value=(False, "clear")),
+            patch.object(automation, "pr_files", return_value=[".github/workflows/ci.yml"]),
+            patch.object(automation, "place_human_hold") as hold,
+            patch.object(automation, "admit_to_mergify") as admit,
+            patch.object(automation, "set_admission_check"),
+            patch.object(automation, "remove_label"),
+        ):
+            automation.reconcile_pr(self.pr)
+        hold.assert_called_once()
+        admit.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
