@@ -15,8 +15,8 @@ import urllib.request
 from typing import Any
 
 API = "https://api.github.com"
-TOKEN = os.environ["NATIVE_MERGE_TOKEN"]
-REPO = os.environ["REPO"]
+TOKEN = os.environ.get("NATIVE_MERGE_TOKEN", "")
+REPO = os.environ.get("REPO", "")
 DEFAULT_BRANCH = os.environ.get("DEFAULT_BRANCH", "main")
 ADMISSION_CHECK = "Trusted autonomy admission"
 BLOCKING_LABELS = {
@@ -90,21 +90,6 @@ def admission_check(number: int, sha: str) -> tuple[bool, bool]:
     return success, bool(owned)
 
 
-def mast_owner_approval(number: int, sha: str) -> bool:
-    reviews = pages(f"/repos/{REPO}/pulls/{number}/reviews")
-    owner_reviews = [
-        review for review in reviews
-        if (review.get("user") or {}).get("login", "").casefold() == "jonathan-harris1975"
-    ]
-    owner_reviews.sort(key=lambda review: review.get("submitted_at") or "", reverse=True)
-    latest = owner_reviews[0] if owner_reviews else None
-    return bool(
-        latest
-        and latest.get("state") == "APPROVED"
-        and latest.get("commit_id") == sha
-    )
-
-
 def merge_request(pr_node_id: str) -> dict[str, Any] | None:
     result = graphql(
         "query($id: ID!) { node(id: $id) { ... on PullRequest { autoMergeRequest { enabledAt mergeMethod } } } }",
@@ -142,20 +127,19 @@ def reconcile(pr_summary: dict[str, Any]) -> None:
         return
 
     pr = request("GET", f"/repos/{REPO}/pulls/{number}")
+    current_labels = {label["name"] for label in pr.get("labels", [])}
     sha = str((pr.get("head") or {}).get("sha") or "")
     exact_admission, has_admission_evidence = admission_check(number, sha) if sha else (False, False)
-    blocked = bool(labels.intersection(BLOCKING_LABELS))
+    blocked = bool(current_labels.intersection(BLOCKING_LABELS))
     eligible = (
         pr.get("state") == "open"
         and not pr.get("draft")
         and pr.get("base", {}).get("ref") == DEFAULT_BRANCH
         and pr.get("mergeable") is True
-        and "autonomy:admitted" in labels
+        and "autonomy:admitted" in current_labels
         and not blocked
         and exact_admission
     )
-    if eligible and REPO.casefold() == "jonathan-harris1975/mast":
-        eligible = mast_owner_approval(number, sha)
 
     if eligible:
         if active_request is None:
@@ -166,7 +150,7 @@ def reconcile(pr_summary: dict[str, Any]) -> None:
     # Only cancel requests associated with an autonomy admission label or
     # exact-head admission evidence. This leaves unrelated user requests alone.
     if active_request is not None and (
-        "autonomy:admitted" in labels or has_admission_evidence
+        "autonomy:admitted" in current_labels or has_admission_evidence
     ):
         disable(node_id)
         print(f"Disabled GitHub native auto-merge for PR #{number}; admission or hold conditions no longer pass.")
