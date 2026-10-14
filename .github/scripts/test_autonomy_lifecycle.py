@@ -152,12 +152,9 @@ class ManagedBranchOwnershipTests(unittest.TestCase):
         hold = self.enterContext(patch.object(automation, "place_human_hold"))
         admit = self.enterContext(patch.object(automation, "admit_to_mergify"))
         self.enterContext(
-            patch.object(
-                automation,
-                "pr_files",
-                return_value=[".github/workflows/security.yml"],
-            )
+            patch.object(automation, "pr_files", return_value=[".github/workflows/security.yml"])
         )
+        self.enterContext(patch.object(automation, "has_operator_risk_approval", return_value=False))
 
         automation.reconcile_pr(copy.deepcopy(self.pr))
 
@@ -165,9 +162,6 @@ class ManagedBranchOwnershipTests(unittest.TestCase):
         admit.assert_not_called()
         risk_label.assert_called_once_with(self.pr["number"], [automation.RISK_APPROVAL_LABEL])
 
-
-class KiloPolicyTests(unittest.TestCase):
-    @classmethod
     def setUpClass(cls):
         root = Path(__file__).resolve().parents[2]
         cls.policy = json.loads((root / "kilo.jsonc").read_text(encoding="utf-8"))
