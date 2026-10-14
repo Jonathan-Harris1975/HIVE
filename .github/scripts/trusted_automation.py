@@ -10,6 +10,7 @@ import os
 import re
 import subprocess
 import sys
+from datetime import datetime
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -69,14 +70,20 @@ RISK_HIGH_RISK_BASENAMES = {
     "fly.toml", "wrangler.toml", "wrangler.json", "wrangler.jsonc",
     "vercel.json", "netlify.toml", "render.yaml", "package.json",
     "package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml",
-    "pyproject.toml", "poetry.lock", "requirements.txt", "pipfile", "pipfile.lock",
+    "pyproject.toml", "poetry.lock", "requirements.txt", "requirements.in", "pipfile", "pipfile.lock",
     "uv.lock", "cargo.toml", "cargo.lock", "go.mod", "go.sum",
     "composer.json", "composer.lock", "gemfile", "gemfile.lock",
 }
 RISK_HIGH_RISK_SEGMENTS = {
     "auth", "authentication", "authorization", "security", "crypto", "oidc",
     "saml", "rbac", "permissions", "secrets", "migrations", "migration",
+    "gateway", "middleware",
 }
+RISK_HIGH_RISK_NAME_STEMS = (
+    "auth", "authentication", "authorization", "security", "crypto", "oidc",
+    "saml", "rbac", "permission", "secret", "session", "middleware", "gateway",
+    "deploy", "deployment",
+)
 
 RISK_LOW_RISK_PREFIXES_BY_REPO = {
     "AIMS": ("routes/", "services/"),
@@ -479,19 +486,23 @@ def pr_files(number: int) -> list[str]:
     names: list[str] = []
     for page in range(1, 11):
         chunk = get(f"/repos/{REPO}/pulls/{number}/files?per_page=100&page={page}")
-        names.extend(str(item.get("filename", "")) for item in chunk)
+        for item in chunk:
+            names.append(str(item.get("filename", "")))
+            previous = item.get("previous_filename")
+            if previous:
+                names.append(str(previous))
         if len(chunk) < 100:
-            return names
+            return list(dict.fromkeys(names))
     raise RuntimeError(f"PR #{number} has too many changed files to verify safely")
 
 
 def sensitive_file(path: str) -> bool:
     """Return True for high-risk or unclassified paths; only explicit low-risk paths pass."""
-    normalized = path.replace("\\", "/")
+    normalized = path.replace("\\", "/").removeprefix("./")
     folded = normalized.casefold()
     repo_name = REPO.rsplit("/", 1)[-1]
     basename = folded.rsplit("/", 1)[-1]
-    if path in KILO_SENSITIVE_EXACT:
+    if folded in {item.casefold() for item in KILO_SENSITIVE_EXACT}:
         return True
     if any(folded == prefix.casefold().rstrip("/") or folded.startswith(prefix.casefold())
            for prefix in KILO_SENSITIVE_PREFIXES + RISK_HIGH_RISK_PREFIXES):
@@ -505,13 +516,16 @@ def sensitive_file(path: str) -> bool:
         ("dockerfile.", "containerfile.", "requirements-")
     ):
         return True
+    stem_tokens = re.split(r"[^a-z0-9]+", basename)
+    if any(stem in token for token in stem_tokens for stem in RISK_HIGH_RISK_NAME_STEMS):
+        return True
     if basename.endswith((".tf", ".tfvars", ".sql", ".prisma")):
         return True
 
     # Documentation is eligible only in its dedicated directory or the two
     # root-level project notes listed below.
     extension = "." + basename.rsplit(".", 1)[-1] if "." in basename else ""
-    if basename in RISK_LOW_RISK_ROOT_FILES:
+    if folded in RISK_LOW_RISK_ROOT_FILES:
         return False
     if folded.startswith("docs/") and extension in RISK_LOW_RISK_DOC_EXTENSIONS:
         return False
@@ -545,11 +559,23 @@ def has_operator_risk_approval(number: int, sha: str) -> bool:
     else:
         raise RuntimeError(f"PR #{number} has too many review records to verify safely")
 
+    def timestamp_order(item: dict[str, Any], key: str) -> float:
+        value = item.get(key)
+        if not isinstance(value, str) or not value:
+            return float("-inf")
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            return float("-inf")
+
+    if any(timestamp_order(review, "submitted_at") == float("-inf") for review in owner_reviews):
+        return False
     latest_review = max(
         owner_reviews,
-        key=lambda review: str(review.get("submitted_at") or ""),
+        key=lambda review: timestamp_order(review, "submitted_at"),
         default=None,
     )
+    latest_review_time = timestamp_order(latest_review, "submitted_at") if latest_review else None
     if (
         latest_review
         and latest_review.get("state") == "APPROVED"
@@ -572,28 +598,34 @@ def has_operator_risk_approval(number: int, sha: str) -> bool:
     else:
         raise RuntimeError(f"PR #{number} has too many comments to verify safely")
 
+    if any(timestamp_order(item, "created_at") == float("-inf") for item in owner_comments):
+        return False
     latest_approval_comment = max(
         owner_comments,
-        key=lambda item: str(item.get("created_at") or ""),
+        key=lambda item: timestamp_order(item, "created_at"),
         default=None,
     )
     if not latest_approval_comment:
         return False
-    comment_time = str(latest_approval_comment.get("created_at") or "")
-    review_time = str((latest_review or {}).get("submitted_at") or "")
-    return bool(comment_time and comment_time > review_time)
+    comment_time = timestamp_order(latest_approval_comment, "created_at")
+    if comment_time == float("-inf"):
+        return False
+    return latest_review_time is None or comment_time > latest_review_time
 
 
 def require_operator_risk_approval(pr: dict[str, Any], paths: list[str], kind: str) -> bool:
     """Hold high-risk autonomous changes until the repository owner approves the exact head SHA."""
-    risky_paths = [path for path in paths if sensitive_file(path)]
-    if not risky_paths:
-        return False
+    risky_paths = list(dict.fromkeys(path for path in paths if sensitive_file(path)))
     number = int(pr["number"])
+    labels = issue_labels(pr)
+    if not risky_paths:
+        if RISK_APPROVAL_LABEL in labels:
+            remove_label(number, RISK_APPROVAL_LABEL)
+            log(f"Cleared stale risk approval hold for PR #{number}: its current diff has no high-risk paths.")
+        return False
     sha = str(pr.get("head", {}).get("sha", ""))
     if not re.fullmatch(r"[0-9a-f]{40}", sha):
         raise RuntimeError(f"PR #{number} has no valid head SHA for risk approval")
-    labels = issue_labels(pr)
     if has_operator_risk_approval(number, sha):
         if RISK_APPROVAL_LABEL in labels:
             remove_label(number, RISK_APPROVAL_LABEL)
@@ -605,7 +637,7 @@ def require_operator_risk_approval(pr: dict[str, Any], paths: list[str], kind: s
             number,
             f"Autonomous merge is paused for high-risk or unclassified changes. The repository owner must approve this exact head "
             f"SHA: submit an approving review, or comment `/risk-approve {sha}`. Any new commit requires fresh approval. "
-            f"Paths: {', '.join(risky_paths[:8])}",
+            f"Paths: {', '.join(risky_paths[:8])}{f' … and {len(risky_paths) - 8} more' if len(risky_paths) > 8 else ''}",
         )
     if "autonomy:admitted" in labels:
         remove_label(number, "autonomy:admitted")
@@ -630,8 +662,22 @@ def risk_policy_contract_test() -> None:
         ".github/workflows/ci.yml", ".github/scripts/trusted_automation.py",
         "infra/main.tf", "backend/alembic/versions/001.sql",
         "src/auth/session.ts", "package-lock.json", "tests/test_auth.py",
-        "unknown/README.txt",
+        "unknown/README.txt", "unknown/README.md",
     )
+    repo_high_risk_samples = {
+        "AIMS": (
+            "services/shared/middleware/suiteAuth.js",
+            "services/comms-hub/domain/rbac.js",
+            "services/comms-hub/domain/promptSecurity.js",
+            "scripts/deployCommsHubDataPlaneWorker.js",
+            "config/deployment-check.js",
+        ),
+        "AIMS-UI": ("workers/gateway/index.js", "workers/gateway/security.ts", "scripts/deploy-production.mjs"),
+        "HIVE": ("requirements.in", "requirements-dev.txt", "backend/app/core/security.py"),
+        "HIVE-UI": ("workers/gateway/security.ts", "src/lib/session.ts", "src/context/AuthContext.tsx"),
+        "MAST": ("src/security.js",),
+    }
+    high_risk += repo_high_risk_samples.get(repo_name, ())
     low_risk = ("docs/runbook.md", "README.md")
     if repo_name in low_risk_samples:
         low_risk += (low_risk_samples[repo_name],)
@@ -767,12 +813,7 @@ def _reconcile_pr_candidate(pr: dict[str, Any]) -> None:
     if kind in {"kilo", "cto", "branch-pr", "renovate", "codex"}:
         number = int(pr["number"])
         changed_paths = pr_files(number)
-        approved_pin_only = (
-            REPO.endswith("/AIMS-UI")
-            and kind == "renovate"
-            and renovate_sensitive_changes_are_dependency_pins(number)
-        ) if "renovate_sensitive_changes_are_dependency_pins" in globals() else False
-        if not approved_pin_only and require_operator_risk_approval(pr, changed_paths, kind):
+        if require_operator_risk_approval(pr, changed_paths, kind):
             return
 
     if kind == "kilo":
