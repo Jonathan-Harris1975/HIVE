@@ -227,13 +227,16 @@ class RenovateGovernanceTests(unittest.TestCase):
             patch.object(automation, "REPO", "owner/repo"),
             patch.object(automation, "DEFAULT_BRANCH", "main"),
             patch.object(automation, "pr_files", return_value=[".github/workflows/ci.yml"]),
-            patch.object(automation, "has_current_approval", return_value=False),
+            patch.object(automation, "has_operator_risk_approval", return_value=False),
+            patch.object(automation, "add_labels") as risk_label,
+            patch.object(automation, "comment"),
             patch.object(automation, "place_human_hold") as hold,
             patch.object(automation, "admit_to_mergify") as admit,
         ):
             automation.reconcile_pr(pr)
-        hold.assert_called_once()
+        hold.assert_not_called()
         admit.assert_not_called()
+        risk_label.assert_called_once_with(pr["number"], [automation.RISK_APPROVAL_LABEL])
 
     def test_main_repair_reserves_marker_before_kilo_and_acknowledges_after(self):
         root = Path(__file__).resolve().parents[1]
