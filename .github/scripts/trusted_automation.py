@@ -78,6 +78,32 @@ RISK_HIGH_RISK_SEGMENTS = {
     "saml", "rbac", "permissions", "secrets", "migrations", "migration",
 }
 
+RISK_LOW_RISK_PREFIXES_BY_REPO = {
+    "AIMS": ("routes/", "services/"),
+    "AIMS-UI": ("apps/", "packages/"),
+    "HIVE": ("backend/app/",),
+    "HIVE-UI": ("src/",),
+    "IRS": ("public/",),
+    "RAMS": (),
+    "MAST": (),
+    "jonathan-harris-website": (
+        "blog/", "bio/", "book-finder/", "glossary/", "topics/",
+        "transcripts/", "podcast/", "resources/", "for-teams/",
+    ),
+}
+RISK_LOW_RISK_CODE_EXTENSIONS_BY_REPO = {
+    "AIMS": {".js", ".jsx", ".ts", ".tsx"},
+    "AIMS-UI": {".js", ".jsx", ".ts", ".tsx", ".css", ".scss", ".html", ".svg"},
+    "HIVE": {".py"},
+    "HIVE-UI": {".js", ".jsx", ".ts", ".tsx", ".css", ".scss", ".html", ".svg"},
+    "IRS": {".css", ".html", ".svg"},
+    "RAMS": set(),
+    "MAST": set(),
+    "jonathan-harris-website": {".md", ".mdx"},
+}
+RISK_LOW_RISK_DOC_EXTENSIONS = {".md", ".mdx", ".rst"}
+RISK_LOW_RISK_ROOT_FILES = {"readme.md", "changelog.md"}
+
 
 
 def log(message: str) -> None:
@@ -460,20 +486,45 @@ def pr_files(number: int) -> list[str]:
 
 
 def sensitive_file(path: str) -> bool:
+    """Return True for high-risk or unclassified paths; only explicit low-risk paths pass."""
     normalized = path.replace("\\", "/")
     folded = normalized.casefold()
+    repo_name = REPO.rsplit("/", 1)[-1]
+    basename = folded.rsplit("/", 1)[-1]
     if path in KILO_SENSITIVE_EXACT:
         return True
     if any(folded == prefix.casefold().rstrip("/") or folded.startswith(prefix.casefold())
            for prefix in KILO_SENSITIVE_PREFIXES + RISK_HIGH_RISK_PREFIXES):
         return True
     parts = folded.split("/")
-    basename = parts[-1]
-    if basename in RISK_HIGH_RISK_BASENAMES or basename.startswith(("dockerfile.", "containerfile.")):
-        return True
     if any(part in RISK_HIGH_RISK_SEGMENTS for part in parts):
         return True
-    return basename.endswith((".tf", ".tfvars", ".sql"))
+    if any(part in {"test", "tests", "e2e", "spec", "specs", "data"} for part in parts):
+        return True
+    if basename in RISK_HIGH_RISK_BASENAMES or basename.startswith(
+        ("dockerfile.", "containerfile.", "requirements-")
+    ):
+        return True
+    if basename.endswith((".tf", ".tfvars", ".sql", ".prisma")):
+        return True
+
+    # Documentation is eligible only in its dedicated directory or the two
+    # root-level project notes listed below.
+    extension = "." + basename.rsplit(".", 1)[-1] if "." in basename else ""
+    if basename in RISK_LOW_RISK_ROOT_FILES:
+        return False
+    if folded.startswith("docs/") and extension in RISK_LOW_RISK_DOC_EXTENSIONS:
+        return False
+
+    prefixes = RISK_LOW_RISK_PREFIXES_BY_REPO.get(repo_name, ())
+    allowed_extensions = RISK_LOW_RISK_CODE_EXTENSIONS_BY_REPO.get(repo_name, set())
+    if (
+        allowed_extensions
+        and extension in allowed_extensions
+        and any(folded.startswith(prefix.casefold()) for prefix in prefixes)
+    ):
+        return False
+    return True
 
 
 def has_operator_risk_approval(number: int, sha: str) -> bool:
@@ -552,7 +603,7 @@ def require_operator_risk_approval(pr: dict[str, Any], paths: list[str], kind: s
         add_labels(number, [RISK_APPROVAL_LABEL])
         comment(
             number,
-            f"Autonomous merge is paused for high-risk changes. The repository owner must approve this exact head "
+            f"Autonomous merge is paused for high-risk or unclassified changes. The repository owner must approve this exact head "
             f"SHA: submit an approving review, or comment `/risk-approve {sha}`. Any new commit requires fresh approval. "
             f"Paths: {', '.join(risky_paths[:8])}",
         )
@@ -563,18 +614,31 @@ def require_operator_risk_approval(pr: dict[str, Any], paths: list[str], kind: s
 
 
 def risk_policy_contract_test() -> None:
-    """Keep representative high-risk and low-risk path classifications fail-closed."""
+    """Keep the explicit low-risk allowlist and fail-closed default executable."""
+    repo_name = REPO.rsplit("/", 1)[-1]
+    low_risk_samples = {
+        "AIMS": "routes/health-check.js",
+        "AIMS-UI": "apps/portal/src/components/status.tsx",
+        "HIVE": "backend/app/health_check.py",
+        "HIVE-UI": "src/components/status.tsx",
+        "IRS": "public/status.css",
+        "RAMS": "docs/runbook.md",
+        "MAST": "docs/runbook.md",
+        "jonathan-harris-website": "blog/sample.md",
+    }
     high_risk = (
         ".github/workflows/ci.yml", ".github/scripts/trusted_automation.py",
         "infra/main.tf", "backend/alembic/versions/001.sql",
-        "src/auth/session.ts", "package-lock.json",
+        "src/auth/session.ts", "package-lock.json", "tests/test_auth.py",
+        "unknown/README.txt",
     )
-    low_risk = ("src/views/dashboard.tsx", "docs/runbook.md", "tests/test_auth.py")
+    low_risk = ("docs/runbook.md", "README.md")
+    if repo_name in low_risk_samples:
+        low_risk += (low_risk_samples[repo_name],)
     failed = [path for path in high_risk if not sensitive_file(path)]
     failed.extend(path for path in low_risk if sensitive_file(path))
     if failed:
         raise RuntimeError("Risk policy contract failed for: " + ", ".join(failed))
-
 
 def place_human_hold(pr: dict[str, Any], reason: str) -> None:
     labels = issue_labels(pr)
@@ -791,7 +855,7 @@ def main() -> int:
     ensure_label(CTO_TASK_LABEL, "1D76DB", "Actionable engineering task explicitly assigned to cto.new")
     ensure_label(CTO_IMPLEMENTATION_LABEL, "5319E7", "cto.new implementation PR linked to an explicitly assigned task")
     ensure_label("autonomy:human-hold", "FBCA04", "Automation must stop for human action")
-    ensure_label(RISK_APPROVAL_LABEL, "FBCA04", "High-risk autonomous changes require exact-head repository-owner approval")
+    ensure_label(RISK_APPROVAL_LABEL, "FBCA04", "High-risk or unclassified autonomous changes require exact-head owner approval")
     ensure_label("autonomy:obsolete", "D4C5F9", "Repair carrier is no longer current")
     ensure_label("autonomy:admitted", "0E8A16", "Exact-head CI/security verification complete; GitHub native auto-merge may merge")
 
