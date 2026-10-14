@@ -46,7 +46,10 @@ def get_json(base: str, token: str, path: str) -> dict[str, Any]:
             time.sleep(min(2 ** (attempt - 1), 4))
             continue
         except ValueError:
-            raise RuntimeError(f"GET {path} failed with a connection or response error") from None
+            if attempt == MAX_READ_ATTEMPTS:
+                raise RuntimeError(f"GET {path} failed with a connection or response error") from None
+            time.sleep(min(2 ** (attempt - 1), 4))
+            continue
         break
     if not isinstance(payload, dict):
         raise RuntimeError(f"GET {path} returned an invalid response")
