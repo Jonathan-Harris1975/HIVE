@@ -600,7 +600,7 @@ def has_operator_risk_approval(number: int, sha: str) -> bool:
         owner_comments.extend(
             item for item in chunk
             if item.get("user", {}).get("login") == owner_login
-            and str(item.get("body") or "").strip() == f"/risk-approve {sha}"
+            and " ".join(str(item.get("body") or "").split()) == f"/risk-approve {sha}"
         )
         if len(chunk) < 100:
             break
