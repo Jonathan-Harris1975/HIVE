@@ -6,7 +6,7 @@ Run the final evidence-led QA/Council pass for **HIVE** after its allocated week
 ## Required evidence
 - Deterministic repository CI and `ci-gate` for the target SHA.
 - CodeQL and the `Trivy, Gitleaks and actionlint` security gate.
-- Mergify automatic admission remains the sole routine merge authority and uses squash merge.
+- GitHub native auto-merge is the sole routine merge authority after exact-head admission; active rulesets and required checks remain authoritative.
 - Socket Security/App behaviour is consistent with `socket.yml`.
 - autofix.ci only mutates code when the repository exposes a safe native fixer.
 - Kilo is invoked only for classified repository-repairable failures; lint/format/provider/deployment plumbing must not wake Kilo.
