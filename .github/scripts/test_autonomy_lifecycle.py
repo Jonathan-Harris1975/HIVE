@@ -500,6 +500,24 @@ class NativeAutoMergeCurrentLabelTests(unittest.TestCase):
         enable.assert_not_called()
         disable.assert_not_called()
 
+    def test_closed_pr_does_not_disable_native_auto_merge_during_race(self):
+        summary = {
+            "number": 7,
+            "labels": [{"name": "autonomy:admitted"}],
+            "node_id": "PR_node_7",
+        }
+        detail = {"state": "closed"}
+        active = {"enabledAt": "2026-01-01T00:00:00Z", "mergeMethod": "SQUASH"}
+        with (
+            patch.object(native_auto_merge, "merge_request", return_value=active),
+            patch.object(native_auto_merge, "request", return_value=detail),
+            patch.object(native_auto_merge, "admission_check") as admission,
+            patch.object(native_auto_merge, "disable") as disable,
+        ):
+            native_auto_merge.reconcile(summary)
+        admission.assert_not_called()
+        disable.assert_not_called()
+
     def test_admission_evidence_from_another_pr_does_not_count(self):
         sha = "a" * 40
         runs = [{
@@ -527,6 +545,18 @@ class NativeAutoMergeCurrentLabelTests(unittest.TestCase):
             return_value={"allow_squash_merge": False, "allow_merge_commit": True, "allow_rebase_merge": True},
         ):
             self.assertEqual(native_auto_merge.merge_method(), "MERGE")
+
+    def test_native_merge_method_falls_back_when_settings_are_unavailable(self):
+        with patch.object(native_auto_merge, "request", return_value={}):
+            self.assertEqual(native_auto_merge.merge_method(), "SQUASH")
+
+    def test_native_merge_method_falls_back_when_token_reports_no_enabled_method(self):
+        with patch.object(
+            native_auto_merge,
+            "request",
+            return_value={"allow_squash_merge": False, "allow_merge_commit": False, "allow_rebase_merge": False},
+        ):
+            self.assertEqual(native_auto_merge.merge_method(), "SQUASH")
 
 
 if __name__ == "__main__":
