@@ -218,7 +218,6 @@ async def _github_repo_evidence(
             "deployment": {"workflow": DEPLOYMENT_WORKFLOWS[repo_id], "status": "unavailable"},
         }
 
-    required_names = {*REQUIRED_WORKFLOWS[repo_id], DEPLOYMENT_WORKFLOWS[repo_id]}
     runs: list[dict[str, Any]] = []
     exhausted = False
     next_url = f"https://api.github.com/repos/{encoded_repo}/actions/runs"
