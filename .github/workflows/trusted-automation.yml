@@ -2,7 +2,7 @@ name: Trusted automation and native auto-merge
 
 on:
   issue_comment:
-    types: [created]
+    types: [created, edited, deleted]
   pull_request_review:
     types: [submitted, edited, dismissed]
   pull_request_review_comment:
