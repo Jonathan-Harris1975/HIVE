@@ -274,3 +274,28 @@ def test_get_json_does_not_retry_before_an_excessive_retry_after(monkeypatch):
         raise AssertionError("rate limit beyond the retry budget should fail closed")
     assert len(calls) == 1
     assert sleeps == []
+
+
+def test_retry_delay_falls_back_for_non_finite_values():
+    import math
+
+    error = urllib.error.HTTPError(
+        "https://hive.example/status",
+        429,
+        "rate limited",
+        {"Retry-After": "NaN"},
+        None,
+    )
+
+    assert module._retry_delay(error, 2) == 2.0
+
+    for value in ("Infinity", "-Infinity"):
+        error = urllib.error.HTTPError(
+            "https://hive.example/status",
+            429,
+            "rate limited",
+            {"Retry-After": value},
+            None,
+        )
+        assert math.isfinite(module._retry_delay(error, 2))
+        assert module._retry_delay(error, 2) == 2.0
