@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import math
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 import os
@@ -37,6 +38,8 @@ def _retry_delay(exc: urllib.error.HTTPError, attempt: int) -> float | None:
             delay = (retry_at - datetime.now(UTC)).total_seconds()
         except (TypeError, ValueError, OverflowError):
             return float(default)
+    if not math.isfinite(delay):
+        return float(default)
     if delay < 0:
         return 0.0
     if delay > MAX_RETRY_AFTER_SECONDS:
