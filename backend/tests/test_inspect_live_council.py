@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import importlib.util
 import io
-import time
 import urllib.error
 from pathlib import Path
 from urllib.request import Request
@@ -203,3 +202,21 @@ def test_get_json_does_not_retry_authentication_failure(monkeypatch):
     else:
         raise AssertionError("authentication failure should fail immediately")
     assert len(calls) == 1
+
+
+
+def test_get_json_retries_invalid_transient_response(monkeypatch):
+    calls = []
+
+    class Opener:
+        def open(self, request, timeout):
+            calls.append(request)
+            if len(calls) == 1:
+                return io.BytesIO(b'not-json')
+            return io.BytesIO(b'{"ok": true}')
+
+    monkeypatch.setattr(module.urllib.request, "build_opener", lambda *_: Opener())
+    monkeypatch.setattr(module.time, "sleep", lambda _seconds: None)
+
+    assert module.get_json("https://hive.example", "secret", "/status") == {"ok": True}
+    assert len(calls) == 2
