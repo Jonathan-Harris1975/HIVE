@@ -669,7 +669,7 @@ class RiskPolicyRegressionTests(unittest.TestCase):
         }
         earlier_comment = {
             "body": f"/risk-approve {sha}",
-            "created_at": (datetime.now(timezone.utc) - timedelta(minutes=3)).isoformat(),
+            "created_at": (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat(),
             "user": {"login": "Jonathan-Harris1975"},
         }
         with (
