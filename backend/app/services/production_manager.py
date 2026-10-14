@@ -270,14 +270,22 @@ async def _github_repo_evidence(
         }
 
     def latest(name: str) -> dict[str, Any] | None:
+        matching = [
+            run
+            for run in runs
+            if str(run.get("name") or "") == name
+            and str(run.get("head_sha") or "") == sha
+        ]
         return next(
             (
                 run
-                for run in runs
-                if str(run.get("name") or "") == name
-                and str(run.get("head_sha") or "") == sha
+                for run in matching
+                if not (
+                    str(run.get("status") or "").lower() == "completed"
+                    and str(run.get("conclusion") or "").lower() == "skipped"
+                )
             ),
-            None,
+            matching[0] if matching else None,
         )
 
     workflow_evidence: dict[str, Any] = {}
