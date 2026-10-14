@@ -220,3 +220,57 @@ def test_get_json_retries_invalid_transient_response(monkeypatch):
 
     assert module.get_json("https://hive.example", "secret", "/status") == {"ok": True}
     assert len(calls) == 2
+
+
+
+def test_get_json_obeys_retry_after_seconds(monkeypatch):
+    calls = []
+    sleeps = []
+
+    class Opener:
+        def open(self, request, timeout):
+            calls.append(request)
+            if len(calls) == 1:
+                raise urllib.error.HTTPError(
+                    request.full_url,
+                    429,
+                    "rate limited",
+                    {"Retry-After": "7"},
+                    None,
+                )
+            return io.BytesIO(b'{"ok": true}')
+
+    monkeypatch.setattr(module.urllib.request, "build_opener", lambda *_: Opener())
+    monkeypatch.setattr(module.time, "sleep", sleeps.append)
+
+    assert module.get_json("https://hive.example", "secret", "/status") == {"ok": True}
+    assert len(calls) == 2
+    assert sleeps == [7.0]
+
+
+def test_get_json_does_not_retry_before_an_excessive_retry_after(monkeypatch):
+    calls = []
+    sleeps = []
+
+    class Opener:
+        def open(self, request, timeout):
+            calls.append(request)
+            raise urllib.error.HTTPError(
+                request.full_url,
+                429,
+                "rate limited",
+                {"Retry-After": "60"},
+                None,
+            )
+
+    monkeypatch.setattr(module.urllib.request, "build_opener", lambda *_: Opener())
+    monkeypatch.setattr(module.time, "sleep", sleeps.append)
+
+    try:
+        module.get_json("https://hive.example", "secret", "/status")
+    except RuntimeError as exc:
+        assert str(exc) == "GET /status failed with HTTP 429"
+    else:
+        raise AssertionError("rate limit beyond the retry budget should fail closed")
+    assert len(calls) == 1
+    assert sleeps == []
