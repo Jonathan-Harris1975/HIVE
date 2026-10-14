@@ -82,3 +82,19 @@ def test_dast_checks_out_exact_revision_before_persisting_r2_evidence() -> None:
     assert "ref: ${{ github.sha }}" in text
     assert "persist-credentials: false" in text
     assert 'python3 .github/scripts/persist_ci_report_r2.py dast "$GITHUB_SHA" "$RUNNER_TEMP/dast-r2"' in text
+
+
+
+def test_weekend_council_archives_validated_report_before_ready_gate() -> None:
+    text = (ROOT / ".github/workflows/council.yml").read_text(encoding="utf-8")
+    wait = text.index("- name: Wait for and validate final Council result")
+    package = text.index("- name: Package validated Council report for R2")
+    archive = text.index("- name: Archive completed Council report to hive-repositories R2")
+    ready = text.index("- name: Require a ready Council verdict before advancing")
+
+    assert wait < package < archive < ready
+    assert "render_council_report.py council-final.json" in text
+    assert 'persist_ci_report_r2.py council "$TARGET_SHA" "$RUNNER_TEMP/council-report"' in text
+    assert "R2_EVIDENCE_PREFIX: ci-reports" in text
+    assert "cp council-final.json \"$report_dir/council-final.json\"" in text
+    assert "cp council-r2-evidence.json \"$report_dir/council-r2-evidence.json\"" in text
