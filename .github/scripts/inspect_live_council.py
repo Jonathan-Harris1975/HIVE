@@ -44,13 +44,10 @@ def downstream_failure_category(error: str, http_status: str | None = None) -> s
     premium_markers = (
         "premium_justification",
         "premium justification",
-        "approved_by",
-        "approved by",
         "evaluation_evidence",
         "evaluation evidence",
         "cheaper_model_tested",
         "cheaper model tested",
-        "independent approval",
     )
     if any(marker in normalized for marker in premium_markers):
         return "premium_approval"
