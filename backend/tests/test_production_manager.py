@@ -318,39 +318,30 @@ async def test_github_gate_evidence_keeps_skipped_required_workflow_fail_closed(
         if request.url.path.endswith("/actions/runs"):
             runs = [
                 {
-                    "id": index + 1,
-                    "name": name,
+                    "id": 99,
+                    "name": skipped_name,
+                    "head_sha": sha,
+                    "status": "completed",
+                    "conclusion": "skipped",
+                },
+                *[
+                    {
+                        "id": index + 1,
+                        "name": name,
+                        "head_sha": sha,
+                        "status": "completed",
+                        "conclusion": "success",
+                    }
+                    for index, name in enumerate(production_manager.REQUIRED_WORKFLOWS["HIVE"])
+                ],
+                {
+                    "id": 100,
+                    "name": production_manager.DEPLOYMENT_WORKFLOWS["HIVE"],
                     "head_sha": sha,
                     "status": "completed",
                     "conclusion": "success",
-                }
-                for index, name in enumerate(production_manager.REQUIRED_WORKFLOWS["HIVE"])
+                },
             ]
-            runs.extend(
-                [
-                    {
-                        "id": 99,
-                        "name": skipped_name,
-                        "head_sha": sha,
-                        "status": "completed",
-                        "conclusion": "skipped",
-                    },
-                    {
-                        "id": 98,
-                        "name": skipped_name,
-                        "head_sha": sha,
-                        "status": "completed",
-                        "conclusion": "success",
-                    },
-                    {
-                        "id": 100,
-                        "name": production_manager.DEPLOYMENT_WORKFLOWS["HIVE"],
-                        "head_sha": sha,
-                        "status": "completed",
-                        "conclusion": "success",
-                    },
-                ]
-            )
             return httpx.Response(200, json={"workflow_runs": runs})
         raise AssertionError(f"unexpected request: {request.url}")
 
