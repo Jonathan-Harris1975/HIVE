@@ -38,7 +38,7 @@ class CouncilReportRendererTests(unittest.TestCase):
             self.assertIn("Repository Council report", report)
             self.assertIn("Evaluated default-branch SHA: " + "a" * 40, report)
             self.assertIn("Disposition: HOLD", report)
-            self.assertIn("Exact-SHA CI checks completed", report)
+            self.assertIn(r"Exact\\-SHA CI checks completed", report)
             self.assertIn(r"\[provider unavailable\]", report)
 
     def test_report_rejects_non_string_evidence(self):
