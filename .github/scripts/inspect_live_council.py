@@ -4,12 +4,47 @@
 from __future__ import annotations
 
 import json
+import math
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 import os
 import re
 import sys
+import time
 import urllib.error
 import urllib.request
 from typing import Any
+
+
+MAX_READ_ATTEMPTS = 3
+MAX_RETRY_AFTER_SECONDS = 20
+RETRYABLE_HTTP_STATUSES = {408, 425, 429, 500, 502, 503, 504}
+
+
+def _retry_delay(exc: urllib.error.HTTPError, attempt: int) -> float | None:
+    """Return a bounded retry delay, or None when Retry-After exceeds our wait budget."""
+    default = min(2 ** (attempt - 1), 4)
+    headers = exc.headers
+    value = headers.get("Retry-After", "").strip() if headers else ""
+    if not value:
+        return float(default)
+    try:
+        delay = float(value)
+    except (ValueError, OverflowError):
+        try:
+            retry_at = parsedate_to_datetime(value)
+            if retry_at.tzinfo is None:
+                retry_at = retry_at.replace(tzinfo=UTC)
+            delay = (retry_at - datetime.now(UTC)).total_seconds()
+        except (TypeError, ValueError, OverflowError):
+            return float(default)
+    if not math.isfinite(delay):
+        return float(default)
+    if delay < 0:
+        return 0.0
+    if delay > MAX_RETRY_AFTER_SECONDS:
+        return None
+    return delay
 
 
 class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -25,14 +60,30 @@ def get_json(base: str, token: str, path: str) -> dict[str, Any]:
         method="GET",
         headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
     )
-    opener = urllib.request.build_opener(NoRedirectHandler)
-    try:
-        with opener.open(request, timeout=25) as response:
-            payload = json.load(response)
-    except urllib.error.HTTPError as exc:
-        raise RuntimeError(f"GET {path} failed with HTTP {exc.code}") from None
-    except (TimeoutError, urllib.error.URLError, ValueError):
-        raise RuntimeError(f"GET {path} failed with a connection or response error") from None
+    for attempt in range(1, MAX_READ_ATTEMPTS + 1):
+        opener = urllib.request.build_opener(NoRedirectHandler)
+        try:
+            with opener.open(request, timeout=25) as response:
+                payload = json.load(response)
+        except urllib.error.HTTPError as exc:
+            if exc.code not in RETRYABLE_HTTP_STATUSES or attempt == MAX_READ_ATTEMPTS:
+                raise RuntimeError(f"GET {path} failed with HTTP {exc.code}") from None
+            delay = _retry_delay(exc, attempt)
+            if delay is None:
+                raise RuntimeError(f"GET {path} failed with HTTP {exc.code}") from None
+            time.sleep(delay)
+            continue
+        except (TimeoutError, urllib.error.URLError):
+            if attempt == MAX_READ_ATTEMPTS:
+                raise RuntimeError(f"GET {path} failed with a connection or response error") from None
+            time.sleep(min(2 ** (attempt - 1), 4))
+            continue
+        except ValueError:
+            if attempt == MAX_READ_ATTEMPTS:
+                raise RuntimeError(f"GET {path} failed with a connection or response error") from None
+            time.sleep(min(2 ** (attempt - 1), 4))
+            continue
+        break
     if not isinstance(payload, dict):
         raise RuntimeError(f"GET {path} returned an invalid response")
     return payload
