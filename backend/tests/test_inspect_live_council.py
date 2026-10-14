@@ -143,3 +143,4 @@ def test_council_summary_classifies_retryable_downstream_statuses_as_unavailable
     assert module.downstream_failure_category("HTTP 409: private", "409") == "downstream_unavailable"
     assert module.downstream_failure_category("HTTP 425: private", "425") == "downstream_unavailable"
     assert module.downstream_failure_category("HTTP 422: private", "422") == "downstream_validation"
+    assert module.downstream_failure_category("HTTP 422: approved by generic CI", "422") == "downstream_validation"
