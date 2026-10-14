@@ -690,7 +690,7 @@ class RiskApprovalExpiryTests(unittest.TestCase):
         self.assertEqual(automation.RISK_APPROVAL_TTL.days, 7)
 
     def test_recent_exact_head_owner_review_is_accepted(self):
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timezone
         now = datetime.now(timezone.utc).isoformat()
         with patch.object(automation, "REPO", "owner/repo"), patch.object(
             automation, "get",
