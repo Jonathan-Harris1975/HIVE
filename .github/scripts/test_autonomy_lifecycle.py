@@ -528,6 +528,18 @@ class NativeAutoMergeCurrentLabelTests(unittest.TestCase):
         ):
             self.assertEqual(native_auto_merge.merge_method(), "MERGE")
 
+    def test_native_merge_method_falls_back_to_preferred_strategy_when_settings_are_unavailable(self):
+        with patch.object(native_auto_merge, "request", return_value={}):
+            self.assertEqual(native_auto_merge.merge_method(), "SQUASH")
+
+    def test_native_merge_method_uses_preferred_strategy_when_no_method_is_reported_enabled(self):
+        with patch.object(
+            native_auto_merge,
+            "request",
+            return_value={"allow_squash_merge": False, "allow_merge_commit": False, "allow_rebase_merge": False},
+        ):
+            self.assertEqual(native_auto_merge.merge_method(), "SQUASH")
+
 
 if __name__ == "__main__":
     unittest.main()
