@@ -106,7 +106,10 @@ def merge_method() -> str:
     ):
         if settings.get(setting):
             return method
-    raise RuntimeError(f"Repository {REPO} allows no GitHub merge method")
+    # The installation token may not expose these repository settings. Prefer
+    # the controller's first choice; GitHub still rejects the mutation if
+    # squash merging is disabled for this repository.
+    return "SQUASH"
 
 
 def enable(pr_node_id: str) -> None:
@@ -138,6 +141,11 @@ def reconcile(pr_summary: dict[str, Any]) -> None:
         return
 
     pr = request("GET", f"/repos/{REPO}/pulls/{number}")
+    if pr.get("state") != "open":
+        # A PR may merge after the open-PR listing but before this detail read.
+        # Its native auto-merge request is no longer actionable.
+        print(f"Skipping auto-merge reconciliation for closed PR #{number}.")
+        return
     current_labels = {label["name"] for label in pr.get("labels", [])}
     sha = str((pr.get("head") or {}).get("sha") or "")
     exact_admission, has_admission_evidence = admission_check(number, sha) if sha else (False, False)
