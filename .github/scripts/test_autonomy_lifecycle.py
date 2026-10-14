@@ -109,12 +109,13 @@ class ManagedBranchOwnershipTests(unittest.TestCase):
             "body": "",
         }
         for name, value in {
-            "REPO": "owner/repo",
+            "REPO": "Jonathan-Harris1975/HIVE",
             "REPAIR_APP_LOGIN": "repair[bot]",
             "DEFAULT_BRANCH": "main",
         }.items():
             self.enterContext(patch.object(automation, name, value))
         self.enterContext(patch.object(automation, "log"))
+        self.enterContext(patch.object(automation, "has_operator_risk_approval", return_value=False))
 
     def test_branch_controller_has_no_native_merge_authority(self):
         source = inspect.getsource(branch_controller)
