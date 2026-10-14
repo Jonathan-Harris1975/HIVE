@@ -261,6 +261,35 @@ jobs:
           R2_EVIDENCE_PREFIX: ci-evidence
         run: python3 .github/scripts/r2_evidence_store.py council-r2-evidence.json
 
+      - name: Package validated Council report for R2
+        env:
+          REPOSITORY: ${{ github.repository }}
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          report_dir="$RUNNER_TEMP/council-report"
+          mkdir -p "$report_dir"
+          cp council-final.json "$report_dir/council-final.json"
+          cp council-r2-evidence.json "$report_dir/council-r2-evidence.json"
+          python3 .github/scripts/render_council_report.py council-final.json "$report_dir/council-report.md" \
+            --repository "$REPOSITORY" --sha "$TARGET_SHA" \
+            --run-id "$RUN_ID" --run-attempt "$RUN_ATTEMPT"
+
+      - name: Archive completed Council report to hive-repositories R2
+        env:
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID || vars.CF_R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || secrets.CF_R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || secrets.CF_R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
+          R2_BUCKET: hive-repositories
+          R2_EVIDENCE_PREFIX: ci-reports
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+        run: python3 .github/scripts/persist_ci_report_r2.py council "$TARGET_SHA" "$RUNNER_TEMP/council-report"
+
       - name: Require a ready Council verdict before advancing
         env:
           TARGET_SHA: ${{ steps.target.outputs.sha }}
