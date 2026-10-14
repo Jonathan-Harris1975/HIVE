@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import importlib.util
+import io
+import time
+import urllib.error
 from pathlib import Path
 from urllib.request import Request
 
@@ -144,3 +147,59 @@ def test_council_summary_classifies_retryable_downstream_statuses_as_unavailable
     assert module.downstream_failure_category("HTTP 425: private", "425") == "downstream_unavailable"
     assert module.downstream_failure_category("HTTP 422: private", "422") == "downstream_validation"
     assert module.downstream_failure_category("HTTP 422: approved by generic CI", "422") == "downstream_validation"
+
+
+
+def test_get_json_retries_transient_gateway_timeout(monkeypatch):
+    calls = []
+
+    class Opener:
+        def open(self, request, timeout):
+            calls.append((request, timeout))
+            if len(calls) == 1:
+                raise urllib.error.HTTPError(request.full_url, 504, "gateway timeout", {}, None)
+            return io.BytesIO(b'{"ok": true}')
+
+    monkeypatch.setattr(module.urllib.request, "build_opener", lambda *_: Opener())
+    monkeypatch.setattr(module.time, "sleep", lambda _seconds: None)
+
+    assert module.get_json("https://hive.example", "secret", "/status") == {"ok": True}
+    assert len(calls) == 2
+    assert calls[0][0].get_header("Authorization") == "Bearer secret"
+
+
+def test_get_json_retries_transient_connection_error(monkeypatch):
+    calls = []
+
+    class Opener:
+        def open(self, request, timeout):
+            calls.append(request)
+            if len(calls) == 1:
+                raise urllib.error.URLError("temporary connection reset")
+            return io.BytesIO(b'{"ok": true}')
+
+    monkeypatch.setattr(module.urllib.request, "build_opener", lambda *_: Opener())
+    monkeypatch.setattr(module.time, "sleep", lambda _seconds: None)
+
+    assert module.get_json("https://hive.example", "secret", "/status") == {"ok": True}
+    assert len(calls) == 2
+
+
+def test_get_json_does_not_retry_authentication_failure(monkeypatch):
+    calls = []
+
+    class Opener:
+        def open(self, request, timeout):
+            calls.append(request)
+            raise urllib.error.HTTPError(request.full_url, 401, "unauthorised", {}, None)
+
+    monkeypatch.setattr(module.urllib.request, "build_opener", lambda *_: Opener())
+    monkeypatch.setattr(module.time, "sleep", lambda _seconds: None)
+
+    try:
+        module.get_json("https://hive.example", "secret", "/status")
+    except RuntimeError as exc:
+        assert str(exc) == "GET /status failed with HTTP 401"
+    else:
+        raise AssertionError("authentication failure should fail immediately")
+    assert len(calls) == 1
