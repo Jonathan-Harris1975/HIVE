@@ -147,6 +147,8 @@ class ManagedBranchOwnershipTests(unittest.TestCase):
         approve.assert_not_called()
 
     def test_managed_branch_pr_touching_protected_controls_gets_human_hold(self):
+        self.enterContext(patch.object(automation, "add_labels"))
+        self.enterContext(patch.object(automation, "comment"))
         hold = self.enterContext(patch.object(automation, "place_human_hold"))
         admit = self.enterContext(patch.object(automation, "admit_to_mergify"))
         self.enterContext(
