@@ -85,3 +85,62 @@ def test_council_summary_reports_per_target_verification():
 
     assert "aims_ok=True aims_http_status=200 aims_attempt=1" in output
     assert "rams_ok=True rams_http_status=200 rams_attempt=2" in output
+
+
+def test_council_summary_classifies_premium_approval_failure_without_leaking_body():
+    status = {"ok": False, "completion_status": "degraded"}
+    history = {
+        "runs": [
+            {
+                "run_id": "run-3",
+                "completion_status": "degraded",
+                "downstream_sync": {
+                    "enabled": True,
+                    "ok": False,
+                    "error": (
+                        'HTTP 422: {"error":"premium_justification missing",'
+                        '"model":"private-model-name","detail":"private response"}'
+                    ),
+                },
+            }
+        ]
+    }
+
+    output = "\\n".join(module.summarize(status, history))
+
+    assert "downstream_http_status=422" in output
+    assert "downstream_failure_category=premium_approval" in output
+    assert "premium_justification" not in output
+    assert "private-model-name" not in output
+    assert "private response" not in output
+
+
+def test_council_summary_classifies_generic_422_as_validation_without_leaking_body():
+    status = {"ok": False, "completion_status": "degraded"}
+    history = {
+        "runs": [
+            {
+                "run_id": "run-4",
+                "completion_status": "degraded",
+                "downstream_sync": {
+                    "enabled": True,
+                    "ok": False,
+                    "error": "HTTP 422: confidential validation response",
+                },
+            }
+        ]
+    }
+
+    output = "\\n".join(module.summarize(status, history))
+
+    assert "downstream_http_status=422" in output
+    assert "downstream_failure_category=downstream_validation" in output
+    assert "confidential validation response" not in output
+
+
+def test_council_summary_classifies_retryable_downstream_statuses_as_unavailable():
+    assert module.downstream_failure_category("HTTP 408: private", "408") == "downstream_unavailable"
+    assert module.downstream_failure_category("HTTP 409: private", "409") == "downstream_unavailable"
+    assert module.downstream_failure_category("HTTP 425: private", "425") == "downstream_unavailable"
+    assert module.downstream_failure_category("HTTP 422: private", "422") == "downstream_validation"
+    assert module.downstream_failure_category("HTTP 422: approved by generic CI", "422") == "downstream_validation"

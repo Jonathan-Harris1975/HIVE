@@ -38,6 +38,32 @@ def get_json(base: str, token: str, path: str) -> dict[str, Any]:
     return payload
 
 
+def downstream_failure_category(error: str, http_status: str | None = None) -> str:
+    """Return a safe allowlisted category without exposing downstream response text."""
+    normalized = error.lower()
+    premium_markers = (
+        "premium_justification",
+        "premium justification",
+        "evaluation_evidence",
+        "evaluation evidence",
+        "cheaper_model_tested",
+        "cheaper model tested",
+    )
+    if any(marker in normalized for marker in premium_markers):
+        return "premium_approval"
+    if "readiness" in normalized:
+        return "service_readiness"
+    if "configuration is missing" in normalized:
+        return "configuration"
+    if http_status in {"408", "409", "425", "429", "500", "502", "503", "504"}:
+        return "downstream_unavailable"
+    if http_status in {"400", "422"}:
+        return "downstream_validation"
+    if http_status in {"401", "403"}:
+        return "downstream_authentication"
+    return "downstream_error"
+
+
 def summarize(status: dict[str, Any], history: dict[str, Any]) -> list[str]:
     lines = [
         "Council status:",
@@ -60,15 +86,15 @@ def summarize(status: dict[str, Any], history: dict[str, Any]) -> list[str]:
     error = str(sync.get("error") or "")
     status_match = re.search(r"\bHTTP\s+(\d{3})\b", error, flags=re.IGNORECASE)
     if status_match:
-        lines.append(f"  downstream_http_status={status_match.group(1)}")
+        http_status = status_match.group(1)
+        lines.append(f"  downstream_http_status={http_status}")
+        lines.append(
+            f"  downstream_failure_category={downstream_failure_category(error, http_status)}"
+        )
     elif error:
-        if "readiness" in error.lower():
-            category = "service_readiness"
-        elif "configuration is missing" in error.lower():
-            category = "configuration"
-        else:
-            category = "downstream_error"
-        lines.append(f"  downstream_failure_category={category}")
+        lines.append(
+            f"  downstream_failure_category={downstream_failure_category(error)}"
+        )
     targets = sync.get("targets")
     if isinstance(targets, dict):
         for name in ("aims", "rams"):
