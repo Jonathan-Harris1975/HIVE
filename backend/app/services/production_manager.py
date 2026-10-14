@@ -244,12 +244,16 @@ async def _github_repo_evidence(
             chunk = []
         runs.extend(run for run in chunk if isinstance(run, dict))
 
-        matched_names = {
+        matched_non_skipped_names = {
             str(run.get("name") or "")
             for run in runs
             if str(run.get("head_sha") or "") == sha
+            and not (
+                str(run.get("status") or "").lower() == "completed"
+                and str(run.get("conclusion") or "").lower() == "skipped"
+            )
         }
-        if required_names.issubset(matched_names):
+        if required_names.issubset(matched_non_skipped_names):
             exhausted = True
             break
         next_link = runs_response.links.get("next", {}).get("url")
