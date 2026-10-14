@@ -477,7 +477,7 @@ def sensitive_file(path: str) -> bool:
 
 
 def has_operator_risk_approval(number: int, sha: str) -> bool:
-    """Require the repository owner's latest review to approve this exact PR head."""
+    """Require a repository-owner approval explicitly bound to this exact PR head."""
     owner_login = REPO.split("/", 1)[0]
     owner_reviews: list[dict[str, Any]] = []
     for page in range(1, 11):
@@ -493,10 +493,44 @@ def has_operator_risk_approval(number: int, sha: str) -> bool:
             break
     else:
         raise RuntimeError(f"PR #{number} has too many review records to verify safely")
-    if not owner_reviews:
+
+    latest_review = max(
+        owner_reviews,
+        key=lambda review: str(review.get("submitted_at") or ""),
+        default=None,
+    )
+    if (
+        latest_review
+        and latest_review.get("state") == "APPROVED"
+        and latest_review.get("commit_id") == sha
+    ):
+        return True
+
+    owner_comments: list[dict[str, Any]] = []
+    for page in range(1, 11):
+        chunk = get(f"/repos/{REPO}/issues/{number}/comments?per_page=100&page={page}")
+        if not isinstance(chunk, list):
+            return False
+        owner_comments.extend(
+            item for item in chunk
+            if item.get("user", {}).get("login") == owner_login
+            and str(item.get("body") or "").strip() == f"/risk-approve {sha}"
+        )
+        if len(chunk) < 100:
+            break
+    else:
+        raise RuntimeError(f"PR #{number} has too many comments to verify safely")
+
+    latest_approval_comment = max(
+        owner_comments,
+        key=lambda item: str(item.get("created_at") or ""),
+        default=None,
+    )
+    if not latest_approval_comment:
         return False
-    latest = max(owner_reviews, key=lambda review: str(review.get("submitted_at") or ""))
-    return latest.get("state") == "APPROVED" and latest.get("commit_id") == sha
+    comment_time = str(latest_approval_comment.get("created_at") or "")
+    review_time = str((latest_review or {}).get("submitted_at") or "")
+    return bool(comment_time and comment_time > review_time)
 
 
 def require_operator_risk_approval(pr: dict[str, Any], paths: list[str], kind: str) -> bool:
@@ -519,7 +553,7 @@ def require_operator_risk_approval(pr: dict[str, Any], paths: list[str], kind: s
         comment(
             number,
             f"Autonomous merge is paused for high-risk changes. The repository owner must approve this exact head "
-            f"SHA in a GitHub review: {sha}. Any new commit requires a fresh approval. "
+            f"SHA: submit an approving review, or comment `/risk-approve {sha}`. Any new commit requires fresh approval. "
             f"Paths: {', '.join(risky_paths[:8])}",
         )
     if "autonomy:admitted" in labels:
