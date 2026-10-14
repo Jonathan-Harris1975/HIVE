@@ -58,12 +58,12 @@ def downstream_failure_category(error: str, http_status: str | None = None) -> s
         return "service_readiness"
     if "configuration is missing" in normalized:
         return "configuration"
-    if http_status in {"400", "409", "422"}:
+    if http_status in {"408", "409", "425", "429", "500", "502", "503", "504"}:
+        return "downstream_unavailable"
+    if http_status in {"400", "422"}:
         return "downstream_validation"
     if http_status in {"401", "403"}:
         return "downstream_authentication"
-    if http_status == "429" or (http_status and http_status.startswith("5")):
-        return "downstream_unavailable"
     return "downstream_error"
 
 
