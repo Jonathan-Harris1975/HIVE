@@ -136,3 +136,10 @@ def test_council_summary_classifies_generic_422_as_validation_without_leaking_bo
     assert "downstream_http_status=422" in output
     assert "downstream_failure_category=downstream_validation" in output
     assert "confidential validation response" not in output
+
+
+def test_council_summary_classifies_retryable_downstream_statuses_as_unavailable():
+    assert module.downstream_failure_category("HTTP 408: private", "408") == "downstream_unavailable"
+    assert module.downstream_failure_category("HTTP 409: private", "409") == "downstream_unavailable"
+    assert module.downstream_failure_category("HTTP 425: private", "425") == "downstream_unavailable"
+    assert module.downstream_failure_category("HTTP 422: private", "422") == "downstream_validation"
