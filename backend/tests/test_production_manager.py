@@ -308,6 +308,63 @@ async def test_github_gate_evidence_ignores_skipped_run_when_same_sha_has_succes
 
 
 @pytest.mark.asyncio
+async def test_github_gate_evidence_keeps_skipped_required_workflow_fail_closed() -> None:
+    sha = "b" * 40
+    skipped_name = production_manager.REQUIRED_WORKFLOWS["HIVE"][0]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/commits/main"):
+            return httpx.Response(200, json={"sha": sha})
+        if request.url.path.endswith("/actions/runs"):
+            runs = [
+                {
+                    "id": index + 1,
+                    "name": name,
+                    "head_sha": sha,
+                    "status": "completed",
+                    "conclusion": "success",
+                }
+                for index, name in enumerate(production_manager.REQUIRED_WORKFLOWS["HIVE"])
+            ]
+            runs.extend(
+                [
+                    {
+                        "id": 99,
+                        "name": skipped_name,
+                        "head_sha": sha,
+                        "status": "completed",
+                        "conclusion": "skipped",
+                    },
+                    {
+                        "id": 98,
+                        "name": skipped_name,
+                        "head_sha": sha,
+                        "status": "completed",
+                        "conclusion": "success",
+                    },
+                    {
+                        "id": 100,
+                        "name": production_manager.DEPLOYMENT_WORKFLOWS["HIVE"],
+                        "head_sha": sha,
+                        "status": "completed",
+                        "conclusion": "success",
+                    },
+                ]
+            )
+            return httpx.Response(200, json={"workflow_runs": runs})
+        raise AssertionError(f"unexpected request: {request.url}")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        evidence = await production_manager._github_repo_evidence(
+            client, repo_id="HIVE", branch="main"
+        )
+
+    assert evidence["state"] == "DEGRADED"
+    assert evidence["required_workflows"][skipped_name]["status"] == "skipped"
+    assert evidence["deployment"]["status"] == "success"
+
+
+@pytest.mark.asyncio
 async def test_github_gate_evidence_pages_past_skipped_run_to_find_older_success() -> None:
     sha = "a" * 40
     deployment_name = production_manager.DEPLOYMENT_WORKFLOWS["HIVE"]
