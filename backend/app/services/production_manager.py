@@ -244,16 +244,21 @@ async def _github_repo_evidence(
             chunk = []
         runs.extend(run for run in chunk if isinstance(run, dict))
 
-        matched_non_skipped_names = {
+        matched_names = {
             str(run.get("name") or "")
             for run in runs
             if str(run.get("head_sha") or "") == sha
+        }
+        deployment_has_non_skipped_run = any(
+            str(run.get("name") or "") == DEPLOYMENT_WORKFLOWS[repo_id]
+            and str(run.get("head_sha") or "") == sha
             and not (
                 str(run.get("status") or "").lower() == "completed"
                 and str(run.get("conclusion") or "").lower() == "skipped"
             )
-        }
-        if required_names.issubset(matched_non_skipped_names):
+            for run in runs
+        )
+        if set(REQUIRED_WORKFLOWS[repo_id]).issubset(matched_names) and deployment_has_non_skipped_run:
             exhausted = True
             break
         next_link = runs_response.links.get("next", {}).get("url")
@@ -273,24 +278,26 @@ async def _github_repo_evidence(
             "deployment": {"workflow": DEPLOYMENT_WORKFLOWS[repo_id], "status": "unavailable"},
         }
 
-    def latest(name: str) -> dict[str, Any] | None:
+    def latest(name: str, *, allow_skipped_fallback: bool = False) -> dict[str, Any] | None:
         matching = [
             run
             for run in runs
             if str(run.get("name") or "") == name
             and str(run.get("head_sha") or "") == sha
         ]
-        return next(
-            (
-                run
-                for run in matching
-                if not (
-                    str(run.get("status") or "").lower() == "completed"
-                    and str(run.get("conclusion") or "").lower() == "skipped"
-                )
-            ),
-            matching[0] if matching else None,
-        )
+        if allow_skipped_fallback:
+            return next(
+                (
+                    run
+                    for run in matching
+                    if not (
+                        str(run.get("status") or "").lower() == "completed"
+                        and str(run.get("conclusion") or "").lower() == "skipped"
+                    )
+                ),
+                matching[0] if matching else None,
+            )
+        return matching[0] if matching else None
 
     workflow_evidence: dict[str, Any] = {}
     gate_states: list[str] = []
@@ -305,7 +312,7 @@ async def _github_repo_evidence(
         }
 
     deployment_name = DEPLOYMENT_WORKFLOWS[repo_id]
-    deployment_run = latest(deployment_name)
+    deployment_run = latest(deployment_name, allow_skipped_fallback=True)
     deployment_state, deployment_status = _run_state(deployment_run)
     gate_states.append(deployment_state)
 
