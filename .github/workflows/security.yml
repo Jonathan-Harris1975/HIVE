@@ -44,6 +44,8 @@ jobs:
       run: python3 .github/scripts/test_r2_evidence_store.py
     - name: Test bounded Council result channel
       run: python3 .github/scripts/test_r2_result_channel.py
+    - name: Test Council report rendering
+      run: python3 .github/scripts/test_render_council_report.py
     - name: Test R2 mutation lease identity
       run: python3 .github/scripts/test_r2_mutation_lease.py
     - name: Install pinned CI tools
