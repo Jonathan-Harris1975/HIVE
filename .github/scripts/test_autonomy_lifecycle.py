@@ -387,17 +387,54 @@ class OwnerCodexAdmissionTests(unittest.TestCase):
             candidate.update(change)
             self.assertFalse(automation.is_owner_codex_pr(candidate))
 
-    def test_sensitive_owner_codex_changes_are_held(self):
+    def test_owner_exact_head_risk_approval(self):
+        owner_review = {
+            "state": "APPROVED",
+            "commit_id": self.sha,
+            "submitted_at": "2026-10-14T00:00:00Z",
+            "user": {"login": "owner"},
+        }
+        with patch.object(
+            automation,
+            "get",
+            side_effect=lambda endpoint: [owner_review] if "/reviews?" in endpoint else [],
+        ):
+            self.assertTrue(automation.has_operator_risk_approval(7, self.sha))
+            self.assertFalse(automation.has_operator_risk_approval(7, "b" * 40))
+
+        rejected_review = dict(owner_review, state="CHANGES_REQUESTED")
+        owner_comment = {
+            "body": f"/risk-approve {self.sha}",
+            "created_at": "2026-10-14T00:01:00Z",
+            "user": {"login": "owner"},
+        }
+        with patch.object(
+            automation,
+            "get",
+            side_effect=lambda endpoint: (
+                [rejected_review] if "/reviews?" in endpoint
+                else [owner_comment] if "/comments?" in endpoint
+                else []
+            ),
+        ):
+            self.assertTrue(automation.has_operator_risk_approval(7, self.sha))
+
+    def test_sensitive_owner_codex_changes_require_operator_risk_approval(self):
         with (
             patch.dict(os.environ, {"ADMISSION_TOKEN": "unit-test", "REPO": "owner/repo"}),
             patch.object(automation, "pr_files", return_value=[".github/workflows/ci.yml"]),
-            patch.object(automation, "place_human_hold") as hold,
+            patch.object(automation, "has_operator_risk_approval", return_value=False),
+            patch.object(automation, "add_labels") as add_risk_label,
+            patch.object(automation, "comment") as risk_comment,
             patch.object(automation, "admit_to_mergify") as admit,
             patch.object(automation, "set_admission_check"),
             patch.object(automation, "remove_label"),
         ):
             automation.reconcile_pr(self.pr)
-        hold.assert_called_once()
+        add_risk_label.assert_called_once_with(
+            int(self.pr["number"]), [automation.RISK_APPROVAL_LABEL]
+        )
+        risk_comment.assert_called_once()
         admit.assert_not_called()
 
 
