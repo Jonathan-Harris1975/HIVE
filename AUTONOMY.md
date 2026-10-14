@@ -4,7 +4,7 @@ Authoritative MAST-aware HIVE schedule: **Renovate Saturday 08:30–11:00; CI Sa
 
 ## Weekend orchestration
 `.github/workflows/weekend-phase-launcher.yml` is the sole scheduled dispatcher for the MAST-aware CI/DAST/Council slots. `.github/workflows/weekend-orchestrator.yml` is manual proving/recovery only and must not move or duplicate those scheduled phases:
-1. **Settle.** Wait until Mergify has completed: no automation PR (admitted, queued, repair, human-hold, Renovate auto-merge) is open and no PR run is in flight. Idle admitted PRs get one `@mergifyio refresh`; trusted-automation is nudged every 15 minutes. Limit: 3 hours, then `HUMAN_HOLD`.
+1. **Settle.** Wait until GitHub native auto-merge has completed: no admitted, repair, human-hold or Renovate automation PR is open and no PR run is in flight. Trusted automation is nudged every 15 minutes to reconcile exact-head checks and auto-merge. Limit: 3 hours, then `HUMAN_HOLD`.
 2. **Verify.** Dispatch CI, CodeQL and Security on the settled default-branch SHA, then confirm the exact-SHA Koyeb deployment. CodeQL, Security, Lychee, Scorecard and the Codecov upload run here, not on every push or PR.
 3. **Repair.** A failure goes through the existing carrier-PR and Kilo path. Once the repair has merged, the orchestrator settles and verifies again (two repair attempts at most, then `HUMAN_HOLD`).
 4. **Council.** The scheduled Council remains owned by the phase launcher in the Sunday 16:00–18:30 slot. A manual recovery run must not release Council before 16:00 London. Renovate updates still under the two-day release age are reported as `PENDING_MINIMUM_AGE` and roll into the next weekend automatically.
@@ -31,7 +31,7 @@ Kilo may diagnose and prepare deterministic code/configuration compatibility fix
 - Failed autonomous repairs must return through the complete repository CI/security/deployment path.
 
 ## PR lifecycle
-GitHub is authoritative for PR state. Mergify housekeeping is permitted only from explicit lifecycle labels:
+GitHub is authoritative for PR state. Trusted lifecycle automation may close stale or duplicate repair carriers only from explicit lifecycle labels:
 - `autonomy:superseded`
 - `autonomy:obsolete`
 - `autonomy:human-hold`
@@ -52,9 +52,9 @@ Autonomous repair PRs are created with the dedicated Autonomy Repair GitHub App 
 
 The autonomous repair workflow must use the dedicated Autonomy Repair GitHub App installation token rather than `GITHUB_TOKEN`. GitHub deliberately requires manual approval for pull-request workflows created or updated by `GITHUB_TOKEN`; App-created PRs avoid that manual approval path while retaining the repository's normal checks.
 
-The repair App receives the repository permissions needed for repair branches/PRs/lifecycle labels plus Actions read/write for trusted workflow admission. It may admit eligible PRs to Mergify after exact-head gates pass, but it cannot bypass GitHub branch/ruleset protections and receives no deployment, secrets, administration or security-event write authority.
+The repair App receives the repository permissions needed for repair branches/PRs/lifecycle labels plus Actions read/write for trusted workflow admission. It may admit eligible PRs to GitHub native auto-merge after exact-head gates pass, but it cannot bypass GitHub branch/ruleset protections and receives no deployment, secrets, administration or security-event write authority.
 
-Successful default-branch reruns automatically mark open repair PRs for the same workflow as `autonomy:obsolete` (unless they are on human hold), allowing Mergify to close stale repair carriers safely. This prevents a Kilo-created replacement PR or a manual correction from leaving the original repair PR behind.
+Successful default-branch reruns automatically mark open repair PRs for the same workflow as `autonomy:obsolete` (unless they are on human hold), allowing trusted lifecycle automation to close stale repair carriers safely. This prevents a Kilo-created replacement PR or a manual correction from leaving the original repair PR behind.
 ## CodeQL and security handoff
 
 - The additional CodeQL gate fails only for open, high/critical CodeQL security alerts. On PRs it requires an alert on an added line; GitHub's separately configured code-scanning ruleset remains authoritative for other introduced findings. Existing alerts and review handoff are not CI errors by themselves.
@@ -62,12 +62,12 @@ Successful default-branch reruns automatically mark open repair PRs for the same
 - A genuine failed CodeQL/security check on a PR routes the failed job/step names to Kilo. Secrets and raw scanner output are never sent to the agent.
 - Kilo may repair code/configuration, but it must not dismiss CodeQL alerts, weaken queries/tests, broaden suppressions, change secret allowlists or make security-policy decisions. If no safe repository code change is justified, the carrier marker stays and the work moves to `autonomy:human-hold`.
 
-## Trusted automation admission for Mergify
+## Trusted automation admission for GitHub native auto-merge
 
 `.github/workflows/trusted-automation.yml` is a default-branch control plane for verified automation PRs. It never checks out or executes PR code. The installed Autonomous Repair Bot GitHub App therefore also requires **Actions: Read and write** so it can approve an `action_required` workflow run, or safely re-request the same run when GitHub requires that path. Contents, Pull requests and Issues remain read/write; Metadata is read-only.
 
 Admission is fail-closed. Exact same-repository Mend Renovate PRs are recognised from the `renovate[bot]` identity and Renovate body marker. Kilo implementation PRs require the configured creator login and either an active App-authored carrier link or a same-repository source PR link with an exact-head router receipt and preserved source ancestry. Unknown/unlinked bot PRs are not admitted. Fork secrets and fork write tokens remain disabled.
 
-Renovate's committed policy remains authoritative: PRs can run CI automatically, but trusted approval/Mergify admission is requested only when Renovate applies `dependency:auto-eligible`. Manual classes carry `dependency:manual` and remain human decisions. Renovate itself never queues or merges the PR. A linked Kilo implementation PR can progress only when the current head SHA has successful repository CI, CodeQL, repository-security checks while GitHub enforces other required ruleset checks. Sensitive governance/security-path changes are labelled `autonomy:human-hold`; carrier PRs never auto-merge.
+Renovate's committed policy remains authoritative: PRs can run CI automatically, but trusted admission to native auto-merge is requested only when Renovate applies `dependency:auto-eligible`. Manual classes carry `dependency:manual` and remain human decisions. Renovate itself never queues or merges the PR. A linked Kilo implementation PR can progress only when the current head SHA has successful repository CI, CodeQL, repository-security checks while GitHub enforces other required ruleset checks. Sensitive governance/security-path changes are labelled `autonomy:human-hold`; carrier PRs never auto-merge.
 
-Mergify Merge Queue is the sole routine merge authority. The trusted workflow admits eligible PRs only after exact-head CI/security verification. Mergify queues them, reruns the required candidate checks, and squash merges them. GitHub native Merge Queue is not used. Verified obsolete/superseded repair carriers are closed directly by the repair lifecycle workflows; Mergify closure rules remain a fallback.
+GitHub native auto-merge is the sole routine merge authority after trusted exact-head admission and successful required checks. Active rulesets remain authoritative; no automation can bypass them. Verified obsolete or superseded repair carriers are closed directly by the repair lifecycle workflows.

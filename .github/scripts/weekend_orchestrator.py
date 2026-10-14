@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Weekend orchestrator: settle Mergify, verify exact-SHA evidence, then release Council.
+"""Weekend orchestrator: settle GitHub native auto-merge, verify exact-SHA evidence, then release Council.
 
 Manual proving/recovery sequence (Europe/London): the scheduled weekend phases are owned
 by weekend-phase-launcher.yml. This script may settle automation PRs and verify CI,
@@ -44,7 +44,8 @@ TRUSTED_FILE = "trusted-automation.yml"
 
 AUTOMATION_LABELS = {"autonomy:admitted", "autonomy:repair", "autonomy:human-hold",
                      "autonomy:kilo-implementation"}
-MERGIFY_QUEUE_PREFIX = "mergify/merge-queue/"
+# Keep abandoned queue refs visible until they are closed; this is not an active merge dependency.
+LEGACY_MERGE_QUEUE_PREFIX = "mergify/merge-queue/"
 RENOVATE_LOGIN = "renovate[bot]"
 
 
@@ -146,7 +147,6 @@ class Orchestrator:
         self.sleep = sleep
         self.now = now
         self.stages: list[dict[str, Any]] = []
-        self.refreshed: set[int] = set()
         self.last_nudge = 0.0
 
     # ------------------------------------------------------------------ records
@@ -174,7 +174,7 @@ class Orchestrator:
             login = pr.get("user", {}).get("login", "")
             body = pr.get("body") or ""
             renovate_auto = (login == RENOVATE_LOGIN and "**Automerge**: Enabled." in body)
-            if (self.labels(pr) & AUTOMATION_LABELS or head.startswith(MERGIFY_QUEUE_PREFIX)
+            if (self.labels(pr) & AUTOMATION_LABELS or head.startswith(LEGACY_MERGE_QUEUE_PREFIX)
                     or renovate_auto):
                 found.append(pr)
         return found
@@ -201,33 +201,22 @@ class Orchestrator:
         return "unknown"
 
     # ------------------------------------------------------------------ stages
-    def nudge(self, prs: list[dict]) -> None:
+    def nudge(self) -> None:
+        """Ask trusted default-branch automation to reconcile native auto-merge."""
         now = self.clock()
-        if now - self.last_nudge >= self.cfg.nudge_minutes * 60:
-            self.last_nudge = now
-            try:
-                self.api.call("POST",
-                              f"/repos/{self.cfg.repo}/actions/workflows/{TRUSTED_FILE}/dispatches",
-                              {"ref": self.cfg.branch})
-                log("Nudged trusted-automation reconciliation.")
-            except RuntimeError as exc:
-                log(f"Could not nudge trusted automation: {exc}")
-        for pr in prs:
-            number = int(pr["number"])
-            if "autonomy:admitted" not in self.labels(pr) or number in self.refreshed:
-                continue
-            updated = datetime.fromisoformat(pr["updated_at"].replace("Z", "+00:00"))
-            if self.now() - updated >= timedelta(minutes=self.cfg.idle_refresh_minutes):
-                self.refreshed.add(number)
-                try:
-                    self.api.call("POST", f"/repos/{self.cfg.repo}/issues/{number}/comments",
-                                  {"body": "@mergifyio refresh"})
-                    log(f"Asked Mergify to refresh idle admitted PR #{number}.")
-                except RuntimeError as exc:
-                    log(f"Could not refresh PR #{number}: {exc}")
+        if now - self.last_nudge < self.cfg.nudge_minutes * 60:
+            return
+        self.last_nudge = now
+        try:
+            self.api.call("POST",
+                          f"/repos/{self.cfg.repo}/actions/workflows/{TRUSTED_FILE}/dispatches",
+                          {"ref": self.cfg.branch})
+            log("Nudged trusted native auto-merge reconciliation.")
+        except RuntimeError as exc:
+            log(f"Could not nudge trusted automation: {exc}")
 
     def settle(self) -> bool:
-        """Wait until Mergify has completed: no automation PR left, nothing running."""
+        """Wait for native auto-merge to finish eligible automation PRs and their checks."""
         deadline = self.clock() + self.cfg.settle_minutes * 60
         while True:
             prs = self.automation_prs(self.open_prs())
@@ -240,8 +229,8 @@ class Orchestrator:
                 self.record("settle", "timeout",
                             f"open automation PRs: {numbers}; PR runs in flight: {running}")
                 return False
-            log(f"Waiting for Mergify: {len(prs)} automation PR(s) open, {running} PR run(s) in flight.")
-            self.nudge(prs)
+            log(f"Waiting for native auto-merge: {len(prs)} automation PR(s) open, {running} PR run(s) in flight.")
+            self.nudge()
             self.sleep(self.cfg.poll_seconds)
 
     def dispatch(self, workflow_file: str, inputs: dict[str, str] | None = None) -> datetime:
@@ -358,7 +347,7 @@ class Orchestrator:
         if self.cfg.dry_run:
             # A real dispatch can trigger workflow_run autonomous repair and merges.
             # A safe dry run therefore performs only GET requests and never nudges
-            # Mergify, dispatches CI/Council, or waits for live repair side effects.
+            # trusted automation, dispatches CI/Council, or waits for live repair side effects.
             sha = self.head_sha()
             prs = self.automation_prs(self.open_prs())
             pending = self.pending_minimum_age()
@@ -369,7 +358,7 @@ class Orchestrator:
         repairs = 0
         while True:
             if not self.settle():
-                return self.hold("Mergify did not complete within the settle limit")
+                return self.hold("GitHub native auto-merge did not settle within the configured limit")
             sha = self.head_sha()
             failures = self.verify(sha)
             if self.head_sha() != sha and not failures:

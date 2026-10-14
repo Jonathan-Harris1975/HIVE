@@ -121,7 +121,7 @@ class SettleTests(unittest.TestCase):
         orch, _ = make(api, settle_minutes=3)
         self.assertFalse(orch.settle())
 
-    def test_renovate_automerge_pr_and_mergify_queue_branch_block(self):
+    def test_renovate_automerge_pr_and_legacy_queue_branch_block(self):
         api = FakeApi()
         api.prs = [pr(8, login="renovate[bot]", body="**Automerge**: Enabled."),
                    pr(9, head="mergify/merge-queue/abc")]
@@ -135,13 +135,15 @@ class SettleTests(unittest.TestCase):
         orch, _ = make(api)
         self.assertEqual(orch.automation_prs(api.prs), [])
 
-    def test_idle_admitted_pr_gets_one_refresh(self):
+    def test_idle_admitted_pr_uses_trusted_reconciliation_without_comment(self):
         api = FakeApi()
         api.prs = [pr(7, labels=["autonomy:admitted"], updated="2026-10-04T00:00:00Z")]
-        orch, _ = make(api, settle_minutes=4)
+        orch, _ = make(api, settle_minutes=3, nudge_minutes=1)
         orch.settle()
-        refreshes = [p for p in api.posts if p[2] == {"body": "@mergifyio refresh"}]
-        self.assertEqual(len(refreshes), 1)
+        dispatches = [p for p in api.posts if p[1].endswith("/workflows/trusted-automation.yml/dispatches")]
+        comments = [p for p in api.posts if "/comments" in p[1]]
+        self.assertEqual(len(dispatches), 2)
+        self.assertEqual(comments, [])
 
 
 class CouncilGateTests(unittest.TestCase):
