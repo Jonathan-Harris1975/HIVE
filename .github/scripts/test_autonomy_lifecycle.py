@@ -162,6 +162,8 @@ class ManagedBranchOwnershipTests(unittest.TestCase):
         admit.assert_not_called()
         risk_label.assert_called_once_with(self.pr["number"], [automation.RISK_APPROVAL_LABEL])
 
+class KiloPermissionPolicyTests(unittest.TestCase):
+    @classmethod
     def setUpClass(cls):
         root = Path(__file__).resolve().parents[2]
         cls.policy = json.loads((root / "kilo.jsonc").read_text(encoding="utf-8"))
@@ -595,6 +597,86 @@ class NativeAutoMergeCurrentLabelTests(unittest.TestCase):
             return_value={"allow_squash_merge": False, "allow_merge_commit": False, "allow_rebase_merge": False},
         ):
             self.assertEqual(native_auto_merge.merge_method(), "SQUASH")
+
+
+class RiskPolicyRegressionTests(unittest.TestCase):
+    def test_repository_security_deployment_and_dependency_paths_are_high_risk(self):
+        cases = {
+            "AIMS": (
+                "services/shared/middleware/suiteAuth.js",
+                "services/comms-hub/domain/rbac.js",
+                "services/comms-hub/domain/promptSecurity.js",
+                "scripts/deployCommsHubDataPlaneWorker.js",
+                "config/deployment-check.js",
+            ),
+            "AIMS-UI": ("workers/gateway/index.js", "workers/gateway/security.ts", "scripts/deploy-production.mjs"),
+            "HIVE": ("requirements.in", "requirements-dev.txt", "backend/app/core/security.py"),
+            "HIVE-UI": ("workers/gateway/security.ts", "src/lib/session.ts", "src/context/AuthContext.tsx"),
+            "MAST": ("src/security.js",),
+        }
+        for repo, paths in cases.items():
+            with self.subTest(repo=repo), patch.object(automation, "REPO", f"Jonathan-Harris1975/{repo}"):
+                for path in paths:
+                    with self.subTest(path=path):
+                        self.assertTrue(automation.sensitive_file(path), path)
+
+    def test_exact_sensitive_paths_are_normalized_before_matching(self):
+        with patch.object(automation, "REPO", "Jonathan-Harris1975/AIMS"):
+            self.assertTrue(automation.sensitive_file(r".github\scripts\trusted_automation.py"))
+
+    def test_renames_classify_both_old_and_new_paths(self):
+        with patch.object(
+            automation,
+            "get",
+            return_value=[{"filename": "docs/new-name.md", "previous_filename": ".github/workflows/ci.yml"}],
+        ):
+            self.assertEqual(
+                automation.pr_files(12),
+                ["docs/new-name.md", ".github/workflows/ci.yml"],
+            )
+
+    def test_stale_risk_hold_is_removed_after_risky_path_leaves_current_diff(self):
+        pr = {"number": 12, "labels": [{"name": automation.RISK_APPROVAL_LABEL}]}
+        with (
+            patch.object(automation, "REPO", "Jonathan-Harris1975/HIVE"),
+            patch.object(automation, "remove_label") as remove_label,
+            patch.object(automation, "log"),
+        ):
+            self.assertFalse(automation.require_operator_risk_approval(pr, ["backend/app/example.py"], "codex"))
+        remove_label.assert_called_once_with(12, automation.RISK_APPROVAL_LABEL)
+
+    def test_owner_exact_head_comment_can_approve_owner_authored_codex_pr(self):
+        sha = "a" * 40
+        owner_comment = {
+            "body": f"/risk-approve {sha}",
+            "created_at": "2026-10-14T06:00:00+01:00",
+            "user": {"login": "Jonathan-Harris1975"},
+        }
+        with (
+            patch.object(automation, "REPO", "Jonathan-Harris1975/HIVE"),
+            patch.object(automation, "get", side_effect=lambda endpoint: [owner_comment] if "/comments?" in endpoint else []),
+        ):
+            self.assertTrue(automation.has_operator_risk_approval(12, sha))
+            self.assertFalse(automation.has_operator_risk_approval(12, "b" * 40))
+
+    def test_exact_head_comment_must_follow_the_latest_owner_review(self):
+        sha = "c" * 40
+        review = {
+            "state": "CHANGES_REQUESTED",
+            "commit_id": sha,
+            "submitted_at": "2026-10-14T06:30:00Z",
+            "user": {"login": "Jonathan-Harris1975"},
+        }
+        earlier_comment = {
+            "body": f"/risk-approve {sha}",
+            "created_at": "2026-10-14T07:00:00+01:00",
+            "user": {"login": "Jonathan-Harris1975"},
+        }
+        with (
+            patch.object(automation, "REPO", "Jonathan-Harris1975/HIVE"),
+            patch.object(automation, "get", side_effect=lambda endpoint: [review] if "/reviews?" in endpoint else [earlier_comment]),
+        ):
+            self.assertFalse(automation.has_operator_risk_approval(12, sha))
 
 
 if __name__ == "__main__":
