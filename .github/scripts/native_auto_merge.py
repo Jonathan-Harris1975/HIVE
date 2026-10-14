@@ -21,6 +21,7 @@ DEFAULT_BRANCH = os.environ.get("DEFAULT_BRANCH", "main")
 ADMISSION_CHECK = "Trusted autonomy admission"
 BLOCKING_LABELS = {
     "autonomy:human-hold",
+    "autonomy:risk-approval-required",
     "autonomy:council-freeze",
     "autonomy:superseded",
     "autonomy:obsolete",
