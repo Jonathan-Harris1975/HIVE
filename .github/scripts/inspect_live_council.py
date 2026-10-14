@@ -30,7 +30,7 @@ def _retry_delay(exc: urllib.error.HTTPError, attempt: int) -> float | None:
         return float(default)
     try:
         delay = float(value)
-    except ValueError:
+    except (ValueError, OverflowError):
         try:
             retry_at = parsedate_to_datetime(value)
             if retry_at.tzinfo is None:
