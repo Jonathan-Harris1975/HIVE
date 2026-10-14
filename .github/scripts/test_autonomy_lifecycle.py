@@ -399,8 +399,8 @@ class OwnerCodexAdmissionTests(unittest.TestCase):
             "get",
             side_effect=lambda endpoint: [owner_review] if "/reviews?" in endpoint else [],
         ):
-            self.assertTrue(automation.has_operator_risk_approval(7, self.sha))
-            self.assertFalse(automation.has_operator_risk_approval(7, "b" * 40))
+            self.assertTrue(automation.has_operator_risk_approval(int(self.pr['number']), self.sha))
+            self.assertFalse(automation.has_operator_risk_approval(int(self.pr["number"]), "b" * 40))
 
         rejected_review = dict(owner_review, state="CHANGES_REQUESTED")
         owner_comment = {
@@ -417,7 +417,7 @@ class OwnerCodexAdmissionTests(unittest.TestCase):
                 else []
             ),
         ):
-            self.assertTrue(automation.has_operator_risk_approval(7, self.sha))
+            self.assertTrue(automation.has_operator_risk_approval(int(self.pr['number']), self.sha))
 
     def test_sensitive_owner_codex_changes_require_operator_risk_approval(self):
         with (
