@@ -57,6 +57,28 @@ KILO_SENSITIVE_EXACT = {
     "scripts/verify_ci_tool_checksums.py",
 }
 
+RISK_APPROVAL_LABEL = "autonomy:risk-approval-required"
+RISK_HIGH_RISK_PREFIXES = (
+    ".github/", ".circleci/", ".buildkite/", ".gitlab/", ".devcontainer/",
+    "infra/", "infrastructure/", "terraform/", "k8s/", "kubernetes/", "helm/",
+    "charts/", "migrations/", "db/migrations/", "database/migrations/",
+)
+RISK_HIGH_RISK_BASENAMES = {
+    "dockerfile", "containerfile", "docker-compose.yml", "docker-compose.yaml",
+    "compose.yml", "compose.yaml", "procfile", "koyeb.yaml", "koyeb.yml",
+    "fly.toml", "wrangler.toml", "wrangler.json", "wrangler.jsonc",
+    "vercel.json", "netlify.toml", "render.yaml", "package.json",
+    "package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml",
+    "pyproject.toml", "poetry.lock", "requirements.txt", "pipfile", "pipfile.lock",
+    "uv.lock", "cargo.toml", "cargo.lock", "go.mod", "go.sum",
+    "composer.json", "composer.lock", "gemfile", "gemfile.lock",
+}
+RISK_HIGH_RISK_SEGMENTS = {
+    "auth", "authentication", "authorization", "security", "crypto", "oidc",
+    "saml", "rbac", "permissions", "secrets", "migrations", "migration",
+}
+
+
 
 def log(message: str) -> None:
     print(message, flush=True)
@@ -438,9 +460,86 @@ def pr_files(number: int) -> list[str]:
 
 
 def sensitive_file(path: str) -> bool:
+    normalized = path.replace("\\", "/")
+    folded = normalized.casefold()
     if path in KILO_SENSITIVE_EXACT:
         return True
-    return any(path == prefix or path.startswith(prefix) for prefix in KILO_SENSITIVE_PREFIXES)
+    if any(folded == prefix.casefold().rstrip("/") or folded.startswith(prefix.casefold())
+           for prefix in KILO_SENSITIVE_PREFIXES + RISK_HIGH_RISK_PREFIXES):
+        return True
+    parts = folded.split("/")
+    basename = parts[-1]
+    if basename in RISK_HIGH_RISK_BASENAMES or basename.startswith(("dockerfile.", "containerfile.")):
+        return True
+    if any(part in RISK_HIGH_RISK_SEGMENTS for part in parts):
+        return True
+    return basename.endswith((".tf", ".tfvars", ".sql"))
+
+
+def has_operator_risk_approval(number: int, sha: str) -> bool:
+    """Require the repository owner's latest review to approve this exact PR head."""
+    owner_login = REPO.split("/", 1)[0]
+    owner_reviews: list[dict[str, Any]] = []
+    for page in range(1, 11):
+        chunk = get(f"/repos/{REPO}/pulls/{number}/reviews?per_page=100&page={page}")
+        if not isinstance(chunk, list):
+            return False
+        owner_reviews.extend(
+            review for review in chunk
+            if review.get("user", {}).get("login") == owner_login
+            and review.get("state") != "PENDING"
+        )
+        if len(chunk) < 100:
+            break
+    else:
+        raise RuntimeError(f"PR #{number} has too many review records to verify safely")
+    if not owner_reviews:
+        return False
+    latest = max(owner_reviews, key=lambda review: str(review.get("submitted_at") or ""))
+    return latest.get("state") == "APPROVED" and latest.get("commit_id") == sha
+
+
+def require_operator_risk_approval(pr: dict[str, Any], paths: list[str], kind: str) -> bool:
+    """Hold high-risk autonomous changes until the repository owner approves the exact head SHA."""
+    risky_paths = [path for path in paths if sensitive_file(path)]
+    if not risky_paths:
+        return False
+    number = int(pr["number"])
+    sha = str(pr.get("head", {}).get("sha", ""))
+    if not re.fullmatch(r"[0-9a-f]{40}", sha):
+        raise RuntimeError(f"PR #{number} has no valid head SHA for risk approval")
+    labels = issue_labels(pr)
+    if has_operator_risk_approval(number, sha):
+        if RISK_APPROVAL_LABEL in labels:
+            remove_label(number, RISK_APPROVAL_LABEL)
+            log(f"Cleared risk approval hold for PR #{number}: repository owner approved exact head {sha[:12]}.")
+        return False
+    if RISK_APPROVAL_LABEL not in labels:
+        add_labels(number, [RISK_APPROVAL_LABEL])
+        comment(
+            number,
+            f"Autonomous merge is paused for high-risk changes. The repository owner must approve this exact head "
+            f"SHA in a GitHub review: {sha}. Any new commit requires a fresh approval. "
+            f"Paths: {', '.join(risky_paths[:8])}",
+        )
+    if "autonomy:admitted" in labels:
+        remove_label(number, "autonomy:admitted")
+    log(f"PR #{number} ({kind}) is held for owner approval of exact head {sha[:12]}.")
+    return True
+
+
+def risk_policy_contract_test() -> None:
+    """Keep representative high-risk and low-risk path classifications fail-closed."""
+    high_risk = (
+        ".github/workflows/ci.yml", ".github/scripts/trusted_automation.py",
+        "infra/main.tf", "backend/alembic/versions/001.sql",
+        "src/auth/session.ts", "package-lock.json",
+    )
+    low_risk = ("src/views/dashboard.tsx", "docs/runbook.md", "tests/test_auth.py")
+    failed = [path for path in high_risk if not sensitive_file(path)]
+    failed.extend(path for path in low_risk if sensitive_file(path))
+    if failed:
+        raise RuntimeError("Risk policy contract failed for: " + ", ".join(failed))
 
 
 def place_human_hold(pr: dict[str, Any], reason: str) -> None:
@@ -489,6 +588,7 @@ def admit_to_mergify(number: int, expected_sha: str) -> None:
     labels = issue_labels(pr)
     blocking_labels = {
         "autonomy:human-hold",
+        RISK_APPROVAL_LABEL,
         "autonomy:council-freeze",
         "autonomy:superseded",
         "autonomy:obsolete",
@@ -567,13 +667,14 @@ def _reconcile_pr_candidate(pr: dict[str, Any]) -> None:
         return
 
     if kind in {"kilo", "cto", "branch-pr", "renovate", "codex"}:
-        sensitive = [path for path in pr_files(int(pr["number"])) if sensitive_file(path)]
-        if sensitive:
-            source = {"kilo": "repair", "cto": "cto.new", "branch-pr": "managed branch", "renovate": "Renovate", "codex": "owner-authorized Codex"}[kind]
-            place_human_hold(
-                pr,
-                f"the {source} PR changes governance/security automation files: " + ", ".join(sensitive[:8]),
-            )
+        number = int(pr["number"])
+        changed_paths = pr_files(number)
+        approved_pin_only = (
+            REPO.endswith("/AIMS-UI")
+            and kind == "renovate"
+            and renovate_sensitive_changes_are_dependency_pins(number)
+        ) if "renovate_sensitive_changes_are_dependency_pins" in globals() else False
+        if not approved_pin_only and require_operator_risk_approval(pr, changed_paths, kind):
             return
 
     if kind == "kilo":
@@ -637,6 +738,7 @@ def reconcile_pr(pr: dict[str, Any]) -> None:
 
 
 def main() -> int:
+    risk_policy_contract_test()
     if not REQUIRED_WORKFLOWS:
         raise RuntimeError("REQUIRED_WORKFLOWS must list the repository's CI/security workflow names")
     if not re.fullmatch(r"[A-Za-z0-9-]+\[bot\]", REPAIR_APP_LOGIN):
@@ -655,6 +757,7 @@ def main() -> int:
     ensure_label(CTO_TASK_LABEL, "1D76DB", "Actionable engineering task explicitly assigned to cto.new")
     ensure_label(CTO_IMPLEMENTATION_LABEL, "5319E7", "cto.new implementation PR linked to an explicitly assigned task")
     ensure_label("autonomy:human-hold", "FBCA04", "Automation must stop for human action")
+    ensure_label(RISK_APPROVAL_LABEL, "FBCA04", "High-risk autonomous changes require exact-head repository-owner approval")
     ensure_label("autonomy:obsolete", "D4C5F9", "Repair carrier is no longer current")
     ensure_label("autonomy:admitted", "0E8A16", "Exact-head CI/security verification complete; GitHub native auto-merge may merge")
 
