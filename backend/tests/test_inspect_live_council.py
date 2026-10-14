@@ -289,7 +289,7 @@ def test_retry_delay_falls_back_for_non_finite_values():
 
     assert module._retry_delay(error, 2) == 2.0
 
-    for value in ("Infinity", "-Infinity"):
+    for value in ("Infinity", "-Infinity", "1e400"):
         error = urllib.error.HTTPError(
             "https://hive.example/status",
             429,
