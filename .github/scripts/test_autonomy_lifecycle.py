@@ -679,5 +679,66 @@ class RiskPolicyRegressionTests(unittest.TestCase):
             self.assertFalse(automation.has_operator_risk_approval(12, sha))
 
 
+
+
+class RiskApprovalExpiryTests(unittest.TestCase):
+    def setUp(self):
+        self.sha = "a" * 40
+
+    def test_approval_ttl_is_explicitly_bounded(self):
+        self.assertEqual(automation.RISK_APPROVAL_TTL.days, 7)
+
+    def test_recent_exact_head_owner_review_is_accepted(self):
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).isoformat()
+        with patch.object(automation, "REPO", "owner/repo"), patch.object(
+            automation, "get",
+            side_effect=[
+                [{"user": {"login": "owner"}, "state": "APPROVED", "commit_id": self.sha, "submitted_at": now}],
+                [],
+            ],
+        ):
+            self.assertTrue(automation.has_operator_risk_approval(42, self.sha))
+
+    def test_expired_or_wrong_head_review_is_rejected(self):
+        from datetime import datetime, timedelta, timezone
+        old = (datetime.now(timezone.utc) - timedelta(days=8)).isoformat()
+        cases = [
+            (self.sha, old),
+            ("b" * 40, datetime.now(timezone.utc).isoformat()),
+        ]
+        for commit_id, submitted_at in cases:
+            with self.subTest(commit_id=commit_id, submitted_at=submitted_at), patch.object(
+                automation, "REPO", "owner/repo"
+            ), patch.object(
+                automation, "get",
+                side_effect=[
+                    [{"user": {"login": "owner"}, "state": "APPROVED", "commit_id": commit_id, "submitted_at": submitted_at}],
+                    [],
+                ],
+            ):
+                self.assertFalse(automation.has_operator_risk_approval(42, self.sha))
+
+    def test_exact_head_approval_comment_is_accepted_only_while_fresh(self):
+        from datetime import datetime, timedelta, timezone
+        fresh = datetime.now(timezone.utc).isoformat()
+        stale = (datetime.now(timezone.utc) - timedelta(days=8)).isoformat()
+        for timestamp, expected in ((fresh, True), (stale, False)):
+            with self.subTest(timestamp=timestamp), patch.object(
+                automation, "REPO", "owner/repo"
+            ), patch.object(
+                automation, "get",
+                side_effect=[
+                    [],
+                    [{"user": {"login": "owner"}, "body": f"/risk-approve {self.sha}", "created_at": timestamp}],
+                ],
+            ):
+                self.assertEqual(
+                    automation.has_operator_risk_approval(42, self.sha), expected
+                )
+
+
+
 if __name__ == "__main__":
     unittest.main()
+
