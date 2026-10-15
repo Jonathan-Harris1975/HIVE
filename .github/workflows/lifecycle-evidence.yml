@@ -45,7 +45,8 @@ jobs:
             --output lifecycle-evidence/evidence.json
       - name: Persist exact-run evidence to R2
         env:
-          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID || vars.CF_R2_ACCOUNT_ID }}
+          R2_ENDPOINT: ${{ vars.CF_R2_ENDPOINT_URL || vars.R2_ENDPOINT_URL || format('https://{0}.r2.cloudflarestorage.com', vars.R2_ACCOUNT_ID || vars.CF_R2_ACCOUNT_ID || secrets.R2_ACCOUNT_ID || secrets.CF_R2_ACCOUNT_ID) }}
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID || vars.CF_R2_ACCOUNT_ID || secrets.R2_ACCOUNT_ID || secrets.CF_R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || secrets.CF_R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || secrets.CF_R2_SECRET_ACCESS_KEY }}
           GITHUB_REPOSITORY: ${{ github.repository }}
