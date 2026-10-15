@@ -5,7 +5,7 @@ import datetime as dt
 import json
 import re
 import hashlib
-from typing import TYPE_CHECKING, Any, Iterable
+from typing import TYPE_CHECKING, Any, Iterable, Mapping
 
 if TYPE_CHECKING:
     from app.storage.r2 import R2Storage
@@ -44,7 +44,7 @@ def _state(record: dict[str, Any] | None) -> str:
     # GREEN needs affirmative, exact-revision gate and deployment evidence.
     if state == "GREEN":
         statuses = ("ci_gate", "socket_status", "codeql_status", "gitleaks_status", "trivy_status", "codecov_status", "dast_status", "deployment_status")
-        reasons = record.get("not_applicable_reasons") if isinstance(record.get("not_applicable_reasons"), dict) else {}
+        reasons: dict[str, Any] = record.get("not_applicable_reasons") if isinstance(record.get("not_applicable_reasons"), dict) else {}
         if any(record.get(field) not in {"pass", "not_applicable"} for field in statuses):
             return "UNKNOWN"
         if any(record.get(field) == "not_applicable" and not reasons.get(field) for field in statuses):
@@ -58,7 +58,7 @@ def _state(record: dict[str, Any] | None) -> str:
     return state
 
 
-def build_weekly_overview(records_by_repository: dict[str, Iterable[dict[str, Any]]], year: int, week: int, generated_at: str | None = None) -> dict[str, Any]:
+def build_weekly_overview(records_by_repository: Mapping[str, Iterable[dict[str, Any]]], year: int, week: int, generated_at: str | None = None) -> dict[str, Any]:
     repositories = []
     flattened: list[dict[str, Any]] = []
     for name in REPOSITORIES:
