@@ -743,3 +743,18 @@ class RiskApprovalExpiryTests(unittest.TestCase):
 if __name__ == "__main__":
     unittest.main()
 
+
+class KiloControlPlaneProtectionTests(unittest.TestCase):
+    def test_kilo_cannot_change_project_overrides_or_its_repair_contract(self):
+        root = Path(__file__).resolve().parents[2]
+        policy = json.loads((root / "kilo.jsonc").read_text(encoding="utf-8"))
+        protected = (
+            ".kilo/**",
+            ".kilocode/**",
+            ".github/kilo-machine-repair-contract.md",
+        )
+        for tool in ("edit", "write", "apply_patch"):
+            rules = policy["permission"][tool]
+            for pattern in protected:
+                self.assertEqual(rules[pattern], "deny")
+                self.assertLess(list(rules).index("*"), list(rules).index(pattern))
