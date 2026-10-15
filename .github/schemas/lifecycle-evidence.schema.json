@@ -1,0 +1,340 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "HIVE lifecycle evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "repository",
+    "pr_number",
+    "head_sha",
+    "merge_sha",
+    "trigger_actor",
+    "ci_gate",
+    "autofix_used",
+    "socket_status",
+    "codeql_status",
+    "gitleaks_status",
+    "trivy_status",
+    "codecov_status",
+    "dast_status",
+    "kilo_triggered",
+    "kilo_trigger_reason",
+    "repair_provider",
+    "fallback_used",
+    "fallback_reason",
+    "repair_attempts",
+    "mergify_admitted",
+    "mergify_queued",
+    "merged",
+    "deployment_status",
+    "deployed_sha",
+    "deployment_verified",
+    "human_hold",
+    "failure_class",
+    "final_state",
+    "started_at",
+    "completed_at",
+    "deployment_not_applicable_reason",
+    "merge_authority",
+    "github_auto_merge_enabled",
+    "github_auto_merge_queued",
+    "mergify_not_applicable_reason",
+    "not_applicable_reasons",
+    "source_workflow",
+    "source_workflow_conclusion",
+    "failed_check",
+    "proposed_solution",
+    "repair_prompt",
+    "risk_impact",
+    "repository_slug"
+  ],
+  "properties": {
+    "repository": {
+      "type": "string",
+      "minLength": 1
+    },
+    "pr_number": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
+    "head_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "merge_sha": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "trigger_actor": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "ci_gate": {
+      "$ref": "#/$defs/status"
+    },
+    "autofix_used": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "socket_status": {
+      "$ref": "#/$defs/status"
+    },
+    "codeql_status": {
+      "$ref": "#/$defs/status"
+    },
+    "gitleaks_status": {
+      "$ref": "#/$defs/status"
+    },
+    "trivy_status": {
+      "$ref": "#/$defs/status"
+    },
+    "codecov_status": {
+      "$ref": "#/$defs/status"
+    },
+    "dast_status": {
+      "$ref": "#/$defs/status"
+    },
+    "kilo_triggered": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "kilo_trigger_reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "repair_provider": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "fallback_used": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "fallback_reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "repair_attempts": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "mergify_admitted": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "mergify_queued": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "merged": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "deployment_status": {
+      "$ref": "#/$defs/status"
+    },
+    "deployed_sha": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "deployment_verified": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "human_hold": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "failure_class": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "final_state": {
+      "enum": [
+        "GREEN",
+        "RECOVERING",
+        "REVIEW_REQUIRED",
+        "SERVICE_BLOCKED",
+        "UNKNOWN"
+      ]
+    },
+    "started_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "completed_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "deployment_not_applicable_reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "merge_authority": {
+      "enum": [
+        "github_native_auto_merge",
+        "mergify",
+        "unknown"
+      ]
+    },
+    "github_auto_merge_enabled": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "github_auto_merge_queued": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "mergify_not_applicable_reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "not_applicable_reasons": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ci_gate": {
+          "type": "string",
+          "minLength": 1
+        },
+        "socket_status": {
+          "type": "string",
+          "minLength": 1
+        },
+        "codeql_status": {
+          "type": "string",
+          "minLength": 1
+        },
+        "gitleaks_status": {
+          "type": "string",
+          "minLength": 1
+        },
+        "trivy_status": {
+          "type": "string",
+          "minLength": 1
+        },
+        "codecov_status": {
+          "type": "string",
+          "minLength": 1
+        },
+        "dast_status": {
+          "type": "string",
+          "minLength": 1
+        },
+        "deployment_status": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "source_workflow": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source_workflow_conclusion": {
+      "enum": [
+        "success",
+        "failure",
+        "cancelled",
+        "skipped",
+        "timed_out",
+        "action_required",
+        "unknown",
+        null
+      ]
+    },
+    "failed_check": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "proposed_solution": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "repair_prompt": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "risk_impact": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "repository_slug": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+    }
+  },
+  "$defs": {
+    "status": {
+      "enum": [
+        "pass",
+        "fail",
+        "running",
+        "unknown",
+        "not_applicable"
+      ]
+    }
+  }
+}

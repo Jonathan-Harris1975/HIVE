@@ -148,5 +148,17 @@ jobs:
         description: Optional PR number; blank checks all eligible open PRs
         required: false
         type: string
+      review_id:
+        description: Stable HIVE review id for an accepted repair request
+        required: false
+        type: string
+      source_head_sha:
+        description: Exact PR head SHA verified by HIVE before dispatch
+        required: false
+        type: string
+      repair_prompt:
+        description: Bounded human-approved repair instruction from the HIVE review record
+        required: false
+        type: string
 permissions:
   contents: read

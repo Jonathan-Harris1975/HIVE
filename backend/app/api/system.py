@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
+import json
 import time
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.core.config import Settings, get_settings
 from app.core.security import require_admin
@@ -13,6 +15,7 @@ from app.services.ops_events import list_ops_events
 from app.services.providers.registry import discover_providers
 from app.services.repo_health import build_repo_health_report
 from app.services.production_manager import build_production_manager_report
+from app.services.lifecycle_reports import BUCKET, accept_review_fix, generate_and_store_weekly_report, list_open_reviews, list_weekly_reports
 from app.services.repo_hygiene import repo_hygiene_report
 from app.storage.d1 import D1MetadataStore
 from app.storage.r2 import R2Storage
@@ -53,6 +56,59 @@ async def production_manager(
     """Return HIVE's authoritative ecosystem production decision."""
 
     return await build_production_manager_report(settings, force_refresh=force_refresh)
+
+
+@router.get("/system/lifecycle-reports/current")
+def current_lifecycle_report(settings: Settings = Depends(get_settings)) -> dict[str, object]:
+    """Read the immutable current ISO week's HIVE overview from R2."""
+    now = dt.datetime.now(dt.timezone.utc).isocalendar()
+    key = f"reports/weekly/{now.year}/{now.week:02d}/overview.json"
+    try:
+        result = R2Storage(settings).read_object(key, max_bytes=2 * 1024 * 1024, bucket=BUCKET)
+        report = json.loads(result.content)
+        return {"ok": True, "available": True, "report": report, "r2_key": key}
+    except (FileNotFoundError, RuntimeError, ValueError) as exc:
+        return {"ok": True, "available": False, "report": None, "r2_key": key, "reason": type(exc).__name__}
+
+
+@router.post("/system/lifecycle-reports/weekly")
+async def generate_weekly_lifecycle_report(settings: Settings = Depends(get_settings)) -> dict[str, object]:
+    """Assemble exact evidence and persist one immutable ISO-week report set."""
+    now = dt.datetime.now(dt.timezone.utc).isocalendar()
+    return await asyncio.to_thread(generate_and_store_weekly_report, R2Storage(settings), now.year, now.week)
+
+
+@router.get("/system/lifecycle-reports/history")
+def lifecycle_report_history(limit: int = Query(12, ge=1, le=52), settings: Settings = Depends(get_settings)) -> dict[str, object]:
+    """List compact summaries for durable weekly overview history."""
+    try:
+        items = list_weekly_reports(R2Storage(settings), limit)
+        return {"ok": True, "count": len(items), "items": items}
+    except RuntimeError as exc:
+        return {"ok": False, "count": 0, "items": [], "error": type(exc).__name__}
+
+
+@router.get("/system/lifecycle-reviews")
+def lifecycle_reviews(settings: Settings = Depends(get_settings)) -> dict[str, object]:
+    """List durable HIVE review records that require a decision."""
+    try:
+        items = list_open_reviews(R2Storage(settings))
+        return {"ok": True, "count": len(items), "items": items}
+    except RuntimeError as exc:
+        return {"ok": False, "count": 0, "items": [], "error": type(exc).__name__}
+
+
+@router.post("/system/lifecycle-reviews/{review_id}/accept-fix")
+async def accept_lifecycle_fix(review_id: str, settings: Settings = Depends(get_settings)) -> dict[str, object]:
+    """Record an authenticated Accept Fix decision and dispatch the trusted PR repair workflow."""
+    try:
+        return await asyncio.to_thread(accept_review_fix, R2Storage(settings), settings, review_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @router.get("/system/ops-events")
