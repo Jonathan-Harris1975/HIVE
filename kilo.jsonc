@@ -4,6 +4,9 @@
     "*": "allow",
     "edit": {
       "*": "allow",
+      ".kilo/**": "deny",
+      ".kilocode/**": "deny",
+      ".github/kilo-machine-repair-contract.md": "deny",
       "kilo.jsonc": "deny",
       ".github/workflows/*": "deny",
       ".github/actions/*": "deny",
@@ -19,6 +22,9 @@
     },
     "write": {
       "*": "allow",
+      ".kilo/**": "deny",
+      ".kilocode/**": "deny",
+      ".github/kilo-machine-repair-contract.md": "deny",
       "kilo.jsonc": "deny",
       ".github/workflows/*": "deny",
       ".github/actions/*": "deny",
@@ -34,6 +40,9 @@
     },
     "apply_patch": {
       "*": "allow",
+      ".kilo/**": "deny",
+      ".kilocode/**": "deny",
+      ".github/kilo-machine-repair-contract.md": "deny",
       "kilo.jsonc": "deny",
       ".github/workflows/*": "deny",
       ".github/actions/*": "deny",
