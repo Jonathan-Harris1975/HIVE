@@ -1,0 +1,13 @@
+# Eight-repository lifecycle reporting
+
+The lifecycle evidence contract is `.github/schemas/lifecycle-evidence.schema.json` in each governed repository. The workflow emits an exact-head record and preserves it with the existing create-only `ci-reports` R2 writer. A generic `workflow_run` event does not prove that required gates passed; its unjoined fields remain `unknown`, and the deterministic HIVE overview cannot report GREEN unless every repository has complete affirmative CI and deployment evidence.
+
+HIVE assembles the current ISO week from lifecycle JSON in `hive-repositories`, writes `reports/weekly/<year>/<week>/overview.json`, `overview.md`, and one JSON record for each of AIMS, AIMS-UI, HIVE, HIVE-UI, IRS, RAMS, MAST and jonathan-harris-website. Weekly report objects are create-only. MAST schedules generation Mondays at 07:05 Europe/London, after its 06:55 HIVE governance check. The HIVE Operations surface reads the persisted report.
+
+The live repository audit and operator confirmation establish GitHub native auto-merge as the merge authority. The records keep legacy Mergify fields for contract compatibility, mark them inapplicable with a reason, and add explicit GitHub auto-merge fields. No merge authority, CI gate, or security check is bypassed.
+
+Kilo remains the code-repair executor. Provider fallback remains unset unless a quota, credit, rate-limit, provider-unavailable, or defined timeout signal is recorded. A failed Kilo patch is handled by existing bounded repair logic and does not trigger provider fallback. Reporting is deterministic and has no AI-provider dependency.
+
+Council bundles already written by the eight repositories' governed Council workflows are indexed from the same `ci-reports` R2 tree into `reports/council/<repository>/<run>-<sha>/evidence-index.json` and referenced by the weekly overview. The source manifests and evidence remain unchanged.
+
+HIVE creates a review bundle only when an exact evidence record has `REVIEW_REQUIRED`, `SERVICE_BLOCKED`, or an explicit human hold. The immutable bundle contains the original evidence, review summary and proposal. Accept Fix is disabled unless the proposal, repair prompt, governed PR number and exact head are present. When accepted, HIVE verifies the PR is still open at that head, writes a create-only decision record, and dispatches the repository's existing `pr-issue-repair.yml` workflow. That workflow performs its normal eligibility checks and Kilo handoff; it cannot merge or deploy. An uncertain dispatch is not automatically retried. Subsequent complete GREEN evidence indexes the original record under `reports/review-required/resolved/<year>/<review-id>/` without changing the source evidence.

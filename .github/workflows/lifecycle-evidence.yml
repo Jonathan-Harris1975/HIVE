@@ -1,0 +1,64 @@
+name: HIVE lifecycle evidence
+
+on:
+  workflow_run: # zizmor: ignore[dangerous-triggers] reads trusted workflow metadata; no PR code is checked out or run
+    workflows: ["*"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: hive-lifecycle-evidence-${{ github.event.workflow_run.id || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  evidence:
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.name != 'HIVE lifecycle evidence' && github.event.workflow_run.head_repository.full_name == github.repository) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+      - name: Emit redacted lifecycle record
+        env:
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          SOURCE_ACTOR: ${{ github.event.workflow_run.actor.login || github.actor }}
+          SOURCE_STARTED: ${{ github.event.workflow_run.run_started_at || github.event.workflow_run.created_at }}
+          SOURCE_COMPLETED: ${{ github.event.workflow_run.updated_at }}
+          SOURCE_WORKFLOW: ${{ github.event.workflow_run.name }}
+          SOURCE_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          SOURCE_PR: ${{ github.event.workflow_run.pull_requests[0].number }}
+        run: |
+          python3 .github/scripts/emit_lifecycle_evidence.py \
+            --repository "${GITHUB_REPOSITORY#*/}" \
+            --head-sha "$SOURCE_SHA" \
+            --pr-number "$SOURCE_PR" \
+            --trigger-actor "$SOURCE_ACTOR" \
+            --source-workflow "$SOURCE_WORKFLOW" \
+            --source-conclusion "$SOURCE_CONCLUSION" \
+            --started-at "$SOURCE_STARTED" \
+            --completed-at "$SOURCE_COMPLETED" \
+            --output lifecycle-evidence/evidence.json
+      - name: Persist exact-run evidence to R2
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT || secrets.R2_ENDPOINT_URL }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.event.workflow_run.id || github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt || '1' }}
+          EVIDENCE_RUN_ID: ${{ github.event.workflow_run.id || github.run_id }}
+          EVIDENCE_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt || '1' }}
+          EVIDENCE_STATUS: UNKNOWN
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: python3 .github/scripts/persist_ci_report_r2.py lifecycle "$SOURCE_SHA" lifecycle-evidence
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: lifecycle-evidence-${{ github.event.workflow_run.head_sha || github.sha }}
+          path: lifecycle-evidence/evidence.json
+          retention-days: 90

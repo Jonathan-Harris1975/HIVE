@@ -39,7 +39,7 @@ def request(method, endpoint, key, body=b"", ctype=None, expected_length=None):
     except urllib.error.HTTPError as e:
         raise RuntimeError(f"R2 {method} failed with HTTP {e.code}") from e
 def main():
-    p=argparse.ArgumentParser(); p.add_argument("phase",choices=("dast","council")); p.add_argument("sha"); p.add_argument("source",type=Path); a=p.parse_args()
+    p=argparse.ArgumentParser(); p.add_argument("phase",choices=("dast","council","lifecycle")); p.add_argument("sha"); p.add_argument("source",type=Path); a=p.parse_args()
     repository = req("GITHUB_REPOSITORY")
     repo = repository.split("/")[-1]
     run = os.environ.get("EVIDENCE_RUN_ID", "").strip() or req("GITHUB_RUN_ID")
