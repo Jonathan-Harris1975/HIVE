@@ -16,7 +16,14 @@ concurrency:
 
 jobs:
   evidence:
-    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.name != 'HIVE lifecycle evidence' && github.event.workflow_run.head_repository.full_name == github.repository) }}
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch' ||
+          (github.event.workflow_run.head_repository.full_name == github.repository &&
+           github.event.workflow_run.name != 'HIVE lifecycle evidence' &&
+           github.event.workflow_run.name != 'Deployment failure diagnostics' &&
+           github.event.workflow_run.name != 'Trusted automation and native auto-merge' &&
+           github.event.workflow_run.name != 'Autonomous PR issue repair' &&
+           github.event.workflow_run.name != 'Autonomous main-branch repair PR') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
