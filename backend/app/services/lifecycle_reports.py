@@ -44,7 +44,8 @@ def _state(record: dict[str, Any] | None) -> str:
     # GREEN needs affirmative, exact-revision gate and deployment evidence.
     if state == "GREEN":
         statuses = ("ci_gate", "socket_status", "codeql_status", "gitleaks_status", "trivy_status", "codecov_status", "dast_status", "deployment_status")
-        reasons: dict[str, Any] = record.get("not_applicable_reasons") if isinstance(record.get("not_applicable_reasons"), dict) else {}
+        raw_reasons = record.get("not_applicable_reasons")
+        reasons: dict[str, Any] = raw_reasons if isinstance(raw_reasons, dict) else {}
         if any(record.get(field) not in {"pass", "not_applicable"} for field in statuses):
             return "UNKNOWN"
         if any(record.get(field) == "not_applicable" and not reasons.get(field) for field in statuses):
