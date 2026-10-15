@@ -95,10 +95,9 @@ jobs:
           jq -n --arg repository "$REPO" --arg sha "$TARGET_SHA" --arg source_run_id "$SOURCE_COUNCIL_RUN_ID" --arg source_run_attempt "$SOURCE_COUNCIL_RUN_ATTEMPT" --arg disposition "$DISPOSITION" --arg collected_at "$(date -u +%FT%TZ)"             '{repository:$repository,exact_evaluated_sha:$sha,source_council_run_id:$source_run_id,source_council_run_attempt:$source_run_attempt,council_disposition:$disposition,collected_at:$collected_at}' > "$RUNNER_TEMP/council-r2/council-return-context.json"
       - name: Persist and verify completed Council evidence
         env:
-          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
-          R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID || vars.CF_R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || secrets.CF_R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || secrets.CF_R2_SECRET_ACCESS_KEY }}
           EVIDENCE_RUN_ID: ${{ inputs.source_council_run_id }}
           EVIDENCE_RUN_ATTEMPT: ${{ inputs.source_council_run_attempt }}
           EVIDENCE_STATUS: ${{ inputs.disposition }}
