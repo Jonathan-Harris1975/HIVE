@@ -273,7 +273,53 @@ class D1MetadataStore:
             "failed": failed,
         }
 
-    def reset_configured_databases(self) -> dict[str, object]:
+    def preview_database(self, name: str) -> dict[str, object]:
+        """Read row counts for one configured D1 database."""
+        allowed = {item.strip() for item in self.settings.d1_reset_database_names if item.strip()}
+        if name not in allowed:
+            return {"ok": False, "message": "D1 database is not configured as a reset target."}
+        if not self.enabled:
+            return {"ok": False, "enabled": False, "message": "D1 is disabled or not configured."}
+        resolved = self._resolve_database_by_name(name)
+        if not resolved.get("ok"):
+            return {"ok": False, "database_name": name, "message": "Could not resolve the configured D1 database."}
+        database_id = str(resolved.get("database_id") or "")
+        tables_result = self._query_database(
+            database_id,
+            "SELECT name FROM sqlite_master WHERE type = 'table' "
+            "AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' ORDER BY name",
+            [],
+        )
+        if not tables_result.get("ok"):
+            return {"ok": False, "database_name": name, "message": "Could not list D1 tables for the preview."}
+        names = [str(row.get("name") or "") for row in _extract_d1_rows(tables_result.get("result"))]
+        tables: list[dict[str, object]] = []
+        preserved: list[str] = []
+        total_rows = 0
+        for table_name in names:
+            if not table_name:
+                continue
+            if _preserve_d1_table(table_name):
+                preserved.append(table_name)
+                continue
+            quoted = chr(34) + table_name.replace(chr(34), chr(34) * 2) + chr(34)
+            count_result = self._query_database(database_id, f"SELECT COUNT(*) AS row_count FROM {quoted}", [])  # nosec B608 - table name is read from sqlite_master and safely quoted.
+            if not count_result.get("ok"):
+                return {"ok": False, "database_name": name, "message": "Could not count rows in a D1 table."}
+            rows = _extract_d1_rows(count_result.get("result"))
+            count = rows[0].get("row_count") if rows else None
+            if not isinstance(count, int) or count < 0:
+                return {"ok": False, "database_name": name, "message": f"Could not count rows in {table_name}."}
+            tables.append({"name": table_name, "rows": count})
+            total_rows += count
+        return {
+            "ok": True, "target": name, "database_name": name, "tables": tables,
+            "total_rows": total_rows,
+            "preserved_tables": preserved,
+            "preserves": ["D1 schema", "migration tables", "R2 objects", "Vectorize data"],
+        }
+
+    def reset_configured_databases(self, database_names: list[str] | None = None) -> dict[str, object]:
         """Purge application rows from the configured ecosystem D1 databases.
 
         The databases themselves, their schemas and schema-migration ledgers are
@@ -281,21 +327,22 @@ class D1MetadataStore:
         replaying additive migrations against an already-created schema.
         """
 
-        if not self.settings.d1_account_id or not self.settings.d1_api_key:
+        if not self.enabled:
             return {
                 "ok": False,
                 "enabled": False,
-                "message": "D1 account credentials are not configured.",
+                "message": "D1 is disabled or not configured.",
             }
 
-        names = list(dict.fromkeys(
+        configured = list(dict.fromkeys(
             item.strip() for item in self.settings.d1_reset_database_names if item.strip()
         ))
-        if not names:
+        names = list(dict.fromkeys(item.strip() for item in (database_names or []) if item.strip()))
+        if not names or any(name not in configured for name in names):
             return {
                 "ok": False,
                 "enabled": True,
-                "message": "No D1 reset database names are configured.",
+                "message": "Provide only configured D1 database names to reset.",
             }
 
         results: list[dict[str, object]] = []

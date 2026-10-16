@@ -14,7 +14,6 @@ from app.storage.sql_store import SqlStore
 
 router = APIRouter(tags=["database"], dependencies=[Depends(require_admin)])
 _PURGE_RESET_LOCK = threading.Lock()
-_PURGE_RESET_CONFIRMATION = "PURGE ALL DATABASES"
 
 
 class EcosystemMetadataRequest(BaseModel):
@@ -38,7 +37,12 @@ class ConversationRenameRequest(BaseModel):
 
 
 class DatabasePurgeResetRequest(BaseModel):
-    confirmation: str = Field(..., min_length=1, max_length=64)
+    target: str = Field(..., min_length=1, max_length=160)
+    confirmation: str = Field(..., min_length=1, max_length=160)
+
+
+class DatabasePurgeResetTargetRequest(BaseModel):
+    target: str = Field(..., min_length=1, max_length=160)
 
 
 @router.get("/db/diagnostics")
@@ -112,37 +116,72 @@ def database_ping_write(settings: Settings = Depends(get_settings)) -> dict[str,
     }
 
 
+@router.get("/db/purge-reset/targets")
+def purge_reset_targets(settings: Settings = Depends(get_settings)) -> dict[str, object]:
+    """List individually selectable reset targets without exposing credentials."""
+    targets: list[dict[str, object]] = [{
+        "id": "hive_sql",
+        "label": "HIVE SQL",
+        "kind": "sql",
+        "enabled": SqlStore(settings).enabled,
+        "required_confirmation": "RESET HIVE SQL",
+    }]
+    targets.extend({
+        "id": name,
+        "label": name,
+        "kind": "d1",
+        "enabled": D1MetadataStore(settings).enabled,
+        "required_confirmation": f"RESET {name}",
+    } for name in dict.fromkeys(item.strip() for item in settings.d1_reset_database_names if item.strip()))
+    return {"ok": True, "targets": targets}
+
+
+@router.post("/db/purge-reset/preview")
+def preview_purge_reset(
+    payload: DatabasePurgeResetTargetRequest,
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    """Return a read-only row-count preview for exactly one reset target."""
+    if payload.target == "hive_sql":
+        return SqlStore(settings).preview_reset()
+    if payload.target in settings.d1_reset_database_names:
+        return D1MetadataStore(settings).preview_database(payload.target)
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown reset target.")
+
+
 @router.post("/db/purge-reset")
 def purge_reset_databases(
     payload: DatabasePurgeResetRequest,
     settings: Settings = Depends(get_settings),
 ) -> dict[str, object]:
-    """Purge HIVE/Koyeb SQL data and the configured ecosystem D1 databases.
-
-    Database services, D1 UUIDs, schemas and D1 schema-migration ledgers are
-    preserved. The explicit confirmation phrase is checked again server-side so
-    this endpoint cannot be triggered by an accidental UI click alone.
-    """
-
-    if payload.confirmation.strip() != _PURGE_RESET_CONFIRMATION:
+    """Reset one explicitly selected SQL or D1 target after target-specific confirmation."""
+    if payload.target == "hive_sql":
+        expected = "RESET HIVE SQL"
+    elif payload.target in settings.d1_reset_database_names:
+        expected = f"RESET {payload.target}"
+    else:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown reset target.")
+    if payload.confirmation.strip() != expected:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Confirmation must exactly match {_PURGE_RESET_CONFIRMATION!r}.",
+            detail=f"Confirmation must exactly match {expected!r}.",
         )
     if not _PURGE_RESET_LOCK.acquire(blocking=False):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="A database purge/reset is already in progress.",
+            detail="A database reset is already in progress.",
         )
 
     try:
-        d1_result = D1MetadataStore(settings).reset_configured_databases()
-        sql_result = SqlStore(settings).reset_all_data()
+        if payload.target == "hive_sql":
+            result = SqlStore(settings).reset_all_data()
+        else:
+            result = D1MetadataStore(settings).reset_configured_databases([payload.target])
         return {
-            "ok": bool(d1_result.get("ok") and sql_result.get("ok")),
+            "ok": bool(result.get("ok")),
             "confirmation": "accepted",
-            "d1": d1_result,
-            "sql": sql_result,
+            "target": payload.target,
+            "result": result,
         }
     finally:
         _PURGE_RESET_LOCK.release()

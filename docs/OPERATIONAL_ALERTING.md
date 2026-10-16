@@ -21,8 +21,12 @@ The token must be unique, at least 32 characters and separate from `ADMIN_BEARER
 |---|---|---|
 | `POST /v1/ops/events` | Dedicated event token | Accept a bounded operational event |
 | `GET /v1/system/ops-events` | HIVE admin bearer | List recent redacted events for HIVE-UI |
+| `DELETE /v1/system/ops-events?event_id={id}` | HIVE admin bearer | Delete one event from the operational inbox |
+| `DELETE /v1/system/ops-events?clear_all=true` | HIVE admin bearer | Delete all events from the operational inbox |
 
 Payloads are size-bounded and keys resembling credentials, tokens or passwords are redacted before storage. Event senders must never include logs, prompts, request bodies or secret values.
+
+Deletion is available only through the authenticated HIVE-UI operator controls. It removes the selected inbox event from HIVE's in-memory queue and, when enabled, the D1 `ops_events` lane; provider-side run/deployment records are unaffected. Clearing the inbox is irreversible.
 
 ## Repository secrets
 

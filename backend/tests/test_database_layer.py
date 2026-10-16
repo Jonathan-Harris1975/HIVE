@@ -588,46 +588,61 @@ def test_d1_purge_preserves_schema_migration_ledger(monkeypatch) -> None:
     assert "PRAGMA defer_foreign_keys = ON" in purge_sql
 
 
-def test_purge_reset_endpoint_requires_exact_confirmation(monkeypatch) -> None:
+def test_purge_reset_endpoint_requires_target_specific_confirmation() -> None:
     from fastapi.testclient import TestClient
 
     from app.main import create_app
 
     settings = Settings(APP_ENV="test", DATABASE_ENABLED=False, D1_ENABLED=False)
-    application = create_app(settings)
-    client = TestClient(application)
-
-    response = client.post("/v1/db/purge-reset", json={"confirmation": "purge"})
-
+    with TestClient(create_app(settings)) as client:
+        response = client.post(
+            "/v1/db/purge-reset",
+            json={"target": "hive_sql", "confirmation": "RESET ALL"},
+        )
     assert response.status_code == 400
 
 
-def test_purge_reset_endpoint_resets_both_stores(monkeypatch) -> None:
+def test_purge_reset_endpoint_resets_only_selected_sql_target(monkeypatch) -> None:
     from fastapi.testclient import TestClient
 
     from app.main import create_app
 
-    monkeypatch.setattr(
-        D1MetadataStore,
-        "reset_configured_databases",
-        lambda self: {"ok": True, "databases": [{"database_name": "database-hive"}]},
-    )
+    calls: list[str] = []
     monkeypatch.setattr(
         SqlStore,
         "reset_all_data",
-        lambda self: {"ok": True, "dialect": "postgres", "tables_cleared": ["hive_conversations"]},
+        lambda self: calls.append("sql") or {"ok": True, "tables_cleared": ["hive_conversations"]},
     )
-    settings = Settings(APP_ENV="test", DATABASE_ENABLED=False, D1_ENABLED=False)
-    application = create_app(settings)
-
-    with TestClient(application) as client:
+    monkeypatch.setattr(
+        D1MetadataStore,
+        "reset_configured_databases",
+        lambda self, names=None: calls.append("d1") or {"ok": True},
+    )
+    with TestClient(create_app(Settings(APP_ENV="test", DATABASE_ENABLED=False, D1_ENABLED=False))) as client:
         response = client.post(
             "/v1/db/purge-reset",
-            json={"confirmation": "PURGE ALL DATABASES"},
+            json={"target": "hive_sql", "confirmation": "RESET HIVE SQL"},
         )
-
     assert response.status_code == 200
-    payload = response.json()
-    assert payload["ok"] is True
-    assert payload["d1"]["ok"] is True
-    assert payload["sql"]["ok"] is True
+    assert response.json()["target"] == "hive_sql"
+    assert calls == ["sql"]
+
+
+def test_purge_reset_preview_is_read_only(monkeypatch) -> None:
+    from fastapi.testclient import TestClient
+
+    from app.main import create_app
+
+    calls: list[str] = []
+    monkeypatch.setattr(
+        SqlStore,
+        "preview_reset",
+        lambda self: calls.append("preview") or {
+            "ok": True, "target": "hive_sql", "tables": [{"name": "hive_messages", "rows": 3}], "total_rows": 3,
+        },
+    )
+    with TestClient(create_app(Settings(APP_ENV="test", DATABASE_ENABLED=False, D1_ENABLED=False))) as client:
+        response = client.post("/v1/db/purge-reset/preview", json={"target": "hive_sql"})
+    assert response.status_code == 200
+    assert response.json()["total_rows"] == 3
+    assert calls == ["preview"]

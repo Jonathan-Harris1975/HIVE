@@ -121,19 +121,26 @@ def list_ops_events(
     service: str | None = None,
 ) -> dict[str, Any]:
     safe_limit = max(1, min(int(limit or 50), 200))
-    items = _memory_events()
     store = D1MetadataStore(settings)
     d1_available = store.enabled
     d1_error: str | None = None
     if store.enabled:
+        # D1 is authoritative when enabled. Falling back to process-local memory
+        # can resurrect events deleted by another worker.
+        items: list[dict[str, Any]] = []
         result = store.list_metadata(lane="ops_events", limit=max(safe_limit, 100))
         if result.get("ok"):
-            for row in result.get("items", []):
-                metadata = row.get("metadata")
-                if isinstance(metadata, dict):
-                    items.append(metadata)
+            rows = result.get("items")
+            if isinstance(rows, list):
+                for row in rows:
+                    if isinstance(row, dict):
+                        metadata = row.get("metadata")
+                        if isinstance(metadata, dict):
+                            items.append(metadata)
         else:
             d1_error = _text(result.get("message") or result.get("error") or "D1 query failed", limit=200)
+    else:
+        items = _memory_events()
 
     deduped: dict[str, dict[str, Any]] = {}
     for item in items:
@@ -157,6 +164,42 @@ def list_ops_events(
         "items": filtered[:safe_limit],
     }
 
+
+
+def delete_ops_event(settings: Settings, event_id: str) -> dict[str, Any]:
+    """Delete one operational event from memory and the persistent ops-events lane."""
+    clean_id = _text(event_id, limit=160)
+    if not clean_id:
+        raise ValueError("An event ID is required.")
+
+    store = D1MetadataStore(settings)
+    if store.enabled:
+        result = store.delete_metadata_ids([f"ops-event:{clean_id}"])
+        if not result.get("ok"):
+            raise RuntimeError("The operational event could not be deleted from D1.")
+
+    with _LOCK:
+        retained = [item for item in _MEMORY if item.get("event_id") != clean_id]
+        _MEMORY.clear()
+        _MEMORY.extend(retained)
+    return {"ok": True, "event_id": clean_id}
+
+
+def delete_all_ops_events(settings: Settings) -> dict[str, Any]:
+    """Delete every operational event from memory and the persistent ops-events lane."""
+    store = D1MetadataStore(settings)
+    if store.enabled:
+        result = store.query(
+            "DELETE FROM hive_ecosystem_metadata WHERE lane = ?",
+            ["ops_events"],
+        )
+        if not result.get("ok"):
+            raise RuntimeError("Operational events could not be deleted from D1.")
+
+    with _LOCK:
+        deleted_from_memory = len(_MEMORY)
+        _MEMORY.clear()
+    return {"ok": True, "deleted_from_memory": deleted_from_memory}
 
 def clear_ops_events_for_tests() -> None:
     with _LOCK:
