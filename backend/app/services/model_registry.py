@@ -714,25 +714,35 @@ def register_model(
         )
 
     with _LOCK:
-        existing = next((item for item in _REGISTRY[category] if item.model_id == model_id), None)
-    if existing is not None:
-        available = existing.available if available is None else available
-        evaluation_passed = existing.evaluation_passed if evaluation_passed is None else evaluation_passed
-        task_score = existing.task_score if task_score is None else task_score
-        reliability_score = existing.reliability_score if reliability_score is None else reliability_score
+        previous_model = next(
+            (item for item in _REGISTRY[category] if item.model_id == model_id), None
+        )
+    if previous_model is not None:
+        available = previous_model.available if available is None else available
+        evaluation_passed = (
+            previous_model.evaluation_passed if evaluation_passed is None else evaluation_passed
+        )
+        task_score = previous_model.task_score if task_score is None else task_score
+        reliability_score = (
+            previous_model.reliability_score if reliability_score is None else reliability_score
+        )
         evaluation_sample_size = (
-            existing.evaluation_sample_size
+            previous_model.evaluation_sample_size
             if evaluation_sample_size is None
             else evaluation_sample_size
         )
-        evaluation_evidence = existing.evaluation_evidence if evaluation_evidence is None else evaluation_evidence
-        evaluation_date = existing.evaluation_date if evaluation_date is None else evaluation_date
+        evaluation_evidence = (
+            previous_model.evaluation_evidence
+            if evaluation_evidence is None
+            else evaluation_evidence
+        )
+        evaluation_date = previous_model.evaluation_date if evaluation_date is None else evaluation_date
         cost_per_successful_task = (
-            existing.cost_per_successful_task
+            previous_model.cost_per_successful_task
             if cost_per_successful_task is None
             else cost_per_successful_task
         )
-        approved_roles = existing.approved_roles if approved_roles is None else approved_roles
+        approved_roles = previous_model.approved_roles if approved_roles is None else approved_roles
     if evaluation_sample_size is not None and evaluation_sample_size < 0:
         raise ModelRegistryError("evaluation_sample_size cannot be negative")
     if evaluation_passed is True and (
