@@ -1,5 +1,5 @@
 > **Document status:** Production control plan  
-> **Last reviewed:** 12 September 2026  
+> **Last reviewed:** 16 October 2026  
 > **Control owner:** HIVE AI Council  
 > **Scope:** HIVE, AIMS and RAMS model selection through OpenRouter
 
@@ -18,15 +18,17 @@
    - Fetch measured benchmark evidence and combine it with HIVE task evals. A catalogue entry alone is not enough for promotion.
    - Re-check the intended model page immediately before a material rollout; the table below is a dated shortlist, not a permanent allow-list.
 
-   | Route | Current OpenRouter candidate at review date | Practical disposition |
+   | Route | Pinned OpenRouter candidate at review date | Practical disposition |
    |---|---|---|
-   | General, summary and most file work | `~google/gemini-flash-latest` (then resolving to Gemini 3.8 Flash; $0.75/M input, $3.75/M output, 1.048M context) | Keep as the baseline while HIVE evals meet the quality floor; govern the resolved canonical slug. |
-   | Complex reasoning / premium | `~anthropic/claude-sonnet-latest` (then resolving to Sonnet 5; $2/M input, $10/M output, 1M context) | Approved premium candidate only; operator override needs justification. |
-   | Coding | `openai/gpt-5.3-codex` ($1.75/M input, $14/M output, 400K context) | Keep only where coding eval uplift offsets its higher output cost. |
-   | Low-cost challenger | `z-ai/glm-5.3-flash` ($0.075/M input, $0.25/M output, 1.31M context) | Shadow-test against the baseline; do not promote from public benchmarks alone. |
+   | General and cheap summary work | `google/gemini-3.8-flash` ($0.75/M input, $3.75/M output as listed on 16 October; 1.0M context) | Use as the pinned last-known-good general/cheap fallback while HIVE evals meet the quality floor. |
+   | Balanced and file work | `openai/gpt-5.6-terra` ($2/M input, $12/M output; 1.05M context) | Use as the distinct pinned balanced fallback for file triage and multi-step work. |
+   | Independent audit | `anthropic/claude-sonnet-5.5` ($2/M input, $10/M output; 1.0M context) | Use as the pinned audit fallback; rank audit candidates separately from general reasoning. |
+   | Premium / complex review | `anthropic/claude-opus-5.5` ($4/M input, $20/M output; 1.0M context) | Keep behind complete, expiring premium justification; do not use as an ordinary fallback. |
+   | Coding | `openai/gpt-5.3-codex` ($1.75/M input, $14/M output; 400K context) | Keep only where coding eval uplift offsets its higher output cost. |
+   | Low-cost challenger | `z-ai/glm-5.3-flash` ($0.06/M input, $0.20/M output; 1.0M context) | Shadow-test against the pinned baseline; do not promote from public benchmarks alone. |
    | Free fallback | `nvidia/nemotron-3-ultra-550b-a55b:free` | Public, non-sensitive, best-effort work only; never the first production fallback. |
 
-   At this review, the configured routes were present and did not publish a retirement date. That is not a guarantee: moving `~...-latest` aliases can change their target. Council records must therefore use `canonical_slug`; aliases are for discovery and emergency continuity only.
+   Exact model IDs and the listed prices were checked against OpenRouter on 16 October 2026. Gemini Flash pricing is currently discounted and can change; refresh price, provider availability and lifecycle before each Council approval. Static environment fallbacks use pinned IDs so a family-alias change cannot silently change the HIVE fallback. Store the resolved `canonical_slug` in Council records and keep floating aliases to discovery or controlled shadow tests.
 
 3. **Classify the work before selecting a model.**
 
