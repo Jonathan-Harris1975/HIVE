@@ -121,11 +121,13 @@ def list_ops_events(
     service: str | None = None,
 ) -> dict[str, Any]:
     safe_limit = max(1, min(int(limit or 50), 200))
-    items = _memory_events()
     store = D1MetadataStore(settings)
     d1_available = store.enabled
     d1_error: str | None = None
     if store.enabled:
+        # D1 is authoritative when enabled. Falling back to process-local memory
+        # can resurrect events deleted by another worker.
+        items: list[dict[str, Any]] = []
         result = store.list_metadata(lane="ops_events", limit=max(safe_limit, 100))
         if result.get("ok"):
             for row in result.get("items", []):
@@ -134,6 +136,8 @@ def list_ops_events(
                     items.append(metadata)
         else:
             d1_error = _text(result.get("message") or result.get("error") or "D1 query failed", limit=200)
+    else:
+        items = _memory_events()
 
     deduped: dict[str, dict[str, Any]] = {}
     for item in items:
