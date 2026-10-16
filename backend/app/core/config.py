@@ -242,14 +242,14 @@ class Settings(BaseSettings):
         "JH Ops Chat", validation_alias=AliasChoices("OPENROUTER_APP_TITLE", "OPENROUTER_APP_NAME")
     )
 
-    # Model policy is deliberately env-driven. Defaults use currently common
-    # OpenRouter aliases / cheap high-context models rather than brittle dated IDs.
-    default_model: str = "~google/gemini-flash-latest"
-    cheap_model: str = "~google/gemini-flash-latest"
-    balanced_model: str = "~google/gemini-flash-latest"
-    premium_model: str = "~anthropic/claude-sonnet-latest"
+    # The Council registry is the runtime authority; these pinned IDs are
+    # last-known-good fallbacks with distinct quality and cost roles.
+    default_model: str = "google/gemini-3.8-flash"
+    cheap_model: str = "google/gemini-3.8-flash"
+    balanced_model: str = "openai/gpt-5.6-terra"
+    premium_model: str = "anthropic/claude-opus-5.5"
     code_model: str = "openai/gpt-5.3-codex"
-    audit_model: str = "~google/gemini-flash-latest"
+    audit_model: str = "anthropic/claude-sonnet-5.5"
     openrouter_free_fallback_model: str = "nvidia/nemotron-3-ultra-550b-a55b:free"
     allow_paid_fallback: bool = False
     # Free OpenRouter endpoints may retain prompts for provider improvement and
