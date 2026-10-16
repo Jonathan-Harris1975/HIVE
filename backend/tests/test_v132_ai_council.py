@@ -32,6 +32,11 @@ class FakeD1Store:
         return {"ok": True, "count": len(items), "items": items}
 
 
+def test_council_has_a_distinct_audit_registry_category():
+    assert "audit" in model_registry.CATEGORIES
+    assert ai_council._CATEGORY_CLASSIFIERS["audit"] is ai_council._is_reasoning_candidate
+
+
 def _model(
     model_id: str,
     *,
