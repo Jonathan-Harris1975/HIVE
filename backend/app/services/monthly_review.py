@@ -120,9 +120,14 @@ def _model_registry_status(settings: Settings) -> dict[str, Any]:
             total_count += 1
             if item.get("available") is False:
                 unavailable_count += 1
+            raw_sample_size = item.get("evaluation_sample_size")
             try:
-                sample_size = int(item.get("evaluation_sample_size") or 0)
-            except (TypeError, ValueError):
+                sample_size = (
+                    max(0, int(raw_sample_size))
+                    if isinstance(raw_sample_size, (int, float, str))
+                    else 0
+                )
+            except (ValueError, OverflowError):
                 sample_size = 0
             if (
                 item.get("evaluation_passed") is True
@@ -167,18 +172,22 @@ def _downstream_model_governance(settings: Settings) -> dict[str, Any]:
     """Summarise the verified AIMS/RAMS apply receipts from the latest Council run."""
     runs = get_run_history(settings, limit=5)
     latest = runs[-1] if runs and isinstance(runs[-1], dict) else {}
-    sync = latest.get("downstream_sync") if isinstance(latest, dict) else None
-    if not isinstance(sync, dict):
+    sync_value = latest.get("downstream_sync") if isinstance(latest, dict) else None
+    if not isinstance(sync_value, dict):
         return {"ok": False, "reason": "no downstream governance receipt"}
-    targets = sync.get("targets") if isinstance(sync.get("targets"), dict) else {}
+    sync = sync_value
+    targets_value = sync.get("targets")
+    targets = targets_value if isinstance(targets_value, dict) else {}
     summary: dict[str, Any] = {
         "ok": sync.get("enabled") is True and sync.get("ok") is True,
         "sourceRunId": sync.get("sourceRunId"),
         "targets": {},
     }
     for name in ("aims", "rams"):
-        target = targets.get(name) if isinstance(targets.get(name), dict) else {}
-        response = target.get("response") if isinstance(target.get("response"), dict) else {}
+        target_value = targets.get(name)
+        target = target_value if isinstance(target_value, dict) else {}
+        response_value = target.get("response")
+        response = response_value if isinstance(response_value, dict) else {}
         summary["targets"][name] = {
             "ok": target.get("ok") is True and response.get("ok") is True,
             "applied": response.get("applied") is True,
