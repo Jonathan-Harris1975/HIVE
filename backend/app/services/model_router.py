@@ -121,6 +121,30 @@ class ModelRouter:
             None,
         )
 
+    def _audit_registry_default(self) -> str | None:
+        """Choose a qualified audit model distinct from general reasoning."""
+        reasoning_model = self._registry_default("reasoning")
+        reasoning_ids = {reasoning_model} if reasoning_model else set()
+        if reasoning_model:
+            for candidate in model_registry.get_ranked_models("reasoning"):
+                if candidate.model_id == reasoning_model or candidate.canonical_slug == reasoning_model:
+                    reasoning_ids.add(candidate.model_id)
+                    if candidate.canonical_slug:
+                        reasoning_ids.add(candidate.canonical_slug)
+                    break
+
+        for candidate in model_registry.get_ranked_models("audit"):
+            if candidate.score < self.settings.model_registry_min_visible_score:
+                continue
+            if not lifecycle_is_routable(candidate.lifecycle_status):
+                continue
+            if reasoning_ids.intersection(
+                model_id for model_id in (candidate.model_id, candidate.canonical_slug) if model_id
+            ):
+                continue
+            return candidate.model_id
+        return None
+
     def _baseline_model(self, task: TaskType) -> str:
         category_by_task = {
             TaskType.SUMMARY: "cheap",
@@ -138,6 +162,8 @@ class ModelRouter:
             TaskType.AUDIT: self.settings.audit_model,
             TaskType.PREMIUM: self.settings.premium_model,
         }
+        if task == TaskType.AUDIT:
+            return self._audit_registry_default() or static_by_task[task]
         return self._registry_default(category_by_task[task]) or static_by_task[task]
 
     def select_model(self, task: TaskType, requested_model: str | None = None) -> str:
