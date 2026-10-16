@@ -4,7 +4,8 @@ from fastapi.testclient import TestClient
 
 from app.core.config import Settings
 from app.main import create_app
-from app.services.ops_events import clear_ops_events_for_tests
+from app.services.ops_events import clear_ops_events_for_tests, ingest_ops_event, list_ops_events
+from app.storage.d1 import D1MetadataStore
 
 
 def test_ops_event_ingest_is_separate_from_admin_auth_and_redacts_secrets() -> None:
@@ -105,3 +106,29 @@ def test_ops_events_can_be_deleted_by_id_or_cleared() -> None:
 
         invalid = client.delete("/v1/system/ops-events", headers=admin_headers)
         assert invalid.status_code == 400
+
+
+def test_persistent_ops_events_do_not_resurrect_stale_worker_memory(monkeypatch) -> None:
+    clear_ops_events_for_tests()
+    memory_settings = Settings(app_env="test", d1_enabled=False)
+    ingest_ops_event(memory_settings, {"event_id": "deleted-on-another-worker", "service": "HIVE"})
+
+    monkeypatch.setattr(D1MetadataStore, "enabled", property(lambda self: True))
+    monkeypatch.setattr(
+        D1MetadataStore,
+        "list_metadata",
+        lambda self, *, lane, limit: {"ok": True, "items": []},
+    )
+    persistent_settings = Settings(
+        app_env="test",
+        d1_enabled=True,
+        d1_account_id="account",
+        d1_api_key="token",
+        d1_database_id="database",
+    )
+
+    result = list_ops_events(persistent_settings)
+
+    assert result["persistent_store"] is True
+    assert result["items"] == []
+    clear_ops_events_for_tests()
