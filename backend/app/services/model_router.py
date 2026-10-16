@@ -127,7 +127,7 @@ class ModelRouter:
             TaskType.FILE_TRIAGE: "long_context",
             TaskType.GENERAL: "reasoning",
             TaskType.CODE: "coding",
-            TaskType.AUDIT: "reasoning",
+            TaskType.AUDIT: "audit",
             TaskType.PREMIUM: "reasoning",
         }
         static_by_task = {
