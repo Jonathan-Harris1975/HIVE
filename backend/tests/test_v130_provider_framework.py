@@ -7,7 +7,7 @@ import pytest
 
 from app.core.config import Settings
 from app.services.providers.base import parse_provider_model
-from app.services.providers.openrouter_provider import OpenRouterCompatibleProvider
+from app.services.providers.openrouter_provider import OpenRouterCompatibleProvider, OpenRouterProvider
 from app.services.providers.registry import _parse_extra_providers, discover_providers
 
 
@@ -39,6 +39,10 @@ def test_parse_provider_model_handles_missing_fields_gracefully():
     assert model.pricing_prompt is None
     assert model.supports_tools is False
     assert model.supports_structured_output is False
+
+
+def test_parse_provider_model_preserves_account_availability():
+    assert parse_provider_model({"id": "example/model", "available": False}).available is False
 
 
 @pytest.mark.asyncio
@@ -84,6 +88,26 @@ async def test_openrouter_compatible_provider_health_reports_failure_without_rai
 
     assert health.ok is False
     assert health.error is not None
+
+
+@pytest.mark.asyncio
+async def test_openrouter_provider_marks_user_filtered_catalogue_availability(monkeypatch):
+    settings = Settings(openrouter_api_key="test-key")
+    provider = OpenRouterProvider(settings)
+    monkeypatch.setattr(provider._client, "list_models", lambda force_refresh=False: _async_result([
+        {"id": "allowed/model"}, {"id": "blocked/model"},
+    ]))
+    monkeypatch.setattr(provider, "_list_user_model_ids", lambda: _async_result({"allowed/model"}))
+
+    models = await provider.list_models(force_refresh=True)
+
+    assert [(model.model_id, model.available) for model in models] == [
+        ("allowed/model", True), ("blocked/model", False),
+    ]
+
+
+async def _async_result(value):
+    return value
 
 
 def test_parse_extra_providers_skips_malformed_entries():

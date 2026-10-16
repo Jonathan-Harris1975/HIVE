@@ -39,10 +39,21 @@ def _qualified_registry(settings: Settings) -> tuple[dict[str, list[dict[str, ob
             except ValueError:
                 score = 0.0
             lifecycle = str(item.get("lifecycle_status") or "active")
-            if score >= settings.model_registry_min_visible_score and lifecycle in {
+            provider = str(item.get("provider") or "").lower()
+            if (
+                item.get("available") is False
+                or (provider == "openrouter" and item.get("available") is not True)
+                or item.get("evaluation_passed") is False
+            ):
+                continue
+            if (
+                score >= settings.model_registry_min_visible_score
+                and item.get("available") is not False
+                and lifecycle in {
                 "active",
                 "watch",
-            }:
+                }
+            ):
                 qualified_count += 1
                 eligible.append(item)
         qualified[category] = eligible

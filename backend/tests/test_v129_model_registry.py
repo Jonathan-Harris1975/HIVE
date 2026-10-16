@@ -19,9 +19,9 @@ def _clear_registry():
 
 
 def test_register_model_ranks_by_score_descending():
-    registry.register_model("coding", "model-a", score=0.5, provider="openrouter")
-    registry.register_model("coding", "model-b", score=0.9, provider="openrouter")
-    registry.register_model("coding", "model-c", score=0.7, provider="openrouter")
+    registry.register_model("coding", "model-a", score=0.5, provider="openrouter", available=True)
+    registry.register_model("coding", "model-b", score=0.9, provider="openrouter", available=True)
+    registry.register_model("coding", "model-c", score=0.7, provider="openrouter", available=True)
 
     ranked = registry.get_ranked_models("coding")
 
@@ -46,6 +46,40 @@ def test_register_model_rejects_unknown_category():
 
 def test_get_default_model_returns_none_when_empty():
     assert registry.get_default_model("reasoning") is None
+
+
+def test_failed_or_unavailable_model_is_not_returned_as_default():
+    registry.register_model(
+        "reasoning", "blocked/model", score=0.99, available=False,
+        evaluation_passed=True, evaluation_sample_size=10, evaluation_evidence="eval.json",
+    )
+    registry.register_model(
+        "reasoning", "failed/model", score=0.98, available=True,
+        evaluation_passed=False,
+    )
+
+    assert registry.get_default_model("reasoning") is None
+
+
+def test_registry_round_trips_task_evidence_and_keeps_it_when_rescored():
+    store = _FakeD1Store()
+    registry.register_model(
+        "coding", "tested/model", score=0.8, available=True,
+        evaluation_passed=True, task_score=0.91, reliability_score=0.97,
+        evaluation_sample_size=40, evaluation_evidence="rams-eval/2026-10.json",
+        cost_per_successful_task=0.012, approved_roles=["OPENROUTER_PRIMARY_MODEL"], store=store,
+    )
+    registry.register_model("coding", "tested/model", score=0.9, store=store)
+
+    registry.clear_registry()
+    registry.load_registry_from_store(store)
+    model = registry.get_ranked_models("coding")[0]
+
+    assert model.evaluation_passed is True
+    assert model.evaluation_sample_size == 40
+    assert model.evaluation_evidence == "rams-eval/2026-10.json"
+    assert model.cost_per_successful_task == pytest.approx(0.012)
+    assert model.approved_roles == ("OPENROUTER_PRIMARY_MODEL",)
 
 
 def test_remove_model():
@@ -135,7 +169,7 @@ class _FakeD1Store:
 def test_registered_model_survives_simulated_restart_via_d1_store():
     store = _FakeD1Store()
     registry.register_model(
-        "coding", "persisted-model", score=0.8, provider="openrouter", store=store
+        "coding", "persisted-model", score=0.8, provider="openrouter", available=True, store=store
     )
 
     # Simulate a process restart: the in-memory registry is wiped, then

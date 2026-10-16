@@ -109,12 +109,34 @@ def _model_registry_status(settings: Settings) -> dict[str, Any]:
     qualified: dict[str, list[dict[str, object]]] = {}
     qualified_count = 0
     total_count = 0
+    evaluation_ready_count = 0
+    unavailable_count = 0
+    awaiting_evaluation_count = 0
     for category, items in registry.items():
         visible: list[dict[str, object]] = []
         for item in items:
             if not isinstance(item, dict):
                 continue
             total_count += 1
+            if item.get("available") is False:
+                unavailable_count += 1
+            try:
+                sample_size = int(item.get("evaluation_sample_size") or 0)
+            except (TypeError, ValueError):
+                sample_size = 0
+            if (
+                item.get("evaluation_passed") is True
+                and item.get("available") is not False
+                and (
+                    str(item.get("provider") or "").lower() != "openrouter"
+                    or item.get("available") is True
+                )
+                and sample_size > 0
+                and bool(item.get("evaluation_evidence"))
+            ):
+                evaluation_ready_count += 1
+            else:
+                awaiting_evaluation_count += 1
             raw_score = item.get("score")
             try:
                 score = float(raw_score) if isinstance(raw_score, (int, float, str)) else 0.0
@@ -131,11 +153,39 @@ def _model_registry_status(settings: Settings) -> dict[str, Any]:
     return {
         "ok": qualified_count > 0,
         "qualified_count": qualified_count,
+        "evaluation_ready_count": evaluation_ready_count,
+        "awaiting_evaluation_count": awaiting_evaluation_count,
+        "unavailable_count": unavailable_count,
         "total_count": total_count,
         "quality_floor": settings.model_registry_min_visible_score,
         "registry": qualified,
         "reason": None if qualified_count > 0 else "model registry has no qualified models",
     }
+
+
+def _downstream_model_governance(settings: Settings) -> dict[str, Any]:
+    """Summarise the verified AIMS/RAMS apply receipts from the latest Council run."""
+    runs = get_run_history(settings, limit=5)
+    latest = runs[-1] if runs and isinstance(runs[-1], dict) else {}
+    sync = latest.get("downstream_sync") if isinstance(latest, dict) else None
+    if not isinstance(sync, dict):
+        return {"ok": False, "reason": "no downstream governance receipt"}
+    targets = sync.get("targets") if isinstance(sync.get("targets"), dict) else {}
+    summary: dict[str, Any] = {
+        "ok": sync.get("enabled") is True and sync.get("ok") is True,
+        "sourceRunId": sync.get("sourceRunId"),
+        "targets": {},
+    }
+    for name in ("aims", "rams"):
+        target = targets.get(name) if isinstance(targets.get(name), dict) else {}
+        response = target.get("response") if isinstance(target.get("response"), dict) else {}
+        summary["targets"][name] = {
+            "ok": target.get("ok") is True and response.get("ok") is True,
+            "applied": response.get("applied") is True,
+            "reason": response.get("reason"),
+            "assignments": response.get("assignments", response.get("decisions", {})),
+        }
+    return summary
 
 
 def _ai_council_status(
@@ -216,6 +266,7 @@ async def generate_monthly_review(
             _ai_council_status, settings, limit=5, required_since=council_required_since
         ),
         "model_registry": _section(_model_registry_status, settings),
+        "downstream_model_governance": _section(_downstream_model_governance, settings),
         "optimisation_success_rate": _section(success_rate_report, settings),
         "optimisation_experiments": _section(list_experiments, settings),
         "optimisation_decisions": _section(list_decisions, settings),

@@ -59,6 +59,7 @@ def _model(
         raw={},
         canonical_slug=canonical_slug,
         expiration_date=expiration_date,
+        available=True,
     )
 
 
@@ -88,8 +89,30 @@ def _isolated_state(monkeypatch):
 @pytest.fixture
 def settings():
     return Settings(
-        ai_council_promotion_threshold=0.5, ai_council_auto_promotion_min_confidence=0.3
+        ai_council_promotion_threshold=0.5,
+        ai_council_auto_promotion_min_confidence=0.3,
+        ai_council_require_task_evaluation=False,
     )
+
+
+@pytest.mark.asyncio
+async def test_council_keeps_benchmark_qualified_models_as_challengers_until_task_eval(monkeypatch):
+    settings = Settings(
+        ai_council_promotion_threshold=0.5,
+        ai_council_auto_promotion_min_confidence=0.3,
+        ai_council_require_task_evaluation=True,
+    )
+    monkeypatch.setattr(
+        ai_council,
+        "discover_providers",
+        lambda s: [FakeProvider("acme", [_model("acme/untested-coder")])],
+    )
+
+    report = await ai_council.run_council(settings)
+
+    assert report.promotions == []
+    assert report.qualification_counts["awaiting_task_evaluation"] > 0
+    assert model_registry.get_ranked_models("coding") == []
 
 
 @pytest.mark.asyncio
@@ -257,6 +280,7 @@ async def test_run_council_uses_measured_openrouter_benchmarks_for_high_confiden
     settings = Settings(
         ai_council_promotion_threshold=0.5,
         ai_council_auto_promotion_min_confidence=0.6,
+        ai_council_require_task_evaluation=False,
     )
     good_coder = _model("openai/measured-coder", context_length=200_000, price=0.000001)
 
@@ -292,6 +316,7 @@ async def test_realistic_artificial_analysis_indices_are_population_normalised(m
     settings = Settings(
         ai_council_promotion_threshold=0.72,
         ai_council_auto_promotion_min_confidence=0.6,
+        ai_council_require_task_evaluation=False,
     )
     top = _model("acme/top-coder", context_length=200_000, price=0.000001)
     upper_mid = _model("acme/upper-mid", context_length=160_000, price=0.0000015)
@@ -398,6 +423,7 @@ async def test_benchmark_feed_uses_recent_measured_cache_after_live_failure(monk
         ai_council_benchmark_attempts=1,
         ai_council_benchmark_retry_base_seconds=0,
         ai_council_benchmark_cache_max_age_days=45,
+        ai_council_require_task_evaluation=False,
     )
     model = _model("openai/cached-coder", context_length=200_000, price=0.000001)
 

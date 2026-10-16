@@ -643,7 +643,15 @@ async def run_council(settings: Settings, *, run_id: str | None = None) -> Counc
     alias_changes: list[dict[str, str | None]] = []
     models_seen = 0
     benchmark_match_counts = {"benchmark_rows": 0, "matched_model_ids": 0, "matched_canonical_slugs": 0, "unmatched_models": 0}
-    qualification_counts = {"candidates": 0, "ineligible_lifecycle": 0, "below_score": 0, "below_confidence": 0, "eligible": 0}
+    qualification_counts = {
+        "candidates": 0,
+        "ineligible_lifecycle": 0,
+        "unavailable_for_account": 0,
+        "awaiting_task_evaluation": 0,
+        "below_score": 0,
+        "below_confidence": 0,
+        "eligible": 0,
+    }
 
     for provider in providers:
         try:
@@ -723,6 +731,12 @@ async def run_council(settings: Settings, *, run_id: str | None = None) -> Counc
                 canonical_slug=model.canonical_slug,
                 store=store,
             )
+            if provider.name == "openrouter" and model.available is not None:
+                model_registry.set_model_availability(
+                    model.canonical_slug or model.model_id,
+                    available=model.available,
+                    store=store,
+                )
             if state != "active":
                 retirement_watch.append(
                     {
@@ -758,6 +772,9 @@ async def run_council(settings: Settings, *, run_id: str | None = None) -> Counc
             category_weights_used[category] = category_weights
             for model in candidates:
                 qualification_counts["candidates"] += 1
+                if provider.name == "openrouter" and model.available is not True:
+                    qualification_counts["unavailable_for_account"] += 1
+                    continue
                 state, _days_to_expiry = lifecycle_by_model.get(model.model_id, ("active", None))
                 if not lifecycle_is_routable(state):
                     qualification_counts["ineligible_lifecycle"] += 1
@@ -777,8 +794,27 @@ async def run_council(settings: Settings, *, run_id: str | None = None) -> Counc
                     result.score >= settings.ai_council_promotion_threshold
                     and result.confidence >= settings.ai_council_auto_promotion_min_confidence
                 ):
-                    qualification_counts["eligible"] += 1
                     governed_model_id = model.canonical_slug or model.model_id
+                    existing = next(
+                        (
+                            item
+                            for item in model_registry.get_ranked_models(category)
+                            if item.model_id == governed_model_id
+                        ),
+                        None,
+                    )
+                    # Catalogue/benchmark scores identify challengers. Production
+                    # promotion additionally needs a passing service-task evaluation.
+                    if settings.ai_council_require_task_evaluation and not (
+                        existing
+                        and existing.evaluation_passed is True
+                        and (existing.evaluation_sample_size or 0) > 0
+                        and bool(existing.evaluation_evidence)
+                        and existing.available is not False
+                    ):
+                        qualification_counts["awaiting_task_evaluation"] += 1
+                        continue
+                    qualification_counts["eligible"] += 1
                     model_registry.register_model(
                         category,
                         governed_model_id,
@@ -801,6 +837,7 @@ async def run_council(settings: Settings, *, run_id: str | None = None) -> Counc
                         canonical_slug=model.canonical_slug,
                         expiration_date=model.expiration_date,
                         lifecycle_status=state,
+                        available=model.available,
                         notes=(
                             f"AI Council: {result.confidence * 100:.0f}% of benchmark axes "
                             f"had real signal (rest scored neutral)."
