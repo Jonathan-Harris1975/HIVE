@@ -158,6 +158,42 @@ def list_ops_events(
     }
 
 
+
+def delete_ops_event(settings: Settings, event_id: str) -> dict[str, Any]:
+    """Delete one operational event from memory and the persistent ops-events lane."""
+    clean_id = _text(event_id, limit=160)
+    if not clean_id:
+        raise ValueError("An event ID is required.")
+
+    store = D1MetadataStore(settings)
+    if store.enabled:
+        result = store.delete_metadata_ids([f"ops-event:{clean_id}"])
+        if not result.get("ok"):
+            raise RuntimeError("The operational event could not be deleted from D1.")
+
+    with _LOCK:
+        retained = [item for item in _MEMORY if item.get("event_id") != clean_id]
+        _MEMORY.clear()
+        _MEMORY.extend(retained)
+    return {"ok": True, "event_id": clean_id}
+
+
+def delete_all_ops_events(settings: Settings) -> dict[str, Any]:
+    """Delete every operational event from memory and the persistent ops-events lane."""
+    store = D1MetadataStore(settings)
+    if store.enabled:
+        result = store.query(
+            "DELETE FROM hive_ecosystem_metadata WHERE lane = ?",
+            ["ops_events"],
+        )
+        if not result.get("ok"):
+            raise RuntimeError("Operational events could not be deleted from D1.")
+
+    with _LOCK:
+        deleted_from_memory = len(_MEMORY)
+        _MEMORY.clear()
+    return {"ok": True, "deleted_from_memory": deleted_from_memory}
+
 def clear_ops_events_for_tests() -> None:
     with _LOCK:
         _MEMORY.clear()
