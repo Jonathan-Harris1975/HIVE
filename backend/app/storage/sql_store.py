@@ -1203,7 +1203,7 @@ class SqlStore:
         counts = self.table_counts()
         raw_counts = counts.get("counts")
         if not counts.get("ok") or not isinstance(raw_counts, dict):
-            return {"ok": False, "enabled": True, "message": "Could not count SQL rows.", "unavailable": counts}
+            return {"ok": False, "enabled": True, "message": "Could not count SQL rows."}
         table_counts: dict[str, int] = {}
         for name in self.table_names():
             value = raw_counts.get(name)
