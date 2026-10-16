@@ -27,3 +27,11 @@ Set `HIVE_LEANCTX_BASE_URL` and `HIVE_CONTEXT_GATEWAY_BASE_URL` to the deployed 
 The proxy service is responsible for its own OpenRouter upstream credential. HIVE strips `_hive_context_profile` before sending any request outside the application.
 
 File/AnchorPatch requests retain the existing exact-context protection: Headroom becomes a pass-through and the lossy OpenRouter/local compaction routes are skipped.
+
+## Headroom defaults and savings
+
+HIVE pins `headroom-ai==0.38.0`, keeps the target ratio at `0.7`, protects the
+latest message, preserves system instructions, and leaves the optional Kompress
+model disabled. Successful savings are logged with the OpenRouter model,
+context provider, and before/after token counts; prompt content is not logged by
+this integration.
