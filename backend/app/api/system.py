@@ -11,7 +11,7 @@ from app.core.config import Settings, get_settings
 from app.core.security import require_admin
 from app.core.version import BUILD_STAGE
 from app.services import model_registry
-from app.services.ops_events import list_ops_events
+from app.services.ops_events import delete_all_ops_events, delete_ops_event, list_ops_events
 from app.services.providers.registry import discover_providers
 from app.services.repo_health import build_repo_health_report
 from app.services.production_manager import build_production_manager_report
@@ -123,6 +123,28 @@ async def ops_events(
     return await asyncio.to_thread(
         list_ops_events, settings, limit=limit, severity=severity, service=service
     )
+
+
+@router.delete("/system/ops-events")
+def delete_system_ops_events(
+    event_id: str | None = Query(None, min_length=1, max_length=160),
+    clear_all: bool = Query(False),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    """Delete one event or explicitly clear the operational-event inbox."""
+    if bool(event_id) == clear_all:
+        raise HTTPException(
+            status_code=400,
+            detail="Specify exactly one of event_id or clear_all=true.",
+        )
+    try:
+        if event_id:
+            return delete_ops_event(settings, event_id)
+        return delete_all_ops_events(settings)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @router.get("/system/runtime-stats")
