@@ -2,6 +2,31 @@ from app.core.config import Settings
 from app.services.model_router import Mode, ModelRouter, TaskType
 
 
+def test_model_defaults_are_pinned_and_routes_keep_distinct_roles(monkeypatch) -> None:
+    for name in (
+        "DEFAULT_MODEL",
+        "CHEAP_MODEL",
+        "BALANCED_MODEL",
+        "PREMIUM_MODEL",
+        "CODE_MODEL",
+        "AUDIT_MODEL",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    settings = Settings(_env_file=None)
+    monkeypatch.setattr(
+        "app.services.model_router.model_registry.get_ranked_models",
+        lambda _category: [],
+    )
+    router = ModelRouter(settings)
+
+    assert router.select_model(TaskType.GENERAL) == "google/gemini-3.8-flash"
+    assert router.select_model(TaskType.SUMMARY) == "google/gemini-3.8-flash"
+    assert router.select_model(TaskType.FILE_TRIAGE) == "openai/gpt-5.6-terra"
+    assert router.select_model(TaskType.AUDIT) == "anthropic/claude-sonnet-5.5"
+    assert router.select_model(TaskType.CODE) == "openai/gpt-5.3-codex"
+    assert router.select_model(TaskType.PREMIUM) == "anthropic/claude-opus-5.5"
+
+
 def test_model_router_detects_audit() -> None:
     router = ModelRouter(Settings())
     assert router.classify_task("Check AIMS quarantine retry logic", Mode.AUTO) == TaskType.AUDIT

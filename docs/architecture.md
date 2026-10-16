@@ -298,8 +298,8 @@ history) — all stored as rows in the existing `hive_ecosystem_metadata` D1
 table under `lane="repository_memory"`. `hive-repositories` remains the deterministic primary instance for repository indexing, while paginated account-level discovery fans semantic queries out across every active Cloudflare AI Search instance and merges ranked results. Diagnostics also query per-instance indexing statistics so paused indexes, indexing errors and degraded stats are visible in HIVE. Indexing completeness is diagnostic-only: individual file/indexing failures degrade indexing health but do not mark AI Search unavailable while at least one active instance can still serve queries. This avoids maintaining a second hard-coded list as HIVE gains indexes.
 
 **Phase 3 - Model Registry** (`services/model_registry.py`): ranked models
-per category (coding, reasoning, planning, vision, research, fast, cheap,
-creative, long_context). `ModelRouter.select_model` prefers the top-ranked
+per category (coding, reasoning, audit, planning, vision, research, fast,
+cheap, creative, long_context). `ModelRouter.select_model` prefers the top-ranked
 "coding" model once the registry is populated, falling back to the static
 `code_model` setting otherwise — additive, not a breaking change. D1 is the
 primary registry store. A failed D1 mutation is accepted as pending only after

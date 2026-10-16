@@ -17,7 +17,7 @@ logger = logging.getLogger("uvicorn.error.hive.model_registry")
 # Phase 3 - Model Registry.
 #
 # A dynamic, in-process registry of ranked models per category. Categories
-# are fixed (coding, reasoning, planning, vision, research, fast, cheap,
+# are fixed (coding, reasoning, audit, planning, vision, research, fast, cheap,
 # creative, long_context); the *models* within each category are entirely
 # configuration/runtime driven, not hard-coded. The highest-ranked model in
 # a category is that category's default.
@@ -34,6 +34,7 @@ LANE = "model_registry"
 CATEGORIES: tuple[str, ...] = (
     "coding",
     "reasoning",
+    "audit",
     "planning",
     "vision",
     "research",

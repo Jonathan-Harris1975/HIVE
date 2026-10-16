@@ -32,6 +32,11 @@ class FakeD1Store:
         return {"ok": True, "count": len(items), "items": items}
 
 
+def test_council_has_a_distinct_audit_registry_category():
+    assert "audit" in model_registry.CATEGORIES
+    assert ai_council._CATEGORY_CLASSIFIERS["audit"] is ai_council._is_reasoning_candidate
+
+
 def _model(
     model_id: str,
     *,
@@ -99,6 +104,11 @@ async def test_run_council_promotes_high_scoring_coding_model(monkeypatch, setti
     assert report.providers_discovered == 1
     assert any(p.model_id == "acme/good-coder" for p in report.promotions)
     assert model_registry.get_default_model("coding") == "acme/good-coder"
+    assert any(
+        p.model_id == "acme/good-coder" and p.category == "audit"
+        for p in report.promotions
+    )
+    assert model_registry.get_default_model("audit") == "acme/good-coder"
 
 
 @pytest.mark.asyncio

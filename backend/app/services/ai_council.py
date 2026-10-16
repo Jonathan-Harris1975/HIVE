@@ -73,8 +73,8 @@ def _is_coding_candidate(model: ProviderModelInfo, keywords: tuple[str, ...]) ->
 # ---------------------------------------------------------------------------
 # Multi-category classification (RC1 fix — Audit Finding #3)
 # ---------------------------------------------------------------------------
-# The Council previously only populated the "coding" category.  The eight
-# remaining categories (reasoning, planning, vision, research, fast, cheap,
+# The Council previously only populated the "coding" category.  The remaining
+# categories (reasoning, audit, planning, vision, research, fast, cheap,
 # creative, long_context) now have automatic classification paths based on
 # model capability signals available in ProviderModelInfo.  Scores remain
 # data-driven from the Benchmark Engine; no hardcoded rankings are introduced.
@@ -134,6 +134,7 @@ def _is_long_context_candidate(model: ProviderModelInfo) -> bool:
 # Mapping: category → classifier function
 _CATEGORY_CLASSIFIERS: dict[str, object] = {
     "reasoning": _is_reasoning_candidate,
+    "audit": _is_reasoning_candidate,
     "planning": _is_planning_candidate,
     "vision": _is_vision_candidate,
     "research": _is_research_candidate,

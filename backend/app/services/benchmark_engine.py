@@ -55,6 +55,7 @@ CATEGORY_WEIGHT_MULTIPLIERS: dict[str, dict[str, float]] = {
         "structured_output": 1.4,
     },
     "reasoning": {"reasoning_benchmark": 2.0, "reliability": 1.4},
+    "audit": {"reasoning_benchmark": 2.0, "reliability": 2.0, "structured_output": 1.5, "cost": 0.5},
     "planning": {"reasoning_benchmark": 1.5, "structured_output": 2.0, "json_reliability": 1.8},
     "vision": {"reasoning_benchmark": 1.3, "reliability": 1.5},
     "research": {"reasoning_benchmark": 1.5, "long_context": 2.0, "reliability": 1.5},

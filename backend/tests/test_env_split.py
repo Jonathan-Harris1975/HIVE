@@ -56,7 +56,12 @@ def test_settings_loads_repo_shared_env_file() -> None:
     settings = Settings(_env_file="HIVE-PRODUCTION-SHARED.env")
     assert settings.app_version == "1.31-production"
     assert settings.database_auto_init is True
-    assert settings.default_model == "~google/gemini-flash-latest"
+    assert settings.default_model == "google/gemini-3.8-flash"
+    assert settings.cheap_model == "google/gemini-3.8-flash"
+    assert settings.balanced_model == "openai/gpt-5.6-terra"
+    assert settings.audit_model == "anthropic/claude-sonnet-5.5"
+    assert settings.premium_model == "anthropic/claude-opus-5.5"
+    assert settings.code_model == "openai/gpt-5.3-codex"
     assert settings.r2_bucket_repositories == "hive-repositories"
     assert settings.r2_public_base_url_repositories == ""
     assert settings.r2_public_base_url_audits == ""
