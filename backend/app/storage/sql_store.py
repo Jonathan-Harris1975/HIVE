@@ -1201,16 +1201,20 @@ class SqlStore:
         if not self.enabled:
             return {"ok": False, "enabled": False, "message": "SQL database is disabled or not configured."}
         counts = self.table_counts()
-        if not counts.get("ok") or not isinstance(counts.get("counts"), dict):
+        raw_counts = counts.get("counts")
+        if not counts.get("ok") or not isinstance(raw_counts, dict):
             return {"ok": False, "enabled": True, "message": "Could not count SQL rows.", "unavailable": counts}
-        table_counts = counts["counts"]
-        if any(not isinstance(value, int) or value < 0 for value in table_counts.values()):
-            return {"ok": False, "enabled": True, "message": "SQL row counts are incomplete."}
+        table_counts: dict[str, int] = {}
+        for name in self.table_names():
+            value = raw_counts.get(name)
+            if not isinstance(value, int) or value < 0:
+                return {"ok": False, "enabled": True, "message": "SQL row counts are incomplete."}
+            table_counts[name] = value
         return {
             "ok": True,
             "target": "hive_sql",
             "dialect": self.dialect,
-            "tables": [{"name": name, "rows": table_counts.get(name, 0)} for name in self.table_names()],
+            "tables": [{"name": name, "rows": table_counts[name]} for name in self.table_names()],
             "total_rows": sum(table_counts.values()),
             "preserves": ["SQL schema", "R2 objects", "Vectorize data"],
         }
