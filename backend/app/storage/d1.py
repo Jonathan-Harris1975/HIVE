@@ -278,8 +278,8 @@ class D1MetadataStore:
         allowed = {item.strip() for item in self.settings.d1_reset_database_names if item.strip()}
         if name not in allowed:
             return {"ok": False, "message": "D1 database is not configured as a reset target."}
-        if not self.settings.d1_account_id or not self.settings.d1_api_key:
-            return {"ok": False, "enabled": False, "message": "D1 account credentials are not configured."}
+        if not self.enabled:
+            return {"ok": False, "enabled": False, "message": "D1 is disabled or not configured."}
         resolved = self._resolve_database_by_name(name)
         if not resolved.get("ok"):
             return {"ok": False, "database_name": name, "unavailable": resolved}
@@ -325,11 +325,11 @@ class D1MetadataStore:
         replaying additive migrations against an already-created schema.
         """
 
-        if not self.settings.d1_account_id or not self.settings.d1_api_key:
+        if not self.enabled:
             return {
                 "ok": False,
                 "enabled": False,
-                "message": "D1 account credentials are not configured.",
+                "message": "D1 is disabled or not configured.",
             }
 
         configured = list(dict.fromkeys(
