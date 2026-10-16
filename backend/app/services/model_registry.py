@@ -127,6 +127,15 @@ class RankedModel:
     canonical_slug: str | None = None
     expiration_date: str | None = None
     lifecycle_status: str = "active"
+    available: bool | None = None
+    evaluation_passed: bool | None = None
+    task_score: float | None = None
+    reliability_score: float | None = None
+    evaluation_sample_size: int | None = None
+    evaluation_evidence: str | None = None
+    evaluation_date: str | None = None
+    cost_per_successful_task: float | None = None
+    approved_roles: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -169,6 +178,29 @@ def _optional_float(metadata: dict[str, Any], key: str) -> float | None:
         return None
 
 
+def _optional_bool(metadata: dict[str, Any], key: str) -> bool | None:
+    value = metadata.get(key)
+    return value if isinstance(value, bool) else None
+
+
+def _optional_int(metadata: dict[str, Any], key: str) -> int | None:
+    value = metadata.get(key)
+    if isinstance(value, bool):
+        return None
+    try:
+        parsed = int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed is not None and parsed >= 0 else None
+
+
+def _optional_roles(metadata: dict[str, Any]) -> tuple[str, ...] | None:
+    value = metadata.get("approved_roles")
+    if not isinstance(value, (list, tuple)):
+        return None
+    return tuple(dict.fromkeys(str(role).strip() for role in value if str(role).strip()))
+
+
 def _ranked_from_mapping(data: dict[str, object]) -> RankedModel | None:
     category = str(data.get("category") or "")
     model_id = str(data.get("model_id") or "")
@@ -209,6 +241,15 @@ def _ranked_from_mapping(data: dict[str, object]) -> RankedModel | None:
             str(data["expiration_date"]) if data.get("expiration_date") is not None else None
         ),
         lifecycle_status=lifecycle,
+        available=_optional_bool(data, "available"),
+        evaluation_passed=_optional_bool(data, "evaluation_passed"),
+        task_score=_optional_float(data, "task_score"),
+        reliability_score=_optional_float(data, "reliability_score"),
+        evaluation_sample_size=_optional_int(data, "evaluation_sample_size"),
+        evaluation_evidence=(str(data["evaluation_evidence"]) if data.get("evaluation_evidence") else None),
+        evaluation_date=(str(data["evaluation_date"]) if data.get("evaluation_date") else None),
+        cost_per_successful_task=_optional_float(data, "cost_per_successful_task"),
+        approved_roles=_optional_roles(data),
     )
 
 
@@ -643,6 +684,15 @@ def register_model(
     canonical_slug: str | None = None,
     expiration_date: str | None = None,
     lifecycle_status: str = "active",
+    available: bool | None = None,
+    evaluation_passed: bool | None = None,
+    task_score: float | None = None,
+    reliability_score: float | None = None,
+    evaluation_sample_size: int | None = None,
+    evaluation_evidence: str | None = None,
+    evaluation_date: str | None = None,
+    cost_per_successful_task: float | None = None,
+    approved_roles: list[str] | tuple[str, ...] | None = None,
     store: "D1MetadataStore | None" = None,
     pending_store: DurablePendingStore | None = None,
 ) -> list[RankedModel]:
@@ -663,6 +713,40 @@ def register_model(
             f"Unknown lifecycle status: {lifecycle_status!r}. Expected one of {LIFECYCLE_STATUSES}."
         )
 
+    with _LOCK:
+        existing = next((item for item in _REGISTRY[category] if item.model_id == model_id), None)
+    if existing is not None:
+        available = existing.available if available is None else available
+        evaluation_passed = existing.evaluation_passed if evaluation_passed is None else evaluation_passed
+        task_score = existing.task_score if task_score is None else task_score
+        reliability_score = existing.reliability_score if reliability_score is None else reliability_score
+        evaluation_sample_size = (
+            existing.evaluation_sample_size
+            if evaluation_sample_size is None
+            else evaluation_sample_size
+        )
+        evaluation_evidence = existing.evaluation_evidence if evaluation_evidence is None else evaluation_evidence
+        evaluation_date = existing.evaluation_date if evaluation_date is None else evaluation_date
+        cost_per_successful_task = (
+            existing.cost_per_successful_task
+            if cost_per_successful_task is None
+            else cost_per_successful_task
+        )
+        approved_roles = existing.approved_roles if approved_roles is None else approved_roles
+    if evaluation_sample_size is not None and evaluation_sample_size < 0:
+        raise ModelRegistryError("evaluation_sample_size cannot be negative")
+    if evaluation_passed is True and (
+        not evaluation_sample_size or not str(evaluation_evidence or "").strip()
+    ):
+        raise ModelRegistryError(
+            "passing task evaluations require a positive evaluation_sample_size and evaluation_evidence"
+        )
+    for name, value in (("task_score", task_score), ("reliability_score", reliability_score)):
+        if value is not None and not 0.0 <= float(value) <= 1.0:
+            raise ModelRegistryError(f"{name} must be between 0.0 and 1.0")
+    if cost_per_successful_task is not None and cost_per_successful_task < 0:
+        raise ModelRegistryError("cost_per_successful_task cannot be negative")
+
     ranked = RankedModel(
         model_id=model_id,
         category=category,
@@ -677,6 +761,15 @@ def register_model(
         canonical_slug=canonical_slug,
         expiration_date=expiration_date,
         lifecycle_status=lifecycle_status,
+        available=available,
+        evaluation_passed=evaluation_passed,
+        task_score=task_score,
+        reliability_score=reliability_score,
+        evaluation_sample_size=evaluation_sample_size,
+        evaluation_evidence=evaluation_evidence,
+        evaluation_date=evaluation_date,
+        cost_per_successful_task=cost_per_successful_task,
+        approved_roles=tuple(approved_roles) if approved_roles is not None else None,
     )
 
     _persist_or_queue_mutation(
@@ -764,6 +857,44 @@ def set_model_lifecycle(
             model_id=changed.model_id,
             model=changed,
             failure_message="D1 Model Registry lifecycle persistence failed",
+        )
+
+    with _LOCK:
+        for category in CATEGORIES:
+            _REGISTRY[category] = [
+                changed_by_key.get(_item_id(category, item.model_id), item)
+                for item in _REGISTRY[category]
+            ]
+    return len(changed_by_key)
+
+
+def set_model_availability(
+    model_id: str,
+    *,
+    available: bool,
+    store: "D1MetadataStore | None" = None,
+    pending_store: DurablePendingStore | None = None,
+) -> int:
+    """Persist account-level provider availability for every matching route."""
+    changed_by_key: dict[str, RankedModel] = {}
+    with _LOCK:
+        for category in CATEGORIES:
+            for item in _REGISTRY[category]:
+                if item.model_id != model_id and item.canonical_slug != model_id:
+                    continue
+                changed_by_key[_item_id(category, item.model_id)] = replace(
+                    item, available=available
+                )
+
+    for changed in changed_by_key.values():
+        _persist_or_queue_mutation(
+            store=store,
+            pending_store=pending_store,
+            action="upsert",
+            category=changed.category,
+            model_id=changed.model_id,
+            model=changed,
+            failure_message="D1 Model Registry availability persistence failed",
         )
 
     with _LOCK:
@@ -1041,7 +1172,17 @@ def get_ranked_models(category: str) -> list[RankedModel]:
 def get_default_model(category: str) -> str | None:
     ranked = get_ranked_models(category)
     return next(
-        (item.model_id for item in ranked if item.lifecycle_status in ROUTABLE_LIFECYCLE_STATUSES),
+        (
+            item.model_id
+            for item in ranked
+            if item.lifecycle_status in ROUTABLE_LIFECYCLE_STATUSES
+            and item.available is not False
+            and (
+                (item.provider or "").lower() != "openrouter"
+                or item.available is True
+            )
+            and item.evaluation_passed is not False
+        ),
         None,
     )
 
@@ -1152,6 +1293,15 @@ def seed_from_json(seed_json: str) -> int:
                     if str(entry.get("lifecycle_status") or "active") in LIFECYCLE_STATUSES
                     else "active"
                 ),
+                available=_optional_bool(entry, "available"),
+                evaluation_passed=_optional_bool(entry, "evaluation_passed"),
+                task_score=_optional_float(entry, "task_score"),
+                reliability_score=_optional_float(entry, "reliability_score"),
+                evaluation_sample_size=_optional_int(entry, "evaluation_sample_size"),
+                evaluation_evidence=(str(entry["evaluation_evidence"]) if entry.get("evaluation_evidence") else None),
+                evaluation_date=(str(entry["evaluation_date"]) if entry.get("evaluation_date") else None),
+                cost_per_successful_task=_optional_float(entry, "cost_per_successful_task"),
+                approved_roles=_optional_roles(entry),
             )
             count += 1
     return count

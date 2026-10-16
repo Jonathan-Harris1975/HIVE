@@ -19,6 +19,62 @@ class ModelSyncError(RuntimeError):
     pass
 
 
+def _aims_explicit_assignments(
+    registry: dict[str, list[dict[str, object]]],
+) -> dict[str, str]:
+    """Build service-specific AIMS routes only from evidenced approvals."""
+    candidates: dict[str, list[dict[str, object]]] = {}
+    for items in registry.values():
+        for item in items:
+            try:
+                sample_size = int(item.get("evaluation_sample_size") or 0)
+            except (TypeError, ValueError):
+                sample_size = 0
+            if (
+                item.get("available") is False
+                or (
+                    str(item.get("provider") or "").lower() == "openrouter"
+                    and item.get("available") is not True
+                )
+                or item.get("evaluation_passed") is not True
+                or sample_size < 1
+                or not str(item.get("evaluation_evidence") or "").strip()
+            ):
+                continue
+            roles = item.get("approved_roles")
+            if not isinstance(roles, (list, tuple)):
+                continue
+            for role in roles:
+                name = str(role).strip()
+                if name.startswith(("AI_MODEL_", "OPENROUTER_", "BLOTATO_", "COMMS_HUB_", "OUTREACH_", "NEWSLETTER_")):
+                    candidates.setdefault(name, []).append(item)
+
+    def order(item: dict[str, object]) -> tuple[bool, float, float, float, str]:
+        raw_cost = item.get("cost_per_successful_task")
+        try:
+            cost = float(raw_cost) if raw_cost is not None else 0.0
+            has_cost = raw_cost is not None and cost >= 0
+        except (TypeError, ValueError):
+            has_cost, cost = False, 0.0
+        try:
+            quality = float(item.get("task_score") or item.get("score") or 0.0)
+        except (TypeError, ValueError):
+            quality = 0.0
+        try:
+            reliability = float(item.get("reliability_score") or 0.0)
+        except (TypeError, ValueError):
+            reliability = 0.0
+        return (not has_cost, cost, -quality, -reliability, str(item.get("model_id") or ""))
+
+    assignments: dict[str, str] = {}
+    for role, items in candidates.items():
+        selected = sorted(items, key=order)[0]
+        model_id = str(selected.get("model_id") or "")
+        if model_id:
+            assignments[role] = model_id
+    return assignments
+
+
 def _usable_secret(value: str) -> str:
     text = str(value or "").strip()
     if re.fullmatch(r"\{\{\s*secret\.[^}]+\}\}", text, flags=re.IGNORECASE):
@@ -112,7 +168,12 @@ async def sync_model_registry_downstream(
 
     timeout = httpx.Timeout(settings.model_governance_sync_timeout_seconds)
     limits = httpx.Limits(max_connections=2, max_keepalive_connections=2)
-    payload = {"sourceRunId": source_run_id, "registry": registry}
+    payload = {
+        "sourceRunId": source_run_id,
+        "registry": registry,
+        "requireTaskEvaluation": True,
+        "assignments": _aims_explicit_assignments(registry),
+    }
     rams_wake: WakeResult | None = None
     results: dict[str, Any] = {}
 

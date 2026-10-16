@@ -23,7 +23,29 @@ class OpenRouterProvider:
 
     async def list_models(self, *, force_refresh: bool = False) -> list[ProviderModelInfo]:
         raw_models = await self._client.list_models(force_refresh=force_refresh)
-        return [parse_provider_model(model) for model in raw_models]
+        user_model_ids = await self._list_user_model_ids()
+        return [
+            parse_provider_model({**model, "available": model.get("id") in user_model_ids})
+            for model in raw_models
+            if isinstance(model, dict)
+        ]
+
+    async def _list_user_model_ids(self) -> set[str]:
+        """Return OpenRouter models allowed by this account's provider/privacy guardrails."""
+        headers = {"Authorization": f"Bearer {self.settings.openrouter_api_key}"}
+        async with httpx.AsyncClient(
+            timeout=max(5.0, self.settings.ai_council_benchmark_timeout_seconds)
+        ) as client:
+            response = await client.get(
+                f"{self.settings.openrouter_base_url.rstrip('/')}/models/user",
+                headers=headers,
+            )
+            response.raise_for_status()
+            payload: Any = response.json()
+        data = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(data, list) or any(not isinstance(item, dict) for item in data):
+            raise ValueError("OpenRouter user-model response missing data array")
+        return {str(item["id"]) for item in data if item.get("id")}
 
     async def list_benchmarks(
         self, *, source: str = "artificial-analysis", task_type: str | None = None

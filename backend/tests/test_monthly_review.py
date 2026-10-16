@@ -132,8 +132,8 @@ async def test_generate_monthly_review_assembles_all_sections(monkeypatch):
 
     assert report["ok"] is True
     assert report["period"] == "2026-06"
-    assert report["sections_total"] == 9
-    assert report["sections_ok"] == 9
+    assert report["sections_total"] == 10
+    assert report["sections_ok"] == 10
     assert report["sections"]["cost_and_tokens"]["data"]["totals"]["cost_usd"] == 4.5
     assert report["sections"]["repo_health"]["data"]["status"] == "healthy"
     assert report["report_id"].startswith("monthly-review-2026-06-")

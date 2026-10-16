@@ -693,6 +693,10 @@ class Settings(BaseSettings):
         le=1.0,
         validation_alias=AliasChoices("AI_COUNCIL_AUTO_PROMOTION_MIN_CONFIDENCE"),
     )
+    ai_council_require_task_evaluation: bool = Field(
+        True,
+        validation_alias=AliasChoices("AI_COUNCIL_REQUIRE_TASK_EVALUATION"),
+    )
     # The OpenRouter benchmark feed is independent from the model-catalogue
     # request and can legitimately take longer than /models.  Do not couple it
     # to OPENROUTER_MODEL_LIST_TIMEOUT_SECONDS: a transient benchmark timeout

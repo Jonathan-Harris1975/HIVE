@@ -31,6 +31,7 @@ class ProviderModelInfo:
     canonical_slug: str | None = None
     expiration_date: str | None = None
     supported_parameters: tuple[str, ...] = ()
+    available: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -98,6 +99,7 @@ def parse_provider_model(raw: dict[str, Any]) -> ProviderModelInfo:
         canonical_slug=(str(raw.get("canonical_slug")) if raw.get("canonical_slug") else None),
         expiration_date=(str(raw.get("expiration_date")) if raw.get("expiration_date") else None),
         supported_parameters=supported_parameters,
+        available=(raw.get("available") if isinstance(raw.get("available"), bool) else None),
     )
 
 

@@ -14,7 +14,7 @@
 
 2. **Check OpenRouter before every approval or renewal.**
 
-   - Fetch `/api/v1/models` and record `id`, `canonical_slug`, `expiration_date`, input/output price, context, modalities, supported parameters and provider availability.
+   - Fetch `/api/v1/models` and `/api/v1/models/user`. The account-filtered result is the availability gate; record `id`, `canonical_slug`, `expiration_date`, input/output price, context, modalities, supported parameters and provider availability.
    - Fetch measured benchmark evidence and combine it with HIVE task evals. A catalogue entry alone is not enough for promotion.
    - Re-check the intended model page immediately before a material rollout; the table below is a dated shortlist, not a permanent allow-list.
 
@@ -53,7 +53,7 @@
 
    - Apply hard capability gates first: required modality, context, tools, structured output, data policy, lifecycle state and minimum quality.
    - Rank only models that pass those gates. Coding weights coding quality/reliability most; cheap/fast weights cost/latency more; long-context weights usable context/reliability more.
-   - Use `AI_COUNCIL_PROMOTION_THRESHOLD` and `AI_COUNCIL_AUTO_PROMOTION_MIN_CONFIDENCE` for automatic promotion. Missing evidence stays visible for review but is not silently treated as proof.
+   - Use `AI_COUNCIL_PROMOTION_THRESHOLD` and `AI_COUNCIL_AUTO_PROMOTION_MIN_CONFIDENCE` for benchmark qualification. A production promotion also requires `evaluation_passed=true`, a positive `evaluation_sample_size`, traceable `evaluation_evidence`, and account availability. Missing task evidence leaves the model as a challenger.
    - Run a fixed golden set plus recent production samples. Record success rate, p50/p95 latency, input/output tokens, actual OpenRouter cost, fallback rate, schema/tool success and human rework.
    - Require a statistically and operationally meaningful uplift before replacing a healthy baseline. Use shadow or canary traffic first and retain a rollback model.
 

@@ -37,6 +37,15 @@ class RegisterModelRequest(BaseModel):
     canonical_slug: str | None = Field(None, max_length=240)
     expiration_date: str | None = Field(None, max_length=80)
     lifecycle_status: str = Field("active", description=f"One of {LIFECYCLE_STATUSES}")
+    available: bool | None = None
+    evaluation_passed: bool | None = None
+    task_score: float | None = Field(None, ge=0.0, le=1.0)
+    reliability_score: float | None = Field(None, ge=0.0, le=1.0)
+    evaluation_sample_size: int | None = Field(None, ge=0)
+    evaluation_evidence: str | None = Field(None, max_length=500)
+    evaluation_date: str | None = Field(None, max_length=80)
+    cost_per_successful_task: float | None = Field(None, ge=0.0)
+    approved_roles: list[str] | None = None
 
 
 @router.get("/model-registry/categories")
@@ -69,6 +78,9 @@ async def get_category_models(
         for model in all_ranked
         if model.score >= settings.model_registry_min_visible_score
         and model.lifecycle_status in {"active", "watch"}
+        and model.available is not False
+        and ((model.provider or "").lower() != "openrouter" or model.available is True)
+        and model.evaluation_passed is not False
     ]
     return {
         "category": category,
@@ -89,6 +101,15 @@ async def get_category_models(
                 "canonical_slug": model.canonical_slug,
                 "expiration_date": model.expiration_date,
                 "lifecycle_status": model.lifecycle_status,
+                "available": model.available,
+                "evaluation_passed": model.evaluation_passed,
+                "task_score": model.task_score,
+                "reliability_score": model.reliability_score,
+                "evaluation_sample_size": model.evaluation_sample_size,
+                "evaluation_evidence": model.evaluation_evidence,
+                "evaluation_date": model.evaluation_date,
+                "cost_per_successful_task": model.cost_per_successful_task,
+                "approved_roles": list(model.approved_roles or ()),
             }
             for model in ranked
         ],
@@ -125,6 +146,15 @@ async def post_register_model(
             canonical_slug=body.canonical_slug,
             expiration_date=body.expiration_date,
             lifecycle_status=body.lifecycle_status,
+            available=body.available,
+            evaluation_passed=body.evaluation_passed,
+            task_score=body.task_score,
+            reliability_score=body.reliability_score,
+            evaluation_sample_size=body.evaluation_sample_size,
+            evaluation_evidence=body.evaluation_evidence,
+            evaluation_date=body.evaluation_date,
+            cost_per_successful_task=body.cost_per_successful_task,
+            approved_roles=body.approved_roles,
             store=store,
         )
     except ModelRegistryPersistenceError as error:
