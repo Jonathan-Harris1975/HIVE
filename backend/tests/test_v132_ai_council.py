@@ -104,6 +104,11 @@ async def test_run_council_promotes_high_scoring_coding_model(monkeypatch, setti
     assert report.providers_discovered == 1
     assert any(p.model_id == "acme/good-coder" for p in report.promotions)
     assert model_registry.get_default_model("coding") == "acme/good-coder"
+    assert any(
+        p.model_id == "acme/good-coder" and p.category == "audit"
+        for p in report.promotions
+    )
+    assert model_registry.get_default_model("audit") == "acme/good-coder"
 
 
 @pytest.mark.asyncio
