@@ -321,12 +321,15 @@ def test_model_router_uses_registry_categories_beyond_coding():
         model_registry_min_visible_score=0.72,
     )
     registry.register_model("reasoning", "ranked-reasoning", score=0.91)
+    registry.register_model("audit", "ranked-reasoning", score=0.99)
     registry.register_model("audit", "ranked-audit", score=0.93)
 
     router = ModelRouter(settings)
 
     assert router.select_model(TaskType.GENERAL) == "ranked-reasoning"
     assert router.select_model(TaskType.AUDIT) == "ranked-audit"
+    registry.remove_model("audit", "ranked-audit")
+    assert router.select_model(TaskType.AUDIT) == "static-audit"
 
 
 class _FakeDurablePendingStore:
