@@ -282,7 +282,7 @@ class D1MetadataStore:
             return {"ok": False, "enabled": False, "message": "D1 is disabled or not configured."}
         resolved = self._resolve_database_by_name(name)
         if not resolved.get("ok"):
-            return {"ok": False, "database_name": name, "unavailable": resolved}
+            return {"ok": False, "database_name": name, "message": "Could not resolve the configured D1 database."}
         database_id = str(resolved.get("database_id") or "")
         tables_result = self._query_database(
             database_id,
@@ -291,7 +291,7 @@ class D1MetadataStore:
             [],
         )
         if not tables_result.get("ok"):
-            return {"ok": False, "database_name": name, "unavailable": tables_result}
+            return {"ok": False, "database_name": name, "message": "Could not list D1 tables for the preview."}
         names = [str(row.get("name") or "") for row in _extract_d1_rows(tables_result.get("result"))]
         tables: list[dict[str, object]] = []
         preserved: list[str] = []
@@ -303,9 +303,9 @@ class D1MetadataStore:
                 preserved.append(table_name)
                 continue
             quoted = chr(34) + table_name.replace(chr(34), chr(34) * 2) + chr(34)
-            count_result = self._query_database(database_id, f"SELECT COUNT(*) AS row_count FROM {quoted}", [])
+            count_result = self._query_database(database_id, f"SELECT COUNT(*) AS row_count FROM {quoted}", [])  # nosec B608 - table name is read from sqlite_master and safely quoted.
             if not count_result.get("ok"):
-                return {"ok": False, "database_name": name, "unavailable": count_result}
+                return {"ok": False, "database_name": name, "message": "Could not count rows in a D1 table."}
             rows = _extract_d1_rows(count_result.get("result"))
             count = rows[0].get("row_count") if rows else None
             if not isinstance(count, int) or count < 0:
