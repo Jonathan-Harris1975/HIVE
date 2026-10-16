@@ -19,6 +19,24 @@ class ModelSyncError(RuntimeError):
     pass
 
 
+def _optional_float(value: object) -> float | None:
+    if not isinstance(value, (int, float, str)):
+        return None
+    try:
+        return float(value)
+    except (ValueError, OverflowError):
+        return None
+
+
+def _sample_size(value: object) -> int:
+    if not isinstance(value, (int, float, str)):
+        return 0
+    try:
+        return max(0, int(value))
+    except (ValueError, OverflowError):
+        return 0
+
+
 def _aims_explicit_assignments(
     registry: dict[str, list[dict[str, object]]],
 ) -> dict[str, str]:
@@ -26,10 +44,7 @@ def _aims_explicit_assignments(
     candidates: dict[str, list[dict[str, object]]] = {}
     for items in registry.values():
         for item in items:
-            try:
-                sample_size = int(item.get("evaluation_sample_size") or 0)
-            except (TypeError, ValueError):
-                sample_size = 0
+            sample_size = _sample_size(item.get("evaluation_sample_size"))
             if (
                 item.get("available") is False
                 or (
@@ -50,20 +65,11 @@ def _aims_explicit_assignments(
                     candidates.setdefault(name, []).append(item)
 
     def order(item: dict[str, object]) -> tuple[bool, float, float, float, str]:
-        raw_cost = item.get("cost_per_successful_task")
-        try:
-            cost = float(raw_cost) if raw_cost is not None else 0.0
-            has_cost = raw_cost is not None and cost >= 0
-        except (TypeError, ValueError):
-            has_cost, cost = False, 0.0
-        try:
-            quality = float(item.get("task_score") or item.get("score") or 0.0)
-        except (TypeError, ValueError):
-            quality = 0.0
-        try:
-            reliability = float(item.get("reliability_score") or 0.0)
-        except (TypeError, ValueError):
-            reliability = 0.0
+        parsed_cost = _optional_float(item.get("cost_per_successful_task"))
+        has_cost = parsed_cost is not None and parsed_cost >= 0
+        cost = parsed_cost if has_cost and parsed_cost is not None else 0.0
+        quality = _optional_float(item.get("task_score") or item.get("score")) or 0.0
+        reliability = _optional_float(item.get("reliability_score")) or 0.0
         return (not has_cost, cost, -quality, -reliability, str(item.get("model_id") or ""))
 
     assignments: dict[str, str] = {}
