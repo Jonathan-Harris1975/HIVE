@@ -295,6 +295,7 @@ class D1MetadataStore:
         names = [str(row.get("name") or "") for row in _extract_d1_rows(tables_result.get("result"))]
         tables: list[dict[str, object]] = []
         preserved: list[str] = []
+        total_rows = 0
         for table_name in names:
             if not table_name:
                 continue
@@ -310,9 +311,10 @@ class D1MetadataStore:
             if not isinstance(count, int) or count < 0:
                 return {"ok": False, "database_name": name, "message": f"Could not count rows in {table_name}."}
             tables.append({"name": table_name, "rows": count})
+            total_rows += count
         return {
             "ok": True, "target": name, "database_name": name, "tables": tables,
-            "total_rows": sum(int(table["rows"]) for table in tables),
+            "total_rows": total_rows,
             "preserved_tables": preserved,
             "preserves": ["D1 schema", "migration tables", "R2 objects", "Vectorize data"],
         }
