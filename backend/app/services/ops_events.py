@@ -130,10 +130,13 @@ def list_ops_events(
         items: list[dict[str, Any]] = []
         result = store.list_metadata(lane="ops_events", limit=max(safe_limit, 100))
         if result.get("ok"):
-            for row in result.get("items", []):
-                metadata = row.get("metadata")
-                if isinstance(metadata, dict):
-                    items.append(metadata)
+            rows = result.get("items")
+            if isinstance(rows, list):
+                for row in rows:
+                    if isinstance(row, dict):
+                        metadata = row.get("metadata")
+                        if isinstance(metadata, dict):
+                            items.append(metadata)
         else:
             d1_error = _text(result.get("message") or result.get("error") or "D1 query failed", limit=200)
     else:
