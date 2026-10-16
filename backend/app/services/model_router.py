@@ -124,7 +124,8 @@ class ModelRouter:
     def _audit_registry_default(self) -> str | None:
         """Choose a qualified audit model distinct from general reasoning."""
         reasoning_model = self._registry_default("reasoning")
-        reasoning_ids = {reasoning_model} if reasoning_model else set()
+        general_model = reasoning_model or self.settings.default_model
+        reasoning_ids = {general_model} if general_model else set()
         if reasoning_model:
             for candidate in model_registry.get_ranked_models("reasoning"):
                 if candidate.model_id == reasoning_model or candidate.canonical_slug == reasoning_model:
