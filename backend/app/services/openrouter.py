@@ -450,7 +450,7 @@ class OpenRouterClient:
                     model=model,
                     exact_context=exact_context,
                 )
-                self._log_headroom(outcome, model=model)
+                self._log_headroom(outcome, model=model, route_name=route_name)
                 if outcome.failed or (
                     outcome.skipped_reason and outcome.skipped_reason != "exact_context"
                 ):
@@ -519,18 +519,24 @@ class OpenRouterClient:
             for message in messages
         )
 
-    def _log_headroom(self, outcome: HeadroomOutcome, *, model: str) -> None:
+    def _log_headroom(
+        self, outcome: HeadroomOutcome, *, model: str, route_name: str
+    ) -> None:
         if outcome.failed:
             logger.warning(
-                "Headroom fail-open model=%s reason=%s", model, outcome.skipped_reason or "unknown"
+                "Headroom fail-open route=%s model=%s reason=%s",
+                route_name,
+                model,
+                outcome.skipped_reason or "unknown",
             )
             return
         if outcome.skipped_reason and outcome.skipped_reason not in {"disabled", "exact_context"}:
             logger.debug("Headroom skipped model=%s reason=%s", model, outcome.skipped_reason)
         if self.settings.headroom_log_savings and outcome.tokens_saved > 0:
             logger.info(
-                "Headroom saved=%d tokens model=%s before=%d after=%d transforms=%s",
+                "headroom.savings tokens_saved=%d route=%s model=%s tokens_before=%d tokens_after=%d transforms=%s",
                 outcome.tokens_saved,
+                route_name,
                 model,
                 outcome.tokens_before,
                 outcome.tokens_after,
