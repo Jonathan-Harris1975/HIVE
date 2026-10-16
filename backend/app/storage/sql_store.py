@@ -1196,6 +1196,25 @@ class SqlStore:
             "hive_cost_events",
         ]
 
+    def preview_reset(self) -> dict[str, object]:
+        """Read row counts for HIVE SQL tables without modifying data."""
+        if not self.enabled:
+            return {"ok": False, "enabled": False, "message": "SQL database is disabled or not configured."}
+        counts = self.table_counts()
+        if not counts.get("ok") or not isinstance(counts.get("counts"), dict):
+            return {"ok": False, "enabled": True, "message": "Could not count SQL rows.", "unavailable": counts}
+        table_counts = counts["counts"]
+        if any(not isinstance(value, int) or value < 0 for value in table_counts.values()):
+            return {"ok": False, "enabled": True, "message": "SQL row counts are incomplete."}
+        return {
+            "ok": True,
+            "target": "hive_sql",
+            "dialect": self.dialect,
+            "tables": [{"name": name, "rows": table_counts.get(name, 0)} for name in self.table_names()],
+            "total_rows": sum(table_counts.values()),
+            "preserves": ["SQL schema", "R2 objects", "Vectorize data"],
+        }
+
     def reset_all_data(self) -> dict[str, object]:
         """Remove all HIVE application rows while preserving the SQL schema.
 
