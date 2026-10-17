@@ -56,7 +56,7 @@ jobs:
       - name: Audit GitHub Actions with zizmor
         # Blocking after the live trigger baseline was reconciled. Accepted
         # trigger exceptions are narrow and documented at the trigger itself.
-        uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
+        uses: zizmorcore/zizmor-action@f9597c869b2e67095f9b527070297a13a6efe928 # v0.7.0
         with:
           advanced-security: false
           annotations: true
@@ -85,7 +85,7 @@ jobs:
       - name: Prove zizmor detects the seeded unsafe pattern
         id: seeded_zizmor
         continue-on-error: true
-        uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
+        uses: zizmorcore/zizmor-action@f9597c869b2e67095f9b527070297a13a6efe928 # v0.7.0
         with:
           inputs: .zizmor-seeded-canary.yml
           advanced-security: false
@@ -125,9 +125,9 @@ jobs:
           persist-credentials: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24.21.0
+          node-version: 24.22.0
 
       - name: Prove malformed Renovate configuration is rejected
         shell: bash
