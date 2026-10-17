@@ -82,7 +82,7 @@ jobs:
           printf '{"repository":"%s","sha":"%s","workflow_run":"%s","service":"HIVE","status":"production-deployment-green"}\n' \
             "$GITHUB_REPOSITORY" "$DEPLOYED_SHA" "$GITHUB_RUN_ID" > deployment-attestation.json
       - name: Retain production deployment evidence
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: hive-deployment-attestation-${{ github.event.workflow_run.head_sha || github.sha }}
           path: deployment-attestation.json
