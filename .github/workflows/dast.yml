@@ -21,7 +21,7 @@ jobs:
       contents: read
     env:
       INPUT_TARGET_URL: ${{ inputs.target_url }}
-      CONFIGURED_TARGET_URL: ${{ vars.DAST_TARGET_URL }}
+      CONFIGURED_TARGET_URL: ${{ secrets.DAST_TARGET_URL || vars.DAST_TARGET_URL || '' }}
     steps:
       - name: Check out exact DAST workflow revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
