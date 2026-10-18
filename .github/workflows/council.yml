@@ -27,6 +27,8 @@ concurrency:
 jobs:
   council:
     runs-on: ubuntu-latest
+    environment:
+      name: Koyeb
     timeout-minutes: 60
     steps:
       - name: Check out trusted Council definition
