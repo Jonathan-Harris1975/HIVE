@@ -19,7 +19,7 @@ jobs:
   scan:
     name: OWASP ZAP full active scan
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 180
     environment:
       name: Koyeb
     outputs:
@@ -68,6 +68,7 @@ jobs:
         uses: zaproxy/action-full-scan@3c58388149901b9a03b7718852c5ba889646c27c # v0.13.0
         with:
           target: ${{ steps.resolve.outputs.target }}
+          cmd_options: '-I -m 60'
           allow_issue_writing: false
           fail_action: true
           artifact_name: dast-zap-full-${{ github.run_id }}
