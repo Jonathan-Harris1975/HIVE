@@ -162,5 +162,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          export EVIDENCE_STATUS="$(jq -r '.dast_status // "UNKNOWN"' "$RUNNER_TEMP/dast-r2/summary.json")"
+          EVIDENCE_STATUS="$(jq -r '.dast_status // "UNKNOWN"' "$RUNNER_TEMP/dast-r2/summary.json")"
+          export EVIDENCE_STATUS
           python3 .github/scripts/persist_ci_report_r2.py dast "$GITHUB_SHA" "$RUNNER_TEMP/dast-r2"
