@@ -32,7 +32,7 @@ jobs:
             echo "::error::KOYEB_SERVICE is required at the Koyeb Environment or repository scope."
             exit 1
           fi
-          printf 'KOYEB_SERVICE=%s\\n' "$service" >> "$GITHUB_ENV"
+          printf 'KOYEB_SERVICE=%s\n' "$service" >> "$GITHUB_ENV"
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # pinned release commit
       - name: Check Koyeb deployment-watch configuration
         id: deployment_config
