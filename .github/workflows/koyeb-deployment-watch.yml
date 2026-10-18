@@ -20,12 +20,24 @@ jobs:
     environment: Koyeb
     timeout-minutes: 20
     steps:
+      - name: Resolve Koyeb service from Environment or repository
+        env:
+          KOYEB_SERVICE_REPOSITORY: ${{ vars.KOYEB_SERVICE || '' }}
+          KOYEB_SERVICE_SECRET: ${{ secrets.KOYEB_SERVICE || '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          service="${KOYEB_SERVICE:-${KOYEB_SERVICE_SECRET:-${KOYEB_SERVICE_REPOSITORY:-}}}"
+          if [ -z "$service" ]; then
+            echo "::error::KOYEB_SERVICE is required at the Koyeb Environment or repository scope."
+            exit 1
+          fi
+          printf 'KOYEB_SERVICE=%s\n' "$service" >> "$GITHUB_ENV"
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # pinned release commit
       - name: Check Koyeb deployment-watch configuration
         id: deployment_config
         env:
           KOYEB_TOKEN: ${{ secrets.KOYEB_TOKEN }}
-          KOYEB_SERVICE: ${{ vars.KOYEB_SERVICE }}
         run: |
           set -euo pipefail
           missing=()
@@ -65,7 +77,6 @@ jobs:
       - name: Watch production deployment
         env:
           KOYEB_TOKEN: ${{ secrets.KOYEB_TOKEN }}
-          KOYEB_SERVICE: ${{ vars.KOYEB_SERVICE }}
           SERVICE_DISPLAY_NAME: HIVE
           OPS_ALERT_WEBHOOK_URL: ${{ secrets.OPS_ALERT_WEBHOOK_URL }}
           OPS_ALERT_WEBHOOK_TOKEN: ${{ secrets.OPS_ALERT_WEBHOOK_TOKEN }}
