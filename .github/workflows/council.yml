@@ -27,6 +27,9 @@ concurrency:
 jobs:
   council:
     runs-on: ubuntu-latest
+    environment:
+      name: R2
+      deployment: false
     timeout-minutes: 60
     steps:
       - name: Check out trusted Council definition
@@ -120,7 +123,7 @@ jobs:
           TARGET_SHA: ${{ steps.target.outputs.sha }}
           RUN_ID: ${{ github.run_id }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
-          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID || vars.CF_R2_ACCOUNT_ID }}
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID || vars.CF_R2_ACCOUNT_ID || secrets.R2_ACCOUNT_ID || secrets.CF_R2_ACCOUNT_ID || vars.CF_ACCOUNT_ID || secrets.CF_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || secrets.CF_R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || secrets.CF_R2_SECRET_ACCESS_KEY }}
           R2_BUCKET: hive-repositories
@@ -193,7 +196,7 @@ jobs:
           RUN_ID: ${{ github.run_id }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
           RESULT_KEY: ${{ steps.result_channel.outputs.key }}
-          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID || vars.CF_R2_ACCOUNT_ID }}
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID || vars.CF_R2_ACCOUNT_ID || secrets.R2_ACCOUNT_ID || secrets.CF_R2_ACCOUNT_ID || vars.CF_ACCOUNT_ID || secrets.CF_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || secrets.CF_R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || secrets.CF_R2_SECRET_ACCESS_KEY }}
           R2_BUCKET: hive-repositories
@@ -254,7 +257,7 @@ jobs:
 
       - name: Persist Council run evidence to hive-repositories R2
         env:
-          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID || vars.CF_R2_ACCOUNT_ID }}
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID || vars.CF_R2_ACCOUNT_ID || secrets.R2_ACCOUNT_ID || secrets.CF_R2_ACCOUNT_ID || vars.CF_ACCOUNT_ID || secrets.CF_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || secrets.CF_R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || secrets.CF_R2_SECRET_ACCESS_KEY }}
           R2_BUCKET: hive-repositories
