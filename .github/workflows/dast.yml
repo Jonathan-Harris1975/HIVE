@@ -25,27 +25,27 @@ jobs:
       deployment: false
     outputs:
       enabled: ${{ steps.resolve.outputs.enabled }}
-    env:
-      # Environment-level variables arrive in the runner environment. Keep
-      # repository-level values under separate names for a safe runtime fallback.
-      REPOSITORY_DAST_ENABLED: ${{ vars.DAST_ENABLED || 'false' }}
-      REPOSITORY_DAST_TARGET_URL: ${{ vars.DAST_TARGET_URL || '' }}
-      DAST_TARGET_URL_SECRET: ${{ secrets.DAST_TARGET_URL || '' }}
           TARGET_URL_INPUT: ${{ inputs.target_url || '' }}
     steps:
       - name: Resolve DAST configuration from environment or repository
         id: resolve
+        env:
+          # Step-level context resolution runs after the selected Environment is loaded.
+          DAST_ENABLED_SETTING: ${{ vars.DAST_ENABLED || 'false' }}
+          DAST_TARGET_URL_VARIABLE: ${{ vars.DAST_TARGET_URL || '' }}
+          DAST_TARGET_URL_SECRET: ${{ secrets.DAST_TARGET_URL || '' }}
+          TARGET_URL_INPUT: ${{ inputs.target_url || '' }}
         shell: bash
         run: |
           set -euo pipefail
-          enabled="${DAST_ENABLED:-${REPOSITORY_DAST_ENABLED:-false}}"
+          enabled="${DAST_ENABLED_SETTING:-false}"
           if [[ "$enabled" != "true" ]]; then
             echo "enabled=false" >> "$GITHUB_OUTPUT"
             echo "DAST is disabled."
             exit 0
           fi
           echo "enabled=true" >> "$GITHUB_OUTPUT"
-          target="${TARGET_URL_INPUT:-${DAST_TARGET_URL:-${DAST_TARGET_URL_SECRET:-${REPOSITORY_DAST_TARGET_URL:-}}}}"
+          target="${TARGET_URL_INPUT:-${DAST_TARGET_URL_SECRET:-${DAST_TARGET_URL_VARIABLE:-}}}"
           if [[ -z "$target" ]]; then
             echo "::error::DAST is enabled but no authorised target URL is configured."
             exit 1
@@ -136,13 +136,22 @@ jobs:
           path: ${{ runner.temp }}/dast-r2
 
       - name: Resolve R2 credentials from environment or repository
+        env:
+          # Step-level contexts include the selected R2 Environment and repository fallback.
+          R2_ENDPOINT_REPOSITORY: ${{ vars.CF_R2_ENDPOINT_URL || vars.R2_ENDPOINT_URL || vars.R2_ENDPOINT || '' }}
+          R2_ENDPOINT_SECRET: ${{ secrets.R2_ENDPOINT || secrets.CF_R2_ENDPOINT_URL || secrets.R2_ENDPOINT_URL || '' }}
+          R2_ACCOUNT_ID_REPOSITORY: ${{ vars.R2_ACCOUNT_ID || vars.CF_R2_ACCOUNT_ID || '' }}
+          R2_ACCOUNT_ID_SECRET: ${{ secrets.R2_ACCOUNT_ID || secrets.CF_R2_ACCOUNT_ID || '' }}
+          R2_ACCESS_KEY_ID_REPOSITORY: ${{ vars.R2_ACCESS_KEY_ID || vars.CF_R2_ACCESS_KEY_ID || '' }}
+          R2_ACCESS_KEY_ID_SECRET: ${{ secrets.R2_ACCESS_KEY_ID || secrets.CF_R2_ACCESS_KEY_ID || '' }}
+          R2_SECRET_ACCESS_KEY_SECRET: ${{ secrets.R2_SECRET_ACCESS_KEY || secrets.CF_R2_SECRET_ACCESS_KEY || '' }}
         shell: bash
         run: |
           set -euo pipefail
-          account_id="${R2_ACCOUNT_ID_SECRET:-${R2_ACCOUNT_ID:-${R2_ACCOUNT_ID_REPOSITORY:-}}}"
-          endpoint="${R2_ENDPOINT_SECRET:-${R2_ENDPOINT:-${R2_ENDPOINT_REPOSITORY:-}}}"
-          access_key="${R2_ACCESS_KEY_ID_SECRET:-${R2_ACCESS_KEY_ID:-${R2_ACCESS_KEY_ID_REPOSITORY:-}}}"
-          secret_key="${R2_SECRET_ACCESS_KEY_SECRET:-${R2_SECRET_ACCESS_KEY:-}}"
+          account_id="${R2_ACCOUNT_ID_SECRET:-${R2_ACCOUNT_ID_REPOSITORY:-}}"
+          endpoint="${R2_ENDPOINT_SECRET:-${R2_ENDPOINT_REPOSITORY:-}}"
+          access_key="${R2_ACCESS_KEY_ID_SECRET:-${R2_ACCESS_KEY_ID_REPOSITORY:-}}"
+          secret_key="${R2_SECRET_ACCESS_KEY_SECRET:-}"
           if [[ -z "$endpoint" && -n "$account_id" ]]; then
             endpoint="https://${account_id}.r2.cloudflarestorage.com"
           fi
