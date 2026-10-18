@@ -28,7 +28,7 @@ jobs:
   council:
     runs-on: ubuntu-latest
     environment:
-      name: Koyeb
+      name: R2
       deployment: false
     timeout-minutes: 60
     steps:
