@@ -88,7 +88,7 @@ jobs:
           jq -n --arg repository "$GITHUB_REPOSITORY" --arg sha "$GITHUB_SHA" \
             --arg run_id "$GITHUB_RUN_ID" --arg run_attempt "$GITHUB_RUN_ATTEMPT" \
             --arg outcome "${ZAP_OUTCOME:-not-run}" \
-            '{repository:$repository,default_branch_sha:$sha,workflow_run_id:$run_id,workflow_run_attempt:$run_attempt,scanner:"OWASP ZAP",dast_status:$outcome}' \
+            '{repository:$repository,workflow_sha:$sha,workflow_run_id:$run_id,workflow_run_attempt:$run_attempt,scanner:"OWASP ZAP",dast_status:$outcome}' \
             > "$RUNNER_TEMP/dast-r2/summary.json"
 
       - name: Upload exact-run evidence for R2 persistence
@@ -159,4 +159,8 @@ jobs:
             "$endpoint" "$access_key" "$secret_key" >> "$GITHUB_ENV"
 
       - name: Persist DAST evidence to hive-repositories R2
-        run: python3 .github/scripts/persist_ci_report_r2.py dast "$GITHUB_SHA" "$RUNNER_TEMP/dast-r2"
+        shell: bash
+        run: |
+          set -euo pipefail
+          export EVIDENCE_STATUS="$(jq -r '.dast_status // "UNKNOWN"' "$RUNNER_TEMP/dast-r2/summary.json")"
+          python3 .github/scripts/persist_ci_report_r2.py dast "$GITHUB_SHA" "$RUNNER_TEMP/dast-r2"
