@@ -55,14 +55,14 @@ jobs:
           printf '::add-mask::%s\n' "$target"
           printf 'target=%s\n' "$target" >> "$GITHUB_OUTPUT"
 
-      - name: Check out trusted evidence helper
+      - name: Check out exact DAST workflow revision
         if: ${{ steps.resolve.outputs.enabled == 'true' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.repository.default_branch }}
+          ref: ${{ github.sha }}
           persist-credentials: false
 
-      - name: Run authorised ZAP full scan
+      - name: Run OWASP ZAP full scan
         id: zap
         if: ${{ steps.resolve.outputs.enabled == 'true' }}
         uses: zaproxy/action-full-scan@3c58388149901b9a03b7718852c5ba889646c27c # v0.13.0
@@ -120,10 +120,10 @@ jobs:
       R2_ACCESS_KEY_ID_SECRET: ${{ secrets.R2_ACCESS_KEY_ID || secrets.CF_R2_ACCESS_KEY_ID || '' }}
       R2_SECRET_ACCESS_KEY_SECRET: ${{ secrets.R2_SECRET_ACCESS_KEY || secrets.CF_R2_SECRET_ACCESS_KEY || '' }}
     steps:
-      - name: Check out trusted evidence helper
+      - name: Check out exact DAST workflow revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.repository.default_branch }}
+          ref: ${{ github.sha }}
           persist-credentials: false
 
       - name: Download exact-run DAST evidence
@@ -158,7 +158,5 @@ jobs:
           printf 'R2_ENDPOINT=%s\nR2_ACCESS_KEY_ID=%s\nR2_SECRET_ACCESS_KEY=%s\n' \
             "$endpoint" "$access_key" "$secret_key" >> "$GITHUB_ENV"
 
-      - name: Persist and verify DAST evidence in hive-repositories
-        env:
-          SOURCE_SHA: ${{ github.sha }}
-        run: python3 .github/scripts/persist_ci_report_r2.py dast "$SOURCE_SHA" "$RUNNER_TEMP/dast-r2"
+      - name: Persist DAST evidence to hive-repositories R2
+        run: python3 .github/scripts/persist_ci_report_r2.py dast "$GITHUB_SHA" "$RUNNER_TEMP/dast-r2"
