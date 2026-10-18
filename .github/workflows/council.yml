@@ -29,6 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: Koyeb
+      deployment: false
     timeout-minutes: 60
     steps:
       - name: Check out trusted Council definition
