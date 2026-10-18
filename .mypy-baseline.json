@@ -265,6 +265,6 @@
     "backend/app/storage/sql_store.py|attr-defined|\"Cursor\" has no attribute \"__enter__\"; maybe \"__iter__\"?": 1,
     "backend/app/storage/sql_store.py|attr-defined|\"Cursor\" has no attribute \"__exit__\"; maybe \"__next__\"?": 1
   },
-  "mypy_version": "2.3.1",
+  "mypy_version": "2.4.0",
   "schema_version": 1
 }
