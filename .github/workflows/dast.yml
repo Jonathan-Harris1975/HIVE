@@ -82,15 +82,15 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/dast-r2"
-          find "$GITHUB_WORKSPACE" -maxdepth 4 -type f \\
-            \\( -name 'report_json.json' -o -name 'report_html.html' -o -name 'report_md.md' \\
-               -o -name 'report_*.json' -o -name 'report_*.html' -o -name 'report_*.md' \\
-               -o -name 'zap*.log' \\) \\
-            -exec cp {} "$RUNNER_TEMP/dast-r2/" \\;
-          jq -n --arg repository "$GITHUB_REPOSITORY" --arg sha "$GITHUB_SHA" \\
-            --arg run_id "$GITHUB_RUN_ID" --arg run_attempt "$GITHUB_RUN_ATTEMPT" \\
-            --arg outcome "${ZAP_OUTCOME:-not-run}" \\
-            '{repository:$repository,default_branch_sha:$sha,workflow_run_id:$run_id,workflow_run_attempt:$run_attempt,scanner:"OWASP ZAP",dast_status:$outcome}' \\
+          find "$GITHUB_WORKSPACE" -maxdepth 4 -type f \
+            \( -name 'report_json.json' -o -name 'report_html.html' -o -name 'report_md.md' \
+               -o -name 'report_*.json' -o -name 'report_*.html' -o -name 'report_*.md' \
+               -o -name 'zap*.log' \) \
+            -exec cp {} "$RUNNER_TEMP/dast-r2/" \;
+          jq -n --arg repository "$GITHUB_REPOSITORY" --arg sha "$GITHUB_SHA" \
+            --arg run_id "$GITHUB_RUN_ID" --arg run_attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg outcome "${ZAP_OUTCOME:-not-run}" \
+            '{repository:$repository,default_branch_sha:$sha,workflow_run_id:$run_id,workflow_run_attempt:$run_attempt,scanner:"OWASP ZAP",dast_status:$outcome}' \
             > "$RUNNER_TEMP/dast-r2/summary.json"
 
       - name: Upload exact-run evidence for R2 persistence
@@ -149,7 +149,7 @@ jobs:
           [[ -n "$endpoint" ]] || { echo "::error::R2 endpoint or account ID is required at Environment or repository scope."; exit 1; }
           [[ -n "$access_key" ]] || { echo "::error::R2 access key ID is required at Environment or repository scope."; exit 1; }
           [[ -n "$secret_key" ]] || { echo "::error::R2 secret access key is required as a GitHub secret."; exit 1; }
-          printf 'R2_ENDPOINT=%s\nR2_ACCESS_KEY_ID=%s\nR2_SECRET_ACCESS_KEY=%s\n' \\
+          printf 'R2_ENDPOINT=%s\nR2_ACCESS_KEY_ID=%s\nR2_SECRET_ACCESS_KEY=%s\n' \
             "$endpoint" "$access_key" "$secret_key" >> "$GITHUB_ENV"
 
       - name: Persist and verify DAST evidence in hive-repositories
