@@ -142,7 +142,8 @@ jobs:
     timeout-minutes: 5
     permissions:
       checks: read
-      contents: read
+      # Required by GitHub's repository API to expose merge-method settings.
+      contents: write
       pull-requests: write
     steps:
       - name: Check out trusted default-branch automation only
