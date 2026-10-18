@@ -98,9 +98,9 @@ jobs:
           parsed_target = urlsplit(target)
           target_host = (parsed_target.hostname or "").lower()
           variants = {target, target.rstrip("/"), quote(target, safe=""), quote_plus(target)}
-          variants |= {value.replace("/", r"\\/") for value in tuple(variants)}
+          variants |= {value.replace("/", r"\/") for value in tuple(variants)}
           variants |= {html.escape(value, quote=True) for value in tuple(variants)}
-          url_pattern = re.compile(r"""https?://[^\\s<>"'\\\\]+""")
+          url_pattern = re.compile(r"""https?://[^ \t\r\n<>"'\\]+""")
 
           def redact_url(match):
               value = match.group(0)
