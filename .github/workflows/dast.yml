@@ -36,7 +36,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          enabled="${DAST_ENABLED_SETTING:-false}"
+          enabled="$(printf '%s' "${DAST_ENABLED_SETTING:-false}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | tr '[:upper:]' '[:lower:]')"
           if [[ "$enabled" != "true" ]]; then
             echo "enabled=false" >> "$GITHUB_OUTPUT"
             echo "DAST is disabled."

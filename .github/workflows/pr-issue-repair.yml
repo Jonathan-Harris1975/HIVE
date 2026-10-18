@@ -7,6 +7,7 @@ jobs:
     if: ${{ (github.event_name != 'issue_comment' || github.event.issue.pull_request) && (github.event_name != 'workflow_run'
       || (github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion == 'failure')) }}
     runs-on: ubuntu-latest
+    environment: Autonomy
     timeout-minutes: 5
     permissions:
       contents: read
@@ -73,6 +74,7 @@ jobs:
   route_verified_issue:
     if: ${{ needs.authenticate_actor.outputs.trusted == 'true' }}
     runs-on: ubuntu-latest
+    environment: Autonomy
     timeout-minutes: 15
     steps:
     - name: Check out trusted router from default branch
