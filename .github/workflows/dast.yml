@@ -76,6 +76,7 @@ jobs:
         if: ${{ always() && steps.resolve.outputs.enabled == 'true' }}
         env:
           ZAP_OUTCOME: ${{ steps.zap.outcome }}
+          DAST_TARGET_URL_VALUE: ${{ steps.resolve.outputs.target }}
         shell: bash
         run: |
           set -euo pipefail
@@ -85,6 +86,48 @@ jobs:
                -o -name 'report_*.json' -o -name 'report_*.html' -o -name 'report_*.md' \
                -o -name 'zap*.log' \) \
             -exec cp {} "$RUNNER_TEMP/dast-r2/" \;
+          python3 - "$RUNNER_TEMP/dast-r2" "$DAST_TARGET_URL_VALUE" <<'PY'
+          import html
+          import pathlib
+          import re
+          import sys
+          from urllib.parse import quote, quote_plus, urlsplit, urlunsplit
+
+          root = pathlib.Path(sys.argv[1])
+          target = sys.argv[2]
+          parsed_target = urlsplit(target)
+          target_host = (parsed_target.hostname or "").lower()
+          variants = {target, target.rstrip("/"), quote(target, safe=""), quote_plus(target)}
+          variants |= {value.replace("/", r"\\/") for value in tuple(variants)}
+          variants |= {html.escape(value, quote=True) for value in tuple(variants)}
+          url_pattern = re.compile(r"""https?://[^\\s<>"'\\\\]+""")
+
+          def redact_url(match):
+              value = match.group(0)
+              try:
+                  parsed = urlsplit(value)
+                  host = (parsed.hostname or "").lower()
+                  if not host:
+                      return "[REDACTED_URL]"
+                  port = f":{parsed.port}" if parsed.port else ""
+                  netloc = host + port
+                  path = "/[REDACTED_TARGET]" if target_host and host == target_host else parsed.path
+                  return urlunsplit((parsed.scheme, netloc, path, "", ""))
+              except ValueError:
+                  return "[REDACTED_URL]"
+
+          for path in root.iterdir():
+              if not path.is_file():
+                  continue
+              try:
+                  text = path.read_text(encoding="utf-8")
+              except (UnicodeDecodeError, OSError):
+                  continue
+              for value in sorted(variants, key=len, reverse=True):
+                  text = text.replace(value, "[REDACTED_DAST_TARGET]")
+              text = url_pattern.sub(redact_url, text)
+              path.write_text(text, encoding="utf-8")
+          PY
           jq -n --arg repository "$GITHUB_REPOSITORY" --arg sha "$GITHUB_SHA" \
             --arg run_id "$GITHUB_RUN_ID" --arg run_attempt "$GITHUB_RUN_ATTEMPT" \
             --arg outcome "${ZAP_OUTCOME:-not-run}" \
