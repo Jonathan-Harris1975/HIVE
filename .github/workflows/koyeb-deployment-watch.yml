@@ -18,12 +18,12 @@ jobs:
     if: ${{ github.event_name == 'workflow_run' && (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch') && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository }}
     runs-on: ubuntu-latest
     environment: Koyeb
-    env:
-      KOYEB_SERVICE_REPOSITORY: ${{ vars.KOYEB_SERVICE || '' }}
-      KOYEB_SERVICE_SECRET: ${{ secrets.KOYEB_SERVICE || '' }}
     timeout-minutes: 20
     steps:
       - name: Resolve Koyeb service from Environment or repository
+        env:
+          KOYEB_SERVICE_REPOSITORY: ${{ vars.KOYEB_SERVICE || '' }}
+          KOYEB_SERVICE_SECRET: ${{ secrets.KOYEB_SERVICE || '' }}
         shell: bash
         run: |
           set -euo pipefail
