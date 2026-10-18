@@ -25,7 +25,6 @@ jobs:
       deployment: false
     outputs:
       enabled: ${{ steps.resolve.outputs.enabled }}
-          TARGET_URL_INPUT: ${{ inputs.target_url || '' }}
     steps:
       - name: Resolve DAST configuration from environment or repository
         id: resolve
