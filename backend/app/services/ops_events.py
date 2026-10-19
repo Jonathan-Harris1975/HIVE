@@ -11,6 +11,11 @@ from typing import Any
 from app.core.config import Settings
 from app.storage.d1 import D1MetadataStore
 
+
+class OpsEventPersistenceError(RuntimeError):
+    """Raised when an enabled durable store cannot persist an operational event."""
+
+
 _ALLOWED_SEVERITIES = {"info", "warning", "critical"}
 _SECRET_KEY = re.compile(r"(authorization|bearer|credential|password|secret|token|api[_-]?key|access[_-]?key)", re.I)
 _MEMORY: deque[dict[str, Any]] = deque()
@@ -85,15 +90,8 @@ def normalise_ops_event(payload: dict[str, Any]) -> dict[str, Any]:
 
 def ingest_ops_event(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
     event = normalise_ops_event(payload)
-    with _LOCK:
-        # Replace a matching event ID to keep provider retries idempotent.
-        existing = [item for item in _MEMORY if item.get("event_id") != event["event_id"]]
-        existing.insert(0, event)
-        _MEMORY.clear()
-        _MEMORY.extend(existing[: max(10, settings.ops_event_memory_limit)])
-
-    persisted = False
     store = D1MetadataStore(settings)
+    persisted = False
     if store.enabled:
         result = store.upsert_metadata(
             item_id=f"ops-event:{event['event_id']}",
@@ -104,7 +102,19 @@ def ingest_ops_event(settings: Settings, payload: dict[str, Any]) -> dict[str, A
             url=event["url"],
             metadata=event,
         )
-        persisted = bool(result.get("ok"))
+        if not result.get("ok"):
+            # The caller receives a retryable failure. Do not claim durable
+            # acceptance or leave a volatile copy that could mask the failure.
+            raise OpsEventPersistenceError("The operational event could not be persisted.")
+        persisted = True
+
+    with _LOCK:
+        # Replace a matching event ID to keep provider retries idempotent.
+        existing = [item for item in _MEMORY if item.get("event_id") != event["event_id"]]
+        existing.insert(0, event)
+        _MEMORY.clear()
+        _MEMORY.extend(existing[: max(10, settings.ops_event_memory_limit)])
+
     return {"ok": True, "accepted": True, "persisted": persisted, "event": event}
 
 

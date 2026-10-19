@@ -132,3 +132,35 @@ def test_persistent_ops_events_do_not_resurrect_stale_worker_memory(monkeypatch)
     assert result["persistent_store"] is True
     assert result["items"] == []
     clear_ops_events_for_tests()
+
+
+
+def test_ops_event_is_not_accepted_when_enabled_d1_persistence_fails(monkeypatch) -> None:
+    clear_ops_events_for_tests()
+    monkeypatch.setattr(D1MetadataStore, "enabled", property(lambda self: True))
+    monkeypatch.setattr(
+        D1MetadataStore,
+        "upsert_metadata",
+        lambda self, **kwargs: {"ok": False, "error": "provider detail"},
+    )
+    settings = Settings(
+        app_env="test",
+        admin_bearer_token="admin-token-which-is-long-enough",
+        ops_event_ingest_enabled=True,
+        ops_event_ingest_token="event-token-which-is-long-enough",
+        d1_enabled=True,
+        d1_account_id="account",
+        d1_api_key="token",
+        d1_database_id="database",
+    )
+    with TestClient(create_app(settings)) as client:
+        response = client.post(
+            "/v1/ops/events",
+            headers={"Authorization": "Bearer event-token-which-is-long-enough"},
+            json={"event_id": "event-persist-failure", "service": "HIVE"},
+        )
+        assert response.status_code == 503
+        assert response.json()["detail"] == "Operational event persistence is unavailable."
+
+    assert list_ops_events(Settings(app_env="test", d1_enabled=False))["count"] == 0
+    clear_ops_events_for_tests()

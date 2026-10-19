@@ -9,7 +9,7 @@ from fastapi.security import HTTPAuthorizationCredentials
 
 from app.core.config import Settings, get_settings
 from app.core.security import bearer
-from app.services.ops_events import ingest_ops_event
+from app.services.ops_events import OpsEventPersistenceError, ingest_ops_event
 
 router = APIRouter(tags=["ops-events"])
 
@@ -37,4 +37,10 @@ async def receive_ops_event(
 ) -> dict[str, Any]:
     """Accept a bounded, redacted operational event from trusted providers."""
 
-    return await asyncio.to_thread(ingest_ops_event, settings, payload)
+    try:
+        return await asyncio.to_thread(ingest_ops_event, settings, payload)
+    except OpsEventPersistenceError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Operational event persistence is unavailable.",
+        ) from error
