@@ -11,18 +11,26 @@ from typing import Sequence
 MAX_REJECTED_ATTEMPTS = 2
 
 
-def next_action(states: Sequence[str]) -> str:
+def next_action(states: Sequence[str], *, circuit_breaker: str = "open") -> str:
     """Return dispatch:N, hold, or exhausted for this exact run marker."""
-    if not states:
-        return "dispatch:1"
+    if circuit_breaker.strip().lower() != "open":
+        return "circuit-open"
     if "accepted" in states:
         return "accepted"
+    if any(state == "pending" or state.startswith("uncertain-") for state in states):
+        return "hold"
+    rejected = sum(state.startswith("rejected-http-") for state in states)
+    if states and states[-1] == "circuit-open":
+        if rejected >= MAX_REJECTED_ATTEMPTS:
+            return "exhausted"
+        return f"dispatch:{rejected + 1}"
+    if not states:
+        return "dispatch:1"
     latest = states[-1]
     if not latest.startswith("rejected-http-"):
         # Accepted, pending, uncertain, malformed, and unknown are never replayed
         # automatically because the provider may already have accepted the task.
         return "hold"
-    rejected = sum(state.startswith("rejected-http-") for state in states)
     if rejected >= MAX_REJECTED_ATTEMPTS:
         return "exhausted"
     return f"dispatch:{rejected + 1}"
@@ -41,25 +49,26 @@ def classify_http_status(status: str) -> str:
 
 
 def main() -> int:
-    if len(sys.argv) != 3 or sys.argv[1] not in {"preflight", "classify"}:
-        print(
-            "usage: kilo_handoff_state.py preflight <states-json> | classify <http-status>",
-            file=sys.stderr,
-        )
-        return 2
-    if sys.argv[1] == "classify":
+    if sys.argv[1:2] == ["preflight"] and len(sys.argv) in {3, 4}:
+        try:
+            states = json.loads(sys.argv[2])
+        except json.JSONDecodeError:
+            print("hold")
+            return 0
+        if not isinstance(states, list) or not all(isinstance(item, str) for item in states):
+            print("hold")
+            return 0
+        circuit_breaker = sys.argv[3] if len(sys.argv) == 4 else "open"
+        print(next_action(states, circuit_breaker=circuit_breaker))
+        return 0
+    if len(sys.argv) == 3 and sys.argv[1] == "classify":
         print(classify_http_status(sys.argv[2]))
         return 0
-    try:
-        states = json.loads(sys.argv[2])
-    except json.JSONDecodeError:
-        print("hold")
-        return 0
-    if not isinstance(states, list) or not all(isinstance(item, str) for item in states):
-        print("hold")
-        return 0
-    print(next_action(states))
-    return 0
+    print(
+        "usage: kilo_handoff_state.py preflight <states-json> [breaker-state] | classify <http-status>",
+        file=sys.stderr,
+    )
+    return 2
 
 
 if __name__ == "__main__":

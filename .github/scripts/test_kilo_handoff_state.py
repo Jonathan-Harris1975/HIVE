@@ -35,6 +35,24 @@ class KiloHandoffStateTests(unittest.TestCase):
         self.assertEqual(next_action(["unknown-state"]), "hold")
         self.assertEqual(next_action([]), "dispatch:1")
 
+    def test_closed_circuit_records_incident_and_safe_resume_needs_same_run(self):
+        self.assertEqual(next_action([], circuit_breaker="closed"), "circuit-open")
+        self.assertEqual(next_action(["circuit-open"], circuit_breaker="open"), "dispatch:1")
+        self.assertEqual(
+            next_action(["rejected-http-403", "circuit-open"], circuit_breaker="open"),
+            "dispatch:2",
+        )
+
+    def test_circuit_resume_never_replays_accepted_or_uncertain_handoff(self):
+        self.assertEqual(
+            next_action(["accepted", "circuit-open"], circuit_breaker="open"),
+            "accepted",
+        )
+        self.assertEqual(
+            next_action(["uncertain-transport", "circuit-open"], circuit_breaker="open"),
+            "hold",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

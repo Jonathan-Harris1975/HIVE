@@ -100,6 +100,7 @@ jobs:
           HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           KILO_REPAIR_TRIGGER_URL: ${{ secrets.KILO_REPAIR_TRIGGER_URL }}
+          HIVE_REPAIR_CIRCUIT_BREAKER: ${{ vars.HIVE_REPAIR_CIRCUIT_BREAKER || 'closed' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -147,8 +148,20 @@ jobs:
             marker="<!-- kilo-main-repair:${RUN_ID} -->"
             marker_states="$(gh api --paginate "repos/${REPO}/issues/${repair_pr}/comments" \
               --jq "[.[] | select(.user.login == \"${REPAIR_APP_LOGIN}\" and (.body | contains(\"${marker}\"))) | (try (.body | capture(\"dispatch-state: (?<state>[a-z0-9-]+)\").state) catch \"pending\")] | @json")"
-            dispatch_plan="$(python3 .github/scripts/kilo_handoff_state.py preflight "$marker_states")"
+            dispatch_plan="$(python3 .github/scripts/kilo_handoff_state.py preflight "$marker_states" "$HIVE_REPAIR_CIRCUIT_BREAKER")"
             case "$dispatch_plan" in
+              circuit-open)
+                if ! jq -e 'index("circuit-open") != null' <<< "$marker_states" >/dev/null; then
+                  reservation_id="$(gh api --method POST "repos/${REPO}/issues/${repair_pr}/comments" \
+                    --field body="$marker dispatch-state: circuit-open run-id:$RUN_ID source-sha:$HEAD_SHA run:$RUN_URL; Kilo dispatch is paused by HIVE_REPAIR_CIRCUIT_BREAKER." \
+                    --jq '.id')"
+                  if [[ ! "$reservation_id" =~ ^[0-9]+$ ]]; then
+                    echo "::error::Could not persist the circuit-open incident marker for run $RUN_ID." >&2
+                    exit 1
+                  fi
+                fi
+                echo "::error::Kilo dispatch circuit is closed. Open HIVE_REPAIR_CIRCUIT_BREAKER only after owner reconciliation; this exact run remains recorded."
+                return 1 ;;
               accepted)
                 echo "Kilo already accepted the repair request for run $RUN_ID; no duplicate dispatch sent."
                 return 0 ;;
