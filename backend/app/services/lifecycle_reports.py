@@ -59,15 +59,47 @@ def _state(record: dict[str, Any] | None) -> str:
     return state
 
 
-def build_weekly_overview(records_by_repository: Mapping[str, Iterable[dict[str, Any]]], year: int, week: int, generated_at: str | None = None) -> dict[str, Any]:
+def build_weekly_overview(records_by_repository: Mapping[str, Iterable[dict[str, Any]]], year: int, week: int, generated_at: str | None = None, *, current_heads: Mapping[str, str] | None = None) -> dict[str, Any]:
+    observed_at = generated_at or dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z")
+    observation = dt.datetime.fromisoformat(observed_at.replace("Z", "+00:00"))
+    if observation.tzinfo is None:
+        raise ValueError("Report observation time must include a timezone")
     repositories = []
     flattened: list[dict[str, Any]] = []
     for name in REPOSITORIES:
         valid = [item for item in records_by_repository.get(name, ()) if _valid_record(item, name)]
-        valid.sort(key=lambda item: (str(item.get("completed_at") or ""), str(item.get("started_at") or ""), item["head_sha"]))
-        latest = valid[-1] if valid else None
+        current_sha = str((current_heads or {}).get(name) or "")
+        current: list[tuple[dt.datetime, dict[str, Any]]] = []
+        for item in valid:
+            if not SHA_RE.fullmatch(current_sha) or item["head_sha"] != current_sha:
+                continue
+            try:
+                completed = dt.datetime.fromisoformat(str(item.get("completed_at") or "").replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            if completed.tzinfo is None or completed > observation:
+                continue
+            period = completed.astimezone(dt.timezone.utc).isocalendar()
+            if (period.year, period.week) == (year, week):
+                current.append((completed, item))
+        current.sort(key=lambda item: item[0])
+        latest = current[-1][1] if current else None
         status = _state(latest)
-        repositories.append({"repository": name, "status": status, "evidence_count": len(valid), "missing_evidence": latest is None, "latest_evidence": latest})
+        issue = (
+            "current_head_unavailable" if not SHA_RE.fullmatch(current_sha)
+            else "missing_evidence" if not valid
+            else "stale_or_undated_evidence" if latest is None
+            else "incomplete_evidence" if status == "UNKNOWN"
+            else None
+        )
+        fields = ("ci_gate", "socket_status", "codeql_status", "gitleaks_status", "trivy_status", "codecov_status", "dast_status", "deployment_status")
+        repositories.append({
+            "repository": name, "status": status, "current_sha": current_sha or None,
+            "head_observed_at": observed_at, "evidence_count": len(valid),
+            "missing_evidence": latest is None, "evidence_issue": issue,
+            "missing_fields": [field for field in fields if not latest or latest.get(field) in {"unknown", "running"}],
+            "latest_evidence": latest,
+        })
         if latest:
             flattened.append(latest)
     states = [row["status"] for row in repositories]
@@ -77,7 +109,8 @@ def build_weekly_overview(records_by_repository: Mapping[str, Iterable[dict[str,
         "schema_version": 1,
         "report_id": f"weekly-{year}-W{week:02d}",
         "period": {"iso_year": year, "iso_week": week},
-        "generated_at": generated_at or dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
+        "generated_at": observed_at,
+        "scope": "current_heads_at_observation",
         "overall_status": overall,
         "evidence_complete": len(flattened) == len(REPOSITORIES) and all(row["status"] != "UNKNOWN" for row in repositories),
         "repositories": repositories,
@@ -102,6 +135,11 @@ def render_weekly_markdown(report: dict[str, Any]) -> str:
     for row in report["repositories"]:
         evidence = str(row["evidence_count"]) + (" (missing)" if row["missing_evidence"] else "")
         lines.append(f"| {row['repository']} | {row['status']} | {evidence} |")
+    lines.extend(["", "## Missing or stale dependencies", ""])
+    for row in report["repositories"]:
+        if row.get("evidence_issue"):
+            fields = ", ".join(row.get("missing_fields", [])) or "current repository head or observation"
+            lines.append(f"- {row['repository']}: {row['evidence_issue']} ({fields}).")
     lines.extend(["", "## Weekly metrics", ""])
     for key, value in report["metrics"].items():
         lines.append(f"- {key.replace('_', ' ').capitalize()}: {value}")
@@ -219,15 +257,119 @@ def collect_council_references(storage: R2Storage, year: int, week: int) -> list
     return references
 
 
+def _current_repository_heads(storage: R2Storage) -> dict[str, str]:
+    """Read each governed default branch through the existing GitHub credential."""
+    settings = getattr(storage, "settings", None)
+    token = str(getattr(settings, "github_token", "") or "").strip()
+    if not settings or not token:
+        return {}
+    import httpx
+    from app.core.governed_repositories import canonical_governed_repository_id
+    from app.services.repository_refresh import github_sources
+
+    try:
+        sources = github_sources(settings)
+    except ValueError:
+        return {}
+    from concurrent.futures import ThreadPoolExecutor
+
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
+               "X-GitHub-Api-Version": "2022-11-28"}
+    with httpx.Client(timeout=httpx.Timeout(5.0, connect=3.0), headers=headers) as client:
+        def lookup(repository: str) -> tuple[str, str | None]:
+            slug = sources.get(canonical_governed_repository_id(repository) or "")
+            if not slug or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", slug):
+                return repository, None
+            try:
+                response = client.get(f"https://api.github.com/repos/{slug}/commits", params={"per_page": 1})
+                payload = response.json() if response.status_code == 200 else None
+            except (httpx.HTTPError, ValueError):
+                return repository, None
+            sha = str(payload[0].get("sha") or "") if isinstance(payload, list) and payload and isinstance(payload[0], dict) else ""
+            return repository, sha if SHA_RE.fullmatch(sha) else None
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            heads = {repository: sha for repository, sha in pool.map(lookup, REPOSITORIES) if sha}
+    return heads
+
+
+def read_latest_weekly_report(storage: R2Storage, year: int, week: int) -> tuple[str, dict[str, Any]]:
+    """Select the newest observation, never whichever slow writer finished last."""
+    prefix = f"reports/weekly/{year}/{week:02d}"
+    snapshots: list[str] = []
+    cursor = None
+    while True:
+        page = storage.list_objects_page(prefix=f"{prefix}/snapshots/", bucket=BUCKET,
+                                         limit=1000, cursor=cursor, delimiter="/", max_scan_keys=50_000)
+        for candidate in page.prefixes:
+            suffix = candidate.removeprefix(f"{prefix}/snapshots/").rstrip("/")
+            if re.fullmatch(r"\d{8}T\d{12}Z-[0-9a-f]{16}", suffix):
+                snapshots.append(candidate.rstrip("/"))
+        if len(snapshots) > 50_000:
+            raise RuntimeError("Weekly snapshot scan exceeded its safe bound")
+        cursor = page.next_cursor
+        if not cursor:
+            break
+    if len(snapshots) > 1000:
+        raise RuntimeError("Weekly snapshot read exceeded its safe bound")
+    key = f"{prefix}/overview.json"
+    report = None
+    invalid_snapshots = 0
+    for snapshot in sorted(snapshots, reverse=True):
+        try:
+            marker = json.loads(storage.read_object(f"{snapshot}/manifest.json", max_bytes=32 * 1024, bucket=BUCKET).content)
+            body = storage.read_object(f"{snapshot}/overview.json", max_bytes=2 * 1024 * 1024, bucket=BUCKET).content
+            if not isinstance(marker, dict) or marker.get("overview_sha256") != hashlib.sha256(body).hexdigest():
+                raise ValueError("Weekly snapshot digest does not match its completion marker")
+            candidate = json.loads(body)
+            if not isinstance(candidate, dict):
+                raise ValueError("Weekly overview must be an object")
+        except (FileNotFoundError, ValueError):
+            invalid_snapshots += 1
+            continue
+        key, report = f"{snapshot}/overview.json", candidate
+        break
+    legacy = report is None
+    if legacy:
+        report = json.loads(storage.read_object(key, max_bytes=2 * 1024 * 1024, bucket=BUCKET).content)
+    if not isinstance(report, dict):
+        raise ValueError("Weekly overview must be an object")
+    if legacy:
+        # Legacy snapshots never checked their records against current repository heads.
+        report["overall_status"] = "UNKNOWN"
+        report["evidence_complete"] = False
+        report["evidence_issue"] = "legacy_snapshot_without_current_head_validation"
+        report["repositories"] = [
+            {**item, "status": "UNKNOWN", "evidence_issue": report["evidence_issue"]}
+            for item in report.get("repositories", []) if isinstance(item, dict)
+        ]
+    if invalid_snapshots:
+        # Retain the older evidence for diagnosis without masking an unreadable newer observation.
+        report["overall_status"] = "UNKNOWN"
+        report["evidence_complete"] = False
+        report["evidence_issue"] = "newer_snapshot_unavailable"
+        report["unavailable_snapshot_count"] = invalid_snapshots
+        report["repositories"] = [
+            {**item, "status": "UNKNOWN", "evidence_issue": report["evidence_issue"]}
+            for item in report.get("repositories", []) if isinstance(item, dict)
+        ]
+    return key, report
+
+
 def generate_and_store_weekly_report(storage: R2Storage, year: int, week: int) -> dict[str, Any]:
     if not (2000 <= year <= 9999 and 1 <= week <= 53):
         raise ValueError("ISO year/week is out of range")
+    observation = dt.datetime.now(dt.timezone.utc)
+    current_heads = _current_repository_heads(storage)
     records = collect_weekly_evidence(storage, year, week)
-    report = build_weekly_overview(records, year, week)
+    report = build_weekly_overview(records, year, week, observation.isoformat().replace("+00:00", "Z"), current_heads=current_heads)
     council_references = collect_council_references(storage, year, week)
     report["council_evidence"] = council_references
     report["metrics"]["council_evidence_bundles"] = len(council_references)
-    prefix = f"reports/weekly/{year}/{week:02d}"
+    digest = hashlib.sha256(json.dumps(report, sort_keys=True).encode()).hexdigest()[:16]
+    snapshot_id = f"{observation.strftime('%Y%m%dT%H%M%S%fZ')}-{digest}"
+    report["snapshot_id"] = snapshot_id
+    prefix = f"reports/weekly/{year}/{week:02d}/snapshots/{snapshot_id}"
     objects: dict[str, bytes] = {
         "overview.json": (json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode(),
         "overview.md": render_weekly_markdown(report).encode(),
@@ -235,9 +377,15 @@ def generate_and_store_weekly_report(storage: R2Storage, year: int, week: int) -
     for repository in REPOSITORIES:
         item = next(row for row in report["repositories"] if row["repository"] == repository)
         evidence = item["latest_evidence"]
-        objects[f"{repository}.json"] = (json.dumps(evidence or {"repository": repository, "status": "UNKNOWN", "missing_evidence": True}, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode()
+        repository_observation = {**(evidence or {}), **{key: item[key] for key in ("repository", "status", "current_sha", "head_observed_at", "missing_evidence", "evidence_issue", "missing_fields")}}
+        objects[f"{repository}.json"] = (json.dumps(repository_observation, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode()
     for filename, body in objects.items():
         _put_immutable(storage, f"{prefix}/{filename}", body, "text/markdown" if filename.endswith(".md") else "application/json")
+    marker = {"schema_version": 1, "snapshot_id": snapshot_id,
+              "observed_at": report["generated_at"], "object_count": len(objects),
+              "overview_sha256": hashlib.sha256(objects["overview.json"]).hexdigest()}
+    _put_immutable(storage, f"{prefix}/manifest.json",
+                   (json.dumps(marker, sort_keys=True) + "\n").encode(), "application/json")
     review_ids: set[str] = set()
     open_review_count = 0
     all_records = [record for group in records.values() for record in group]
@@ -280,7 +428,7 @@ def generate_and_store_weekly_report(storage: R2Storage, year: int, week: int) -
             _put_immutable(storage, f"{review_prefix}/{filename}", body, "text/markdown" if filename.endswith(".md") else "application/json")
         open_review_count += 1
     review_count = open_review_count
-    return {"ok": True, "report": report, "r2_prefix": prefix, "objects_written_or_preserved": len(objects), "open_review_records": review_count}
+    return {"ok": True, "report": report, "r2_prefix": prefix, "objects_written_or_preserved": len(objects) + 1, "open_review_records": review_count}
 
 
 def list_open_reviews(storage: R2Storage, limit: int = 100) -> list[dict[str, Any]]:
@@ -412,9 +560,9 @@ def list_weekly_reports(storage: R2Storage, limit: int = 12) -> list[dict[str, A
     for year_prefix in years.prefixes:
         weeks = storage.list_objects_page(prefix=year_prefix, bucket=BUCKET, limit=100, delimiter="/", max_scan_keys=5000)
         for week_prefix in weeks.prefixes:
-            key = f"{week_prefix.rstrip('/')}/overview.json"
             try:
-                report = json.loads(storage.read_object(key, max_bytes=2 * 1024 * 1024, bucket=BUCKET).content)
+                period_parts = week_prefix.rstrip("/").split("/")
+                key, report = read_latest_weekly_report(storage, int(period_parts[-2]), int(period_parts[-1]))
             except (FileNotFoundError, RuntimeError, ValueError, json.JSONDecodeError):
                 continue
             if isinstance(report, dict) and isinstance(report.get("period"), dict):

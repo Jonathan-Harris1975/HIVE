@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
-import json
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -15,7 +14,7 @@ from app.services.ops_events import delete_all_ops_events, delete_ops_event, lis
 from app.services.providers.registry import discover_providers
 from app.services.repo_health import build_repo_health_report
 from app.services.production_manager import build_production_manager_report
-from app.services.lifecycle_reports import BUCKET, accept_review_fix, generate_and_store_weekly_report, list_open_reviews, list_weekly_reports
+from app.services.lifecycle_reports import accept_review_fix, generate_and_store_weekly_report, list_open_reviews, list_weekly_reports, read_latest_weekly_report
 from app.services.repo_hygiene import repo_hygiene_report
 from app.storage.d1 import D1MetadataStore
 from app.storage.r2 import R2Storage
@@ -60,12 +59,11 @@ async def production_manager(
 
 @router.get("/system/lifecycle-reports/current")
 def current_lifecycle_report(settings: Settings = Depends(get_settings)) -> dict[str, object]:
-    """Read the immutable current ISO week's HIVE overview from R2."""
+    """Read the newest immutable observation for the current ISO week."""
     now = dt.datetime.now(dt.timezone.utc).isocalendar()
     key = f"reports/weekly/{now.year}/{now.week:02d}/overview.json"
     try:
-        result = R2Storage(settings).read_object(key, max_bytes=2 * 1024 * 1024, bucket=BUCKET)
-        report = json.loads(result.content)
+        key, report = read_latest_weekly_report(R2Storage(settings), now.year, now.week)
         return {"ok": True, "available": True, "report": report, "r2_key": key}
     except (FileNotFoundError, RuntimeError, ValueError) as exc:
         return {"ok": True, "available": False, "report": None, "r2_key": key, "reason": type(exc).__name__}
@@ -73,7 +71,7 @@ def current_lifecycle_report(settings: Settings = Depends(get_settings)) -> dict
 
 @router.post("/system/lifecycle-reports/weekly")
 async def generate_weekly_lifecycle_report(settings: Settings = Depends(get_settings)) -> dict[str, object]:
-    """Assemble exact evidence and persist one immutable ISO-week report set."""
+    """Assemble current-head evidence and persist an immutable observation snapshot."""
     now = dt.datetime.now(dt.timezone.utc).isocalendar()
     return await asyncio.to_thread(generate_and_store_weekly_report, R2Storage(settings), now.year, now.week)
 

@@ -43,7 +43,7 @@ def row(repository: str, **overrides):
 class LifecycleReportTests(unittest.TestCase):
     def test_missing_repository_evidence_never_produces_green(self):
         inputs = {repo: [row(repo)] for repo in REPOSITORIES[:-1]}
-        report = build_weekly_overview(inputs, 2026, 42)
+        report = build_weekly_overview(inputs, 2026, 42, current_heads={repo: "a" * 40 for repo in REPOSITORIES})
         self.assertEqual(report["overall_status"], "UNKNOWN")
         self.assertFalse(report["evidence_complete"])
         self.assertEqual(len(report["repositories"]), 8)
@@ -51,9 +51,9 @@ class LifecycleReportTests(unittest.TestCase):
 
     def test_green_requires_affirmative_gate_and_deployment_evidence(self):
         inputs = {repo: [row(repo)] for repo in REPOSITORIES}
-        self.assertEqual(build_weekly_overview(inputs, 2026, 42)["overall_status"], "GREEN")
+        self.assertEqual(build_weekly_overview(inputs, 2026, 42, current_heads={repo: "a" * 40 for repo in REPOSITORIES})["overall_status"], "GREEN")
         inputs["HIVE"] = [row("HIVE", ci_gate="unknown")]
-        self.assertEqual(build_weekly_overview(inputs, 2026, 42)["overall_status"], "UNKNOWN")
+        self.assertEqual(build_weekly_overview(inputs, 2026, 42, current_heads={repo: "a" * 40 for repo in REPOSITORIES})["overall_status"], "UNKNOWN")
 
     def test_review_items_are_created_only_for_terminal_human_decisions(self):
         candidate = row("HIVE", final_state="REVIEW_REQUIRED", failure_class="repair_exhausted", pr_number=22, proposed_solution="Fix the verified timeout handling.", repair_prompt="Inspect and patch the retry timeout.")
