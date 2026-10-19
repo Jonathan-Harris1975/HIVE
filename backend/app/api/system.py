@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
-import json
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -15,7 +14,7 @@ from app.services.ops_events import delete_all_ops_events, delete_ops_event, lis
 from app.services.providers.registry import discover_providers
 from app.services.repo_health import build_repo_health_report
 from app.services.production_manager import build_production_manager_report
-from app.services.lifecycle_reports import BUCKET, accept_review_fix, generate_and_store_weekly_report, list_open_reviews, list_weekly_reports, read_latest_weekly_report
+from app.services.lifecycle_reports import accept_review_fix, generate_and_store_weekly_report, list_open_reviews, list_weekly_reports, read_latest_weekly_report
 from app.services.repo_hygiene import repo_hygiene_report
 from app.storage.d1 import D1MetadataStore
 from app.storage.r2 import R2Storage
