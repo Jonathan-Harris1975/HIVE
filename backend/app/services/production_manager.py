@@ -234,6 +234,7 @@ async def _github_repo_evidence(
 
     runs: list[dict[str, Any]] = []
     exhausted = False
+    release_evidence_found = False
     next_url = f"https://api.github.com/repos/{encoded_repo}/actions/runs"
     next_params: dict[str, str | int] | None = {
         "branch": branch,
@@ -271,7 +272,11 @@ async def _github_repo_evidence(
             )
             for run in runs
         )
-        if set(REQUIRED_WORKFLOWS[repo_id]).issubset(matched_names) and deployment_has_non_skipped_run:
+        release_evidence_found = (
+            set(REQUIRED_WORKFLOWS[repo_id]).issubset(matched_names)
+            and deployment_has_non_skipped_run
+        )
+        if release_evidence_found and set(SMOKE_ONLY_WORKFLOWS[repo_id]).issubset(matched_names):
             exhausted = True
             break
         next_link = runs_response.links.get("next", {}).get("url")
@@ -281,7 +286,8 @@ async def _github_repo_evidence(
         next_url = str(next_link)
         next_params = None
 
-    if not exhausted:
+    # Missing smoke-only evidence must never degrade an otherwise complete release gate.
+    if not exhausted and not release_evidence_found:
         return {
             "configured": True,
             "state": "DEGRADED",
