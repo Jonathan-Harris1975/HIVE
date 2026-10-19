@@ -51,6 +51,15 @@ class ExplicitKiloFixCommandTests(unittest.TestCase):
         self.assertIn("#issuecomment-912", findings[0])
         self.assertIn("a" * 40, findings[0])
 
+    def test_non_actionable_kilo_comment_stays_ignored(self):
+        event = self.event(body="Reply with @kilocode-bot fix it")
+        event["comment"]["user"] = {"login": "kilo-code-bot[bot]"}
+        with patch.object(router, "EVENT", "issue_comment"), patch.object(
+            router, "pr_details", return_value=self.pr
+        ):
+            result = router.extract(event)
+        self.assertIsNone(result)
+
     def test_exact_command_from_untrusted_actor_is_ignored(self):
         with patch.object(router, "EVENT", "issue_comment"), patch.object(
             router, "pr_details", return_value=self.pr
