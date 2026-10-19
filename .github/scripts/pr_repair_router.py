@@ -92,7 +92,7 @@ def review_evidence(body: str, path: str = "") -> str:
 
 def is_kilo_fix_command(body: str) -> bool:
     """Recognise only the explicit standalone repair command."""
-    return re.fullmatch(r"\s*@kilocode-bot\\s+fix\\s+it[.!?]?\\s*", body or "", flags=re.I) is not None
+    return re.fullmatch(r"\s*@kilocode-bot\s+fix\s+it[.!?]?\s*", body or "", flags=re.I) is not None
 
 
 def trusted_repair_request_actor(actor: dict) -> bool:
