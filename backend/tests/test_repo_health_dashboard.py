@@ -48,6 +48,7 @@ async def test_repo_health_reports_all_governed_repositories() -> None:
         "healthy": 8,
         "degraded": 0,
         "down": 0,
+        "unknown": 0,
         "not_configured": 0,
         "standby": 0,
         "starting": 0,
