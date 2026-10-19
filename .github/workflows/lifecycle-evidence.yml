@@ -63,9 +63,11 @@ jobs:
           GITHUB_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt || '1' }}
           EVIDENCE_RUN_ID: ${{ github.event.workflow_run.id || github.run_id }}
           EVIDENCE_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt || '1' }}
-          EVIDENCE_STATUS: UNKNOWN
           SOURCE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
-        run: python3 .github/scripts/persist_ci_report_r2.py lifecycle "$SOURCE_SHA" lifecycle-evidence
+        run: |
+          EVIDENCE_STATUS="$(python3 -c 'import json; print(json.load(open("lifecycle-evidence/evidence.json", encoding="utf-8"))["final_state"])')"
+          export EVIDENCE_STATUS
+          python3 .github/scripts/persist_ci_report_r2.py lifecycle "$SOURCE_SHA" lifecycle-evidence
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:

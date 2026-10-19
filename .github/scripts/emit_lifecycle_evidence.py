@@ -127,7 +127,7 @@ def collect_current_evidence(record):
             statuses.append(result_status(job))
             if step and name == "OWASP ZAP full active scan":
                 steps = job.get("steps", []) if job else []
-                statuses.append(result_status(next((item for item in steps if item.get("name") == step), None)))
+                statuses.append(result_status(next((item for item in steps if item.get("name") in step), None)))
         return combine_statuses(statuses)
 
     fields = ("ci_gate", "socket_status", "codeql_status", "gitleaks_status",
@@ -145,7 +145,6 @@ def collect_current_evidence(record):
             "ci_gate": ("ci-gate", "github-actions"),
             "codeql_status": ("CodeQL security alert gate", "github-actions"),
             "socket_status": ("Socket Security: Project Report", "socket-security"),
-            "trivy_status": ("Trivy, Gitleaks and actionlint", "github-actions"),
             "codecov_status": ("codecov/project", "codecov"),
         }
         for field, (name, app) in checks.items():
@@ -153,6 +152,13 @@ def collect_current_evidence(record):
                 record[field] = check(name, app)
             except EvidenceUnavailable:
                 record[field] = "unknown"
+        try:
+            security_status = check("Trivy, Gitleaks and actionlint", "github-actions")
+        except EvidenceUnavailable:
+            security_status = "unknown"
+        # A successful combined job proves its scanners passed. A failure
+        # could be actionlint or either scanner, so do not invent attribution.
+        record["trivy_status"] = "pass" if security_status == "pass" else "unknown"
         record["gitleaks_status"] = record["trivy_status"]
         deployment = (
             ("pages-deployment-watch.yml", ["watch"]) if record["repository"] == "IRS"
@@ -169,7 +175,7 @@ def collect_current_evidence(record):
         try:
             record["dast_status"] = workflow("dast.yml", branch,
                 ["OWASP ZAP full active scan", "Persist evidence with R2 environment credentials"],
-                step="Run OWASP ZAP full scan")
+                step=("Run OWASP ZAP full scan", "Run authorised ZAP full scan"))
         except EvidenceUnavailable:
             record["dast_status"] = "unknown"
         # Recheck after the snapshot so a branch move cannot produce current green evidence.
@@ -187,6 +193,8 @@ def collect_current_evidence(record):
     record["deployed_sha"] = record["head_sha"] if record["deployment_status"] == "pass" else None
     record["deployment_verified"] = record["deployment_status"] == "pass"
     failed = [field for field in fields if record[field] == "fail"]
+    if security_status == "fail":
+        failed.append("Trivy, Gitleaks and actionlint")
     record["failed_check"] = ", ".join(failed) or None
     if failed:
         record["final_state"] = "SERVICE_BLOCKED"
