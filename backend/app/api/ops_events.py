@@ -39,8 +39,11 @@ async def receive_ops_event(
 
     try:
         return await asyncio.to_thread(ingest_ops_event, settings, payload)
-    except OpsEventPersistenceError as error:
+    except OpsEventPersistenceError as exc:
+        # A non-2xx response asks the sender to retry this same event ID. Do not
+        # acknowledge a process-memory copy as durable delivery.
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Operational event persistence is unavailable.",
-        ) from error
+            detail="Operational event storage is unavailable; retry with the same event ID.",
+            headers={"Retry-After": "1"},
+        ) from exc

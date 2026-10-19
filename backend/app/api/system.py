@@ -120,9 +120,16 @@ async def ops_events(
 ) -> dict[str, object]:
     """Return recent redacted operational events for the HIVE-UI Ops page."""
 
-    return await asyncio.to_thread(
+    result = await asyncio.to_thread(
         list_ops_events, settings, limit=limit, severity=severity, service=service
     )
+    if not result.get("ok"):
+        raise HTTPException(
+            status_code=503,
+            detail="Operational event storage is unavailable; incident inbox state is unknown.",
+            headers={"Retry-After": "1"},
+        )
+    return result
 
 
 @router.delete("/system/ops-events")

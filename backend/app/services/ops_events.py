@@ -11,15 +11,14 @@ from typing import Any
 from app.core.config import Settings
 from app.storage.d1 import D1MetadataStore
 
-
-class OpsEventPersistenceError(RuntimeError):
-    """Raised when an enabled durable store cannot persist an operational event."""
-
-
 _ALLOWED_SEVERITIES = {"info", "warning", "critical"}
 _SECRET_KEY = re.compile(r"(authorization|bearer|credential|password|secret|token|api[_-]?key|access[_-]?key)", re.I)
 _MEMORY: deque[dict[str, Any]] = deque()
 _LOCK = threading.Lock()
+
+
+class OpsEventPersistenceError(RuntimeError):
+    """Raised when an enabled authoritative store cannot accept an event."""
 
 
 def _now_iso() -> str:
@@ -90,24 +89,6 @@ def normalise_ops_event(payload: dict[str, Any]) -> dict[str, Any]:
 
 def ingest_ops_event(settings: Settings, payload: dict[str, Any]) -> dict[str, Any]:
     event = normalise_ops_event(payload)
-    store = D1MetadataStore(settings)
-    persisted = False
-    if store.enabled:
-        result = store.upsert_metadata(
-            item_id=f"ops-event:{event['event_id']}",
-            lane="ops_events",
-            source_type=event["event_type"],
-            source_id=event["service"],
-            title=event["title"],
-            url=event["url"],
-            metadata=event,
-        )
-        if not result.get("ok"):
-            # The caller receives a retryable failure. Do not claim durable
-            # acceptance or leave a volatile copy that could mask the failure.
-            raise OpsEventPersistenceError("The operational event could not be persisted.")
-        persisted = True
-
     with _LOCK:
         # Replace a matching event ID to keep provider retries idempotent.
         existing = [item for item in _MEMORY if item.get("event_id") != event["event_id"]]
@@ -115,6 +96,24 @@ def ingest_ops_event(settings: Settings, payload: dict[str, Any]) -> dict[str, A
         _MEMORY.clear()
         _MEMORY.extend(existing[: max(10, settings.ops_event_memory_limit)])
 
+    persisted = False
+    store = D1MetadataStore(settings)
+    if store.enabled:
+        try:
+            result = store.upsert_metadata(
+                item_id=f"ops-event:{event['event_id']}",
+                lane="ops_events",
+                source_type=event["event_type"],
+                source_id=event["service"],
+                title=event["title"],
+                url=event["url"],
+                metadata=event,
+            )
+            persisted = bool(result.get("ok"))
+        except Exception as exc:  # the caller must retry with the same event ID
+            raise OpsEventPersistenceError("Operational event was not persisted.") from exc
+        if not persisted:
+            raise OpsEventPersistenceError("Operational event was not persisted.")
     return {"ok": True, "accepted": True, "persisted": persisted, "event": event}
 
 
@@ -166,7 +165,10 @@ def list_ops_events(
         filtered = [item for item in filtered if str(item.get("service", "")).lower() == wanted_service]
     filtered.sort(key=lambda item: str(item.get("occurred_at") or item.get("received_at") or ""), reverse=True)
     return {
-        "ok": True,
+        # An enabled D1 store is authoritative. An outage must not look like an
+        # empty inbox, because that could hide an unresolved incident.
+        "ok": d1_error is None,
+        "available": d1_error is None,
         "enabled": settings.ops_event_ingest_enabled,
         "persistent_store": d1_available,
         "persistent_store_error": d1_error,

@@ -251,8 +251,12 @@ class RenovateGovernanceTests(unittest.TestCase):
         self.assertIn("if ! gh api --method PATCH", dispatch)
         self.assertIn("dispatch-state: pending", dispatch)
         self.assertIn("dispatch-state: accepted", dispatch)
-        self.assertIn("dispatch-state: rejected-http-$status", dispatch)
-        self.assertIn('rejected_attempts" -ge 2', dispatch)
+        self.assertIn("kilo_handoff_state.py preflight", dispatch)
+        self.assertIn('kilo_handoff_state.py classify "$status"', dispatch)
+        self.assertIn("dispatch-state: $dispatch_state", dispatch)
+        self.assertIn('dispatch:*) attempt=', dispatch)
+        self.assertIn("HIVE_REPAIR_CIRCUIT_BREAKER", dispatch)
+        self.assertIn("dispatch-state: circuit-open", dispatch)
 
 
 
