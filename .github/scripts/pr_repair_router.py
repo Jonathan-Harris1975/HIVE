@@ -110,10 +110,12 @@ def explicit_fix_findings(pr: dict, comment: dict) -> list[str]:
         return []
     head_sha = pr.get("head", {}).get("sha", "")
     comment_url = comment.get("html_url", "")
+    path = comment.get("path", "")
+    path_context = f" Inline review path: {path}." if path else ""
     actor_login = comment.get("user", {}).get("login", "trusted repository actor")
     return [
         f"Authorized repository actor {actor_login} explicitly requested repair on PR "
-        f"{pr.get('html_url')} at exact head {head_sha}. Command comment: {comment_url}. "
+        f"{pr.get('html_url')} at exact head {head_sha}.{path_context} Command comment: {comment_url}. "
         "Inspect the current PR's unresolved Kilo review findings and failed checks, verify "
         "each against current code, and make the smallest safe fixes. If no actionable defect "
         "remains, report that clearly. Do not merge or deploy."
