@@ -90,7 +90,6 @@ jobs:
             repository_id: process.env.EXPECTED_REPOSITORY_ID,
             repository_owner_id: process.env.EXPECTED_OWNER_ID,
             ref: process.env.EXPECTED_REF, sha: process.env.GITHUB_SHA,
-            workflow_ref: process.env.EXPECTED_WORKFLOW_REF,
             run_id: process.env.EXPECTED_RUN_ID,
             event_name: process.env.GITHUB_EVENT_NAME };
           for (const [name, value] of Object.entries(expected)) {

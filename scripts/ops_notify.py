@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import socket
 import sys
 import time
 import urllib.error
@@ -48,14 +49,14 @@ def send_event(event: dict[str, Any]) -> bool:
                 print(f"Operational event delivery status: {response.status}")
                 if ok:
                     return True
-                retryable = response.status == 429 or response.status >= 500
                 failure = f"HTTP {response.status}"
+                retryable = False
         except urllib.error.HTTPError as exc:
             retryable = exc.code == 429 or exc.code >= 500
             failure = f"HTTP {exc.code}"
             retry_after = exc.headers.get("Retry-After") if exc.headers else None
             exc.close()
-        except (urllib.error.URLError, TimeoutError) as exc:
+        except (urllib.error.URLError, TimeoutError, socket.gaierror, ValueError) as exc:
             retryable = True
             failure = exc.__class__.__name__
 
@@ -88,25 +89,29 @@ def main() -> int:
     parser.add_argument("--url", default="")
     args = parser.parse_args()
     event_id = args.event_id or f"{args.source}:{args.service}:{os.getenv('GITHUB_RUN_ID', datetime.now(UTC).isoformat())}"
-    delivered = send_event(
-        {
-            "event_id": event_id,
-            "source": args.source,
-            "service": args.service,
-            "severity": args.severity,
-            "event_type": args.event_type,
-            "title": args.title,
-            "summary": args.summary,
-            "release_id": args.release_id or os.getenv("GITHUB_SHA") or None,
-            "url": args.url or None,
-            "details": {
-                "repository": os.getenv("GITHUB_REPOSITORY"),
-                "workflow": os.getenv("GITHUB_WORKFLOW"),
-                "runId": os.getenv("GITHUB_RUN_ID"),
-                "runAttempt": os.getenv("GITHUB_RUN_ATTEMPT"),
-            },
-        }
-    )
+    try:
+        delivered = send_event(
+            {
+                "event_id": event_id,
+                "source": args.source,
+                "service": args.service,
+                "severity": args.severity,
+                "event_type": args.event_type,
+                "title": args.title,
+                "summary": args.summary,
+                "release_id": args.release_id or os.getenv("GITHUB_SHA") or None,
+                "url": args.url or None,
+                "details": {
+                    "repository": os.getenv("GITHUB_REPOSITORY"),
+                    "workflow": os.getenv("GITHUB_WORKFLOW"),
+                    "runId": os.getenv("GITHUB_RUN_ID"),
+                    "runAttempt": os.getenv("GITHUB_RUN_ATTEMPT"),
+                },
+            }
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"Operational event delivery failed: {exc.__class__.__name__}", file=sys.stderr)
+        delivered = False
     if not delivered and os.getenv("GITHUB_ACTIONS", "").lower() == "true":
         print(
             "::error::Operational alert was not delivered after bounded retries; "
