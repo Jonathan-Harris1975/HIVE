@@ -86,6 +86,7 @@ jobs:
           persist-credentials: false
 
       - name: Create or continue one repair PR and start Kilo Cloud Agent
+        id: repair
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           REPAIR_APP_LOGIN: ${{ steps.app_token.outputs.repair_app_login }}
@@ -346,3 +347,27 @@ jobs:
 
           repair_pr="${pr_url##*/}"
           dispatch_kilo "$repair_pr"
+
+      - name: Report failed repair handoff to HIVE operations inbox
+        if: ${{ failure() && steps.repair.outcome == 'failure' }}
+        env:
+          OPS_ALERT_WEBHOOK_URL: ${{ secrets.OPS_ALERT_WEBHOOK_URL }}
+          OPS_ALERT_WEBHOOK_TOKEN: ${{ secrets.OPS_ALERT_WEBHOOK_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_WORKFLOW: ${{ github.workflow }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          FAILED_SOURCE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/ops_notify.py \
+            --service HIVE \
+            --source github_actions \
+            --event-type kilo_repair_handoff_failed \
+            --title "HIVE Kilo repair handoff failed" \
+            --summary "The autonomous repair workflow could not complete the Kilo handoff. Inspect the linked workflow run and its durable dispatch marker before retrying." \
+            --severity critical \
+            --event-id "hive-kilo-repair:${GITHUB_RUN_ID}" \
+            --release-id "${FAILED_SOURCE_SHA}" \
+            --url "https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"

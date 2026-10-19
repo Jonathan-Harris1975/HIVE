@@ -91,6 +91,7 @@ jobs:
             repository_owner_id: process.env.EXPECTED_OWNER_ID,
             ref: process.env.EXPECTED_REF, sha: process.env.GITHUB_SHA,
             run_id: process.env.EXPECTED_RUN_ID,
+            workflow_ref: process.env.EXPECTED_WORKFLOW_REF,
             event_name: process.env.GITHUB_EVENT_NAME };
           for (const [name, value] of Object.entries(expected)) {
             if (claims[name] !== value) throw new Error(`OIDC claim ${name} mismatch`);
@@ -106,7 +107,7 @@ jobs:
           safe.claims_checked = true;
           safe.signature_verified = true;
           safe.verification_method = "issuer-jwks-rs256";
-          safe.verification_scope = "GitHub JWT only; RS256 issuer JWKS signature, exact repository identity, workflow file/ref, legacy or immutable default subject, commit, run and event, and bounded lifetime verified; no cloud provider trust verified";
+          safe.verification_scope = "GitHub JWT smoke test only; RS256 issuer JWKS signature, exact repository identity, legacy or immutable default subject, configured default-branch readiness workflow identity, commit, run and event, and bounded lifetime verified; no cloud provider trust verified";
           writeFileSync("oidc-readiness.json", JSON.stringify(safe, null, 2) + "\n");
           NODE
 
