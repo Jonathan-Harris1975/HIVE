@@ -112,7 +112,7 @@ def build_weekly_overview(records_by_repository: Mapping[str, Iterable[dict[str,
         "generated_at": observed_at,
         "scope": "current_heads_at_observation",
         "overall_status": overall,
-        "evidence_complete": len(flattened) == len(REPOSITORIES) and all(row["status"] != "UNKNOWN" for row in repositories),
+        "evidence_complete": len(flattened) == len(REPOSITORIES) and all(row["status"] != "UNKNOWN" and not row["missing_fields"] for row in repositories),
         "repositories": repositories,
         "metrics": {
             "prs_processed": sum(1 for rec in flattened if rec.get("pr_number") is not None),
