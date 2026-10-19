@@ -60,7 +60,7 @@ CF_R2_PUBLIC_BASE_URL=
 
 Leave D1, Vectorize and Redis-style services disabled/unconfigured for the first smoke test. Bring them in after `/health`, `/v1/models`, and basic chat are behaving.
 
-`D1_RESET_DATABASE_NAMES` is an optional comma-separated allowlist for the admin-only `/db/purge-reset` target list and read-only reset preview. When unset, HIVE defaults to `database-hive,database-comms-hub`. The allowlist does not enable D1; reset execution still requires a separate exact `RESET <database-name>` confirmation for the selected target. Do not include a database unless it is intentionally in scope for that guarded reset operation. This setting is configuration, not a credential.
+`D1_RESET_DATABASE_NAMES` is an optional comma-separated allowlist for the admin-only database reset operations. The target list is `GET /v1/db/purge-reset/targets`; the read-only preview is `POST /v1/db/purge-reset/preview`; execution is `POST /v1/db/purge-reset`. When unset, HIVE defaults to `database-hive,database-comms-hub`. The allowlist does not enable D1; reset execution still requires a separate exact `RESET <database-name>` confirmation for the selected target. Do not include a database unless it is intentionally in scope for that guarded reset operation. This setting is configuration, not a credential.
 
 ## First checks
 
