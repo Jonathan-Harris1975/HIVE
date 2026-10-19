@@ -90,6 +90,38 @@ def review_evidence(body: str, path: str = "") -> str:
     return ((path + ": ") if path else "") + text[:3500]
 
 
+def is_kilo_fix_command(body: str) -> bool:
+    """Recognise only the explicit standalone repair command."""
+    return re.fullmatch(r"\s*@kilocode-bot\s+fix\s+it[.!?]?\s*", body or "", flags=re.I) is not None
+
+
+def trusted_repair_request_actor(actor: dict) -> bool:
+    """Require the same repository trust classes as the workflow admission gate."""
+    return (
+        actor.get("user", {}).get("login") in KILO
+        or actor.get("author_association") in {"OWNER", "MEMBER", "COLLABORATOR"}
+    )
+
+
+def explicit_fix_findings(pr: dict, comment: dict) -> list[str]:
+    """Build a bounded, exact-head task from the authenticated command event."""
+    comment_id = comment.get("id")
+    if not isinstance(comment_id, int) or comment_id <= 0:
+        return []
+    head_sha = pr.get("head", {}).get("sha", "")
+    comment_url = comment.get("html_url", "")
+    path = comment.get("path", "")
+    path_context = f" Inline review path: {path}." if path else ""
+    actor_login = comment.get("user", {}).get("login", "trusted repository actor")
+    return [
+        f"Authorized repository actor {actor_login} explicitly requested repair on PR "
+        f"{pr.get('html_url')} at exact head {head_sha}.{path_context} Command comment: {comment_url}. "
+        "Inspect the current PR's unresolved Kilo review findings and failed checks, verify "
+        "each against current code, and make the smallest safe fixes. If no actionable defect "
+        "remains, report that clearly. Do not merge or deploy."
+    ]
+
+
 def resolve_run_pr(run: dict) -> dict | None:
     candidates = [int(p["number"]) for p in run.get("pull_requests", []) if p.get("number")]
     if not candidates:
@@ -187,32 +219,75 @@ def extract(event: dict) -> tuple[dict, str, list[str]] | None:
                 print(f"::notice::Could not attach CodeQL alert identifiers ({type(exc).__name__}); linked run remains available.")
         return pr, "check", [*findings, *actionable[:11]]
 
+    manual_request = False
+    kind = "review"
+    pr = None
+    evidence: list[str] = []
+
     if EVENT == "issue_comment":
-        if not event.get("issue", {}).get("pull_request") or event.get("comment", {}).get("user", {}).get("login") not in KILO:
+        if not event.get("issue", {}).get("pull_request"):
             return None
-        pr = pr_details(int(event["issue"]["number"]))
-        evidence = review_evidence(event["comment"].get("body", ""))
+        comment = event.get("comment", {})
+        body = comment.get("body", "")
+        if is_kilo_fix_command(body):
+            if not trusted_repair_request_actor(comment):
+                return None
+            pr = pr_details(int(event["issue"]["number"]))
+            evidence = explicit_fix_findings(pr, comment) if pr else []
+            kind = "fix-command"
+            manual_request = True
+        else:
+            if comment.get("user", {}).get("login") not in KILO:
+                return None
+            pr = pr_details(int(event["issue"]["number"]))
+            finding = review_evidence(body)
+            evidence = [finding] if finding else []
+
     elif EVENT == "pull_request_review":
-        if event.get("review", {}).get("user", {}).get("login") not in KILO:
-            return None
-        pr = pr_details(int(event["pull_request"]["number"]))
-        review_id = event["review"]["id"]
-        comments = all_pages(f"/repos/{REPO}/pulls/{pr['number']}/comments") if pr else []
-        evidence = "\n".join(filter(None, [review_evidence(c.get("body", ""), c.get("path", ""))
-                                              for c in comments if c.get("pull_request_review_id") == review_id]))[:6000]
-        if not evidence:
-            evidence = review_evidence(event["review"].get("body", ""))
+        review = event.get("review", {})
+        if is_kilo_fix_command(review.get("body", "")):
+            if not trusted_repair_request_actor(review):
+                return None
+            pr = pr_details(int(event["pull_request"]["number"]))
+            evidence = explicit_fix_findings(pr, review) if pr else []
+            kind = "fix-command"
+            manual_request = True
+        else:
+            if review.get("user", {}).get("login") not in KILO:
+                return None
+            pr = pr_details(int(event["pull_request"]["number"]))
+            review_id = review["id"]
+            comments = all_pages(f"/repos/{REPO}/pulls/{pr['number']}/comments") if pr else []
+            finding = "\n".join(filter(None, [
+                review_evidence(c.get("body", ""), c.get("path", ""))
+                for c in comments if c.get("pull_request_review_id") == review_id
+            ]))[:6000]
+            if not finding:
+                finding = review_evidence(review.get("body", ""))
+            evidence = [finding] if finding else []
+
     elif EVENT == "pull_request_review_comment":
-        # Some Kilo reviews are posted as standalone inline comments.
-        if event.get("comment", {}).get("user", {}).get("login") not in KILO:
-            return None
-        pr = pr_details(int(event["pull_request"]["number"]))
-        evidence = review_evidence(event["comment"].get("body", ""), event["comment"].get("path", ""))
+        comment = event.get("comment", {})
+        if is_kilo_fix_command(comment.get("body", "")):
+            if not trusted_repair_request_actor(comment):
+                return None
+            pr = pr_details(int(event["pull_request"]["number"]))
+            evidence = explicit_fix_findings(pr, comment) if pr else []
+            kind = "fix-command"
+            manual_request = True
+        else:
+            # Kilo-authored review findings retain the existing automatic route.
+            if comment.get("user", {}).get("login") not in KILO:
+                return None
+            pr = pr_details(int(event["pull_request"]["number"]))
+            finding = review_evidence(comment.get("body", ""), comment.get("path", ""))
+            evidence = [finding] if finding else []
     else:
         return None
-    if not pr or pr.get("user", {}).get("login") in (KILO | {KILO_IMPLEMENTER}) or not evidence:
+
+    if not pr or not evidence or (not manual_request and pr.get("user", {}).get("login") in (KILO | {KILO_IMPLEMENTER})):
         return None
-    return pr, "review", [evidence]
+    return pr, kind, evidence
 
 
 def machine_contract() -> str:
