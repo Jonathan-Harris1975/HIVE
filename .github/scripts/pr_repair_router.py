@@ -234,7 +234,7 @@ def extract(event: dict) -> tuple[dict, str, list[str]] | None:
                 return None
             pr = pr_details(int(event["issue"]["number"]))
             evidence = explicit_fix_findings(pr, comment) if pr else []
-            kind = f"fix-command-{comment.get('id')}"
+            kind = "fix-command"
             manual_request = True
         else:
             if comment.get("user", {}).get("login") not in KILO:
@@ -250,7 +250,7 @@ def extract(event: dict) -> tuple[dict, str, list[str]] | None:
                 return None
             pr = pr_details(int(event["pull_request"]["number"]))
             evidence = explicit_fix_findings(pr, review) if pr else []
-            kind = f"fix-command-{review.get('id')}"
+            kind = "fix-command"
             manual_request = True
         else:
             if review.get("user", {}).get("login") not in KILO:
@@ -273,7 +273,7 @@ def extract(event: dict) -> tuple[dict, str, list[str]] | None:
                 return None
             pr = pr_details(int(event["pull_request"]["number"]))
             evidence = explicit_fix_findings(pr, comment) if pr else []
-            kind = f"fix-command-{comment.get('id')}"
+            kind = "fix-command"
             manual_request = True
         else:
             # Kilo-authored review findings retain the existing automatic route.
