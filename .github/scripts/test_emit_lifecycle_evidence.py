@@ -1,3 +1,4 @@
+import runpy
 import json, subprocess, sys, tempfile, unittest
 from pathlib import Path
 SCRIPT=Path(__file__).with_name("emit_lifecycle_evidence.py")
@@ -9,6 +10,11 @@ class EvidenceTests(unittest.TestCase):
    row=json.loads(out.read_text())
    self.assertEqual(row["final_state"],"UNKNOWN")
    self.assertEqual(row["ci_gate"],"unknown")
+   helpers = runpy.run_path(str(SCRIPT))
+   self.assertEqual(helpers["result_status"]({"status": "completed", "conclusion": "skipped"}), "unknown")
+   self.assertEqual(helpers["result_status"]({"status": "completed", "conclusion": "failure"}), "fail")
+   self.assertEqual(helpers["combine_statuses"](["pass", "unknown"]), "unknown")
+   self.assertEqual(helpers["combine_statuses"](["pass", "fail"]), "fail")
    self.assertEqual(row["repair_attempts"],0)
    self.assertNotIn("token",json.dumps(row).lower())
    schema=json.loads((SCRIPT.parent.parent/"schemas"/"lifecycle-evidence.schema.json").read_text())

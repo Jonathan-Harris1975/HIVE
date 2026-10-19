@@ -54,6 +54,10 @@ class LifecycleReportTests(unittest.TestCase):
         self.assertEqual(build_weekly_overview(inputs, 2026, 42, current_heads={repo: "a" * 40 for repo in REPOSITORIES})["overall_status"], "GREEN")
         inputs["HIVE"] = [row("HIVE", ci_gate="unknown")]
         self.assertEqual(build_weekly_overview(inputs, 2026, 42, current_heads={repo: "a" * 40 for repo in REPOSITORIES})["overall_status"], "UNKNOWN")
+        inputs["HIVE"] = [row("HIVE", final_state="SERVICE_BLOCKED", ci_gate="unknown", trivy_status="fail")]
+        blocked = build_weekly_overview(inputs, 2026, 42, current_heads={repo: "a" * 40 for repo in REPOSITORIES})
+        self.assertEqual(blocked["overall_status"], "SERVICE_BLOCKED")
+        self.assertFalse(blocked["evidence_complete"])
 
     def test_review_items_are_created_only_for_terminal_human_decisions(self):
         candidate = row("HIVE", final_state="REVIEW_REQUIRED", failure_class="repair_exhausted", pr_number=22, proposed_solution="Fix the verified timeout handling.", repair_prompt="Inspect and patch the retry timeout.")
