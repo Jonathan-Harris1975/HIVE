@@ -25,14 +25,25 @@ OWNER_ONLY_TRIGGERS: tuple[str, ...] = (
 )
 
 REQUIRED_WORKFLOWS: dict[str, tuple[str, ...]] = {
-    "HIVE": ("CI", "Security and repository quality", "CodeQL", "Item 6 hardening", "OIDC readiness"),
-    "HIVE-UI": ("HIVE-UI CI", "Security and repository quality", "CodeQL", "Item 6 hardening", "OIDC readiness"),
-    "AIMS": ("AIMS CI", "Security and repository quality", "CodeQL", "Item 6 hardening", "OIDC readiness"),
-    "AIMS-UI": ("Validate AIMS UI", "Security and repository quality", "CodeQL", "Item 6 hardening", "OIDC readiness"),
-    "RAMS": ("CI", "Security and repository quality", "CodeQL", "Item 6 hardening", "OIDC readiness"),
-    "MAST": ("MAST CI", "Security and repository quality", "CodeQL", "OIDC readiness", "OIDC estate readiness"),
-    "IRS": ("Production verification", "Security and repository quality", "CodeQL", "Item 6 hardening", "OIDC readiness"),
-    "Website": ("Production readiness", "Security and repository quality", "CodeQL", "Item 6 hardening", "OIDC readiness"),
+    "HIVE": ("CI", "Security and repository quality", "CodeQL", "Item 6 hardening"),
+    "HIVE-UI": ("HIVE-UI CI", "Security and repository quality", "CodeQL", "Item 6 hardening"),
+    "AIMS": ("AIMS CI", "Security and repository quality", "CodeQL", "Item 6 hardening"),
+    "AIMS-UI": ("Validate AIMS UI", "Security and repository quality", "CodeQL", "Item 6 hardening"),
+    "RAMS": ("CI", "Security and repository quality", "CodeQL", "Item 6 hardening"),
+    "MAST": ("MAST CI", "Security and repository quality", "CodeQL"),
+    "IRS": ("Production verification", "Security and repository quality", "CodeQL", "Item 6 hardening"),
+    "Website": ("Production readiness", "Security and repository quality", "CodeQL", "Item 6 hardening"),
+}
+
+SMOKE_ONLY_WORKFLOWS: dict[str, tuple[str, ...]] = {
+    "HIVE": ("OIDC readiness",),
+    "HIVE-UI": ("OIDC readiness",),
+    "AIMS": ("OIDC readiness",),
+    "AIMS-UI": ("OIDC readiness",),
+    "RAMS": ("OIDC readiness",),
+    "MAST": ("OIDC readiness", "OIDC estate readiness"),
+    "IRS": ("OIDC readiness",),
+    "Website": ("OIDC readiness",),
 }
 
 GITHUB_API_TIMEOUT = httpx.Timeout(15.0, connect=5.0)
@@ -56,6 +67,8 @@ DEPLOYMENT_WORKFLOWS: dict[str, str] = {
 
 if set(REQUIRED_WORKFLOWS) != set(GOVERNED_REPOSITORY_IDS):
     raise RuntimeError("Production workflow catalogue must cover every governed repository exactly once.")
+if set(SMOKE_ONLY_WORKFLOWS) != set(GOVERNED_REPOSITORY_IDS):
+    raise RuntimeError("Smoke-only workflow catalogue must cover every governed repository exactly once.")
 if set(DEPLOYMENT_WORKFLOWS) != set(GOVERNED_REPOSITORY_IDS):
     raise RuntimeError("Deployment workflow catalogue must cover every governed repository exactly once.")
 
@@ -103,6 +116,7 @@ def _repo_contract(repo_id: str) -> dict[str, Any]:
         "technical_escalation": TECHNICAL_ESCALATION,
         "human_authority": HUMAN_AUTHORITY,
         "required_workflows": list(REQUIRED_WORKFLOWS[repo_id]),
+        "smoke_only_workflows": list(SMOKE_ONLY_WORKFLOWS[repo_id]),
         "deployment_workflow": DEPLOYMENT_WORKFLOWS[repo_id],
         "autonomous_actions": [
             "observe",
@@ -220,6 +234,7 @@ async def _github_repo_evidence(
 
     runs: list[dict[str, Any]] = []
     exhausted = False
+    release_evidence_found = False
     next_url = f"https://api.github.com/repos/{encoded_repo}/actions/runs"
     next_params: dict[str, str | int] | None = {
         "branch": branch,
@@ -257,7 +272,11 @@ async def _github_repo_evidence(
             )
             for run in runs
         )
-        if set(REQUIRED_WORKFLOWS[repo_id]).issubset(matched_names) and deployment_has_non_skipped_run:
+        release_evidence_found = (
+            set(REQUIRED_WORKFLOWS[repo_id]).issubset(matched_names)
+            and deployment_has_non_skipped_run
+        )
+        if release_evidence_found and set(SMOKE_ONLY_WORKFLOWS[repo_id]).issubset(matched_names):
             exhausted = True
             break
         next_link = runs_response.links.get("next", {}).get("url")
@@ -267,7 +286,8 @@ async def _github_repo_evidence(
         next_url = str(next_link)
         next_params = None
 
-    if not exhausted:
+    # Missing smoke-only evidence must never degrade an otherwise complete release gate.
+    if not exhausted and not release_evidence_found:
         return {
             "configured": True,
             "state": "DEGRADED",
@@ -316,6 +336,20 @@ async def _github_repo_evidence(
     gate_states.append(deployment_state)
 
     state = _combine_states(*gate_states) if gate_states else "DEGRADED"
+    smoke_only_evidence: dict[str, Any] = {}
+    for name in SMOKE_ONLY_WORKFLOWS[repo_id]:
+        run = latest(name)
+        if run is None:
+            status = "unknown"
+        elif str(run.get("status") or "").lower() == "completed":
+            status = str(run.get("conclusion") or "unknown").lower()
+        else:
+            status = str(run.get("status") or "unknown").lower()
+        smoke_only_evidence[name] = {
+            "status": status,
+            "run_id": run.get("id") if run else None,
+        }
+
     return {
         "configured": True,
         "state": state,
@@ -326,6 +360,7 @@ async def _github_repo_evidence(
         ),
         "sha": sha,
         "required_workflows": workflow_evidence,
+        "smoke_only_workflows": smoke_only_evidence,
         "deployment": {
             "workflow": deployment_name,
             "state": deployment_state,
