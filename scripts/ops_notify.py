@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import sys
+import time
 import urllib.error
 import urllib.request
 from datetime import UTC, datetime
@@ -31,28 +32,47 @@ def send_event(event: dict[str, Any]) -> bool:
         "occurred_at": datetime.now(UTC).isoformat(),
         **event,
     }
-    request = urllib.request.Request(
-        url,
-        data=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
-        method="POST",
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-            "User-Agent": "HIVE-ecosystem-deployment-watcher/1.0",
-        },
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=float(os.getenv("OPS_ALERT_TIMEOUT_SECONDS", "8"))) as response:
-            ok = 200 <= response.status < 300
-            print(f"Operational event delivery status: {response.status}")
-            return ok
-    except urllib.error.HTTPError as exc:
-        print(f"Operational event delivery failed: HTTP {exc.code}", file=sys.stderr)
-        exc.close()
+    body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+        "User-Agent": "HIVE-ecosystem-deployment-watcher/1.0",
+    }
+    timeout = float(os.getenv("OPS_ALERT_TIMEOUT_SECONDS", "8"))
+    for attempt in range(3):
+        request = urllib.request.Request(url, data=body, method="POST", headers=headers)
+        retry_after = None
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                ok = 200 <= response.status < 300
+                print(f"Operational event delivery status: {response.status}")
+                if ok:
+                    return True
+                retryable = response.status == 429 or response.status >= 500
+                failure = f"HTTP {response.status}"
+        except urllib.error.HTTPError as exc:
+            retryable = exc.code == 429 or exc.code >= 500
+            failure = f"HTTP {exc.code}"
+            retry_after = exc.headers.get("Retry-After") if exc.headers else None
+            exc.close()
+        except (urllib.error.URLError, TimeoutError) as exc:
+            retryable = True
+            failure = exc.__class__.__name__
+
+        if retryable and attempt < 2:
+            # Same event ID and bytes on every attempt make sender retries
+            # idempotent at HIVE's persistence boundary.
+            delay = 0.25 * (2**attempt)
+            if retry_after and retry_after.isdigit():
+                delay = max(delay, min(int(retry_after), 30))
+            time.sleep(delay)
+            continue
+        print(
+            f"Operational event delivery failed after {attempt + 1} attempt(s): {failure}",
+            file=sys.stderr,
+        )
         return False
-    except (urllib.error.URLError, TimeoutError) as exc:
-        print(f"Operational event delivery failed: {exc.__class__.__name__}", file=sys.stderr)
-        return False
+    return False
 
 
 def main() -> int:
@@ -88,8 +108,12 @@ def main() -> int:
         }
     )
     if not delivered and os.getenv("GITHUB_ACTIONS", "").lower() == "true":
-        print("::warning::Operational alert was not delivered; the primary CI result remains authoritative.", file=sys.stderr)
-    return 0
+        print(
+            "::error::Operational alert was not delivered after bounded retries; "
+            "reconcile the run-linked event before considering it closed.",
+            file=sys.stderr,
+        )
+    return 0 if delivered else 1
 
 
 if __name__ == "__main__":

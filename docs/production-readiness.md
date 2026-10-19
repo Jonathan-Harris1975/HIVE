@@ -92,6 +92,30 @@ The production image:
 
 The automatic `main` deployment watcher also fails closed when `KOYEB_TOKEN` or `KOYEB_SERVICE` is missing. It retains an exact-SHA production attestation only after the bounded Koyeb watcher succeeds; alert delivery does not weaken that result.
 
+## Autonomy dispatch, incident durability, and owner verification
+
+Repository code cannot verify the current Koyeb deployment settings, GitHub environment protection, Kilo webhook authorisation, or an external OIDC provider's trust policy. Keep the HIVE controller in reviewable, exact-SHA operation until the service owners complete the following checks.
+
+### Owner configuration checks
+
+- **Koyeb:** set the production HTTP health check to `/readyz`; verify the production variables and secret names in the Koyeb dashboard against `HIVE-PRODUCTION-SHARED.env` and `HIVE-KOYEB-SECRETS-ONLY.env`. Confirm the deployed revision matches the approved source SHA. Do not paste values into an issue, report, or repository file.
+- **GitHub:** verify the `main` ruleset, required checks, environment reviewers, and the autonomous repair workflow's effective token permissions. The workflow must be able to retain its run-correlated issue comment, but must not receive broader write permissions to make Kilo succeed.
+- **Kilo:** investigate the historical HTTP 403 from run `39179584274`. Restore the intended webhook URL/authorisation through the service owner, then run one controlled non-production handoff. Verify a 2xx response, an `accepted` marker carrying the run ID and source SHA, one Kilo task, and no duplicate task on a replay of the same event. The repository keeps a bounded two-attempt budget for explicit 4xx rejection; timeouts and 5xx responses are recorded as uncertain and require owner reconciliation before replay.
+- **Operational event store and alert route:** verify D1 is enabled and readable/writable in production, then deliver a test event with a stable event ID. Confirm it is visible after a fresh service instance starts. Verify the webhook endpoint accepts the same ID idempotently, transient 429/5xx or transport failures receive at most three identical delivery attempts, and a final failure remains a failed workflow with a run-linked alert for follow-up.
+- **OIDC federation, where a cloud/service provider supports it:** configure the external trust policy with issuer `https://token.actions.githubusercontent.com`, audience `https://github.com/Jonathan-Harris1975`, repository `Jonathan-Harris1975/HIVE` (repository ID `1262518964`, owner ID `205491236`), default branch `refs/heads/main`, and workflow reference `Jonathan-Harris1975/HIVE/.github/workflows/oidc-readiness.yml@refs/heads/main`. Bind the subject to the exact value the repository emits: either `repo:Jonathan-Harris1975/HIVE:ref:refs/heads/main` or the configured immutable subject template; do not allow both by default. Where supported, also require the repository and workflow claims as separate trust conditions. Grant only the intended role and audience. The OIDC readiness workflow verifies the GitHub token itself; it does **not** prove that any external provider trusts it or that the provider role is least-privileged.
+- **Cloudflare account security:** resolve the audit's disabled account-level 2FA enforcement finding and independently verify user MFA. Repository changes cannot alter or verify this account setting.
+
+### Exact-revision live test after owner configuration
+
+1. Review and approve the implementation branch, then record the merged commit SHA. Confirm its CI and security checks passed before any deployment.
+2. Deploy only that SHA through the existing protected release path. Confirm Koyeb reports that exact revision and `/readyz` returns ready.
+3. From a non-production test event, verify the dispatch lifecycle: one failure produces one durable marker with exact run ID/SHA; explicit 403 becomes a visible rejected incident; a timeout or 5xx becomes uncertain and stops replay; one replay after an owner-confirmed rejection creates no duplicate task; and two explicit rejections exhaust the automatic budget.
+4. Temporarily make the test D1 write/read unavailable in a non-production environment. Confirm ingestion returns retryable 503 rather than 202, the sender retries the same event ID no more than twice after the first attempt, the inbox reports unavailable rather than empty, and successful replay makes exactly one durable incident visible.
+5. Verify the provider trust test separately from the GitHub JWT readiness artifact. Record issuer, audience, exact subject/workflow restriction, role, source SHA, and result without recording token contents.
+6. Confirm operator notification receipt and close the test incident only after the durable event and the provider's final state agree. Retain evidence and the owner who reconciled uncertain delivery.
+
+These tests establish implementation behaviour only for the tested revision and environment. They do not establish broad production readiness, unattended recovery, or successful recovery of the historical 403 until the owner-run checks pass.
+
 ## Dependency maintenance
 
 `requirements.in` contains the reviewed direct versions and `requirements.txt` is the compiled runtime set. Regenerate it with `python -m piptools compile --generate-hashes --output-file=requirements.txt --strip-extras requirements.in`, then run `python scripts/verify_dependency_lock.py --compile`, `pip check`, the full Python 3.11-3.14 test matrix, `pip-audit`, and the Docker runtime smoke gate. The September 2026 refresh uses Uvicorn 0.53.0, pypdf 6.19.0, pydantic-settings 2.15.0, and boto3/botocore 1.43.98; the compiled Pydantic resolution remains 2.13.5 / pydantic-core 2.46.5. Settings-source matching is explicitly case-insensitive to preserve HIVE's environment-alias contract with pydantic-settings 2.15. The previous pypdf 6.16.1 pin was already patched for the August 2026 XForm resource-consumption advisory. The repository does not maintain a second `requirements.lock` file.
