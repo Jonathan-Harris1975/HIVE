@@ -240,7 +240,8 @@ def extract(event: dict) -> tuple[dict, str, list[str]] | None:
             if comment.get("user", {}).get("login") not in KILO:
                 return None
             pr = pr_details(int(event["issue"]["number"]))
-            evidence = [review_evidence(body)]
+            finding = review_evidence(body)
+            evidence = [finding] if finding else []
 
     elif EVENT == "pull_request_review":
         review = event.get("review", {})
@@ -260,9 +261,10 @@ def extract(event: dict) -> tuple[dict, str, list[str]] | None:
             evidence = ["\n".join(filter(None, [
                 review_evidence(c.get("body", ""), c.get("path", ""))
                 for c in comments if c.get("pull_request_review_id") == review_id
-            ]))[:6000]]
-            if not evidence[0]:
-                evidence = [review_evidence(review.get("body", ""))]
+            ]))[:6000]
+            if not finding:
+                finding = review_evidence(review.get("body", ""))
+            evidence = [finding] if finding else []
 
     elif EVENT == "pull_request_review_comment":
         comment = event.get("comment", {})
@@ -278,7 +280,8 @@ def extract(event: dict) -> tuple[dict, str, list[str]] | None:
             if comment.get("user", {}).get("login") not in KILO:
                 return None
             pr = pr_details(int(event["pull_request"]["number"]))
-            evidence = [review_evidence(comment.get("body", ""), comment.get("path", ""))]
+            finding = review_evidence(comment.get("body", ""), comment.get("path", ""))
+            evidence = [finding] if finding else []
     else:
         return None
 
