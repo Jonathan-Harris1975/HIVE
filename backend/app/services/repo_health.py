@@ -216,7 +216,11 @@ async def _probe(
         payload = _safe_payload(response)
         payload_status = _payload_status(payload)
         if 200 <= response.status_code < 400:
-            status = payload_status or "healthy"
+            # A successful HTTP response is useful liveness evidence for
+            # static endpoints, but an unrecognised JSON health document is
+            # not proof of readiness. Preserve that distinction so malformed
+            # or newly changed health contracts cannot turn the estate green.
+            status = payload_status or ("unknown" if payload is not None else "healthy")
             detail = "Probe returned a successful response."
             if status == "degraded":
                 detail = "Probe responded but reported degraded or not-ready payload state."
@@ -224,6 +228,8 @@ async def _probe(
                 detail = "Probe responded but reported a blocked payload state."
             elif status == "down":
                 detail = "Probe responded but reported a down payload state."
+            elif status == "unknown":
+                detail = "Probe responded with JSON that did not declare a recognised health state."
         elif response.status_code in {401, 403}:
             status = "blocked"
             detail = f"Probe was blocked by authentication or authorisation (HTTP {response.status_code})."
@@ -273,6 +279,8 @@ def _combine_status(liveness: dict[str, Any], operational: dict[str, Any] | None
         return "not_configured"
     if liveness_status in {"blocked", "degraded"}:
         return "degraded"
+    if liveness_status == "unknown":
+        return "unknown"
     if liveness_status != "healthy":
         return "down"
     if operational and operational_status not in {"healthy", "not_configured"}:
@@ -776,7 +784,7 @@ async def build_repo_health_report(
             "overall_status": "disabled",
             "generated_at": _now_iso(),
             "cache_seconds": settings.repo_health_cache_seconds,
-            "summary": {"total": 0, "healthy": 0, "degraded": 0, "down": 0, "not_configured": 0},
+            "summary": {"total": 0, "healthy": 0, "degraded": 0, "down": 0, "unknown": 0, "not_configured": 0},
             "repos": [],
             "note": "Repository health monitoring is disabled.",
         }
@@ -856,13 +864,14 @@ async def build_repo_health_report(
             "healthy": sum(1 for item in repos if item["status"] == "healthy"),
             "degraded": sum(1 for item in repos if item["status"] == "degraded"),
             "down": sum(1 for item in repos if item["status"] == "down"),
+            "unknown": sum(1 for item in repos if item["status"] == "unknown"),
             "not_configured": sum(1 for item in repos if item["status"] == "not_configured"),
             "standby": sum(1 for item in repos if item["status"] in {"standby", "maintenance"}),
             "starting": sum(1 for item in repos if item["status"] == "starting"),
         }
         if summary["down"]:
             overall = "down"
-        elif summary["degraded"] or summary["not_configured"] or summary["starting"]:
+        elif summary["degraded"] or summary["unknown"] or summary["not_configured"] or summary["starting"]:
             overall = "degraded"
         else:
             # Standby/Maintenance are intentional operational states, not faults: they
