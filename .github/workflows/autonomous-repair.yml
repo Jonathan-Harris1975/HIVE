@@ -101,7 +101,7 @@ jobs:
           HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           KILO_REPAIR_TRIGGER_URL: ${{ secrets.KILO_REPAIR_TRIGGER_URL }}
-          HIVE_REPAIR_CIRCUIT_BREAKER: ${{ vars.HIVE_REPAIR_CIRCUIT_BREAKER || 'closed' }}
+          HIVE_REPAIR_CIRCUIT_BREAKER: ${{ vars.HIVE_REPAIR_CIRCUIT_BREAKER || 'open' }}
         shell: bash
         run: |
           set -euo pipefail
