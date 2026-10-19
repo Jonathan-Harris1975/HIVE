@@ -267,7 +267,10 @@ def _current_repository_heads(storage: R2Storage) -> dict[str, str]:
     from app.core.governed_repositories import canonical_governed_repository_id
     from app.services.repository_refresh import github_sources
 
-    sources = github_sources(settings)
+    try:
+        sources = github_sources(settings)
+    except ValueError:
+        return {}
     from concurrent.futures import ThreadPoolExecutor
 
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
@@ -311,15 +314,20 @@ def read_latest_weekly_report(storage: R2Storage, year: int, week: int) -> tuple
         raise RuntimeError("Weekly snapshot read exceeded its safe bound")
     key = f"{prefix}/overview.json"
     report = None
+    invalid_snapshots = 0
     for snapshot in sorted(snapshots, reverse=True):
         try:
             marker = json.loads(storage.read_object(f"{snapshot}/manifest.json", max_bytes=32 * 1024, bucket=BUCKET).content)
-        except FileNotFoundError:
+            body = storage.read_object(f"{snapshot}/overview.json", max_bytes=2 * 1024 * 1024, bucket=BUCKET).content
+            if not isinstance(marker, dict) or marker.get("overview_sha256") != hashlib.sha256(body).hexdigest():
+                raise ValueError("Weekly snapshot digest does not match its completion marker")
+            candidate = json.loads(body)
+            if not isinstance(candidate, dict):
+                raise ValueError("Weekly overview must be an object")
+        except (FileNotFoundError, ValueError):
+            invalid_snapshots += 1
             continue
-        body = storage.read_object(f"{snapshot}/overview.json", max_bytes=2 * 1024 * 1024, bucket=BUCKET).content
-        if not isinstance(marker, dict) or marker.get("overview_sha256") != hashlib.sha256(body).hexdigest():
-            raise ValueError("Weekly snapshot digest does not match its completion marker")
-        key, report = f"{snapshot}/overview.json", json.loads(body)
+        key, report = f"{snapshot}/overview.json", candidate
         break
     legacy = report is None
     if legacy:
@@ -331,6 +339,16 @@ def read_latest_weekly_report(storage: R2Storage, year: int, week: int) -> tuple
         report["overall_status"] = "UNKNOWN"
         report["evidence_complete"] = False
         report["evidence_issue"] = "legacy_snapshot_without_current_head_validation"
+        report["repositories"] = [
+            {**item, "status": "UNKNOWN", "evidence_issue": report["evidence_issue"]}
+            for item in report.get("repositories", []) if isinstance(item, dict)
+        ]
+    if invalid_snapshots:
+        # Retain the older evidence for diagnosis without masking an unreadable newer observation.
+        report["overall_status"] = "UNKNOWN"
+        report["evidence_complete"] = False
+        report["evidence_issue"] = "newer_snapshot_unavailable"
+        report["unavailable_snapshot_count"] = invalid_snapshots
         report["repositories"] = [
             {**item, "status": "UNKNOWN", "evidence_issue": report["evidence_issue"]}
             for item in report.get("repositories", []) if isinstance(item, dict)
