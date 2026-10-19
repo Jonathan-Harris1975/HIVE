@@ -47,7 +47,7 @@ def result_status(item):
     if not isinstance(item, dict):
         return "unknown"
     if item.get("status") != "completed":
-        return "running" if item.get("status") in {"queued", "in_progress", "waiting", "pending"} else "unknown"
+        return "running" if item.get("status") in {"requested", "queued", "in_progress", "waiting", "pending"} else "unknown"
     conclusion = item.get("conclusion")
     return "pass" if conclusion == "success" else "fail" if conclusion in {"failure", "timed_out", "action_required", "startup_failure"} else "unknown"
 
@@ -100,7 +100,18 @@ def collect_current_evidence(record):
         latest = max(rows, key=lambda row: int(row.get("id") or 0), default=None)
         return result_status(latest)
 
-    def workflow(filename, branch, names, step=None):
+    def coverage():
+        payload = read(f"/commits/{record['head_sha']}/status?per_page=100")
+        rows = payload.get("statuses")
+        if payload.get("sha") != record["head_sha"] or not isinstance(rows, list) or len(rows) >= 100:
+            raise EvidenceUnavailable()
+        rows = [row for row in rows if row.get("context") == "codecov/project"]
+        latest = max(rows, key=lambda row: int(row.get("id") or 0), default=None)
+        if latest is None:
+            return check("codecov/project", "codecov")
+        return {"success": "pass", "failure": "fail", "error": "fail", "pending": "running"}.get(latest.get("state"), "unknown")
+
+    def workflow(filename, branch, names, step=None, artifact=None):
         query = urllib.parse.urlencode({"head_sha": record["head_sha"], "branch": branch, "per_page": 100})
         payload = read(f"/actions/workflows/{filename}/runs?{query}")
         rows = payload.get("workflow_runs")
@@ -109,10 +120,21 @@ def collect_current_evidence(record):
         rows = [row for row in rows if row.get("head_sha") == record["head_sha"]
                 and row.get("head_branch") == branch
                 and row.get("head_repository", {}).get("full_name") == slug
-                and row.get("path") == f".github/workflows/{filename}"
+                and str(row.get("path", "")).split("@", 1)[0] == f".github/workflows/{filename}"
                 and row.get("event") != "pull_request"]
         latest = max(rows, key=lambda row: (int(row.get("run_number") or 0),
                      int(row.get("run_attempt") or 0), int(row.get("id") or 0)), default=None)
+        if latest and artifact:
+            # A downstream run's head_sha is its execution revision, not necessarily
+            # its verified source. Trusted workflows name their retained evidence
+            # with the actual target SHA (including workflow_dispatch overrides).
+            payload = read(f"/actions/runs/{latest['id']}/artifacts?per_page=100")
+            artifacts = payload.get("artifacts")
+            if not isinstance(artifacts, list) or len(artifacts) >= 100:
+                raise EvidenceUnavailable()
+            if not any(item.get("name") == f"{artifact}-{record['head_sha']}"
+                       and item.get("expired") is False for item in artifacts):
+                return "unknown"
         status = result_status(latest)
         if status != "pass":
             return status
@@ -145,13 +167,16 @@ def collect_current_evidence(record):
             "ci_gate": ("ci-gate", "github-actions"),
             "codeql_status": ("CodeQL security alert gate", "github-actions"),
             "socket_status": ("Socket Security: Project Report", "socket-security"),
-            "codecov_status": ("codecov/project", "codecov"),
         }
         for field, (name, app) in checks.items():
             try:
                 record[field] = check(name, app)
             except EvidenceUnavailable:
                 record[field] = "unknown"
+        try:
+            record["codecov_status"] = coverage()
+        except EvidenceUnavailable:
+            record["codecov_status"] = "unknown"
         try:
             security_status = check("Trivy, Gitleaks and actionlint", "github-actions")
         except EvidenceUnavailable:
@@ -168,8 +193,14 @@ def collect_current_evidence(record):
             if record["repository"] in {"HIVE-UI", "jonathan-harris-website"}
             else ("koyeb-deployment-watch.yml", ["watch"])
         )
+        artifact = {
+            "AIMS": "aims-deployment-attestation", "HIVE": "hive-deployment-attestation",
+            "RAMS": "rams-deployment-evidence", "MAST": "mast-post-deployment-smoke",
+            "IRS": "irs-live-target-audit", "AIMS-UI": "deployed-integration-attestation",
+            "HIVE-UI": "deployed-integration-attestation", "jonathan-harris-website": "website-deployment-attestation",
+        }.get(record["repository"])
         try:
-            record["deployment_status"] = workflow(deployment[0], branch, deployment[1])
+            record["deployment_status"] = workflow(deployment[0], branch, deployment[1], artifact=artifact)
         except EvidenceUnavailable:
             record["deployment_status"] = "unknown"
         try:

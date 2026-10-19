@@ -9,6 +9,7 @@ on:
 permissions:
   actions: read
   checks: read
+  statuses: read
   contents: read
 
 concurrency:

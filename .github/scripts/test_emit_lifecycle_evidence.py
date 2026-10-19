@@ -13,6 +13,7 @@ class EvidenceTests(unittest.TestCase):
    helpers = runpy.run_path(str(SCRIPT))
    self.assertEqual(helpers["result_status"]({"status": "completed", "conclusion": "skipped"}), "unknown")
    self.assertEqual(helpers["result_status"]({"status": "completed", "conclusion": "failure"}), "fail")
+   self.assertEqual(helpers["result_status"]({"status": "requested"}), "running")
    self.assertEqual(helpers["combine_statuses"](["pass", "unknown"]), "unknown")
    self.assertEqual(helpers["combine_statuses"](["pass", "fail"]), "fail")
    self.assertEqual(row["repair_attempts"],0)
