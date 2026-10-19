@@ -258,7 +258,7 @@ def extract(event: dict) -> tuple[dict, str, list[str]] | None:
             pr = pr_details(int(event["pull_request"]["number"]))
             review_id = review["id"]
             comments = all_pages(f"/repos/{REPO}/pulls/{pr['number']}/comments") if pr else []
-            evidence = ["\n".join(filter(None, [
+            finding = "\n".join(filter(None, [
                 review_evidence(c.get("body", ""), c.get("path", ""))
                 for c in comments if c.get("pull_request_review_id") == review_id
             ]))[:6000]
