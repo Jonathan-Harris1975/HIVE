@@ -268,7 +268,10 @@ def main() -> None:
     args.output.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(json.dumps({"record": "written", "repository": args.repository,
                       "final_state": record["final_state"],
-                      "complete": all(record[field] == "pass" for field in ("ci_gate", "socket_status", "codeql_status", "gitleaks_status", "trivy_status", "codecov_status", "dast_status", "deployment_status"))}))
+                      "complete": all(record[field] == "pass" for field in (
+                          "ci_gate", "socket_status", "codeql_status", "gitleaks_status",
+                          "trivy_status", "codecov_status", "dast_status", "deployment_status",
+                      ))}))
 
 
 if __name__ == "__main__":
