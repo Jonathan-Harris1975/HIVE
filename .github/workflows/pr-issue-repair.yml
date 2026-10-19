@@ -85,6 +85,8 @@ jobs:
     - name: Verify blocker recovery safety
       id: blocker_recovery_safety
       run: python3 .github/scripts/test_pr_blocker_recovery.py
+    - name: Test explicit Kilo repair command
+      run: python3 -B -m unittest discover -s .github/scripts -p 'test_kilo_fix_command.py' -v
     - name: Extract actionable PR findings and start Kilo repair
       id: repair_router
       env:
