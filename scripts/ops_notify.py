@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import sys
+import time
 import urllib.error
 import urllib.request
 from datetime import UTC, datetime
@@ -41,18 +42,29 @@ def send_event(event: dict[str, Any]) -> bool:
             "User-Agent": "HIVE-ecosystem-deployment-watcher/1.0",
         },
     )
-    try:
-        with urllib.request.urlopen(request, timeout=float(os.getenv("OPS_ALERT_TIMEOUT_SECONDS", "8"))) as response:
-            ok = 200 <= response.status < 300
-            print(f"Operational event delivery status: {response.status}")
-            return ok
-    except urllib.error.HTTPError as exc:
-        print(f"Operational event delivery failed: HTTP {exc.code}", file=sys.stderr)
-        exc.close()
-        return False
-    except (urllib.error.URLError, TimeoutError) as exc:
-        print(f"Operational event delivery failed: {exc.__class__.__name__}", file=sys.stderr)
-        return False
+    retryable_statuses = {408, 425, 429, 500, 502, 503, 504}
+    attempts = 3
+    for attempt in range(attempts):
+        try:
+            with urllib.request.urlopen(request, timeout=float(os.getenv("OPS_ALERT_TIMEOUT_SECONDS", "8"))) as response:
+                ok = 200 <= response.status < 300
+                print(f"Operational event delivery status: {response.status}")
+                return ok
+        except urllib.error.HTTPError as exc:
+            status = exc.code
+            exc.close()
+            if status not in retryable_statuses or attempt == attempts - 1:
+                print(f"Operational event delivery failed: HTTP {status}", file=sys.stderr)
+                return False
+        except (urllib.error.URLError, TimeoutError) as exc:
+            if attempt == attempts - 1:
+                print(f"Operational event delivery failed: {exc.__class__.__name__}", file=sys.stderr)
+                return False
+
+        # Retries reuse the same event ID, so HIVE's event upsert remains
+        # idempotent when an accepted response is lost or D1 is temporarily down.
+        time.sleep(0.25 * (2 ** attempt))
+    return False
 
 
 def main() -> int:
