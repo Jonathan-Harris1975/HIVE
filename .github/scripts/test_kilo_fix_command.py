@@ -46,10 +46,28 @@ class ExplicitKiloFixCommandTests(unittest.TestCase):
         self.assertIsNotNone(result)
         pr, kind, findings = result
         self.assertEqual(pr["number"], 7)
-        self.assertEqual(kind, "fix-command-912")
+        self.assertEqual(kind, "fix-command")
         self.assertIn("explicitly requested", findings[0])
         self.assertIn("#issuecomment-912", findings[0])
         self.assertIn("a" * 40, findings[0])
+
+    def test_repeated_commands_for_same_head_share_dedupe_key(self):
+        with patch.object(router, "EVENT", "issue_comment"), patch.object(
+            router, "pr_details", return_value=self.pr
+        ):
+            first = router.extract(self.event(comment_id=912))
+            second = router.extract(self.event(comment_id=913))
+        self.assertEqual(first[1], second[1])
+        self.assertEqual(first[1], "fix-command")
+
+    def test_empty_kilo_review_evidence_is_ignored(self):
+        event = self.event(body="No findings")
+        event["comment"]["user"] = {"login": "kilo-code-bot[bot]"}
+        with patch.object(router, "EVENT", "issue_comment"), patch.object(
+            router, "pr_details", return_value=self.pr
+        ):
+            result = router.extract(event)
+        self.assertIsNone(result)
 
     def test_non_actionable_kilo_comment_stays_ignored(self):
         event = self.event(body="Reply with @kilocode-bot fix it")
@@ -91,7 +109,7 @@ class ExplicitKiloFixCommandTests(unittest.TestCase):
         ):
             result = router.extract(event)
         self.assertIsNotNone(result)
-        self.assertEqual(result[1], "fix-command-913")
+        self.assertEqual(result[1], "fix-command")
         self.assertIn("src/example.py", result[2][0])
 
 
