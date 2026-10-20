@@ -157,7 +157,7 @@ incoming /v1/chat with conversation_id
 
 This keeps current prompts deterministic while allowing HIVE to continue an existing session without relying on client-side history alone.
 
-D1 remains separate and stores ecosystem metadata indexes rather than full chat history.
+The operational SQL store uses its own D1 database for chat/file/cost records. The separate metadata D1 continues to hold ecosystem indexes and other metadata lanes.
 
 
 ## Chunk retrieval foundation
@@ -181,8 +181,8 @@ HIVE now has a durable retrieval spine:
 
 ```text
 R2 raw files
-  -> PostgreSQL file metadata
-  -> PostgreSQL chunks as source of truth
+  -> Operational D1 file metadata
+  -> Operational D1 chunks as source of truth
   -> Workers AI embeddings
   -> Vectorize semantic lookup keyed by SQL chunk IDs
   -> SQL lexical fallback if Vectorize is unavailable
@@ -196,7 +196,7 @@ File-chat responses surface `retrieval_source`, `vector_hits`, `sql_fallback_hit
 
 HIVE now treats archive ingestion as a bounded transformation, not a background-heavy extraction worker. Raw uploaded ZIPs remain in R2. `/v1/files/zip/extract-text` reads the ZIP, extracts text from supported members into a single derived text artefact, stores that artefact back through the normal upload path, and can immediately create SQL chunks for retrieval.
 
-PostgreSQL remains the source of truth for file metadata and chunks. Vectorize remains an optional semantic accelerator over SQL chunk IDs. Production resource protection is provided by explicit member, byte, character and recursion limits.
+Operational D1 is the source of truth for file metadata and chunks. Vectorize remains an optional semantic accelerator over SQL chunk IDs. Production resource protection is provided by explicit member, byte, character and recursion limits.
 
 ## v1.6 workflow and lane architecture
 
@@ -269,7 +269,7 @@ The preview-persistence layer sits above workflow graphs and controlled executio
 Data remains split deliberately:
 
 - D1 stores lightweight preview metadata and simulation summaries.
-- PostgreSQL remains the conversation/file/chunk persistence layer.
+- Operational D1 stores the conversation/file/chunk persistence layer.
 - R2 remains artefact storage.
 - Vectorize remains semantic retrieval.
 

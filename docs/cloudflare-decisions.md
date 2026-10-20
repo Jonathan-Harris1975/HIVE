@@ -24,14 +24,7 @@ For this repo, Redis is not a hard v1 dependency.
 
 Cloudflare Hyperdrive connects to an existing PostgreSQL or MySQL database. It is a connection accelerator/proxy, not a hosted PostgreSQL database.
 
-Options:
-
-- Local/dev: SQLite.
-- Low-cost production: Neon or Supabase PostgreSQL free tier via `DATABASE_URL`.
-- Cloudflare-native SQL: D1, but this is SQLite-compatible rather than PostgreSQL.
-- If deployed inside Workers later: Hyperdrive can connect Workers to an external Postgres database.
-
-Current repo default: SQLite-compatible local database URL, with PostgreSQL-ready configuration.
+HIVE uses local SQLite for development and Cloudflare D1 for production operational SQL. The previous Koyeb PostgreSQL service remains available during the rollback period. D1 is SQLite-compatible rather than PostgreSQL, so production access uses its REST API and transactional batch endpoint rather than a PostgreSQL driver.
 
 ## Vector search decision
 
