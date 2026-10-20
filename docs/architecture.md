@@ -103,6 +103,7 @@ The core v1 chat/R2 file loop still works with both stores disabled. Persistence
 - `hive_conversations`
 - `hive_messages`
 - `hive_files`
+- `hive_file_chunks`
 - `hive_cost_events`
 
 The same schema works for local SQLite smoke tests, PostgreSQL, and Cloudflare D1. Operational D1 is configured independently from the existing ecosystem metadata database with `DATABASE_BACKEND=d1` and `DATABASE_D1_DATABASE_ID`. Keep the PostgreSQL variables configured during cutover so rollback can restore `DATABASE_BACKEND=postgres`.
