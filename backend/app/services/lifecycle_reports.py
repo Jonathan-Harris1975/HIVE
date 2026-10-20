@@ -318,6 +318,58 @@ def _current_repository_heads(storage: R2Storage) -> dict[str, str]:
     return heads
 
 
+def _read_legacy_weekly_report(storage: R2Storage, year: int, week: int) -> tuple[str, dict[str, Any]]:
+    """Read old nested reports for history only; never use them for the current report."""
+    prefix = f"reports/weekly/{year}/{week:02d}"
+    snapshots: list[str] = []
+    cursor = None
+    while True:
+        page = storage.list_objects_page(prefix=f"{prefix}/snapshots/", bucket=BUCKET,
+                                         limit=1000, cursor=cursor, delimiter="/", max_scan_keys=50_000)
+        for candidate in page.prefixes:
+            suffix = candidate.removeprefix(f"{prefix}/snapshots/").rstrip("/")
+            if re.fullmatch(r"\d{8}T\d{12}Z-[0-9a-f]{16}", suffix):
+                snapshots.append(candidate.rstrip("/"))
+        cursor = page.next_cursor
+        if not cursor:
+            break
+    report = None
+    invalid = 0
+    for snapshot in sorted(snapshots, reverse=True):
+        try:
+            marker = json.loads(storage.read_object(f"{snapshot}/manifest.json", max_bytes=32 * 1024, bucket=BUCKET).content)
+            body = storage.read_object(f"{snapshot}/overview.json", max_bytes=2 * 1024 * 1024, bucket=BUCKET).content
+            if marker.get("overview_sha256") != hashlib.sha256(body).hexdigest():
+                raise ValueError("Legacy report digest mismatch")
+            report = json.loads(body)
+            key = f"{snapshot}/overview.json"
+            break
+        except (FileNotFoundError, ValueError, AttributeError):
+            invalid += 1
+    if report is None:
+        key = f"{prefix}/overview.json"
+        report = json.loads(storage.read_object(key, max_bytes=2 * 1024 * 1024, bucket=BUCKET).content)
+        report["overall_status"] = "UNKNOWN"
+        report["evidence_complete"] = False
+        report["evidence_issue"] = "legacy_report_without_current_head_validation"
+        report["repositories"] = [
+            {**item, "status": "UNKNOWN", "evidence_issue": report["evidence_issue"]}
+            for item in report.get("repositories", []) if isinstance(item, dict)
+        ]
+    elif invalid:
+        report["overall_status"] = "UNKNOWN"
+        report["evidence_complete"] = False
+        report["evidence_issue"] = "newer_legacy_snapshot_unavailable"
+        report["unavailable_snapshot_count"] = invalid
+        report["repositories"] = [
+            {**item, "status": "UNKNOWN", "evidence_issue": report["evidence_issue"]}
+            for item in report.get("repositories", []) if isinstance(item, dict)
+        ]
+    if not isinstance(report, dict):
+        raise ValueError("Legacy weekly report must be an object")
+    return key, report
+
+
 def read_latest_weekly_report(storage: R2Storage, year: int, week: int) -> tuple[str, dict[str, Any]]:
     """Read the single current JSON report for an ISO week."""
     key = f"reports/weekly/{year}-W{week:02d}.json"
@@ -533,25 +585,42 @@ def list_weekly_reports(storage: R2Storage, limit: int = 12) -> list[dict[str, A
     """List compact report summaries from the flat JSON/HTML weekly pairs."""
     limit = max(1, min(int(limit), 52))
     cursor = None
-    keys: set[tuple[int, int]] = set()
+    flat_periods: set[tuple[int, int]] = set()
+    legacy_periods: set[tuple[int, int]] = set()
     summaries: list[dict[str, Any]] = []
     while True:
-        page = storage.list_objects_page(prefix="reports/weekly/", bucket=BUCKET, limit=1000, cursor=cursor, delimiter=None, max_scan_keys=5000)
+        page = storage.list_objects_page(prefix="reports/weekly/", bucket=BUCKET, limit=1000, cursor=cursor, delimiter="/", max_scan_keys=5000)
         for obj in page.objects:
             key = str(getattr(obj, "key", ""))
             match = re.fullmatch(r"reports/weekly/(\d{4})-W(\d{2})\.json", key)
             if match:
-                keys.add((int(match.group(1)), int(match.group(2))))
+                flat_periods.add((int(match.group(1)), int(match.group(2))))
+        for year_prefix in page.prefixes:
+            year_match = re.fullmatch(r"reports/weekly/(\d{4})/", year_prefix)
+            if not year_match:
+                continue
+            year_page = storage.list_objects_page(prefix=year_prefix, bucket=BUCKET, limit=1000, delimiter="/", max_scan_keys=5000)
+            for week_prefix in year_page.prefixes:
+                week_match = re.fullmatch(r"reports/weekly/(\d{4})/(\d{2})/", week_prefix)
+                if week_match:
+                    legacy_periods.add((int(week_match.group(1)), int(week_match.group(2))))
         cursor = page.next_cursor
         if not cursor:
             break
-    for year, week in keys:
+    for year, week in flat_periods | (legacy_periods - flat_periods):
         try:
-            key, report = read_latest_weekly_report(storage, year, week)
+            key, report = (
+                read_latest_weekly_report(storage, year, week)
+                if (year, week) in flat_periods
+                else _read_legacy_weekly_report(storage, year, week)
+            )
         except (FileNotFoundError, RuntimeError, ValueError, json.JSONDecodeError):
             continue
         if isinstance(report.get("period"), dict):
-            summaries.append({"report_id": report.get("report_id"), "period": report["period"], "overall_status": report.get("overall_status", "UNKNOWN"), "evidence_complete": report.get("evidence_complete") is True, "r2_key": key, "html_r2_key": key[:-5] + ".html"})
+            summary = {"report_id": report.get("report_id"), "period": report["period"], "overall_status": report.get("overall_status", "UNKNOWN"), "evidence_complete": report.get("evidence_complete") is True, "r2_key": key}
+            if (year, week) in flat_periods:
+                summary["html_r2_key"] = key[:-5] + ".html"
+            summaries.append(summary)
     summaries.sort(key=lambda item: (int(item.get("period", {}).get("iso_year", 0)), int(item.get("period", {}).get("iso_week", 0))), reverse=True)
     return summaries[:limit]
 
