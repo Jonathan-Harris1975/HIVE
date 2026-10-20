@@ -13,7 +13,7 @@ from app.services.lifecycle_reports import (
     collect_weekly_evidence,
     generate_and_store_weekly_report,
     list_weekly_reports,
-    render_weekly_markdown,
+    render_weekly_html,
 )
 
 
@@ -68,11 +68,14 @@ class LifecycleReportTests(unittest.TestCase):
         routine = row("HIVE", final_state="GREEN")
         self.assertIsNone(build_review_objects(routine, 2026))
 
-    def test_markdown_is_compact_and_lists_every_repository(self):
+    def test_html_report_lists_all_eight_repositories_and_escapes_evidence(self):
         report = build_weekly_overview({}, 2026, 42)
-        markdown = render_weekly_markdown(report)
-        self.assertIn("Status: UNKNOWN", markdown)
-        self.assertTrue(all(f"| {repository} | UNKNOWN |" in markdown for repository in REPOSITORIES))
+        report["repositories"][0]["evidence_issue"] = "<script>alert(1)</script>"
+        rendered = render_weekly_html(report)
+        self.assertIn("All eight repositories", rendered)
+        self.assertTrue(all(repository in rendered for repository in REPOSITORIES))
+        self.assertNotIn("<script>alert(1)</script>", rendered)
+        self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", rendered)
 
     def test_weekly_evidence_scans_only_valid_lifecycle_objects(self):
         valid = row("AIMS")
@@ -123,7 +126,7 @@ class LifecycleReportTests(unittest.TestCase):
         duplicate = Storage(conflict)
         self.assertFalse(_put_immutable(duplicate, "reports/x.json", b"{}", "application/json"))
 
-    def test_council_manifest_is_indexed_immutably(self):
+    def test_council_manifests_are_referenced_without_creating_extra_report_objects(self):
         manifest_key = "ci-reports/HIVE/2026/42/council/run/evidence-manifest.json"
         manifest = {"workflow_run_id": "run-1", "default_branch_sha": "a" * 40, "status": "PASS"}
 
@@ -151,9 +154,9 @@ class LifecycleReportTests(unittest.TestCase):
         refs = collect_council_references(storage, 2026, 42)
         self.assertEqual(len(refs), 1)
         self.assertEqual(refs[0]["workflow_run_id"], "run-1")
-        self.assertEqual(storage.puts[0]["Bucket"], BUCKET)
+        self.assertEqual(storage.puts, [])
 
-    def test_report_generation_validates_period_and_writes_immutable_overviews(self):
+    def test_report_generation_writes_one_flat_json_and_one_html_for_all_repositories(self):
         class Storage:
             def __init__(self):
                 self.puts = []
@@ -177,22 +180,28 @@ class LifecycleReportTests(unittest.TestCase):
             result = generate_and_store_weekly_report(storage, 2026, 42)
         self.assertTrue(result["ok"])
         self.assertEqual(result["report"]["overall_status"], "UNKNOWN")
-        self.assertGreaterEqual(result["objects_written_or_preserved"], 10)
-        self.assertEqual(len(storage.puts), result["objects_written_or_preserved"])
+        self.assertEqual(result["objects_written_or_preserved"], 2)
+        self.assertEqual([item["Key"] for item in storage.puts], [
+            "reports/weekly/2026-W42.html", "reports/weekly/2026-W42.json",
+        ])
+        self.assertEqual([item["ContentType"] for item in storage.puts], [
+            "text/html; charset=utf-8", "application/json",
+        ])
+        self.assertEqual(len(storage.puts), 2)
+        self.assertEqual(len(result["report"]["repositories"]), 8)
 
-    def test_weekly_report_index_is_newest_first_and_skips_bad_documents(self):
+    def test_weekly_report_index_reads_flat_json_pairs_and_skips_bad_documents(self):
         class Storage:
             def list_objects_page(self, *, prefix, **_kwargs):
-                if prefix == "reports/weekly/":
-                    return SimpleNamespace(prefixes=["reports/weekly/2026/"], objects=[], next_cursor=None)
-                return SimpleNamespace(
-                    prefixes=["reports/weekly/2026/41/", "reports/weekly/2026/42/"],
-                    objects=[],
-                    next_cursor=None,
-                )
+                keys = [
+                    "reports/weekly/2026-W41.json", "reports/weekly/2026-W41.html",
+                    "reports/weekly/2026-W42.json", "reports/weekly/2026-W42.html",
+                    "reports/weekly/2026/42/snapshots/old.json",
+                ]
+                return SimpleNamespace(objects=[SimpleNamespace(key=key) for key in keys], prefixes=[], next_cursor=None)
 
             def read_object(self, key, **_kwargs):
-                if "/41/" in key:
+                if "W41" in key:
                     raise ValueError("bad report")
                 return SimpleNamespace(
                     content=json.dumps(
@@ -202,6 +211,38 @@ class LifecycleReportTests(unittest.TestCase):
 
         reports = list_weekly_reports(Storage())
         self.assertEqual([item["report_id"] for item in reports], ["weekly-2026-W42"])
+        self.assertEqual(reports[0]["r2_key"], "reports/weekly/2026-W42.json")
+        self.assertEqual(reports[0]["html_r2_key"], "reports/weekly/2026-W42.html")
+
+    def test_weekly_history_keeps_nested_legacy_reports_as_unknown(self):
+        old_report = {
+            "report_id": "weekly-2026-W41",
+            "period": {"iso_year": 2026, "iso_week": 41},
+            "overall_status": "GREEN",
+            "evidence_complete": True,
+            "repositories": [{"repository": name, "status": "GREEN"} for name in REPOSITORIES],
+        }
+
+        class Storage:
+            def list_objects_page(self, *, prefix, **_kwargs):
+                if prefix == "reports/weekly/":
+                    return SimpleNamespace(objects=[], prefixes=["reports/weekly/2026/"], next_cursor=None)
+                if prefix == "reports/weekly/2026/":
+                    return SimpleNamespace(objects=[], prefixes=["reports/weekly/2026/41/"], next_cursor=None)
+                return SimpleNamespace(objects=[], prefixes=[], next_cursor=None)
+
+            def read_object(self, key, **_kwargs):
+                if key == "reports/weekly/2026/41/overview.json":
+                    return SimpleNamespace(content=json.dumps(old_report).encode())
+                raise FileNotFoundError(key)
+
+        reports = list_weekly_reports(Storage())
+        self.assertEqual(len(reports), 1)
+        self.assertEqual(reports[0]["report_id"], "weekly-2026-W41")
+        self.assertEqual(reports[0]["overall_status"], "UNKNOWN")
+        self.assertFalse(reports[0]["evidence_complete"])
+        self.assertNotIn("html_r2_key", reports[0])
 
 if __name__ == "__main__":
     unittest.main()
+

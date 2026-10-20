@@ -1,10 +1,12 @@
-"""Deterministic HIVE lifecycle report assembly and immutable R2 persistence."""
+"""Deterministic HIVE lifecycle report assembly and compact R2 persistence."""
 from __future__ import annotations
 
 import datetime as dt
 import json
 import re
 import hashlib
+import html
+import threading
 from typing import TYPE_CHECKING, Any, Iterable, Mapping
 
 if TYPE_CHECKING:
@@ -17,6 +19,7 @@ BUCKET = "hive-repositories"
 STATUSES = {"pass", "fail", "running", "unknown", "not_applicable"}
 FINAL_STATES = {"GREEN", "RECOVERING", "REVIEW_REQUIRED", "SERVICE_BLOCKED", "UNKNOWN"}
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+_WEEKLY_REPORT_LOCK = threading.Lock()
 
 
 def _valid_record(value: Any, repository: str) -> bool:
@@ -129,27 +132,52 @@ def build_weekly_overview(records_by_repository: Mapping[str, Iterable[dict[str,
     }
 
 
-def render_weekly_markdown(report: dict[str, Any]) -> str:
+def render_weekly_html(report: dict[str, Any]) -> str:
+    """Render the stored report as a self-contained, script-free HTML document."""
     period = report["period"]
-    lines = [f"# HIVE weekly overview · {period['iso_year']} W{period['iso_week']:02d}", "", f"**Status: {report['overall_status']}** · Evidence complete: {'yes' if report['evidence_complete'] else 'no'}", "", "| Repository | Status | Evidence |", "| --- | --- | ---: |"]
-    for row in report["repositories"]:
-        evidence = str(row["evidence_count"]) + (" (missing)" if row["missing_evidence"] else "")
-        lines.append(f"| {row['repository']} | {row['status']} | {evidence} |")
-    lines.extend(["", "## Missing or stale dependencies", ""])
-    for row in report["repositories"]:
+    title = f"HIVE weekly overview · {period['iso_year']} W{period['iso_week']:02d}"
+    def esc(value: Any) -> str:
+        return html.escape(str(value if value is not None else ""), quote=True)
+    repositories = []
+    issues = []
+    for row in report.get("repositories", []):
+        repositories.append(
+            "<tr><th scope=\"row\">{}</th><td><span class=\"status\">{}</span></td>"
+            "<td>{}</td><td>{}</td></tr>".format(
+                esc(row.get("repository")), esc(row.get("status")),
+                esc(row.get("evidence_count", 0)), esc(row.get("current_sha") or "unavailable"),
+            )
+        )
         if row.get("evidence_issue"):
-            fields = ", ".join(row.get("missing_fields", [])) or "current repository head or observation"
-            lines.append(f"- {row['repository']}: {row['evidence_issue']} ({fields}).")
-    lines.extend(["", "## Weekly metrics", ""])
-    for key, value in report["metrics"].items():
-        lines.append(f"- {key.replace('_', ' ').capitalize()}: {value}")
-    lines.append("")
-    if report.get("council_evidence"):
-        lines.extend(["## Council evidence", ""])
-        for item in report["council_evidence"]:
-            lines.append(f"- {item['repository']} · {item['status']} · `{item['source_manifest_key']}`")
-        lines.append("")
-    return "\n".join(lines)
+            fields = ", ".join(row.get("missing_fields", [])) or "current head or observation"
+            issues.append(f"<li><strong>{esc(row.get('repository'))}</strong>: {esc(row['evidence_issue'])} ({esc(fields)})</li>")
+    metrics = "".join(
+        f"<li><span>{esc(key.replace('_', ' ').capitalize())}</span><strong>{esc(value)}</strong></li>"
+        for key, value in report.get("metrics", {}).items()
+    )
+    council = "".join(
+        f"<li><strong>{esc(item.get('repository'))}</strong> · {esc(item.get('status'))} · "
+        f"<code>{esc(item.get('source_manifest_key'))}</code></li>"
+        for item in report.get("council_evidence", [])
+    )
+    issue_section = f"<h2>Missing or stale evidence</h2><ul>{''.join(issues)}</ul>" if issues else ""
+    council_section = f"<h2>Council evidence</h2><ul>{council}</ul>" if council else ""
+    return f"""<!doctype html>
+<html lang="en" data-report-id="{esc(report.get('report_id'))}" data-generated-at="{esc(report.get('generated_at'))}">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light"><title>{esc(title)}</title>
+<style>
+body{{font:16px/1.5 system-ui,sans-serif;max-width:1120px;margin:2rem auto;padding:0 1rem;color:#172033;background:#f5f7fb}}
+h1{{margin-bottom:.25rem}} .meta{{color:#526078}} .summary{{display:flex;gap:1rem;align-items:center;margin:1rem 0;padding:1rem;background:white;border:1px solid #dbe2ee;border-radius:.75rem}}
+.status{{font-weight:700}} table{{width:100%;border-collapse:collapse;background:white}} th,td{{text-align:left;padding:.7rem;border-bottom:1px solid #dbe2ee;overflow-wrap:anywhere}}
+th{{background:#eaf0f8}} ul{{padding-left:1.4rem}} li{{margin:.35rem 0}} code{{overflow-wrap:anywhere}} .metrics{{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));list-style:none;padding:0;gap:.5rem}}
+.metrics li{{display:flex;justify-content:space-between;gap:.5rem;background:white;border:1px solid #dbe2ee;border-radius:.5rem;padding:.65rem}}
+</style></head><body>
+<h1>{esc(title)}</h1><p class="meta">Generated {esc(report.get('generated_at'))} · Scope: {esc(report.get('scope'))}</p>
+<div class="summary"><strong>Overall status: {esc(report.get('overall_status'))}</strong><span>Evidence complete: {('yes' if report.get('evidence_complete') else 'no')}</span></div>
+<h2>All eight repositories</h2><table><thead><tr><th>Repository</th><th>Status</th><th>Evidence records</th><th>Current head SHA</th></tr></thead><tbody>{''.join(repositories)}</tbody></table>
+{issue_section}<h2>Weekly metrics</h2><ul class="metrics">{metrics}</ul>{council_section}
+</body></html>\n"""
 
 
 def build_review_objects(record: dict[str, Any], year: int) -> tuple[str, dict[str, bytes]] | None:
@@ -248,9 +276,6 @@ def collect_council_references(storage: R2Storage, year: int, week: int) -> list
                 sha = str(manifest.get("default_branch_sha") or "")
                 reference = {"repository": repository, "head_sha": sha, "workflow_run_id": run_id, "status": manifest.get("status", "UNKNOWN"), "source_manifest_key": key}
                 references.append(reference)
-                if run_id and sha:
-                    idx = f"reports/council/{repository}/{run_id}-{sha}/evidence-index.json"
-                    _put_immutable(storage, idx, (json.dumps(reference, indent=2, sort_keys=True) + "\n").encode(), "application/json")
             cursor = page.next_cursor
             if not cursor:
                 break
@@ -293,8 +318,8 @@ def _current_repository_heads(storage: R2Storage) -> dict[str, str]:
     return heads
 
 
-def read_latest_weekly_report(storage: R2Storage, year: int, week: int) -> tuple[str, dict[str, Any]]:
-    """Select the newest observation, never whichever slow writer finished last."""
+def _read_legacy_weekly_report(storage: R2Storage, year: int, week: int) -> tuple[str, dict[str, Any]]:
+    """Read old nested reports for history only; never use them for the current report."""
     prefix = f"reports/weekly/{year}/{week:02d}"
     snapshots: list[str] = []
     cursor = None
@@ -305,58 +330,68 @@ def read_latest_weekly_report(storage: R2Storage, year: int, week: int) -> tuple
             suffix = candidate.removeprefix(f"{prefix}/snapshots/").rstrip("/")
             if re.fullmatch(r"\d{8}T\d{12}Z-[0-9a-f]{16}", suffix):
                 snapshots.append(candidate.rstrip("/"))
-        if len(snapshots) > 50_000:
-            raise RuntimeError("Weekly snapshot scan exceeded its safe bound")
         cursor = page.next_cursor
         if not cursor:
             break
-    if len(snapshots) > 1000:
-        raise RuntimeError("Weekly snapshot read exceeded its safe bound")
-    key = f"{prefix}/overview.json"
     report = None
-    invalid_snapshots = 0
+    invalid = 0
     for snapshot in sorted(snapshots, reverse=True):
         try:
             marker = json.loads(storage.read_object(f"{snapshot}/manifest.json", max_bytes=32 * 1024, bucket=BUCKET).content)
             body = storage.read_object(f"{snapshot}/overview.json", max_bytes=2 * 1024 * 1024, bucket=BUCKET).content
-            if not isinstance(marker, dict) or marker.get("overview_sha256") != hashlib.sha256(body).hexdigest():
-                raise ValueError("Weekly snapshot digest does not match its completion marker")
-            candidate = json.loads(body)
-            if not isinstance(candidate, dict):
-                raise ValueError("Weekly overview must be an object")
-        except (FileNotFoundError, ValueError):
-            invalid_snapshots += 1
-            continue
-        key, report = f"{snapshot}/overview.json", candidate
-        break
-    legacy = report is None
-    if legacy:
+            if marker.get("overview_sha256") != hashlib.sha256(body).hexdigest():
+                raise ValueError("Legacy report digest mismatch")
+            report = json.loads(body)
+            key = f"{snapshot}/overview.json"
+            break
+        except (FileNotFoundError, ValueError, AttributeError):
+            invalid += 1
+    if report is None:
+        key = f"{prefix}/overview.json"
         report = json.loads(storage.read_object(key, max_bytes=2 * 1024 * 1024, bucket=BUCKET).content)
+        report["overall_status"] = "UNKNOWN"
+        report["evidence_complete"] = False
+        report["evidence_issue"] = "legacy_report_without_current_head_validation"
+        report["repositories"] = [
+            {**item, "status": "UNKNOWN", "evidence_issue": report["evidence_issue"]}
+            for item in report.get("repositories", []) if isinstance(item, dict)
+        ]
+    elif invalid:
+        report["overall_status"] = "UNKNOWN"
+        report["evidence_complete"] = False
+        report["evidence_issue"] = "newer_legacy_snapshot_unavailable"
+        report["unavailable_snapshot_count"] = invalid
+        report["repositories"] = [
+            {**item, "status": "UNKNOWN", "evidence_issue": report["evidence_issue"]}
+            for item in report.get("repositories", []) if isinstance(item, dict)
+        ]
     if not isinstance(report, dict):
-        raise ValueError("Weekly overview must be an object")
-    if legacy:
-        # Legacy snapshots never checked their records against current repository heads.
-        report["overall_status"] = "UNKNOWN"
-        report["evidence_complete"] = False
-        report["evidence_issue"] = "legacy_snapshot_without_current_head_validation"
-        report["repositories"] = [
-            {**item, "status": "UNKNOWN", "evidence_issue": report["evidence_issue"]}
-            for item in report.get("repositories", []) if isinstance(item, dict)
-        ]
-    if invalid_snapshots:
-        # Retain the older evidence for diagnosis without masking an unreadable newer observation.
-        report["overall_status"] = "UNKNOWN"
-        report["evidence_complete"] = False
-        report["evidence_issue"] = "newer_snapshot_unavailable"
-        report["unavailable_snapshot_count"] = invalid_snapshots
-        report["repositories"] = [
-            {**item, "status": "UNKNOWN", "evidence_issue": report["evidence_issue"]}
-            for item in report.get("repositories", []) if isinstance(item, dict)
-        ]
+        raise ValueError("Legacy weekly report must be an object")
     return key, report
 
 
-def generate_and_store_weekly_report(storage: R2Storage, year: int, week: int) -> dict[str, Any]:
+def read_latest_weekly_report(storage: R2Storage, year: int, week: int) -> tuple[str, dict[str, Any]]:
+    """Read the single current JSON report for an ISO week."""
+    key = f"reports/weekly/{year}-W{week:02d}.json"
+    report = json.loads(storage.read_object(key, max_bytes=2 * 1024 * 1024, bucket=BUCKET).content)
+    if not isinstance(report, dict):
+        raise ValueError("Weekly report must be an object")
+    return key, report
+
+
+def read_weekly_html(storage: R2Storage, year: int, week: int) -> str:
+    """Read the HTML paired with the current JSON, rebuilding it if a write was interrupted."""
+    _, report = read_latest_weekly_report(storage, year, week)
+    key = f"reports/weekly/{year}-W{week:02d}.html"
+    try:
+        body = storage.read_object(key, max_bytes=2 * 1024 * 1024, bucket=BUCKET).content.decode("utf-8")
+    except (FileNotFoundError, RuntimeError, AttributeError, UnicodeDecodeError):
+        return render_weekly_html(report)
+    expected = f'data-generated-at="{html.escape(str(report.get("generated_at") or ""), quote=True)}"'
+    return body if expected in body else render_weekly_html(report)
+
+
+def _generate_and_store_weekly_report(storage: R2Storage, year: int, week: int) -> dict[str, Any]:
     if not (2000 <= year <= 9999 and 1 <= week <= 53):
         raise ValueError("ISO year/week is out of range")
     observation = dt.datetime.now(dt.timezone.utc)
@@ -366,26 +401,14 @@ def generate_and_store_weekly_report(storage: R2Storage, year: int, week: int) -
     council_references = collect_council_references(storage, year, week)
     report["council_evidence"] = council_references
     report["metrics"]["council_evidence_bundles"] = len(council_references)
-    digest = hashlib.sha256(json.dumps(report, sort_keys=True).encode()).hexdigest()[:16]
-    snapshot_id = f"{observation.strftime('%Y%m%dT%H%M%S%fZ')}-{digest}"
-    report["snapshot_id"] = snapshot_id
-    prefix = f"reports/weekly/{year}/{week:02d}/snapshots/{snapshot_id}"
-    objects: dict[str, bytes] = {
-        "overview.json": (json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode(),
-        "overview.md": render_weekly_markdown(report).encode(),
-    }
-    for repository in REPOSITORIES:
-        item = next(row for row in report["repositories"] if row["repository"] == repository)
-        evidence = item["latest_evidence"]
-        repository_observation = {**(evidence or {}), **{key: item[key] for key in ("repository", "status", "current_sha", "head_observed_at", "missing_evidence", "evidence_issue", "missing_fields")}}
-        objects[f"{repository}.json"] = (json.dumps(repository_observation, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode()
-    for filename, body in objects.items():
-        _put_immutable(storage, f"{prefix}/{filename}", body, "text/markdown" if filename.endswith(".md") else "application/json")
-    marker = {"schema_version": 1, "snapshot_id": snapshot_id,
-              "observed_at": report["generated_at"], "object_count": len(objects),
-              "overview_sha256": hashlib.sha256(objects["overview.json"]).hexdigest()}
-    _put_immutable(storage, f"{prefix}/manifest.json",
-                   (json.dumps(marker, sort_keys=True) + "\n").encode(), "application/json")
+    json_key = f"reports/weekly/{year}-W{week:02d}.json"
+    html_key = f"reports/weekly/{year}-W{week:02d}.html"
+    json_body = (json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode()
+    html_body = render_weekly_html(report).encode()
+    # HTML is written first; JSON is the commit marker used by current/history reads.
+    # The process lock also serialises scheduled and operator-triggered builds.
+    storage.client().put_object(Bucket=BUCKET, Key=html_key, Body=html_body, ContentType="text/html; charset=utf-8")
+    storage.client().put_object(Bucket=BUCKET, Key=json_key, Body=json_body, ContentType="application/json")
     review_ids: set[str] = set()
     open_review_count = 0
     all_records = [record for group in records.values() for record in group]
@@ -428,7 +451,13 @@ def generate_and_store_weekly_report(storage: R2Storage, year: int, week: int) -
             _put_immutable(storage, f"{review_prefix}/{filename}", body, "text/markdown" if filename.endswith(".md") else "application/json")
         open_review_count += 1
     review_count = open_review_count
-    return {"ok": True, "report": report, "r2_prefix": prefix, "objects_written_or_preserved": len(objects) + 1, "open_review_records": review_count}
+    return {"ok": True, "report": report, "r2_keys": [json_key, html_key], "objects_written_or_preserved": 2, "open_review_records": review_count}
+
+
+def generate_and_store_weekly_report(storage: R2Storage, year: int, week: int) -> dict[str, Any]:
+    """Serialise report builds so the weekly JSON/HTML pair cannot interleave in-process."""
+    with _WEEKLY_REPORT_LOCK:
+        return _generate_and_store_weekly_report(storage, year, week)
 
 
 def list_open_reviews(storage: R2Storage, limit: int = 100) -> list[dict[str, Any]]:
@@ -553,19 +582,45 @@ def accept_review_fix(storage: R2Storage, settings: Any, review_id: str) -> dict
 
 
 def list_weekly_reports(storage: R2Storage, limit: int = 12) -> list[dict[str, Any]]:
-    """List compact immutable report summaries, newest first."""
+    """List compact report summaries from the flat JSON/HTML weekly pairs."""
     limit = max(1, min(int(limit), 52))
-    years = storage.list_objects_page(prefix="reports/weekly/", bucket=BUCKET, limit=100, delimiter="/", max_scan_keys=5000)
+    cursor = None
+    flat_periods: set[tuple[int, int]] = set()
+    legacy_periods: set[tuple[int, int]] = set()
     summaries: list[dict[str, Any]] = []
-    for year_prefix in years.prefixes:
-        weeks = storage.list_objects_page(prefix=year_prefix, bucket=BUCKET, limit=100, delimiter="/", max_scan_keys=5000)
-        for week_prefix in weeks.prefixes:
-            try:
-                period_parts = week_prefix.rstrip("/").split("/")
-                key, report = read_latest_weekly_report(storage, int(period_parts[-2]), int(period_parts[-1]))
-            except (FileNotFoundError, RuntimeError, ValueError, json.JSONDecodeError):
+    while True:
+        page = storage.list_objects_page(prefix="reports/weekly/", bucket=BUCKET, limit=1000, cursor=cursor, delimiter="/", max_scan_keys=5000)
+        for obj in page.objects:
+            key = str(getattr(obj, "key", ""))
+            match = re.fullmatch(r"reports/weekly/(\d{4})-W(\d{2})\.json", key)
+            if match:
+                flat_periods.add((int(match.group(1)), int(match.group(2))))
+        for year_prefix in page.prefixes:
+            year_match = re.fullmatch(r"reports/weekly/(\d{4})/", year_prefix)
+            if not year_match:
                 continue
-            if isinstance(report, dict) and isinstance(report.get("period"), dict):
-                summaries.append({"report_id": report.get("report_id"), "period": report["period"], "overall_status": report.get("overall_status", "UNKNOWN"), "evidence_complete": report.get("evidence_complete") is True, "r2_key": key})
+            year_page = storage.list_objects_page(prefix=year_prefix, bucket=BUCKET, limit=1000, delimiter="/", max_scan_keys=5000)
+            for week_prefix in year_page.prefixes:
+                week_match = re.fullmatch(r"reports/weekly/(\d{4})/(\d{2})/", week_prefix)
+                if week_match:
+                    legacy_periods.add((int(week_match.group(1)), int(week_match.group(2))))
+        cursor = page.next_cursor
+        if not cursor:
+            break
+    for year, week in flat_periods | (legacy_periods - flat_periods):
+        try:
+            key, report = (
+                read_latest_weekly_report(storage, year, week)
+                if (year, week) in flat_periods
+                else _read_legacy_weekly_report(storage, year, week)
+            )
+        except (FileNotFoundError, RuntimeError, ValueError, json.JSONDecodeError):
+            continue
+        if isinstance(report.get("period"), dict):
+            summary = {"report_id": report.get("report_id"), "period": report["period"], "overall_status": report.get("overall_status", "UNKNOWN"), "evidence_complete": report.get("evidence_complete") is True, "r2_key": key}
+            if (year, week) in flat_periods:
+                summary["html_r2_key"] = key[:-5] + ".html"
+            summaries.append(summary)
     summaries.sort(key=lambda item: (int(item.get("period", {}).get("iso_year", 0)), int(item.get("period", {}).get("iso_week", 0))), reverse=True)
     return summaries[:limit]
+
