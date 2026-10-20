@@ -56,6 +56,8 @@ def test_settings_loads_repo_shared_env_file() -> None:
     settings = Settings(_env_file="HIVE-PRODUCTION-SHARED.env")
     assert settings.app_version == "1.31-production"
     assert settings.database_auto_init is True
+    assert settings.database_backend == "d1"
+    assert settings.database_d1_database_id == "ce7cddf2-7bab-47e7-aa24-f2257184835c"
     assert settings.default_model == "google/gemini-3.8-flash"
     assert settings.cheap_model == "google/gemini-3.8-flash"
     assert settings.balanced_model == "openai/gpt-5.6-terra"

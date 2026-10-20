@@ -491,10 +491,16 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("REPOSITORY_IMPROVEMENT_MAX_WORK_PASSES"),
     )
 
-    # Optional SQL persistence. HIVE v1 works without this; enable when you want
-    # conversation/message/file/cost records in SQLite or Koyeb/PostgreSQL.
+    # Optional SQL persistence. Operational rows can use local SQLite,
+    # PostgreSQL, or Cloudflare D1 through the REST API.
     database_enabled: bool = Field(False, validation_alias=AliasChoices("DATABASE_ENABLED"))
     database_auto_init: bool = Field(True, validation_alias=AliasChoices("DATABASE_AUTO_INIT"))
+    database_backend: Literal["auto", "postgres", "sqlite", "d1"] = Field(
+        "auto", validation_alias=AliasChoices("DATABASE_BACKEND")
+    )
+    database_d1_database_id: str = Field(
+        "", validation_alias=AliasChoices("DATABASE_D1_DATABASE_ID", "D1_SQL_DATABASE_ID")
+    )
     database_url: str = Field("", validation_alias=AliasChoices("DATABASE_URL", "DATABASE_URI"))
     database_host: str = Field("", validation_alias=AliasChoices("DATABASE_HOST", "POSTGRES_HOST"))
     database_port: int = Field(
@@ -997,6 +1003,32 @@ class Settings(BaseSettings):
         if self.database_enabled and self.is_dev:
             return "sqlite:///./local-data/hive.sqlite3"
         return ""
+
+    @property
+    def selected_database_backend(self) -> str:
+        """Resolve the configured operational SQL backend consistently."""
+
+        if self.database_backend != "auto":
+            return self.database_backend
+        if self.sql_database_url.startswith(("postgres://", "postgresql://")):
+            return "postgres"
+        if self.sql_database_url.startswith("sqlite"):
+            return "sqlite"
+        if self.database_d1_database_id:
+            return "d1"
+        return "unknown"
+
+    @property
+    def sql_database_configured(self) -> bool:
+        if not self.database_enabled:
+            return False
+        if self.selected_database_backend == "d1":
+            return bool(
+                self.database_d1_database_id and self.d1_account_id and self.d1_api_key
+            )
+        if self.selected_database_backend in {"postgres", "sqlite"}:
+            return bool(self.sql_database_url)
+        return False
 
     @property
     def r2_endpoint_url(self) -> str:

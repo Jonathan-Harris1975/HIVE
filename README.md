@@ -9,7 +9,7 @@ HIVE-UI (Cloudflare)
   -> signed operator session / authenticated proxy
   -> HIVE (Koyeb / FastAPI)
       -> OpenRouter and configured compatible providers
-      -> PostgreSQL operational persistence / optional Cloudflare D1 metadata
+      -> Cloudflare D1 operational persistence and metadata (PostgreSQL retained for rollback)
       -> Cloudflare R2 object storage and governed multi-bucket reads
       -> Workers AI embeddings -> Vectorize semantic retrieval
       -> Cloudflare AI Search

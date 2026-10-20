@@ -24,14 +24,7 @@ For this repo, Redis is not a hard v1 dependency.
 
 Cloudflare Hyperdrive connects to an existing PostgreSQL or MySQL database. It is a connection accelerator/proxy, not a hosted PostgreSQL database.
 
-Options:
-
-- Local/dev: SQLite.
-- Low-cost production: Neon or Supabase PostgreSQL free tier via `DATABASE_URL`.
-- Cloudflare-native SQL: D1, but this is SQLite-compatible rather than PostgreSQL.
-- If deployed inside Workers later: Hyperdrive can connect Workers to an external Postgres database.
-
-Current repo default: SQLite-compatible local database URL, with PostgreSQL-ready configuration.
+HIVE uses local SQLite for development and Cloudflare D1 for production operational SQL. The previous Koyeb PostgreSQL service remains available during the rollback period. D1 is SQLite-compatible rather than PostgreSQL, so production access uses its REST API and transactional batch endpoint rather than a PostgreSQL driver.
 
 ## Vector search decision
 
@@ -49,12 +42,15 @@ Fallback:
 - Use OpenRouter-compatible embedding model if needed.
 - Store vectors in pgvector if a single Postgres service becomes preferable.
 
-## Cloudflare D1 metadata lane
+## Cloudflare D1 operational and metadata stores
 
-D1 is optional in v1.1 and should be used for ecosystem metadata rather than full chat history. Recommended split:
+HIVE uses Cloudflare D1 for both operational SQL records and ecosystem metadata. The roles use separate databases so operational traffic cannot overwrite the existing metadata store:
 
-- SQL/Koyeb PostgreSQL: conversations, messages, file metadata, upload records, token usage and cost tracking.
-- Cloudflare D1: audit run index, council report index, podcast episode index, ebook catalogue cache, social performance snapshots and other AIMS/RAMS ecosystem metadata.
+- Operational D1 (`DATABASE_D1_DATABASE_ID`): conversations, messages, file metadata/chunks and cost events. Set `DATABASE_BACKEND=d1` and keep `DATABASE_ENABLED=true`.
+- Metadata D1 (`D1_DATABASE_ID`, currently `database-hive`): audit run index, council report index, podcast episode index, ebook catalogue cache, social performance snapshots and other AIMS/RAMS ecosystem metadata.
+- Koyeb PostgreSQL remains configured during the rollback period and is not selected when `DATABASE_BACKEND=d1`.
+
+Operational D1 writes use Cloudflare's transactional batch API. Keep large file bodies in R2.
 
 Required envs:
 
@@ -64,6 +60,9 @@ D1_ACCOUNT_ID=your-cloudflare-account-id
 D1_API_KEY=your-d1-api-token
 D1_DATABASE_ID=your-d1-database-uuid
 D1_DATABASE_NAME=database-hive
+DATABASE_ENABLED=true
+DATABASE_BACKEND=d1
+DATABASE_D1_DATABASE_ID=your-operational-d1-database-uuid
 ```
 
 Initialise the D1 schema with:
@@ -88,9 +87,9 @@ The `hive-chunks` index should match the embedding dimensions used by Workers AI
 Recommended split remains:
 
 - R2: raw file bodies and uploaded ZIP/document objects.
-- D1: ecosystem metadata indexes.
+- D1: operational records and ecosystem metadata indexes in separate databases.
 - Vectorize: semantic lookup only, with SQL chunk IDs as vector IDs.
-- PostgreSQL: durable source of truth for conversations, files, chunks and cost events.
+- Koyeb PostgreSQL: retained as rollback source during the operational D1 migration.
 
 Rotate Cloudflare API tokens after accidental exposure. Update the Koyeb secret, redeploy, and verify `/v1/vectorize/diagnostics`.
 

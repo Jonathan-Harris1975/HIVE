@@ -337,7 +337,7 @@ def build_readiness_report(settings: Settings) -> ReadinessReport:
         )
     )
 
-    database_ready = settings.database_enabled and bool(settings.sql_database_url)
+    database_ready = settings.sql_database_configured
     database_required = production and settings.production_require_database
     checks.append(
         _check(
@@ -345,7 +345,7 @@ def build_readiness_report(settings: Settings) -> ReadinessReport:
             database_ready
             or (not settings.database_enabled and not settings.production_require_database),
             "SQL persistence is configured.",
-            "SQL persistence is enabled or required, but DATABASE_URL/fields are incomplete.",
+            "SQL persistence is enabled or required, but the selected backend settings are incomplete.",
             required=database_required or (production and settings.database_enabled),
         )
     )

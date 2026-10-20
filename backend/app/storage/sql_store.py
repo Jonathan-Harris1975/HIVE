@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from app.core.config import Settings
+from app.storage.d1_sql_client import D1Connection
 from app.storage.sql_store_utils import (
     _default_conversation_title,
     _float_or_none,
@@ -30,9 +31,10 @@ class SqlStore:
 
     Production rules:
     - Works with SQLite for local/dev smoke tests.
-    - Works with Koyeb/PostgreSQL for production persistence.
+    - Works with PostgreSQL or Cloudflare D1 for production persistence.
     - Uses true UPSERTs instead of insert-then-update exception flow.
-    - Rolls back every failed transaction before closing.
+    - Rolls back every failed transaction before closing. D1 writes use its
+      atomic batch endpoint because its HTTP API has no interactive transaction.
     - Returns structured diagnostics; chat/file routes keep working if DB writes fail.
     """
 
@@ -41,16 +43,16 @@ class SqlStore:
         self.url = settings.sql_database_url
 
     @property
+    def selected_backend(self) -> str:
+        return self.settings.selected_database_backend
+
+    @property
     def enabled(self) -> bool:
-        return bool(self.settings.database_enabled and self.url)
+        return self.settings.sql_database_configured
 
     @property
     def dialect(self) -> str:
-        if self.url.startswith("postgres://") or self.url.startswith("postgresql://"):
-            return "postgres"
-        if self.url.startswith("sqlite"):
-            return "sqlite"
-        return "unknown"
+        return self.selected_backend
 
     def safe_config(self) -> dict[str, object]:
         return {
@@ -60,6 +62,7 @@ class SqlStore:
             "user_configured": bool(self.settings.database_user),
             "password_configured": bool(self.settings.database_password),
             "database_name": self.settings.database_name or None,
+            "d1_database_id_configured": bool(self.settings.database_d1_database_id),
             "url_configured": bool(self.settings.database_url),
             "sslmode": self.settings.database_sslmode or None,
             "connect_timeout_seconds": self.settings.database_connect_timeout_seconds,
@@ -717,17 +720,20 @@ class SqlStore:
                     self._sql("DELETE FROM hive_cost_events WHERE conversation_id=__PARAM__"),
                     (conversation_id,),
                 )
-                cost_events_deleted = int(cur.rowcount or 0)
+                cost_events_deleted = int(cur.rowcount or 0) if self.dialect != "d1" else 0
                 cur.execute(
                     self._sql("DELETE FROM hive_messages WHERE conversation_id=__PARAM__"),
                     (conversation_id,),
                 )
-                messages_deleted = int(cur.rowcount or 0)
+                messages_deleted = int(cur.rowcount or 0) if self.dialect != "d1" else 0
                 cur.execute(
                     self._sql("DELETE FROM hive_conversations WHERE id=__PARAM__"),
                     (conversation_id,),
                 )
-                conversations_deleted = int(cur.rowcount or 0)
+                if self.dialect == "d1":
+                    cost_events_deleted, messages_deleted, conversations_deleted = cur.flush_batch()
+                else:
+                    conversations_deleted = int(cur.rowcount or 0)
             return {
                 "ok": conversations_deleted == 1,
                 "enabled": True,
@@ -1222,9 +1228,9 @@ class SqlStore:
     def reset_all_data(self) -> dict[str, object]:
         """Remove all HIVE application rows while preserving the SQL schema.
 
-        Production PostgreSQL uses one transactional TRUNCATE with CASCADE and
-        identity reset. SQLite uses DELETE statements in a transaction so local
-        development and tests exercise the same public operation safely.
+        PostgreSQL uses one transactional TRUNCATE with CASCADE and identity reset.
+        SQLite and D1 use DELETE statements in a transaction so local development
+        and production D1 exercise the same public operation safely.
         """
 
         if not self.enabled:
@@ -1250,7 +1256,7 @@ class SqlStore:
                 if self.dialect == "postgres":
                     table_sql = ", ".join(f'"{name}"' for name in tables)
                     cur.execute(f"TRUNCATE TABLE {table_sql} RESTART IDENTITY CASCADE")
-                elif self.dialect == "sqlite":
+                elif self.dialect in {"sqlite", "d1"}:
                     for table in reversed(tables):
                         # table is sourced only from the fixed table_names() allow-list above.
                         cur.execute(f'DELETE FROM "{table}"')  # nosec B608
@@ -1400,7 +1406,7 @@ class SqlStore:
                 "ALTER TABLE hive_conversations ADD COLUMN IF NOT EXISTS auto_titled INTEGER NOT NULL DEFAULT 0"
             )
             return
-        if self.dialect == "sqlite":
+        if self.dialect in {"sqlite", "d1"}:
             cur.execute("PRAGMA table_info(hive_conversations)")
             columns = {str(row[1]) for row in cur.fetchall()}
             if "auto_titled" not in columns:
@@ -1414,6 +1420,23 @@ class SqlStore:
 
     @contextmanager
     def _connect(self) -> Iterator[Any]:
+        conn: Any
+        if self.dialect == "d1":
+            conn = D1Connection(
+                account_id=self.settings.d1_account_id,
+                database_id=self.settings.database_d1_database_id,
+                api_key=self.settings.d1_api_key,
+                timeout_seconds=self.settings.d1_timeout_seconds,
+            )
+            try:
+                yield conn
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+            return
+
         if self.dialect == "sqlite":
             path = self._sqlite_path()
             if str(path) != ":memory:":

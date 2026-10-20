@@ -91,8 +91,8 @@ HIVE now has an optional two-store persistence design:
 
 | Store | Recommended use |
 | --- | --- |
-| Koyeb/PostgreSQL or local SQLite | Conversations, messages, upload records, file metadata, cost tracking and token usage logs. |
-| Cloudflare D1 | Ecosystem metadata indexes such as audit runs, council reports, podcast episodes, ebook catalogue cache and social performance snapshots. |
+| Cloudflare D1 | HIVE operational records (conversations, messages, files, chunks, cost events) and ecosystem metadata indexes. |
+| Koyeb/PostgreSQL | Retained as the migration rollback source until the D1 cutover is accepted. |
 
 The core v1 chat/R2 file loop still works with both stores disabled. Persistence is additive, not a hard dependency.
 
@@ -103,18 +103,19 @@ The core v1 chat/R2 file loop still works with both stores disabled. Persistence
 - `hive_conversations`
 - `hive_messages`
 - `hive_files`
+- `hive_file_chunks`
 - `hive_cost_events`
 
-The same schema works for local SQLite smoke tests and Koyeb/PostgreSQL.
+The same schema works for local SQLite smoke tests, PostgreSQL, and Cloudflare D1. Operational D1 is configured independently from the existing ecosystem metadata database with `DATABASE_BACKEND=d1` and `DATABASE_D1_DATABASE_ID`. Keep the PostgreSQL variables configured during cutover so rollback can restore `DATABASE_BACKEND=postgres`.
 
 
 ### Persistence production rules
 
-- PostgreSQL writes use transaction context managers with rollback-on-error.
-- Conversation and file records use `ON CONFLICT` upserts, avoiding PostgreSQL aborted-transaction poisoning.
+- PostgreSQL and SQLite writes use transaction context managers with rollback-on-error. D1 writes use Cloudflare's transactional batch API.
+- Conversation and file records use `ON CONFLICT` upserts.
 - Each diagnostic table count runs safely so one missing table cannot poison the remaining checks.
-- D1 queries include bounded retries and structured diagnostics.
-- `/v1/db/ping-write` verifies SQL and D1 write/delete paths without leaving permanent records.
+- D1 metadata and operational queries use separate configured database IDs.
+- `/v1/db/ping-write` verifies the configured operational SQL write/delete path without leaving permanent records.
 
 ### D1 schema
 
@@ -157,7 +158,7 @@ incoming /v1/chat with conversation_id
 
 This keeps current prompts deterministic while allowing HIVE to continue an existing session without relying on client-side history alone.
 
-D1 remains separate and stores ecosystem metadata indexes rather than full chat history.
+The operational SQL store uses its own D1 database for chat/file/cost records. The separate metadata D1 continues to hold ecosystem indexes and other metadata lanes.
 
 
 ## Chunk retrieval foundation
@@ -181,8 +182,8 @@ HIVE now has a durable retrieval spine:
 
 ```text
 R2 raw files
-  -> PostgreSQL file metadata
-  -> PostgreSQL chunks as source of truth
+  -> Operational D1 file metadata
+  -> Operational D1 chunks as source of truth
   -> Workers AI embeddings
   -> Vectorize semantic lookup keyed by SQL chunk IDs
   -> SQL lexical fallback if Vectorize is unavailable
@@ -196,7 +197,7 @@ File-chat responses surface `retrieval_source`, `vector_hits`, `sql_fallback_hit
 
 HIVE now treats archive ingestion as a bounded transformation, not a background-heavy extraction worker. Raw uploaded ZIPs remain in R2. `/v1/files/zip/extract-text` reads the ZIP, extracts text from supported members into a single derived text artefact, stores that artefact back through the normal upload path, and can immediately create SQL chunks for retrieval.
 
-PostgreSQL remains the source of truth for file metadata and chunks. Vectorize remains an optional semantic accelerator over SQL chunk IDs. Production resource protection is provided by explicit member, byte, character and recursion limits.
+Operational D1 is the source of truth for file metadata and chunks. Vectorize remains an optional semantic accelerator over SQL chunk IDs. Production resource protection is provided by explicit member, byte, character and recursion limits.
 
 ## v1.6 workflow and lane architecture
 
@@ -269,7 +270,7 @@ The preview-persistence layer sits above workflow graphs and controlled executio
 Data remains split deliberately:
 
 - D1 stores lightweight preview metadata and simulation summaries.
-- PostgreSQL remains the conversation/file/chunk persistence layer.
+- Operational D1 stores the conversation/file/chunk persistence layer.
 - R2 remains artefact storage.
 - Vectorize remains semantic retrieval.
 
