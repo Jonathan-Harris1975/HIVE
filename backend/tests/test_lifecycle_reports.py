@@ -198,7 +198,7 @@ class LifecycleReportTests(unittest.TestCase):
                     "reports/weekly/2026-W42.json", "reports/weekly/2026-W42.html",
                     "reports/weekly/2026/42/snapshots/old.json",
                 ]
-                return SimpleNamespace(objects=[SimpleNamespace(key=key) for key in keys], next_cursor=None)
+                return SimpleNamespace(objects=[SimpleNamespace(key=key) for key in keys], prefixes=[], next_cursor=None)
 
             def read_object(self, key, **_kwargs):
                 if "W41" in key:
@@ -213,6 +213,35 @@ class LifecycleReportTests(unittest.TestCase):
         self.assertEqual([item["report_id"] for item in reports], ["weekly-2026-W42"])
         self.assertEqual(reports[0]["r2_key"], "reports/weekly/2026-W42.json")
         self.assertEqual(reports[0]["html_r2_key"], "reports/weekly/2026-W42.html")
+
+    def test_weekly_history_keeps_nested_legacy_reports_as_unknown(self):
+        old_report = {
+            "report_id": "weekly-2026-W41",
+            "period": {"iso_year": 2026, "iso_week": 41},
+            "overall_status": "GREEN",
+            "evidence_complete": True,
+            "repositories": [{"repository": name, "status": "GREEN"} for name in REPOSITORIES],
+        }
+
+        class Storage:
+            def list_objects_page(self, *, prefix, **_kwargs):
+                if prefix == "reports/weekly/":
+                    return SimpleNamespace(objects=[], prefixes=["reports/weekly/2026/"], next_cursor=None)
+                if prefix == "reports/weekly/2026/":
+                    return SimpleNamespace(objects=[], prefixes=["reports/weekly/2026/41/"], next_cursor=None)
+                return SimpleNamespace(objects=[], prefixes=[], next_cursor=None)
+
+            def read_object(self, key, **_kwargs):
+                if key == "reports/weekly/2026/41/overview.json":
+                    return SimpleNamespace(content=json.dumps(old_report).encode())
+                raise FileNotFoundError(key)
+
+        reports = list_weekly_reports(Storage())
+        self.assertEqual(len(reports), 1)
+        self.assertEqual(reports[0]["report_id"], "weekly-2026-W41")
+        self.assertEqual(reports[0]["overall_status"], "UNKNOWN")
+        self.assertFalse(reports[0]["evidence_complete"])
+        self.assertNotIn("html_r2_key", reports[0])
 
 if __name__ == "__main__":
     unittest.main()
