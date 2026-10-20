@@ -5,6 +5,7 @@ import datetime as dt
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import HTMLResponse
 
 from app.core.config import Settings, get_settings
 from app.core.security import require_admin
@@ -14,7 +15,7 @@ from app.services.ops_events import delete_all_ops_events, delete_ops_event, lis
 from app.services.providers.registry import discover_providers
 from app.services.repo_health import build_repo_health_report
 from app.services.production_manager import build_production_manager_report
-from app.services.lifecycle_reports import accept_review_fix, generate_and_store_weekly_report, list_open_reviews, list_weekly_reports, read_latest_weekly_report
+from app.services.lifecycle_reports import accept_review_fix, generate_and_store_weekly_report, list_open_reviews, list_weekly_reports, read_latest_weekly_report, read_weekly_html
 from app.services.repo_hygiene import repo_hygiene_report
 from app.storage.d1 import D1MetadataStore
 from app.storage.r2 import R2Storage
@@ -59,7 +60,7 @@ async def production_manager(
 
 @router.get("/system/lifecycle-reports/current")
 def current_lifecycle_report(settings: Settings = Depends(get_settings)) -> dict[str, object]:
-    """Read the newest immutable observation for the current ISO week."""
+    """Read the current ISO-week report assembled from all eight repositories."""
     now = dt.datetime.now(dt.timezone.utc).isocalendar()
     key = f"reports/weekly/{now.year}/{now.week:02d}/overview.json"
     try:
@@ -67,6 +68,30 @@ def current_lifecycle_report(settings: Settings = Depends(get_settings)) -> dict
         return {"ok": True, "available": True, "report": report, "r2_key": key}
     except (FileNotFoundError, RuntimeError, ValueError) as exc:
         return {"ok": True, "available": False, "report": None, "r2_key": key, "reason": type(exc).__name__}
+
+
+@router.get("/system/lifecycle-reports/html", response_class=HTMLResponse)
+def weekly_lifecycle_report_html(
+    year: int = Query(..., ge=2000, le=9999),
+    week: int = Query(..., ge=1, le=53),
+    settings: Settings = Depends(get_settings),
+) -> HTMLResponse:
+    """Serve the stored weekly HTML report for viewing from HIVE-UI."""
+    try:
+        content = read_weekly_html(R2Storage(settings), year, week)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Weekly report is not available") from exc
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=503, detail="Weekly report could not be read") from exc
+    return HTMLResponse(
+        content=content,
+        headers={
+            "Cache-Control": "no-store",
+            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+            "X-Content-Type-Options": "nosniff",
+            "Referrer-Policy": "no-referrer",
+        },
+    )
 
 
 @router.post("/system/lifecycle-reports/weekly")
@@ -211,3 +236,4 @@ async def runtime_stats(settings: Settings = Depends(get_settings)) -> dict[str,
             "memory_limit": settings.ops_event_memory_limit,
         },
     }
+
