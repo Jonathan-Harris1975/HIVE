@@ -91,8 +91,8 @@ HIVE now has an optional two-store persistence design:
 
 | Store | Recommended use |
 | --- | --- |
-| Koyeb/PostgreSQL or local SQLite | Conversations, messages, upload records, file metadata, cost tracking and token usage logs. |
-| Cloudflare D1 | Ecosystem metadata indexes such as audit runs, council reports, podcast episodes, ebook catalogue cache and social performance snapshots. |
+| Cloudflare D1 | HIVE operational records (conversations, messages, files, chunks, cost events) and ecosystem metadata indexes. |
+| Koyeb/PostgreSQL | Retained as the migration rollback source until the D1 cutover is accepted. |
 
 The core v1 chat/R2 file loop still works with both stores disabled. Persistence is additive, not a hard dependency.
 
@@ -105,16 +105,16 @@ The core v1 chat/R2 file loop still works with both stores disabled. Persistence
 - `hive_files`
 - `hive_cost_events`
 
-The same schema works for local SQLite smoke tests and Koyeb/PostgreSQL.
+The same schema works for local SQLite smoke tests, PostgreSQL, and Cloudflare D1. Operational D1 is configured independently from the existing ecosystem metadata database with `DATABASE_BACKEND=d1` and `DATABASE_D1_DATABASE_ID`. Keep the PostgreSQL variables configured during cutover so rollback can restore `DATABASE_BACKEND=postgres`.
 
 
 ### Persistence production rules
 
-- PostgreSQL writes use transaction context managers with rollback-on-error.
-- Conversation and file records use `ON CONFLICT` upserts, avoiding PostgreSQL aborted-transaction poisoning.
+- PostgreSQL and SQLite writes use transaction context managers with rollback-on-error. D1 writes use Cloudflare's transactional batch API.
+- Conversation and file records use `ON CONFLICT` upserts.
 - Each diagnostic table count runs safely so one missing table cannot poison the remaining checks.
-- D1 queries include bounded retries and structured diagnostics.
-- `/v1/db/ping-write` verifies SQL and D1 write/delete paths without leaving permanent records.
+- D1 metadata and operational queries use separate configured database IDs.
+- `/v1/db/ping-write` verifies the configured operational SQL write/delete path without leaving permanent records.
 
 ### D1 schema
 

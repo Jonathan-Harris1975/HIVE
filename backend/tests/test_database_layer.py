@@ -88,6 +88,83 @@ def test_d1_env_aliases() -> None:
     assert settings.d1_database_name == "database-hive"
 
 
+def test_d1_operational_backend_requires_its_own_database_id() -> None:
+    settings = Settings(
+        DATABASE_ENABLED=True,
+        DATABASE_BACKEND="d1",
+        DATABASE_D1_DATABASE_ID="operational-id",
+        D1_ACCOUNT_ID="account-123",
+        D1_API_KEY="token",
+    )
+    store = SqlStore(settings)
+    assert store.enabled is True
+    assert store.dialect == "d1"
+    assert store.safe_config()["d1_database_id_configured"] is True
+
+
+def test_d1_store_commits_chat_writes_as_one_batch(monkeypatch) -> None:
+    from app.storage import d1_sql_client
+
+    calls: list[dict[str, object]] = []
+
+    class FakeResponse:
+        status_code = 200
+        content = b"{}"
+
+        def __init__(self, payload: dict[str, object]) -> None:
+            self.payload = payload
+
+        def json(self) -> dict[str, object]:
+            return self.payload
+
+    class FakeClient:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args) -> None:
+            return None
+
+        def post(self, _url, *, headers, json):
+            calls.append({"headers": headers, "json": json})
+            statements = json.get("batch", [json])
+            return FakeResponse({
+                "success": True,
+                "result": [
+                    {"success": True, "results": [], "meta": {"changes": 1}}
+                    for _ in statements
+                ],
+            })
+
+    monkeypatch.setattr(d1_sql_client.httpx, "Client", FakeClient)
+    store = SqlStore(Settings(
+        DATABASE_ENABLED=True,
+        DATABASE_BACKEND="d1",
+        DATABASE_D1_DATABASE_ID="operational-id",
+        D1_ACCOUNT_ID="account-123",
+        D1_API_KEY="token",
+    ))
+
+    result = store.record_chat(
+        conversation_id="conv-test",
+        mode="general",
+        user_message="hello",
+        assistant_reply="world",
+        model_used="test/model",
+        provider="test",
+        usage={"total_tokens": 2, "cost": 0.01},
+    )
+
+    assert result["ok"] is True
+    assert len(calls) == 1
+    batch = calls[0]["json"]["batch"]
+    assert len(batch) == 4
+    assert "hive_conversations" in batch[0]["sql"]
+    assert all("__PARAM__" not in statement["sql"] for statement in batch)
+
+
 def test_sql_store_lists_conversations_files_and_costs(tmp_path: Path) -> None:
     db_path = tmp_path / "hive.sqlite3"
     settings = Settings(

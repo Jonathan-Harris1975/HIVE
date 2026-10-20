@@ -491,10 +491,16 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("REPOSITORY_IMPROVEMENT_MAX_WORK_PASSES"),
     )
 
-    # Optional SQL persistence. HIVE v1 works without this; enable when you want
-    # conversation/message/file/cost records in SQLite or Koyeb/PostgreSQL.
+    # Optional SQL persistence. Operational rows can use local SQLite,
+    # PostgreSQL, or Cloudflare D1 through the REST API.
     database_enabled: bool = Field(False, validation_alias=AliasChoices("DATABASE_ENABLED"))
     database_auto_init: bool = Field(True, validation_alias=AliasChoices("DATABASE_AUTO_INIT"))
+    database_backend: Literal["auto", "postgres", "sqlite", "d1"] = Field(
+        "auto", validation_alias=AliasChoices("DATABASE_BACKEND")
+    )
+    database_d1_database_id: str = Field(
+        "", validation_alias=AliasChoices("DATABASE_D1_DATABASE_ID", "D1_SQL_DATABASE_ID")
+    )
     database_url: str = Field("", validation_alias=AliasChoices("DATABASE_URL", "DATABASE_URI"))
     database_host: str = Field("", validation_alias=AliasChoices("DATABASE_HOST", "POSTGRES_HOST"))
     database_port: int = Field(

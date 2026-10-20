@@ -159,12 +159,15 @@ ALLOW_PAID_FALLBACK=false
 
 For direct `/v1/chat` tests, avoid very small `max_tokens` values. If a model still returns no visible text, HIVE returns `ok:false` with `error_code:"empty_model_reply"` instead of `ok:true` and `reply:null`.
 
-## Optional Koyeb PostgreSQL persistence
+## Operational D1 persistence
 
-For operational HIVE history, enable the SQL layer only after the core v1 smoke tests are passing.
+HIVE's operational SQL adapter supports Cloudflare D1. Keep `D1_DATABASE_ID` pointed at the existing metadata database, and set the operational D1 database ID separately. Keep PostgreSQL credentials configured in Koyeb during the rollback period.
 
 ```env
 DATABASE_ENABLED=true
+DATABASE_BACKEND=d1
+DATABASE_D1_DATABASE_ID=your-operational-d1-database-uuid
+# Keep the existing DATABASE_HOST/PORT/USER/PASSWORD/NAME/SSLMODE values for rollback.
 DATABASE_HOST=your-koyeb-postgres-host
 DATABASE_PORT=5432
 DATABASE_USER=your-database-user
@@ -183,7 +186,7 @@ curl -X GET "https://YOUR-KOYEB-APP.koyeb.app/v1/db/diagnostics" -H "Authorizati
 curl -X POST "https://YOUR-KOYEB-APP.koyeb.app/v1/db/init" -H "Authorization: Bearer YOUR_ADMIN_BEARER_TOKEN"
 ```
 
-If the password is missing, diagnostics will show the SQL store as configured but the probe will fail. Add the missing secret, redeploy, then rerun `/v1/db/init`.
+After cutover, `/v1/db/diagnostics` should report `dialect=d1`; `/v1/db/ping-write` verifies the atomic D1 write/delete path. To roll back, set `DATABASE_BACKEND=postgres` while preserving PostgreSQL variables, then redeploy. Do not repoint `D1_DATABASE_ID`; it continues to select the ecosystem metadata store.
 
 
 ## File-chat timeout diagnostics
@@ -199,7 +202,7 @@ The endpoint returns `stage`, `timings`, and `error_code:"chat_with_file_timeout
 
 ### Production persistence verification
 
-After enabling Koyeb PostgreSQL and Cloudflare D1, run these in order:
+After configuring operational D1 and the separate metadata D1, run these in order:
 
 ```bash
 curl -X POST "https://YOUR-KOYEB-APP.koyeb.app/v1/db/init" -H "Authorization: Bearer YOUR_ADMIN_BEARER_TOKEN"
@@ -209,7 +212,7 @@ curl -X POST "https://YOUR-KOYEB-APP.koyeb.app/v1/db/ping-write" -H "Authorizati
 curl -X GET "https://YOUR-KOYEB-APP.koyeb.app/v1/db/diagnostics" -H "Authorization: Bearer YOUR_ADMIN_BEARER_TOKEN"
 ```
 
-`/v1/db/ping-write` writes and deletes temporary probe rows in SQL and D1. It is the quick check that the persistence layer is not stuck in an aborted PostgreSQL transaction and that D1 writes are accepted.
+`/v1/db/ping-write` writes and deletes a temporary operational D1 row. It confirms that the atomic write/delete path is accepted and leaves no permanent record.
 
 
 ## Chunk retrieval env controls
