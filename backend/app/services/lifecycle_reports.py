@@ -136,7 +136,8 @@ def render_weekly_html(report: dict[str, Any]) -> str:
     """Render the stored report as a self-contained, script-free HTML document."""
     period = report["period"]
     title = f"HIVE weekly overview · {period['iso_year']} W{period['iso_week']:02d}"
-    esc = lambda value: html.escape(str(value if value is not None else ""), quote=True)
+    def esc(value: Any) -> str:
+        return html.escape(str(value if value is not None else ""), quote=True)
     repositories = []
     issues = []
     for row in report.get("repositories", []):
