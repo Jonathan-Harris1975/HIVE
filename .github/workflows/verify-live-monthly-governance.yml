@@ -16,7 +16,7 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 90
     environment: production
     env:
       HIVE_BASE_URL: ${{ vars.HIVE_BASE_URL }}
@@ -24,12 +24,12 @@ jobs:
       PERIOD: ${{ inputs.period }}
       EXECUTE: ${{ inputs.execute }}
     steps:
-      - name: Verify prerequisites and execute only when approved
+      - name: Start once and poll the D1-backed job
         shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
-          import json, os, re, sys, urllib.error, urllib.request
+          import json, os, re, sys, time, urllib.error, urllib.request
           base = os.getenv("HIVE_BASE_URL", "").strip().rstrip("/")
           token = os.getenv("HIVE_ADMIN_TOKEN", "")
           period = os.getenv("PERIOD", "").strip()
@@ -39,75 +39,53 @@ jobs:
               sys.exit("period must be YYYY-MM")
           if os.getenv("EXECUTE") != "true":
               sys.exit("Execution disabled: dispatch again with execute=true after approving production writes")
-          endpoint = base + "/v1/monthly-review/generate" + (("?period=" + period) if period else "")
-          request = urllib.request.Request(endpoint, method="POST", headers={
-              "Authorization": "Bearer " + token, "Accept": "application/json"
-          })
+
+          headers = {
+              "Authorization": "Bearer " + token,
+              "Accept": "application/json",
+              "Content-Type": "application/json",
+          }
+          endpoint = base + "/v1/monthly-review/generate"
+          if period:
+              endpoint += "?period=" + period
+          request = urllib.request.Request(endpoint, method="POST", headers=headers, data=b"{}")
           try:
-              with urllib.request.urlopen(request, timeout=480) as response:
-                  data = json.load(response)
+              with urllib.request.urlopen(request, timeout=60) as response:
+                  accepted = json.load(response)
           except urllib.error.HTTPError as error:
-              print("Governance endpoint HTTP failure:", error.code)
-              if error.code in (502, 503, 504):
-                  print("Upstream request failed; no automatic retry because the operation may have committed writes")
-              try:
-                  body = json.loads(error.read().decode("utf-8"))
-                  detail = body.get("detail") if isinstance(body, dict) else None
-                  report = detail.get("report") if isinstance(detail, dict) else None
-                  if not isinstance(report, dict):
-                      print("HTTP response did not contain a governance report")
-                      sys.exit(1)
-                  council = report.get("council_cycle") or {}
-                  run = council.get("run") or {}
-                  sync = council.get("downstream_sync") or {}
-                  print("Report OK:", report.get("ok"))
-                  print("Sections:", report.get("sections_ok"), "/", report.get("sections_total"))
-                  for section_name, section in (report.get("sections") or {}).items():
-                      if isinstance(section, dict) and section.get("ok") is False:
-                          print("FAILED section:", section_name)
-                  print("Council OK:", council.get("ok"))
-                  print("Council failure stage:", council.get("failure_stage"))
-                  print("Council qualified models:", council.get("qualified_model_count"))
-                  council_run = council.get("run") or {}
-                  print("Providers discovered:", council_run.get("providers_discovered"))
-                  print("Models discovered:", council_run.get("models_seen"))
-                  print("Models promoted:", len(council_run.get("promotions") or []))
-                  print("Qualification counts:", council_run.get("qualification_counts"))
-                  print("Benchmark matching:", council_run.get("benchmark_match_counts"))
-                  for source in council_run.get("benchmark_sources") or []:
-                      if isinstance(source, dict):
-                          print("Benchmark source:", {k: source.get(k) for k in ("provider", "source", "status", "ok") if k in source})
-                  print("Council cycle completion:", council.get("completion_status"))
-                  print("Council downstream enabled:", (council.get("downstream_sync") or {}).get("enabled"))
-                  print("Council downstream OK:", (council.get("downstream_sync") or {}).get("ok"))
-                  print("Council reused:", council.get("reused"))
-                  print("Council run ID:", run.get("run_id"))
-                  print("R2 OK:", (report.get("r2_object") or {}).get("ok"))
-                  print("D1 OK:", (report.get("d1_index") or {}).get("ok"))
-              except (ValueError, TypeError, AttributeError):
-                  print("HTTP response did not contain a parseable governance report")
+              print("Governance start rejected with HTTP", error.code)
+              print(error.read().decode("utf-8", errors="replace")[:2000])
+              if error.code in (409, 502, 503, 504):
+                  print("Do not retry automatically; inspect D1, R2, Council history and AIMS/RAMS effects first.")
               sys.exit(1)
           except Exception as error:
-              print("Governance request failed:", type(error).__name__)
+              print("Governance start request failed:", type(error).__name__)
+              print("The request outcome may be ambiguous. Inspect the D1 job and downstream effects before retrying.")
               sys.exit(1)
-          council = data.get("council_cycle") or {}
-          run = council.get("run") or {}
-          sync = council.get("downstream_sync") or {}
-          r2 = data.get("r2_object") or {}
-          d1 = data.get("d1_index") or {}
-          checks = {
-              "report_ok": data.get("ok") is True,
-              "sections_complete": data.get("sections_total", 0) > 0 and data.get("sections_ok") == data.get("sections_total"),
-              "council_ok": council.get("ok") is True,
-              "council_completed": council.get("completion_status") == "completed",
-              "downstream_enabled": sync.get("enabled") is True,
-              "downstream_ok": sync.get("ok") is True,
-              "r2_archived": r2.get("ok") is True,
-              "d1_indexed": d1.get("ok") is True,
-          }
-          for name, passed in checks.items():
-              print(("PASS" if passed else "FAIL") + " " + name)
-          if not all(checks.values()):
-              sys.exit("Live governance verification failed")
-          print("Live monthly governance checks passed")
+
+          accepted_period = accepted.get("period")
+          if not accepted.get("accepted") or not accepted_period:
+              sys.exit("HIVE did not return an accepted period")
+          print("Accepted period:", accepted_period)
+          status_url = base + "/v1/monthly-review/jobs/" + accepted_period
+          deadline = time.monotonic() + 85 * 60
+          while time.monotonic() < deadline:
+              status_request = urllib.request.Request(status_url, headers=headers)
+              try:
+                  with urllib.request.urlopen(status_request, timeout=60) as response:
+                      job = json.load(response)
+              except Exception as error:
+                  sys.exit("Status lookup failed; do not start a second run: " + type(error).__name__)
+              state = job.get("state") or {}
+              current = state.get("status")
+              print("Job status:", current)
+              if current == "completed":
+                  print("Monthly governance job completed.")
+                  sys.exit(0)
+              if current == "failed":
+                  sys.exit("Monthly governance job failed; inspect report and downstream effects before retrying.")
+              if current != "claimed":
+                  sys.exit("Unexpected monthly governance status: " + str(current))
+              time.sleep(15)
+          sys.exit("Polling window expired with the job still claimed. Reconcile its status and downstream writes before retrying.")
           PY

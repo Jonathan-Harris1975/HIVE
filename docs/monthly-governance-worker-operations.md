@@ -1,85 +1,58 @@
-# Monthly governance worker: deployment and operations
+# Monthly governance execution and operations
 
-The monthly governance HTTP POST is **not** a background queue. The independent
-worker must run in a persistent, scheduled process with the same HIVE backend
-code and production configuration. Merging the worker does not deploy it.
+MAST is the ecosystem scheduling authority. On the first day of each month it
+calls HIVE's authenticated `POST /v1/monthly-review/generate`. HIVE validates
+the completed reporting period, atomically claims it in D1 and returns HTTP 202.
+The HIVE service then runs the AI Council cycle, AIMS/RAMS propagation, report
+assembly, R2 archive and D1 indexing in a background task. MAST polls
+`GET /v1/monthly-review/jobs/{period}` until the job reaches `completed` or
+`failed`.
 
-## One-time production setup
+This keeps the long governance workflow off the request-response path that
+caused gateway 504s. It uses the existing always-on HIVE service; it does not
+require a second scheduled or paid worker.
 
-1. Provision a scheduled container/job using the HIVE backend image and Python
-   application dependencies. Set its working directory to the backend package
-   root so `python -m app.monthly_governance_worker` resolves correctly.
-2. Inject production configuration through your deployment secret manager.
-   Required: `D1_ENABLED=true`, `D1_ACCOUNT_ID`, `D1_DATABASE_ID`,
-   `D1_API_KEY`, `CF_R2_ACCOUNT_ID`, `CF_R2_ACCESS_KEY_ID`,
-   `CF_R2_SECRET_ACCESS_KEY`, `R2_BUCKET_AUDITS`, `AIMS_BASE_URL`,
-   `AIMS_API_KEY`, `RAMS_BASE_URL`, and `RAMS_API_KEY`.
-   Confirm the actual R2 lane and bucket configuration used by the monthly
-   review, not just the audit bucket. Never commit secret values.
-3. Verify the D1 schema contains `hive_ecosystem_metadata` and that the
-   service account can query and update it.
-4. Run a **read-only** preflight for the previous completed month:
-   `python -m app.monthly_governance_worker --period YYYY-MM --preflight-only`.
-   This checks settings and D1 connectivity/schema; it does not test downstream
-   credentials or perform a monthly governance run.
-5. Configure the scheduler to run **once monthly**, after the reporting month
-   closes (for example 03:00 UTC on day 1), with a single active instance and
-   a runtime budget longer than the expected governance cycle. Use:
-   `python -m app.monthly_governance_worker --previous-month`.
-   The worker resolves the **previous completed UTC month** itself, including
-   January year rollover. Keep `--period YYYY-MM` for deliberate operator-led
-   investigation only. Never schedule a fixed reporting period.
-6. Turn off the old MAST job group's automatic POST to
-   `/v1/monthly-review/generate` **before** enabling the new scheduler.
-   Otherwise two independent execution paths can race, and the legacy POST
-   does not participate in the worker's D1 claim.
-7. Do not manually trigger a run until previous 504 activity has been reconciled.
+## Configuration and readiness
 
-## GitHub read-only worker preflight
+The production HIVE service must have its existing D1, R2 and downstream AIMS
+and RAMS settings configured. The authenticated monthly review endpoint fails
+closed when D1 cannot claim the job. The existing
+**Worker D1 preflight (read only)** GitHub Actions workflow can still verify D1
+connectivity and schema from GitHub-hosted infrastructure. It is diagnostic
+only; it does not schedule or execute governance.
 
-The manual **Worker D1 preflight (read only)** Actions workflow runs the
-worker's existing `--previous-month --preflight-only` mode in a temporary
-GitHub runner. Configure the production GitHub environment with secrets
-`D1_ACCOUNT_ID`, `D1_DATABASE_ID`, `D1_API_KEY`,
-`CF_R2_ACCOUNT_ID`, `CF_R2_ACCESS_KEY_ID`, `CF_R2_SECRET_ACCESS_KEY`,
-`AIMS_API_KEY`, `RAMS_API_KEY`, and environment variables
-`R2_BUCKET_AUDITS`, `AIMS_BASE_URL`, `RAMS_BASE_URL`.
-The workflow sets `D1_ENABLED=true` explicitly.
+The standalone command
+`python -m app.monthly_governance_worker --previous-month` remains available
+for controlled operator-led recovery or a deliberate one-shot execution.
+Do not configure it as a second recurring schedule while MAST owns the monthly
+run.
 
-A green result confirms settings are present and that the runner can query
-D1 diagnostics/schema. It **does not** establish R2 or downstream write
-permissions, confirm the deployed worker has the same secrets, or install a
-scheduler. Do not schedule a write-producing GitHub workflow as a substitute
-for the persistent independent worker without a separate deployment decision.
+## Duplicate and ambiguous request handling
 
-## Monitoring and incident handling
+- A `completed` status means the background operation reached a successful
+  terminal state.
+- A `failed` status means the report or one of its required downstream/archive
+  steps failed; inspect Council history, R2, D1 and AIMS/RAMS before any retry.
+- A `claimed` status may mean the operation is running or stopped after partial
+  writes. Never clear or reclaim it automatically. Reconcile downstream writes
+  and worker logs before a manual retry.
+- MAST disables retries for the monthly POST and consumes the monthly schedule
+  window after a terminal or transport failure. A timeout is not evidence that
+  the operation rolled back.
+- HTTP 409 means a D1 claim already exists. Inspect
+  `GET /v1/monthly-review/jobs/{period}`; do not issue another POST.
+- HTTP 404 from the status endpoint means there is no recorded D1 claim. This
+  does not prove another execution path had no side effects.
 
-- GitHub Actions: `Inspect monthly governance job (read only)` accepts
-  `YYYY-MM` and calls `GET /v1/monthly-review/jobs/{period}`.
-  It requires production `HIVE_BASE_URL` and `HIVE_ADMIN_TOKEN`.
-- `completed`: worker reached its terminal success state. Verify the
-  archived report, Council completion and downstream sync separately.
-- `failed`: investigate report/downstream writes before any retry.
-- `claimed`: may be running or may have crashed after partial writes.
-  **Never** clear or reclaim automatically; inspect D1, R2, Council run IDs,
-  AIMS/RAMS effects and worker logs first.
-- `404`: no worker claim is recorded. This does **not** prove the legacy HTTP
-  endpoint or another process did not execute.
-- Worker exit codes: 0 completed/preflight passed; 1 report failed;
-  2 claim unavailable; 3 duplicate; 4 terminal status persistence failed;
-  5 missing configuration; 6 D1 preflight failed; 7 reporting month is not yet completed.
+The manual **Verify live monthly governance** workflow also starts once and
+polls D1 status. It requires explicit `execute=true`; if the start response is
+ambiguous or polling expires with `claimed`, it exits without retrying.
 
-## Release acceptance checklist
+## Operational acceptance
 
-- [ ] Worker container deployed with correct backend version and secrets
-- [ ] Read-only preflight passes in production
-- [ ] Monthly scheduler configured and observable
-- [ ] Legacy MAST POST schedule disabled to prevent duplicate paths
-- [ ] Existing ambiguous 504 writes reconciled before execution
-- [ ] Production status endpoint can read D1 job state
-- [ ] First authorized run archives R2 report, indexes D1, and verifies
-      Council and downstream sync
-- [ ] Alerting established for missing, claimed-too-long and failed jobs
-
-The legacy HTTP 504 is a separate outstanding issue. Do not assume that a
-timeout means the operation was rolled back.
+- [ ] MAST's deployed revision includes the monthly async job and has a fresh R2 heartbeat.
+- [ ] HIVE's deployed revision returns 202 from the authenticated monthly start endpoint.
+- [ ] HIVE D1 contains the `hive_ecosystem_metadata` lane and records the job claim.
+- [ ] The status endpoint reports terminal state and MAST records the poll result.
+- [ ] The archived report exists in R2, is indexed in D1, and records verified Council completion and AIMS/RAMS propagation.
+- [ ] Any previous ambiguous 504 is reconciled before a manual retry.
