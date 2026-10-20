@@ -33,7 +33,8 @@ async def test_generate_monthly_review_accepts_and_schedules_one_background_task
     }
     assert len(tasks.tasks) == 1
     assert tasks.tasks[0].func is api._run_monthly_review_job
-    assert tasks.tasks[0].args[1:] == ("2026-09", tasks.tasks[0].args[2])
+    assert tasks.tasks[0].args[1] == "2026-09"
+    assert tasks.tasks[0].args[2].startswith("api-")
 
 
 @pytest.mark.asyncio
