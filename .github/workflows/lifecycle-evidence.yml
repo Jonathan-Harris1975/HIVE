@@ -4,6 +4,10 @@ on:
   workflow_run: # zizmor: ignore[dangerous-triggers] reads trusted workflow metadata; no PR code is checked out or run
     workflows:
       - "Repository Council"
+      - "CI"
+      - "CodeQL"
+      - "Security and repository quality"
+      - "Koyeb production deployment watch"
     types: [completed]
   workflow_dispatch:
 
@@ -14,17 +18,18 @@ permissions:
   contents: read
 
 concurrency:
-  group: hive-lifecycle-evidence-${{ github.event.workflow_run.id || github.run_id }}
+  group: hive-lifecycle-evidence-${{ github.repository }}
   cancel-in-progress: false
 
 jobs:
   evidence:
     if: >-
-      ${{ github.event_name == 'workflow_dispatch' ||
-          (github.event.workflow_run.head_repository.full_name == github.repository &&
-           github.event.workflow_run.event == 'workflow_dispatch' &&
-           github.event.workflow_run.head_branch == 'main' &&
-           github.event.workflow_run.name == 'Repository Council') }}
+      ${{ github.ref == 'refs/heads/main' &&
+          (github.event_name == 'workflow_dispatch' ||
+           (github.event.workflow_run.head_repository.full_name == github.repository &&
+            github.event.workflow_run.head_branch == 'main' &&
+            contains(fromJSON('["Repository Council","CI","CodeQL","Security and repository quality","Koyeb production deployment watch"]'), github.event.workflow_run.name) &&
+            contains(fromJSON('["push","workflow_dispatch","workflow_run"]'), github.event.workflow_run.event))) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
