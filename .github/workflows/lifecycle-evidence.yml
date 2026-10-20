@@ -24,11 +24,12 @@ concurrency:
 jobs:
   evidence:
     if: >-
-      ${{ github.event_name == 'workflow_dispatch' ||
-          (github.event.workflow_run.head_repository.full_name == github.repository &&
-           github.event.workflow_run.head_branch == 'main' &&
-           contains(fromJSON('["Repository Council","CI","CodeQL","Security and repository quality","Koyeb production deployment watch"]'), github.event.workflow_run.name) &&
-           contains(fromJSON('["push","workflow_dispatch","workflow_run"]'), github.event.workflow_run.event)) }}
+      ${{ github.ref == 'refs/heads/main' &&
+          (github.event_name == 'workflow_dispatch' ||
+           (github.event.workflow_run.head_repository.full_name == github.repository &&
+            github.event.workflow_run.head_branch == 'main' &&
+            contains(fromJSON('["Repository Council","CI","CodeQL","Security and repository quality","Koyeb production deployment watch"]'), github.event.workflow_run.name) &&
+            contains(fromJSON('["push","workflow_dispatch","workflow_run"]'), github.event.workflow_run.event))) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
