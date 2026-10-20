@@ -3,30 +3,7 @@ name: HIVE lifecycle evidence
 on:
   workflow_run: # zizmor: ignore[dangerous-triggers] reads trusted workflow metadata; no PR code is checked out or run
     workflows:
-      - "autofix.ci"
-      - "Autonomous main-branch repair PR"
-      - "Branch PR signal"
-      - "CI"
-      - "CodeQL"
-      - "Persist completed Council report to R2"
       - "Repository Council"
-      - "DAST penetration test"
-      - "Deployment failure diagnostics"
-      - "Inspect live AI Council state (read only)"
-      - "Inspect monthly governance job (read only)"
-      - "Item 6 hardening"
-      - "Koyeb production deployment watch"
-      - "OIDC readiness"
-      - "PR branch sync"
-      - "Autonomous PR issue repair"
-      - "Worker D1 preflight (read only)"
-      - "Preflight live monthly governance (read only)"
-      - "R2 evidence live validation"
-      - "Security and repository quality"
-      - "Trusted automation and native auto-merge"
-      - "Verify live monthly governance"
-      - "Weekend orchestrator"
-      - "Weekend CI phase launcher"
     types: [completed]
   workflow_dispatch:
 
@@ -45,11 +22,9 @@ jobs:
     if: >-
       ${{ github.event_name == 'workflow_dispatch' ||
           (github.event.workflow_run.head_repository.full_name == github.repository &&
-           github.event.workflow_run.name != 'HIVE lifecycle evidence' &&
-           github.event.workflow_run.name != 'Deployment failure diagnostics' &&
-           github.event.workflow_run.name != 'Trusted automation and native auto-merge' &&
-           github.event.workflow_run.name != 'Autonomous PR issue repair' &&
-           github.event.workflow_run.name != 'Autonomous main-branch repair PR') }}
+           github.event.workflow_run.event == 'workflow_dispatch' &&
+           github.event.workflow_run.head_branch == 'main' &&
+           github.event.workflow_run.name == 'Repository Council') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
