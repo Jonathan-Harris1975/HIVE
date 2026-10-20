@@ -340,6 +340,24 @@ def test_production_d1_accepts_private_writable_r2_model_registry_fallback() -> 
     assert check.status == "ok"
 
 
+def test_production_readiness_accepts_operational_d1_without_postgres_url() -> None:
+    settings = _production_settings(
+        PRODUCTION_REQUIRE_DATABASE=True,
+        DATABASE_ENABLED=True,
+        DATABASE_BACKEND="d1",
+        DATABASE_D1_DATABASE_ID="operational-db-id",
+        D1_ACCOUNT_ID="test-account",
+        D1_API_KEY="test-api-key",
+    )
+
+    report = build_readiness_report(settings)
+
+    database_check = next(item for item in report.checks if item.name == "database")
+    assert database_check.status == "ok"
+    assert database_check.required is True
+    assert settings.sql_database_url == ""
+
+
 def test_committed_production_database_requirement_matches_documentation() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     shared_env = (repo_root / "HIVE-PRODUCTION-SHARED.env").read_text(encoding="utf-8")

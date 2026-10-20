@@ -102,6 +102,34 @@ def test_d1_operational_backend_requires_its_own_database_id() -> None:
     assert store.safe_config()["d1_database_id_configured"] is True
 
 
+def test_d1_cursor_reads_ctes_and_settles_writes_drained_by_another_cursor(monkeypatch) -> None:
+    from app.storage.d1_sql_client import D1Connection, _is_read_statement
+
+    assert _is_read_statement("WITH recent AS (SELECT 1) SELECT * FROM recent") is True
+    assert _is_read_statement("WITH recent AS (SELECT 1) DELETE FROM recent") is False
+    connection = D1Connection(account_id="account", database_id="db", api_key="token")
+    writer = connection.cursor()
+    reader = connection.cursor()
+
+    def fake_request(payload):
+        statements = payload.get("batch", [payload])
+        return [
+            {
+                "success": True,
+                "results": [{"value": 1}] if statement["sql"].startswith("SELECT") else [],
+                "meta": {"changes": index + 4},
+            }
+            for index, statement in enumerate(statements)
+        ]
+
+    monkeypatch.setattr(connection, "_request", fake_request)
+    writer.execute("UPDATE hive_conversations SET title=? WHERE id=?", ("x", "one"))
+    reader.execute("SELECT 1 AS value")
+
+    assert writer.rowcount == 4
+    assert reader.description[0][0] == "value"
+
+
 def test_d1_store_commits_chat_writes_as_one_batch(monkeypatch) -> None:
     from app.storage import d1_sql_client
 

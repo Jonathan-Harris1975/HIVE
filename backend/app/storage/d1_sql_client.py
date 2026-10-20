@@ -6,6 +6,7 @@ execute immediately; a read after pending writes flushes that batch first.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import httpx
@@ -33,7 +34,7 @@ class D1Connection:
             "Content-Type": "application/json",
         }
         self.timeout_seconds = timeout_seconds
-        self._pending: list[dict[str, Any]] = []
+        self._pending: list[tuple[dict[str, Any], D1Cursor]] = []
         self._closed = False
 
     def cursor(self) -> "D1Cursor":
@@ -46,11 +47,20 @@ class D1Connection:
         if not self._pending:
             return []
         pending, self._pending = self._pending, []
-        if len(pending) == 1:
-            payload: dict[str, Any] = pending[0]
+        statements = [statement for statement, _cursor in pending]
+        if len(statements) == 1:
+            payload: dict[str, Any] = statements[0]
         else:
-            payload = {"batch": pending}
-        return self._request(payload)
+            payload = {"batch": statements}
+        try:
+            results = self._request(payload)
+        except Exception:
+            for _statement, cursor in pending:
+                cursor._clear_pending()
+            raise
+        for index, ((_statement, cursor), result) in enumerate(zip(pending, results)):
+            cursor._settle_pending(index, result)
+        return results
 
     def rollback(self) -> None:
         self._pending.clear()
@@ -113,7 +123,7 @@ class D1Cursor:
             self._set_result(result)
             return self
 
-        self.connection._pending.append(statement)
+        self.connection._pending.append((statement, self))
         self._pending_index = len(self.connection._pending) - 1
         return self
 
@@ -153,14 +163,14 @@ class D1Cursor:
         if pending_index is None:
             return []
         results = self.connection.commit()
-        self._pending_index = None
         counts: list[int] = []
         for result in results:
             meta = result.get("meta")
             changes = meta.get("changes") if isinstance(meta, dict) else None
             counts.append(int(changes) if isinstance(changes, (int, float)) else 0)
-        if pending_index < len(results):
+        if pending_index < len(results) and self._pending_index is not None:
             self._set_result(results[pending_index])
+            self._pending_index = None
         return counts
 
     def _set_result(self, result: dict[str, Any]) -> None:
@@ -178,10 +188,66 @@ class D1Cursor:
     def _flush_pending(self) -> None:
         self.flush_batch()
 
+    def _settle_pending(self, index: int, result: dict[str, Any]) -> None:
+        if self._pending_index == index:
+            self._set_result(result)
+            self._pending_index = None
+
+    def _clear_pending(self) -> None:
+        self._pending_index = None
+
 
 def _is_read_statement(sql: str) -> bool:
     statement = sql.lstrip().upper()
     while statement.startswith("--"):
         _, _, statement = statement.partition("\n")
         statement = statement.lstrip()
-    return statement.startswith(("SELECT", "PRAGMA", "EXPLAIN"))
+    if statement.startswith(("SELECT", "PRAGMA", "EXPLAIN")):
+        return True
+    if statement.startswith("WITH"):
+        return _with_main_statement_is_read(statement)
+    return False
+
+
+def _with_main_statement_is_read(statement: str) -> bool:
+    """Recognise read-only CTEs without classifying a CTE-wrapped write as a read."""
+
+    depth = 0
+    quote: str | None = None
+    index = 0
+    while index < len(statement):
+        char = statement[index]
+        following = statement[index + 1] if index + 1 < len(statement) else ""
+        if quote:
+            if char == quote:
+                if following == quote:
+                    index += 2
+                    continue
+                quote = None
+            elif char == "\\" and quote == "'":
+                index += 2
+                continue
+        elif char in {"'", '"', "`"}:
+            quote = char
+        elif char == "-" and following == "-":
+            newline = statement.find("\n", index + 2)
+            index = len(statement) if newline < 0 else newline
+            continue
+        elif char == "/" and following == "*":
+            end = statement.find("*/", index + 2)
+            index = len(statement) if end < 0 else end + 2
+            continue
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            depth = max(0, depth - 1)
+            if depth == 0:
+                suffix = statement[index + 1 :].lstrip()
+                if suffix.startswith(","):
+                    index += 1
+                    continue
+                match = re.match(r"([A-Z]+)\b", suffix)
+                if match:
+                    return match.group(1) in {"SELECT", "VALUES"}
+        index += 1
+    return False
