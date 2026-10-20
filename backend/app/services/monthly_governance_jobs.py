@@ -1,8 +1,8 @@
-"""Atomic D1 claim for a monthly governance job.
+"""Atomic D1 claim and status persistence for monthly governance jobs.
 
-This is a persistence primitive, not a background worker. The caller must run
-work outside the HTTP request and explicitly mark its result. A claimed job
-must never be silently retried after an ambiguous worker failure.
+The API starts work after returning HTTP 202; the CLI remains available for
+controlled one-shot operations. A claimed job must never be silently retried
+after an ambiguous process failure.
 """
 from __future__ import annotations
 
