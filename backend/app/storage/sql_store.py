@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 17714)
-Total output lines: 1786
-
 from __future__ import annotations
 
 import logging
@@ -797,7 +794,176 @@ class SqlStore:
                 "message_count": len(messages),
                 "messages": messages,
             }
-        except Exception as …1714 tokens truncated…c)}
+        except Exception as exc:  # pragma: no cover
+            return {
+                "ok": False,
+                "enabled": True,
+                "conversation_id": conversation_id,
+                "error": str(exc),
+            }
+
+    def first_conversation_exchange(self, conversation_id: str) -> dict[str, str | None]:
+        """Return the first user message and first assistant reply for auto-titling."""
+
+        if not self.enabled or not conversation_id:
+            return {"user_message": None, "assistant_reply": None}
+        try:
+            with self._connect() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    self._sql(
+                        """
+                    SELECT role, content
+                    FROM hive_messages
+                    WHERE conversation_id=__PARAM__ AND role IN ('user', 'assistant')
+                    ORDER BY created_at ASC
+                    LIMIT 8
+                    """
+                    ),
+                    (conversation_id,),
+                )
+                rows = self._fetch_dicts(cur)
+        except Exception as error:
+            logger.warning(
+                "SQL query failed conversation_id=%s method=first_conversation_exchange error_type=%s error=%s",
+                conversation_id,
+                type(error).__name__,
+                error,
+            )
+            return {"user_message": None, "assistant_reply": None}
+
+        first_user: str | None = None
+        first_assistant: str | None = None
+        for row in rows:
+            role = str(row.get("role") or "")
+            content = str(row.get("content") or "").strip()
+            if not content:
+                continue
+            if role == "user" and first_user is None:
+                first_user = content
+            elif role == "assistant" and first_assistant is None:
+                first_assistant = content
+            if first_user and first_assistant:
+                break
+        return {"user_message": first_user, "assistant_reply": first_assistant}
+
+    def recent_chat_turns(self, conversation_id: str, *, limit: int = 20) -> list[dict[str, str]]:
+        """Return recent user/assistant turns suitable for model context hydration."""
+
+        if not self.enabled or not conversation_id:
+            return []
+        try:
+            with self._connect() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    self._sql(
+                        """
+                    SELECT role, content
+                    FROM hive_messages
+                    WHERE conversation_id=__PARAM__ AND role IN ('user', 'assistant')
+                    ORDER BY created_at DESC
+                    LIMIT __PARAM__
+                    """
+                    ),
+                    (conversation_id, _int_or_none(limit) or 20),
+                )
+                rows = list(reversed(self._fetch_dicts(cur)))
+            return [
+                {"role": str(row.get("role")), "content": str(row.get("content") or "")}
+                for row in rows
+                if row.get("role") in {"user", "assistant"} and row.get("content")
+            ]
+        except Exception as error:
+            logger.warning(
+                "SQL query failed conversation_id=%s method=recent_chat_turns error_type=%s error=%s",
+                conversation_id,
+                type(error).__name__,
+                error,
+            )
+            return []
+
+    def list_files(self, *, limit: int = 50) -> dict[str, object]:
+        if not self.enabled:
+            return {"ok": False, "enabled": False}
+        try:
+            with self._connect() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    self._sql(
+                        """
+                    SELECT id, object_key, filename, storage, bucket, public_url, size_bytes, content_type, sha256, created_at, updated_at
+                    FROM hive_files
+                    ORDER BY updated_at DESC
+                    LIMIT __PARAM__
+                    """
+                    ),
+                    (_int_or_none(limit) or 50,),
+                )
+                rows = self._fetch_dicts(cur)
+            return {"ok": True, "enabled": True, "count": len(rows), "files": rows}
+        except Exception as exc:  # pragma: no cover
+            return {"ok": False, "enabled": True, "error": str(exc)}
+
+    def cost_summary(
+        self,
+        *,
+        by_model_limit: int = 20,
+        since: str | None = None,
+        until: str | None = None,
+    ) -> dict[str, object]:
+        if not self.enabled:
+            return {"ok": False, "enabled": False}
+        p = self._param()
+        where_clauses: list[str] = []
+        params: list[object] = []
+        if since:
+            where_clauses.append(f"created_at >= {p}")
+            params.append(since)
+        if until:
+            where_clauses.append(f"created_at < {p}")
+            params.append(until)
+        where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+        try:
+            with self._connect() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    self._sql(
+                        """
+                    SELECT
+                      COUNT(*) AS event_count,
+                      COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+                      COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+                      COALESCE(SUM(total_tokens), 0) AS total_tokens,
+                      COALESCE(SUM(cost_usd), 0) AS cost_usd
+                    FROM hive_cost_events
+                    __WHERE_SQL__
+                    """
+                    ).replace("__WHERE_SQL__", where_sql),
+                    tuple(params),
+                )
+                totals = self._fetch_dicts(cur)[0]
+                cur.execute(
+                    self._sql(
+                        """
+                    SELECT
+                      model,
+                      provider,
+                      COUNT(*) AS event_count,
+                      COALESCE(SUM(total_tokens), 0) AS total_tokens,
+                      COALESCE(SUM(cost_usd), 0) AS cost_usd
+                    FROM hive_cost_events
+                    __WHERE_SQL__
+                    GROUP BY model, provider
+                    ORDER BY cost_usd DESC, total_tokens DESC
+                    LIMIT __PARAM__
+                    """
+                    ).replace("__WHERE_SQL__", where_sql),
+                    (*params, _int_or_none(by_model_limit) or 20),
+                )
+                by_model = self._fetch_dicts(cur)
+            return {"ok": True, "enabled": True, "totals": totals, "by_model": by_model}
+        except Exception as exc:  # pragma: no cover
+            return {"ok": False, "enabled": True, "error": str(exc)}
 
     def model_governance_audit(
         self,
