@@ -1,43 +1,92 @@
 from __future__ import annotations
 
+import asyncio
 import json as _json
+import logging
+import uuid
+from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 
 from app.core.config import Settings, get_settings
 from app.core.security import require_admin
-from app.services.monthly_governance_jobs import get_job
+from app.services.monthly_governance_jobs import claim_job, complete_job, get_job
 from app.services.monthly_review import _period_bounds, generate_and_archive_monthly_review, list_monthly_reviews
 from app.storage.d1 import D1MetadataStore
 from app.storage.r2 import R2Storage
 
 router = APIRouter(tags=["monthly-review"], dependencies=[Depends(require_admin)])
+logger = logging.getLogger(__name__)
 
 
-@router.post("/monthly-review/generate")
-async def generate_monthly_review_endpoint(
-    period: str | None = Query(None, description="Target month as 'YYYY-MM'. Defaults to the month that just finished."),
-    settings: Settings = Depends(get_settings),
-) -> dict[str, object]:
-    """Generate, archive (R2) and index (D1) a Monthly Review report.
+async def _run_monthly_review_job(settings: Settings, period: str, owner: str) -> None:
+    """Run the long monthly operation after the request has returned 202.
 
-    Intended to be called by MAST's hive-governance-monthly job group. The
-    endpoint now guarantees a verified current-month AI Council run (reusing one
-    when already completed) before it assembles and archives the review.
+    A crashed or interrupted task deliberately leaves its D1 claim in place:
+    operators must reconcile possible downstream writes before any retry.
     """
     try:
         report = await generate_and_archive_monthly_review(settings, period=period)
+    except Exception:
+        logger.exception("Monthly governance job interrupted; D1 claim retained period=%s", period)
+        raise
+
+    finished = await asyncio.to_thread(
+        complete_job,
+        D1MetadataStore(settings),
+        period=period,
+        owner=owner,
+        succeeded=report.get("ok") is True,
+    )
+    if not finished.get("ok") or not finished.get("completed"):
+        logger.error("Monthly governance terminal status was not persisted period=%s", period)
+
+
+
+
+@router.post("/monthly-review/generate", status_code=status.HTTP_202_ACCEPTED)
+async def generate_monthly_review_endpoint(
+    background_tasks: BackgroundTasks,
+    period: str | None = Query(None, description="Target month as 'YYYY-MM'. Defaults to the month that just finished."),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    """Atomically accept a monthly review and return before the long work begins.
+
+    MAST owns the schedule. It polls the persistent D1 job status until terminal
+    completion. The D1 claim fences duplicate writes when a request is retried or
+    the service is restarted.
+    """
+    try:
+        canonical, _, _ = _period_bounds(period)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    if not report.get("ok"):
+    if canonical >= datetime.now(UTC).strftime("%Y-%m"):
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={
-                "error": "Monthly governance review completed with failed prerequisites or archive/index steps",
-                "report": report,
-            },
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Monthly governance can only run for a completed UTC month.",
         )
-    return report
+
+    owner = f"api-{uuid.uuid4().hex}"
+    store = D1MetadataStore(settings)
+    claim = await asyncio.to_thread(claim_job, store, period=canonical, owner=owner)
+    if not claim.get("ok"):
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=claim)
+    if not claim.get("claimed"):
+        existing = await asyncio.to_thread(get_job, store, period=canonical)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"error": "Monthly governance job already exists; reconcile its status before retrying.", "job": existing},
+        )
+
+    background_tasks.add_task(_run_monthly_review_job, settings, canonical, owner)
+    return {
+        "ok": True,
+        "accepted": True,
+        "period": canonical,
+        "job_id": claim["job_id"],
+        "status": "claimed",
+        "status_url": f"/v1/monthly-review/jobs/{canonical}",
+    }
 
 
 @router.get("/monthly-review/jobs/{period}")

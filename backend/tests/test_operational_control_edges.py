@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
-from fastapi import HTTPException
+from fastapi import BackgroundTasks, HTTPException
 
 from app.api import buckets, monthly_review, repositories, service_actions
 from app.services import koyeb_control, model_sync
@@ -187,7 +187,7 @@ async def test_monthly_review_endpoint_maps_validation_errors(monkeypatch) -> No
 
     monkeypatch.setattr(monthly_review, "generate_and_archive_monthly_review", invalid)
     with pytest.raises(HTTPException) as exc:
-        await monthly_review.generate_monthly_review_endpoint(period="bad", settings=SimpleNamespace())
+        await monthly_review.generate_monthly_review_endpoint(BackgroundTasks(), period="bad", settings=SimpleNamespace())
     assert exc.value.status_code == 400
 
 
