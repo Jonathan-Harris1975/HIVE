@@ -4,6 +4,9 @@ on:
   workflow_run: # zizmor: ignore[dangerous-triggers] reads trusted workflow metadata; no PR code is checked out or run
     workflows:
       - "Repository Council"
+      - "CI"
+      - "CodeQL"
+      - "Security and repository quality"
     types: [completed]
   workflow_dispatch:
 
@@ -22,9 +25,11 @@ jobs:
     if: >-
       ${{ github.event_name == 'workflow_dispatch' ||
           (github.event.workflow_run.head_repository.full_name == github.repository &&
-           github.event.workflow_run.event == 'workflow_dispatch' &&
            github.event.workflow_run.head_branch == 'main' &&
-           github.event.workflow_run.name == 'Repository Council') }}
+           ((github.event.workflow_run.event == 'workflow_dispatch' &&
+             github.event.workflow_run.name == 'Repository Council') ||
+            (github.event.workflow_run.event == 'push' &&
+             contains(fromJSON('["CI","CodeQL","Security and repository quality"]'), github.event.workflow_run.name)))) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
