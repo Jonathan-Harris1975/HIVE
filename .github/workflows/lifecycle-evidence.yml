@@ -18,7 +18,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: hive-lifecycle-evidence-${{ github.event.workflow_run.id || github.run_id }}
+  group: hive-lifecycle-evidence-${{ github.repository }}
   cancel-in-progress: false
 
 jobs:
