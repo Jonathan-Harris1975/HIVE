@@ -14,6 +14,7 @@ os.environ.setdefault("GITHUB_REPOSITORY", "owner/repo")
 os.environ.setdefault("GH_TOKEN", "test-token")
 os.environ.setdefault("GITHUB_EVENT_NAME", "schedule")
 os.environ.setdefault("DEFAULT_BRANCH", "main")
+os.environ.setdefault("KILO_DEBUG_TRIGGER_URL", "https://hooks.kilosessions.ai/test")
 sys.path.insert(0, str(Path(__file__).parent))
 import pr_blocker_recovery as m
 
