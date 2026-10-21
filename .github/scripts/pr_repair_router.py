@@ -312,11 +312,21 @@ def patch_reservation(reservation_id: int, body: str) -> bool:
     return False
 
 
+BLOCKER_TRIGGER_SECRETS = {
+    "merge-conflict-": "KILO_DEBUG_TRIGGER_URL",
+    "branch-behind-": "KILO_DEBUG_TRIGGER_URL",
+    "review-threads-": "KILO_REPAIR_TRIGGER_URL",
+}
+
+
 def trigger_secret_for(kind: str) -> str:
-    """Route failed checks and branch-state repairs to Debug; keep review fixes on Code."""
-    if kind == "check" or kind.startswith(("merge-conflict-", "branch-behind-")):
+    """Use an explicit shared prefix map for repair routing."""
+    if kind == "check":
         return "KILO_DEBUG_TRIGGER_URL"
-    return "KILO_REPAIR_TRIGGER_URL"
+    return next(
+        (secret for prefix, secret in BLOCKER_TRIGGER_SECRETS.items() if kind.startswith(prefix)),
+        "KILO_REPAIR_TRIGGER_URL",
+    )
 
 
 
@@ -345,7 +355,7 @@ def dispatch(pr: dict, kind: str, findings: list[str]) -> str:
     destination = ("Update this existing Kilo PR branch; do not open a replacement PR. " if existing_kilo_pr else
                    f"Fetch and branch from source PR head {sha}; create one implementation PR to {DEFAULT} "
                    f"including {source} in its PR body. Preserve the source PR's exact commit ancestry. ")
-    blocker_prefixes = ('merge-conflict-', 'branch-behind-', 'review-threads-')
+    blocker_prefixes = tuple(BLOCKER_TRIGGER_SECRETS)
     blocker_prefix = next((prefix for prefix in blocker_prefixes if kind.startswith(prefix)), None)
     blocker_recovery = blocker_prefix is not None
     if blocker_recovery:
