@@ -153,7 +153,7 @@ def reconcile(pr_summary: dict[str, Any]) -> None:
         return
     current_labels = {label["name"] for label in pr.get("labels", [])}
     sha = str((pr.get("head") or {}).get("sha") or "")
-    exact_admission, has_admission_evidence = admission_check(number, sha) if sha else (False, False)
+    exact_admission, _has_admission_evidence = admission_check(number, sha) if sha else (False, False)
     blocked = bool(current_labels.intersection(BLOCKING_LABELS))
     eligible_except_mergeability = (
         pr.get("state") == "open"
