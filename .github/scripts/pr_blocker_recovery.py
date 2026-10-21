@@ -181,6 +181,16 @@ def current_head_failure_findings(pr):
         for status in statuses:
             if status.get("state") not in {"failure", "error"}:
                 continue
+            creator = login((status.get("creator") or {}).get("login"))
+            trusted_kilo_logins = {
+                login(value) for value in (
+                    *router.KILO,
+                    router.KILO_IMPLEMENTER,
+                    router.REPAIR_APP_LOGIN,
+                ) if value
+            }
+            if creator in trusted_kilo_logins:
+                continue
             name = str(status.get("context") or "unnamed status")[:160]
             key = ("commit-status", name)
             if key not in seen:
@@ -193,6 +203,15 @@ def current_head_failure_findings(pr):
     else:
         raise RuntimeError("Commit-status pagination exceeds safe limit")
     return findings
+
+
+def should_scan_current_head_failures(recovery):
+    """Scan check failures unless a stronger or active bot repair owns this PR."""
+    state = recovery.get("state")
+    return (
+        state == "no-conflict-or-review-blocker"
+        or (state == "review-recovery" and not recovery.get("request_status"))
+    )
 
 
 def route_current_head_failures(number):
@@ -210,7 +229,8 @@ def route_current_head_failures(number):
         return {"pr": number, "state": "no-failed-current-head-checks", "head": sha}
     fresh = router.pr_details(number)
     if (not fresh or fresh.get("head", {}).get("sha") != sha or
-            fresh.get("mergeable") is not True or fresh.get("mergeable_state") in {"dirty", "behind"}):
+            fresh.get("mergeable") is not True or fresh.get("mergeable_state") in {"dirty", "behind"} or
+            {x.get("name") for x in fresh.get("labels", [])} & HOLD_LABELS):
         return {"pr": number, "state": "changed-before-check-dispatch", "head": sha}
     request = router.dispatch(pr, "check", findings)
     return {"pr": number, "state": "check-" + request, "head": sha}
@@ -220,7 +240,11 @@ def escalate_attempt_limit(number, kind, sha):
     """Post one visible PR escalation when an automated repair category is exhausted."""
     marker = f"<!-- kilo-auto-repair-escalation:{sha}:{kind} -->"
     comments = router.all_pages(f"/repos/{router.REPO}/issues/{number}/comments")
-    if any(marker in (item.get("body") or "") for item in comments):
+    if any(
+        item.get("user", {}).get("login") == "github-actions[bot]"
+        and marker in (item.get("body") or "")
+        for item in comments
+    ):
         return "already-escalated"
     router.api(
         "POST",
@@ -389,6 +413,19 @@ def recovery_error_detail(exc):
     }
 
 
+def attempt_limit_context(recovery):
+    """Return the exhausted repair category and its exact source head."""
+    state = str(recovery.get("state", ""))
+    if state.endswith("-attempt-limit"):
+        return state[:-len("-attempt-limit")], recovery.get("head", "")
+    if recovery.get("request_status") == "attempt-limit":
+        return "review", recovery.get("head", "")
+    check = recovery.get("check_recovery") or {}
+    if check.get("state") == "check-attempt-limit":
+        return "check", check.get("head", "")
+    return None, ""
+
+
 def main():
     event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
     results = []
@@ -396,7 +433,7 @@ def main():
     for number in candidate_numbers(event):
         try:
             recovery = recover(number)
-            if recovery.get("state") == "no-conflict-or-review-blocker":
+            if should_scan_current_head_failures(recovery):
                 try:
                     recovery["check_recovery"] = route_current_head_failures(number)
                 except Exception as scan_exc:
@@ -406,16 +443,11 @@ def main():
                         "error_type": type(scan_exc).__name__,
                     }
                     print(f"::error::Current-head check scan for PR #{number} failed ({type(scan_exc).__name__}); inspect the recovery job.")
-            attempt_state = str(recovery.get("state", ""))
-            attempt_kind = None
-            if attempt_state.endswith("-attempt-limit"):
-                attempt_kind = attempt_state[:-len("-attempt-limit")]
-            elif recovery.get("request_status") == "attempt-limit":
-                attempt_kind = "review"
+            attempt_kind, attempt_sha = attempt_limit_context(recovery)
             if attempt_kind:
                 try:
                     recovery["escalation"] = escalate_attempt_limit(
-                        number, attempt_kind, recovery.get("head", "")
+                        number, attempt_kind, attempt_sha
                     )
                 except Exception as escalation_exc:
                     errors += 1
