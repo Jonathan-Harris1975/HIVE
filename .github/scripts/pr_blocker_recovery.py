@@ -413,6 +413,19 @@ def recovery_error_detail(exc):
     }
 
 
+def attempt_limit_context(recovery):
+    """Return the exhausted repair category and its exact source head."""
+    state = str(recovery.get("state", ""))
+    if state.endswith("-attempt-limit"):
+        return state[:-len("-attempt-limit")], recovery.get("head", "")
+    if recovery.get("request_status") == "attempt-limit":
+        return "review", recovery.get("head", "")
+    check = recovery.get("check_recovery") or {}
+    if check.get("state") == "check-attempt-limit":
+        return "check", check.get("head", "")
+    return None, ""
+
+
 def main():
     event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
     results = []
@@ -430,18 +443,11 @@ def main():
                         "error_type": type(scan_exc).__name__,
                     }
                     print(f"::error::Current-head check scan for PR #{number} failed ({type(scan_exc).__name__}); inspect the recovery job.")
-            attempt_state = str(recovery.get("state", ""))
-            attempt_kind = None
-            if attempt_state.endswith("-attempt-limit"):
-                attempt_kind = attempt_state[:-len("-attempt-limit")]
-            elif recovery.get("request_status") == "attempt-limit":
-                attempt_kind = "review"
-            elif recovery.get("check_recovery", {}).get("state") == "check-attempt-limit":
-                attempt_kind = "check"
+            attempt_kind, attempt_sha = attempt_limit_context(recovery)
             if attempt_kind:
                 try:
                     recovery["escalation"] = escalate_attempt_limit(
-                        number, attempt_kind, recovery.get("head", "")
+                        number, attempt_kind, attempt_sha
                     )
                 except Exception as escalation_exc:
                     errors += 1
