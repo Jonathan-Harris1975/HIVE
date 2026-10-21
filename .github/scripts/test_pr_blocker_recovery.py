@@ -753,6 +753,17 @@ class Recovery(unittest.TestCase):
 
         dispatch_and_check("merge-conflict-" + base_sha, "https://hooks.kilosessions.ai/debug")
         dispatch_and_check("review-threads-" + base_sha, "https://hooks.kilosessions.ai/code")
+    def test_scans_failed_checks_when_only_human_threads_remain(self):
+        self.assertTrue(m.should_scan_current_head_failures(
+            {"state": "review-recovery", "request_status": None}
+        ))
+        self.assertFalse(m.should_scan_current_head_failures(
+            {"state": "review-recovery", "request_status": "requested"}
+        ))
+        self.assertTrue(m.should_scan_current_head_failures(
+            {"state": "no-conflict-or-review-blocker"}
+        ))
+
 
 if __name__ == "__main__":
     unittest.main()
