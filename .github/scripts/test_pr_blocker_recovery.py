@@ -715,5 +715,29 @@ class Recovery(unittest.TestCase):
         self.assertFalse(m.has_unresolved_repair_handoff([stale], sha))
         self.assertFalse(m.has_unresolved_repair_handoff([forged], sha))
 
+    def test_debug_routing_uses_the_shared_blocker_prefix_map(self):
+        router = m.router
+        self.assertEqual(router.BLOCKER_TRIGGER_SECRETS, {
+            "merge-conflict-": "KILO_DEBUG_TRIGGER_URL",
+            "branch-behind-": "KILO_DEBUG_TRIGGER_URL",
+            "review-threads-": "KILO_REPAIR_TRIGGER_URL",
+        })
+        for prefix in router.BLOCKER_TRIGGER_SECRETS:
+            self.assertIn(prefix, router.BLOCKER_TRIGGER_SECRETS)
+        self.assertEqual(router.trigger_secret_for("check"), "KILO_DEBUG_TRIGGER_URL")
+        self.assertEqual(
+            router.trigger_secret_for("merge-conflict-" + "b" * 40),
+            "KILO_DEBUG_TRIGGER_URL",
+        )
+        self.assertEqual(
+            router.trigger_secret_for("branch-behind-" + "b" * 40),
+            "KILO_DEBUG_TRIGGER_URL",
+        )
+        self.assertEqual(
+            router.trigger_secret_for("review-threads-" + "b" * 40),
+            "KILO_REPAIR_TRIGGER_URL",
+        )
+        self.assertEqual(router.trigger_secret_for("review"), "KILO_REPAIR_TRIGGER_URL")
+
 if __name__ == "__main__":
     unittest.main()
