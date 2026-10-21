@@ -70,6 +70,9 @@ def pages(path: str) -> list[dict[str, Any]]:
 
 def admission_check(number: int, sha: str) -> tuple[bool, bool]:
     """Return (exact successful admission exists, any admission check exists)."""
+    sha = str(sha).lower()
+    if not re.fullmatch(r"[0-9a-f]{40}", sha):
+        return False, False
     name = urllib.parse.quote(ADMISSION_CHECK, safe="")
     runs = request(
         "GET",
@@ -174,11 +177,10 @@ def reconcile(pr_summary: dict[str, Any]) -> None:
 
     # Only cancel requests associated with an autonomy admission label or
     # exact-head admission evidence. This leaves unrelated user requests alone.
-    if active_request is not None and (
-        "autonomy:admitted" in current_labels or has_admission_evidence
-    ):
+    if active_request is not None and "autonomy:admitted" in current_labels:
+        # The required check blocks unadmitted PRs; only cancel requests explicitly owned by this controller.
         disable(node_id)
-        print(f"Disabled GitHub native auto-merge for PR #{number}; admission or hold conditions no longer pass.")
+        print(f"Disabled GitHub native auto-merge for admitted PR #{number}; admission or hold conditions no longer pass.")
 
 
 def main() -> int:
