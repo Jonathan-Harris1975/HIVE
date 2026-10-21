@@ -870,5 +870,15 @@ class CurrentHeadFailureCoverage(unittest.TestCase):
             self.assertEqual(m.escalate_attempt_limit(17, "check", "a" * 40), "escalated")
         self.assertEqual(api.call_args.args[0], "POST")
 
+
+    def test_attempt_limit_context_uses_nested_check_sha(self):
+        self.assertEqual(
+            m.attempt_limit_context({
+                "state": "no-conflict-or-review-blocker",
+                "check_recovery": {"state": "check-attempt-limit", "head": "a" * 40},
+            }),
+            ("check", "a" * 40),
+        )
+
 if __name__ == "__main__":
     unittest.main()
