@@ -715,29 +715,44 @@ class Recovery(unittest.TestCase):
         self.assertFalse(m.has_unresolved_repair_handoff([stale], sha))
         self.assertFalse(m.has_unresolved_repair_handoff([forged], sha))
 
-    def test_debug_routing_uses_the_shared_blocker_prefix_map(self):
+    def test_dispatch_uses_debug_for_blockers_and_code_for_review_repair(self):
         router = m.router
-        self.assertEqual(router.BLOCKER_TRIGGER_SECRETS, {
-            "merge-conflict-": "KILO_DEBUG_TRIGGER_URL",
-            "branch-behind-": "KILO_DEBUG_TRIGGER_URL",
-            "review-threads-": "KILO_REPAIR_TRIGGER_URL",
-        })
-        for prefix in router.BLOCKER_TRIGGER_SECRETS:
-            self.assertIn(prefix, router.BLOCKER_TRIGGER_SECRETS)
-        self.assertEqual(router.trigger_secret_for("check"), "KILO_DEBUG_TRIGGER_URL")
-        self.assertEqual(
-            router.trigger_secret_for("merge-conflict-" + "b" * 40),
-            "KILO_DEBUG_TRIGGER_URL",
-        )
-        self.assertEqual(
-            router.trigger_secret_for("branch-behind-" + "b" * 40),
-            "KILO_DEBUG_TRIGGER_URL",
-        )
-        self.assertEqual(
-            router.trigger_secret_for("review-threads-" + "b" * 40),
-            "KILO_REPAIR_TRIGGER_URL",
-        )
-        self.assertEqual(router.trigger_secret_for("review"), "KILO_REPAIR_TRIGGER_URL")
+        base_sha = "b" * 40
+        pr = {
+            "number": 7,
+            "html_url": "https://github.com/owner/repo/pull/7",
+            "head": {"sha": "a" * 40, "ref": "fix/test"},
+            "labels": [],
+            "user": {"login": "owner"},
+        }
+        response = MagicMock()
+        response.__enter__.return_value.status = 202
+
+        def api(method, path, payload=None):
+            if method == "GET" and "/commits/" in path:
+                return {"sha": base_sha}
+            if method == "POST":
+                return {"id": 123}
+            if method == "PATCH":
+                return {"id": 123}
+            raise AssertionError((method, path))
+
+        def dispatch_and_check(kind, expected_url):
+            with (
+                patch.dict(os.environ, {
+                    "KILO_DEBUG_TRIGGER_URL": "https://hooks.kilosessions.ai/debug",
+                    "KILO_REPAIR_TRIGGER_URL": "https://hooks.kilosessions.ai/code",
+                }),
+                patch.object(router, "all_pages", return_value=[]),
+                patch.object(router, "pr_details", return_value=pr),
+                patch.object(router, "api", side_effect=api),
+                patch.object(router.urllib.request, "urlopen", return_value=response) as urlopen,
+            ):
+                self.assertEqual(router.dispatch(pr, kind, []), "requested")
+                self.assertEqual(urlopen.call_args.args[0].full_url, expected_url)
+
+        dispatch_and_check("merge-conflict-" + base_sha, "https://hooks.kilosessions.ai/debug")
+        dispatch_and_check("review-threads-" + base_sha, "https://hooks.kilosessions.ai/code")
 
 if __name__ == "__main__":
     unittest.main()
