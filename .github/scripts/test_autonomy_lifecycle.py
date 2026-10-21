@@ -331,6 +331,7 @@ class AdmissionLifecycleProofTests(unittest.TestCase):
         pr = {"number": number, "head": {"sha": sha, "repo": {"full_name": "owner/repo"}}, "base": {"ref": "main"}, "labels": [{"name": "autonomy:admitted"}]}
         with (
             patch.dict(os.environ, {"ADMISSION_TOKEN": "unit-test", "REPO": "owner/repo"}),
+            patch.object(automation, "REPO", "owner/repo"),
             patch.object(automation, "_reconcile_pr_candidate"),
             patch.object(automation, "set_admission_check") as set_check,
             patch.object(automation, "remove_label") as remove_label,
@@ -352,6 +353,7 @@ class AdmissionLifecycleProofTests(unittest.TestCase):
             automation.set_admission_check(number, sha, "success", "current trusted evidence passed")
         with (
             patch.dict(os.environ, {"ADMISSION_TOKEN": "unit-test", "REPO": "owner/repo"}),
+            patch.object(automation, "REPO", "owner/repo"),
             patch.object(automation, "_reconcile_pr_candidate", side_effect=verified),
             patch.object(automation, "set_admission_check") as set_check,
             patch.object(automation, "remove_label") as remove_label,
