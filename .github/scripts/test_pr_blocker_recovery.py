@@ -14,6 +14,7 @@ os.environ.setdefault("GITHUB_REPOSITORY", "owner/repo")
 os.environ.setdefault("GH_TOKEN", "test-token")
 os.environ.setdefault("GITHUB_EVENT_NAME", "schedule")
 os.environ.setdefault("DEFAULT_BRANCH", "main")
+os.environ.setdefault("KILO_DEBUG_TRIGGER_URL", "https://hooks.kilosessions.ai/test")
 sys.path.insert(0, str(Path(__file__).parent))
 import pr_blocker_recovery as m
 
@@ -713,6 +714,45 @@ class Recovery(unittest.TestCase):
         self.assertFalse(m.has_unresolved_repair_handoff([rejected], sha))
         self.assertFalse(m.has_unresolved_repair_handoff([stale], sha))
         self.assertFalse(m.has_unresolved_repair_handoff([forged], sha))
+
+    def test_dispatch_uses_debug_for_blockers_and_code_for_review_repair(self):
+        router = m.router
+        base_sha = "b" * 40
+        pr = {
+            "number": 7,
+            "html_url": "https://github.com/owner/repo/pull/7",
+            "head": {"sha": "a" * 40, "ref": "fix/test"},
+            "labels": [],
+            "user": {"login": "owner"},
+        }
+        response = MagicMock()
+        response.__enter__.return_value.status = 202
+
+        def api(method, path, payload=None):
+            if method == "GET" and "/commits/" in path:
+                return {"sha": base_sha}
+            if method == "POST":
+                return {"id": 123}
+            if method == "PATCH":
+                return {"id": 123}
+            raise AssertionError((method, path))
+
+        def dispatch_and_check(kind, expected_url):
+            with (
+                patch.dict(os.environ, {
+                    "KILO_DEBUG_TRIGGER_URL": "https://hooks.kilosessions.ai/debug",
+                    "KILO_REPAIR_TRIGGER_URL": "https://hooks.kilosessions.ai/code",
+                }),
+                patch.object(router, "all_pages", return_value=[]),
+                patch.object(router, "pr_details", return_value=pr),
+                patch.object(router, "api", side_effect=api),
+                patch.object(router.urllib.request, "urlopen", return_value=response) as urlopen,
+            ):
+                self.assertEqual(router.dispatch(pr, kind, []), "requested")
+                self.assertEqual(urlopen.call_args.args[0].full_url, expected_url)
+
+        dispatch_and_check("merge-conflict-" + base_sha, "https://hooks.kilosessions.ai/debug")
+        dispatch_and_check("review-threads-" + base_sha, "https://hooks.kilosessions.ai/code")
 
 if __name__ == "__main__":
     unittest.main()

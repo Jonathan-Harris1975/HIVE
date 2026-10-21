@@ -312,6 +312,24 @@ def patch_reservation(reservation_id: int, body: str) -> bool:
     return False
 
 
+BLOCKER_TRIGGER_SECRETS = {
+    "merge-conflict-": "KILO_DEBUG_TRIGGER_URL",
+    "branch-behind-": "KILO_DEBUG_TRIGGER_URL",
+    "review-threads-": "KILO_REPAIR_TRIGGER_URL",
+}
+
+
+def trigger_secret_for(kind: str) -> str:
+    """Use an explicit shared prefix map for repair routing."""
+    if kind == "check":
+        return "KILO_DEBUG_TRIGGER_URL"
+    return next(
+        (secret for prefix, secret in BLOCKER_TRIGGER_SECRETS.items() if kind.startswith(prefix)),
+        "KILO_REPAIR_TRIGGER_URL",
+    )
+
+
+
 def dispatch(pr: dict, kind: str, findings: list[str]) -> str:
     number, sha = pr["number"], pr["head"]["sha"]
     marker = f"<!-- kilo-auto-repair:{sha}:{kind} -->"
@@ -327,16 +345,17 @@ def dispatch(pr: dict, kind: str, findings: list[str]) -> str:
     if len(matching_markers) >= 2:
         print(f"::warning::PR #{number} exhausted its two {kind} repair attempts; inspect the repair agent's results.")
         return 'attempt-limit'
-    url = os.environ.get("KILO_REPAIR_TRIGGER_URL", "")
+    trigger_secret = trigger_secret_for(kind)
+    url = os.environ.get(trigger_secret, "")
     if not valid_kilo_webhook_url(url):
-        raise RuntimeError("Configure KILO_REPAIR_TRIGGER_URL with this repository's Kilo Cloud Agent webhook trigger")
+        raise RuntimeError(f"Configure {trigger_secret} with this repository's Kilo Cloud Agent webhook trigger")
 
     source = pr["html_url"]
     existing_kilo_pr = pr.get("user", {}).get("login") == KILO_IMPLEMENTER
     destination = ("Update this existing Kilo PR branch; do not open a replacement PR. " if existing_kilo_pr else
                    f"Fetch and branch from source PR head {sha}; create one implementation PR to {DEFAULT} "
                    f"including {source} in its PR body. Preserve the source PR's exact commit ancestry. ")
-    blocker_prefixes = ('merge-conflict-', 'branch-behind-', 'review-threads-')
+    blocker_prefixes = tuple(BLOCKER_TRIGGER_SECRETS)
     blocker_prefix = next((prefix for prefix in blocker_prefixes if kind.startswith(prefix)), None)
     blocker_recovery = blocker_prefix is not None
     if blocker_recovery:
@@ -422,15 +441,18 @@ def dispatch(pr: dict, kind: str, findings: list[str]) -> str:
 def safe_route_error(exc: Exception) -> str:
     """Return actionable routing diagnostics without exposing the private webhook URL."""
     message = str(exc)
-    if message.startswith("Configure KILO_REPAIR_TRIGGER_URL with"):
+    if message.startswith(("Configure KILO_REPAIR_TRIGGER_URL with", "Configure KILO_DEBUG_TRIGGER_URL with")):
         return "Kilo webhook configuration is missing, unsupported or invalid"
     match = re.fullmatch(r"Kilo trigger returned HTTP ([0-9]{3})", message)
     if match:
         return f"Kilo trigger returned HTTP {match.group(1)}"
     if message == "Kilo trigger could not be reached":
         return "Kilo trigger could not be reached"
-    secret = os.environ.get("KILO_REPAIR_TRIGGER_URL", "")
-    safe = message.replace(secret, "<redacted>") if secret else message
+    safe = message
+    for secret_name in ("KILO_REPAIR_TRIGGER_URL", "KILO_DEBUG_TRIGGER_URL"):
+        secret = os.environ.get(secret_name, "")
+        if secret:
+            safe = safe.replace(secret, "<redacted>")
     return safe or f"{type(exc).__name__}"
 
 
