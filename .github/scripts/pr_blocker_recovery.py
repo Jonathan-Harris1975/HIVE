@@ -139,6 +139,102 @@ def has_unresolved_repair_handoff(comments, sha):
     )
 
 
+def current_head_failure_findings(pr):
+    """Return bounded failed check evidence for this exact PR head, across providers."""
+    sha = pr.get("head", {}).get("sha", "")
+    if not re.fullmatch(r"[0-9a-f]{40}", sha):
+        raise ValueError("Invalid PR head SHA for check recovery")
+    findings = []
+    seen = set()
+    encoded_sha = router.urllib.parse.quote(sha, safe="")
+    for page in range(1, 11):
+        payload = router.api(
+            "GET",
+            f"/repos/{router.REPO}/commits/{encoded_sha}/check-runs?filter=latest&per_page=100&page={page}",
+        )
+        rows = payload.get("check_runs", [])
+        for check in rows:
+            if check.get("head_sha") != sha or check.get("status") != "completed" or check.get("conclusion") not in {"failure", "timed_out"}:
+                continue
+            app = str((check.get("app") or {}).get("slug") or "external-check")
+            # Never feed Kilo's own review status back into its repair loop.
+            if app.startswith("kilo"):
+                continue
+            name = str(check.get("name") or "unnamed check")[:160]
+            key = (app, name)
+            if key in seen:
+                continue
+            seen.add(key)
+            findings.append(f"Failed check on exact PR head {sha}: {app}/{name} (conclusion={check['conclusion']}).")
+            if len(findings) >= 12:
+                return findings
+        if len(rows) < 100:
+            break
+    else:
+        raise RuntimeError("Check-run pagination exceeds safe limit")
+
+    for page in range(1, 11):
+        status_payload = router.api(
+            "GET", f"/repos/{router.REPO}/commits/{encoded_sha}/status?per_page=100&page={page}"
+        )
+        statuses = status_payload.get("statuses", [])
+        for status in statuses:
+            if status.get("state") not in {"failure", "error"}:
+                continue
+            name = str(status.get("context") or "unnamed status")[:160]
+            key = ("commit-status", name)
+            if key not in seen:
+                seen.add(key)
+                findings.append(f"Failed commit status on exact PR head {sha}: {name} (state={status['state']}).")
+            if len(findings) >= 12:
+                return findings
+        if len(statuses) < 100:
+            break
+    else:
+        raise RuntimeError("Commit-status pagination exceeds safe limit")
+    return findings
+
+
+def route_current_head_failures(number):
+    """Route failures found by the scheduled all-PR sweep, with exact-head revalidation."""
+    pr = router.pr_details(number)
+    if not pr:
+        return {"pr": number, "state": "excluded"}
+    if {x.get("name") for x in pr.get("labels", [])} & HOLD_LABELS:
+        return {"pr": number, "state": "excluded"}
+    sha = pr["head"]["sha"]
+    if pr.get("mergeable") is not True or pr.get("mergeable_state") in {"dirty", "behind"}:
+        return {"pr": number, "state": "blocker-changed-before-check-scan", "head": sha}
+    findings = current_head_failure_findings(pr)
+    if not findings:
+        return {"pr": number, "state": "no-failed-current-head-checks", "head": sha}
+    fresh = router.pr_details(number)
+    if (not fresh or fresh.get("head", {}).get("sha") != sha or
+            fresh.get("mergeable") is not True or fresh.get("mergeable_state") in {"dirty", "behind"}):
+        return {"pr": number, "state": "changed-before-check-dispatch", "head": sha}
+    request = router.dispatch(pr, "check", findings)
+    return {"pr": number, "state": "check-" + request, "head": sha}
+
+
+def escalate_attempt_limit(number, kind, sha):
+    """Post one visible PR escalation when an automated repair category is exhausted."""
+    marker = f"<!-- kilo-auto-repair-escalation:{sha}:{kind} -->"
+    comments = router.all_pages(f"/repos/{router.REPO}/issues/{number}/comments")
+    if any(marker in (item.get("body") or "") for item in comments):
+        return "already-escalated"
+    router.api(
+        "POST",
+        f"/repos/{router.REPO}/issues/{number}/comments",
+        {"body": (
+            f"{marker}\n"
+            f"Automatic repair paused for `{kind}` at head `{sha}` after the configured attempt limit. "
+            "A maintainer needs to inspect the latest repair handoffs and failed checks, then either correct the blocker "
+            "or make a new commit to start a fresh exact-head recovery cycle. No merge or deployment was performed."
+        )},
+    )
+    return "escalated"
+
+
 def recover(number):
     pr = router.pr_details(number)
     if not pr or {x.get("name") for x in pr.get("labels", [])} & HOLD_LABELS:
@@ -299,7 +395,33 @@ def main():
     errors = 0
     for number in candidate_numbers(event):
         try:
-            results.append(recover(number))
+            recovery = recover(number)
+            if recovery.get("state") == "no-conflict-or-review-blocker":
+                try:
+                    recovery["check_recovery"] = route_current_head_failures(number)
+                except Exception as scan_exc:
+                    errors += 1
+                    recovery["check_recovery"] = {
+                        "state": "check-scan-error",
+                        "error_type": type(scan_exc).__name__,
+                    }
+                    print(f"::error::Current-head check scan for PR #{number} failed ({type(scan_exc).__name__}); inspect the recovery job.")
+            attempt_state = str(recovery.get("state", ""))
+            attempt_kind = None
+            if attempt_state.endswith("-attempt-limit"):
+                attempt_kind = attempt_state[:-len("-attempt-limit")]
+            elif recovery.get("request_status") == "attempt-limit":
+                attempt_kind = "review"
+            if attempt_kind:
+                try:
+                    recovery["escalation"] = escalate_attempt_limit(
+                        number, attempt_kind, recovery.get("head", "")
+                    )
+                except Exception as escalation_exc:
+                    errors += 1
+                    recovery["escalation"] = "attempt-limit-escalation-error"
+                    print(f"::error::Attempt-limit escalation for PR #{number} failed ({type(escalation_exc).__name__}); inspect the recovery job.")
+            results.append(recovery)
         except Exception as exc:
             errors += 1
             detail = recovery_error_detail(exc)

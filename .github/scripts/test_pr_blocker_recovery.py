@@ -756,3 +756,65 @@ class Recovery(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class CurrentHeadFailureCoverage(unittest.TestCase):
+    def setUp(self):
+        self.pr = {
+            "number": 17,
+            "html_url": "https://github.com/owner/repo/pull/17",
+            "head": {"sha": "a" * 40},
+            "labels": [],
+            "mergeable": True,
+            "mergeable_state": "clean",
+        }
+        self.config = patch.multiple(m.router, REPO="owner/repo", DEFAULT="main")
+        self.config.start()
+        self.addCleanup(self.config.stop)
+
+    def test_collects_failures_from_checks_and_commit_statuses_on_exact_head(self):
+        def api(method, path, payload=None):
+            if "check-runs" in path:
+                return {"check_runs": [
+                    {"head_sha": "a" * 40, "status": "completed", "conclusion": "failure",
+                     "name": "Build", "app": {"slug": "github-actions"}},
+                    {"head_sha": "b" * 40, "status": "completed", "conclusion": "failure",
+                     "name": "Stale", "app": {"slug": "github-actions"}},
+                    {"head_sha": "a" * 40, "status": "completed", "conclusion": "success",
+                     "name": "Green", "app": {"slug": "github-actions"}},
+                    {"head_sha": "a" * 40, "status": "completed", "conclusion": "failure",
+                     "name": "Kilo Code Review", "app": {"slug": "kilo"}},
+                ]}
+            if path.endswith("/status") or "/status?" in path:
+                return {"statuses": [
+                    {"state": "failure", "context": "Cloudflare Pages"},
+                    {"state": "success", "context": "passing"},
+                ]}
+            raise AssertionError(path)
+
+        with patch.object(m.router, "api", side_effect=api):
+            findings = m.current_head_failure_findings(self.pr)
+        self.assertEqual(len(findings), 2)
+        self.assertTrue(any("github-actions/Build" in item for item in findings))
+        self.assertTrue(any("Cloudflare Pages" in item for item in findings))
+        self.assertFalse(any("Stale" in item or "Kilo" in item or "Green" in item for item in findings))
+
+    def test_check_failure_dispatch_revalidates_exact_pr_head(self):
+        with (
+            patch.object(m.router, "pr_details", side_effect=[self.pr, {**self.pr, "head": {"sha": "b" * 40}}]),
+            patch.object(m, "current_head_failure_findings", return_value=["failed check"]),
+            patch.object(m.router, "dispatch") as dispatch,
+        ):
+            result = m.route_current_head_failures(17)
+        self.assertEqual(result["state"], "changed-before-check-dispatch")
+        dispatch.assert_not_called()
+
+    def test_check_failure_dispatch_uses_debug_repair_kind(self):
+        with (
+            patch.object(m.router, "pr_details", return_value=self.pr),
+            patch.object(m, "current_head_failure_findings", return_value=["failed check"]),
+            patch.object(m.router, "dispatch", return_value="requested") as dispatch,
+        ):
+            result = m.route_current_head_failures(17)
+        self.assertEqual(result["state"], "check-requested")
+        self.assertEqual(dispatch.call_args.args[1], "check")
+
