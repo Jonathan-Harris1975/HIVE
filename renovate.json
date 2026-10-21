@@ -67,5 +67,13 @@
         "dependency:manual"
       ]
     }
-  ]
+  ],
+  "pip-compile": {
+    "managerFilePatterns": [
+      "/(^|\\/)requirements\\.txt$/"
+    ]
+  },
+  "pip_requirements": {
+    "enabled": false
+  }
 }
