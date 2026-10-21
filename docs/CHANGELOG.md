@@ -6,6 +6,11 @@
 
 
 
+## 21 October 2026 - dependency security refresh
+
+- Updated certifi to 2026.10.19, removing the GHSA-6q48-6c7w-9gw2 advisory exposure.
+
+
 ## 20 September 2026 - R2/embeddings regression depth and dependency refresh
 
 - Added deterministic R2 connector/storage regression tests for success, empty results, pagination, auth/access failures, transient network failures, malformed SDK responses, domain translation and credential redaction.

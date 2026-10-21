@@ -33,6 +33,13 @@
   },
   "packageRules": [
     {
+      "description": "Renovate does not update the pip-compiled lock directly; pip-compile owns requirements.txt.",
+      "matchManagers": [
+        "pip_requirements"
+      ],
+      "enabled": false
+    },
+    {
       "description": "Digest, pin and lock-file updates carry no release timestamp; do not let them sit permanently pending on the stability check",
       "matchUpdateTypes": [
         "digest",
