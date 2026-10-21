@@ -67,3 +67,31 @@ def test_ambiguous_or_failed_lookup_keeps_the_original_reference(watcher: Module
 
     monkeypatch.setattr(watcher.subprocess, "run", lambda *_args, **_kwargs: _Result(1, ""))
     assert watcher._resolve_service("hive", "token") == "hive"
+
+
+def test_deployment_identity_requires_one_full_unambiguous_source_sha(watcher: ModuleType) -> None:
+    expected = "a" * 40
+    deployment = {"id": "deployment-1", "status": "healthy", "git": {"commit_sha": expected}}
+    assert watcher._deployment_sha(deployment) == expected
+    assert watcher._deployment_sha({"id": "deployment-1", "git": {"commit_sha": expected[:12]}}) == ""
+    assert watcher._deployment_sha(
+        {"id": "deployment-1", "commit_sha": expected, "git": {"commit_sha": "b" * 40}}
+    ) == ""
+
+
+def test_expected_deployment_requires_exact_sha_and_required_timestamp(watcher: ModuleType) -> None:
+    expected = "a" * 40
+    created = watcher._parse_timestamp("2026-10-21T00:00:00Z")
+    exact = {"id": "deployment-1", "created_at": "2026-10-21T00:00:00Z", "git": {"commit_sha": expected}}
+    assert watcher._matches_expected_deployment(exact, expected, created)
+    assert not watcher._matches_expected_deployment(
+        {"id": "deployment-1", "created_at": "2026-10-21T00:00:00Z"}, expected, created
+    )
+    assert not watcher._matches_expected_deployment(
+        {"id": "deployment-1", "created_at": "2026-10-21T00:00:00Z", "git": {"commit_sha": "b" * 40}},
+        expected,
+        created,
+    )
+    assert not watcher._matches_expected_deployment(
+        {"id": "deployment-1", "git": {"commit_sha": expected}}, expected, created
+    )
