@@ -195,6 +195,15 @@ def current_head_failure_findings(pr):
     return findings
 
 
+def should_scan_current_head_failures(recovery):
+    """Scan check failures unless a stronger or active bot repair owns this PR."""
+    state = recovery.get("state")
+    return (
+        state == "no-conflict-or-review-blocker"
+        or (state == "review-recovery" and not recovery.get("request_status"))
+    )
+
+
 def route_current_head_failures(number):
     """Route failures found by the scheduled all-PR sweep, with exact-head revalidation."""
     pr = router.pr_details(number)
@@ -396,7 +405,7 @@ def main():
     for number in candidate_numbers(event):
         try:
             recovery = recover(number)
-            if recovery.get("state") == "no-conflict-or-review-blocker":
+            if should_scan_current_head_failures(recovery):
                 try:
                     recovery["check_recovery"] = route_current_head_failures(number)
                 except Exception as scan_exc:
@@ -412,6 +421,8 @@ def main():
                 attempt_kind = attempt_state[:-len("-attempt-limit")]
             elif recovery.get("request_status") == "attempt-limit":
                 attempt_kind = "review"
+            elif recovery.get("check_recovery", {}).get("state") == "check-attempt-limit":
+                attempt_kind = "check"
             if attempt_kind:
                 try:
                     recovery["escalation"] = escalate_attempt_limit(
