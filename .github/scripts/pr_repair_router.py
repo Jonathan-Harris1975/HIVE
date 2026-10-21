@@ -313,8 +313,10 @@ def patch_reservation(reservation_id: int, body: str) -> bool:
 
 
 def trigger_secret_for(kind: str) -> str:
-    """Use Debug only for failed commit checks; preserve the Code route for other work."""
-    return "KILO_DEBUG_TRIGGER_URL" if kind == "check" else "KILO_REPAIR_TRIGGER_URL"
+    """Route failed checks and branch-state repairs to Debug; keep review fixes on Code."""
+    if kind == "check" or kind.startswith(("merge-conflict-", "branch-behind-")):
+        return "KILO_DEBUG_TRIGGER_URL"
+    return "KILO_REPAIR_TRIGGER_URL"
 
 
 
