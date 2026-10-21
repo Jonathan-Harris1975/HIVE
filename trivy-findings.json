@@ -1,0 +1,11 @@
+[
+  {
+    "Kind": "Vulnerability",
+    "Target": "requirements.txt",
+    "ID": "GHSA-6q48-6c7w-9gw2",
+    "Severity": "CRITICAL",
+    "Package": "certifi",
+    "Installed": "2026.7.22",
+    "Fixed": "2026.10.19"
+  }
+]
