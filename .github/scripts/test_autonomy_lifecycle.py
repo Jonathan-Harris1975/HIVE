@@ -297,7 +297,7 @@ class TrustedAdmissionProofTests(unittest.TestCase):
         request.side_effect = [
             {"check_runs": [
                 {"id": 11, "app": {"slug": "other-app"}, "started_at": "2026-01-01T00:00:00Z"},
-                {"id": 12, "app": {"slug": "github-actions"}, "started_at": "2026-01-02T00:00:00Z"},
+                {"id": 12, "app": {"slug": "github-actions"}, "name": "Trusted autonomy admission", "head_sha": "b" * 40, "external_id": "trusted-autonomy-admission:18:" + "b" * 40, "started_at": "2026-01-02T00:00:00Z"},
             ]},
             {},
         ]
@@ -336,7 +336,8 @@ class AdmissionLifecycleProofTests(unittest.TestCase):
             patch.object(automation, "remove_label") as remove_label,
         ):
             automation.reconcile_pr(pr)
-        set_check.assert_called_once()
+        self.assertEqual(set_check.call_count, 2)
+        self.assertEqual(set_check.call_args_list[0].args[:3], (number, sha, "failure"))
         args, kwargs = set_check.call_args
         self.assertEqual(args[:3], (number, sha, "failure"))
         self.assertTrue(kwargs["create_if_missing"])
@@ -348,6 +349,7 @@ class AdmissionLifecycleProofTests(unittest.TestCase):
         pr = {"number": number, "head": {"sha": sha}, "labels": [{"name": "autonomy:admitted"}]}
         def verified(candidate):
             automation.VERIFIED_ADMISSION_HEADS.add((number, sha))
+            automation.set_admission_check(number, sha, "success", "current trusted evidence passed")
         with (
             patch.dict(os.environ, {"ADMISSION_TOKEN": "unit-test", "REPO": "owner/repo"}),
             patch.object(automation, "_reconcile_pr_candidate", side_effect=verified),
@@ -355,7 +357,9 @@ class AdmissionLifecycleProofTests(unittest.TestCase):
             patch.object(automation, "remove_label") as remove_label,
         ):
             automation.reconcile_pr(pr)
-        set_check.assert_not_called()
+        self.assertEqual(set_check.call_count, 2)
+        self.assertEqual(set_check.call_args_list[0].args[:3], (number, sha, "failure"))
+        self.assertEqual(set_check.call_args_list[1].args[:3], (number, sha, "success"))
         remove_label.assert_not_called()
 
 
