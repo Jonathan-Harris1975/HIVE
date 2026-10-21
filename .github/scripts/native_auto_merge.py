@@ -80,6 +80,7 @@ def admission_check(number: int, sha: str) -> tuple[bool, bool]:
         run for run in runs
         if (run.get("app") or {}).get("slug") == "github-actions"
         and run.get("name") == ADMISSION_CHECK
+        and run.get("head_sha") == sha
         and run.get("external_id") == exact_id
     ]
     success = any(
