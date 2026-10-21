@@ -120,9 +120,13 @@ def set_admission_check(
         "GET",
         f"/repos/{repo}/commits/{sha}/check-runs?check_name={encoded_name}&filter=all&per_page=100",
     )
+    external_id = f"trusted-autonomy-admission:{number}:{sha}"
     owned = [
         run for run in (runs or {}).get("check_runs", [])
         if (run.get("app") or {}).get("slug") == CHECKS_APP_SLUG
+        and run.get("name") == CHECK_NAME
+        and run.get("head_sha") == sha
+        and run.get("external_id") == external_id
     ]
     owned.sort(key=lambda run: run.get("started_at") or run.get("created_at") or "", reverse=True)
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -133,7 +137,7 @@ def set_admission_check(
         "conclusion": conclusion,
         "started_at": now,
         "completed_at": now,
-        "external_id": f"trusted-autonomy-admission:{number}:{sha}",
+        "external_id": external_id,
         "details_url": f"https://github.com/{repo}/pull/{number}",
         "output": {
             "title": "Trusted admission verified" if conclusion == "success" else "Trusted admission withheld",
