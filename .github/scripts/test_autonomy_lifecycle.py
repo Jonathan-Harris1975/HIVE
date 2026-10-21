@@ -328,7 +328,7 @@ class AdmissionLifecycleProofTests(unittest.TestCase):
     def test_label_alone_is_withdrawn_when_trusted_validation_did_not_admit(self):
         number = 201
         sha = "d" * 40
-        pr = {"number": number, "head": {"sha": sha}, "labels": [{"name": "autonomy:admitted"}]}
+        pr = {"number": number, "head": {"sha": sha, "repo": {"full_name": "owner/repo"}}, "base": {"ref": "main"}, "labels": [{"name": "autonomy:admitted"}]}
         with (
             patch.dict(os.environ, {"ADMISSION_TOKEN": "unit-test", "REPO": "owner/repo"}),
             patch.object(automation, "_reconcile_pr_candidate"),
@@ -346,7 +346,7 @@ class AdmissionLifecycleProofTests(unittest.TestCase):
     def test_only_successful_trusted_validation_keeps_admission(self):
         number = 202
         sha = "e" * 40
-        pr = {"number": number, "head": {"sha": sha}, "labels": [{"name": "autonomy:admitted"}]}
+        pr = {"number": number, "head": {"sha": sha, "repo": {"full_name": "owner/repo"}}, "base": {"ref": "main"}, "labels": [{"name": "autonomy:admitted"}]}
         def verified(candidate):
             automation.VERIFIED_ADMISSION_HEADS.add((number, sha))
             automation.set_admission_check(number, sha, "success", "current trusted evidence passed")
@@ -499,7 +499,7 @@ class NativeAutoMergeCurrentLabelTests(unittest.TestCase):
             native_auto_merge.reconcile(summary)
         enable.assert_not_called()
 
-    def test_removed_admission_label_revokes_existing_auto_merge(self):
+    def test_removed_admission_label_preserves_user_auto_merge_request(self):
         summary = {
             "number": 7,
             "labels": [{"name": "autonomy:admitted"}],
@@ -521,7 +521,7 @@ class NativeAutoMergeCurrentLabelTests(unittest.TestCase):
             patch.object(native_auto_merge, "disable") as disable,
         ):
             native_auto_merge.reconcile(summary)
-        disable.assert_called_once_with("PR_node_7")
+        disable.assert_not_called()
 
     def test_uncomputed_mergeability_preserves_existing_auto_merge(self):
         summary = {
