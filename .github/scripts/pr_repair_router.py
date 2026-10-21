@@ -312,6 +312,12 @@ def patch_reservation(reservation_id: int, body: str) -> bool:
     return False
 
 
+def trigger_secret_for(kind: str) -> str:
+    """Use Debug only for failed commit checks; preserve the Code route for other work."""
+    return "KILO_DEBUG_TRIGGER_URL" if kind == "check" else "KILO_REPAIR_TRIGGER_URL"
+
+
+
 def dispatch(pr: dict, kind: str, findings: list[str]) -> str:
     number, sha = pr["number"], pr["head"]["sha"]
     marker = f"<!-- kilo-auto-repair:{sha}:{kind} -->"
@@ -327,9 +333,10 @@ def dispatch(pr: dict, kind: str, findings: list[str]) -> str:
     if len(matching_markers) >= 2:
         print(f"::warning::PR #{number} exhausted its two {kind} repair attempts; inspect the repair agent's results.")
         return 'attempt-limit'
-    url = os.environ.get("KILO_REPAIR_TRIGGER_URL", "")
+    trigger_secret = trigger_secret_for(kind)
+    url = os.environ.get(trigger_secret, "")
     if not valid_kilo_webhook_url(url):
-        raise RuntimeError("Configure KILO_REPAIR_TRIGGER_URL with this repository's Kilo Cloud Agent webhook trigger")
+        raise RuntimeError(f"Configure {trigger_secret} with this repository's Kilo Cloud Agent webhook trigger")
 
     source = pr["html_url"]
     existing_kilo_pr = pr.get("user", {}).get("login") == KILO_IMPLEMENTER
@@ -422,15 +429,18 @@ def dispatch(pr: dict, kind: str, findings: list[str]) -> str:
 def safe_route_error(exc: Exception) -> str:
     """Return actionable routing diagnostics without exposing the private webhook URL."""
     message = str(exc)
-    if message.startswith("Configure KILO_REPAIR_TRIGGER_URL with"):
+    if message.startswith(("Configure KILO_REPAIR_TRIGGER_URL with", "Configure KILO_DEBUG_TRIGGER_URL with")):
         return "Kilo webhook configuration is missing, unsupported or invalid"
     match = re.fullmatch(r"Kilo trigger returned HTTP ([0-9]{3})", message)
     if match:
         return f"Kilo trigger returned HTTP {match.group(1)}"
     if message == "Kilo trigger could not be reached":
         return "Kilo trigger could not be reached"
-    secret = os.environ.get("KILO_REPAIR_TRIGGER_URL", "")
-    safe = message.replace(secret, "<redacted>") if secret else message
+    safe = message
+    for secret_name in ("KILO_REPAIR_TRIGGER_URL", "KILO_DEBUG_TRIGGER_URL"):
+        secret = os.environ.get(secret_name, "")
+        if secret:
+            safe = safe.replace(secret, "<redacted>")
     return safe or f"{type(exc).__name__}"
 
 
