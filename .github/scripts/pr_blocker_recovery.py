@@ -181,6 +181,16 @@ def current_head_failure_findings(pr):
         for status in statuses:
             if status.get("state") not in {"failure", "error"}:
                 continue
+            creator = login((status.get("creator") or {}).get("login"))
+            trusted_kilo_logins = {
+                login(value) for value in (
+                    *router.KILO,
+                    router.KILO_IMPLEMENTER,
+                    router.REPAIR_APP_LOGIN,
+                ) if value
+            }
+            if creator in trusted_kilo_logins:
+                continue
             name = str(status.get("context") or "unnamed status")[:160]
             key = ("commit-status", name)
             if key not in seen:
@@ -219,7 +229,8 @@ def route_current_head_failures(number):
         return {"pr": number, "state": "no-failed-current-head-checks", "head": sha}
     fresh = router.pr_details(number)
     if (not fresh or fresh.get("head", {}).get("sha") != sha or
-            fresh.get("mergeable") is not True or fresh.get("mergeable_state") in {"dirty", "behind"}):
+            fresh.get("mergeable") is not True or fresh.get("mergeable_state") in {"dirty", "behind"} or
+            {x.get("name") for x in fresh.get("labels", [])} & HOLD_LABELS):
         return {"pr": number, "state": "changed-before-check-dispatch", "head": sha}
     request = router.dispatch(pr, "check", findings)
     return {"pr": number, "state": "check-" + request, "head": sha}
@@ -229,7 +240,11 @@ def escalate_attempt_limit(number, kind, sha):
     """Post one visible PR escalation when an automated repair category is exhausted."""
     marker = f"<!-- kilo-auto-repair-escalation:{sha}:{kind} -->"
     comments = router.all_pages(f"/repos/{router.REPO}/issues/{number}/comments")
-    if any(marker in (item.get("body") or "") for item in comments):
+    if any(
+        item.get("user", {}).get("login") == "github-actions[bot]"
+        and marker in (item.get("body") or "")
+        for item in comments
+    ):
         return "already-escalated"
     router.api(
         "POST",
