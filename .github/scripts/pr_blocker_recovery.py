@@ -396,14 +396,15 @@ def main():
     for number in candidate_numbers(event):
         try:
             recovery = recover(number)
-            results.append(recovery)
             if recovery.get("state") == "no-conflict-or-review-blocker":
                 try:
-                    results.append(route_current_head_failures(number))
+                    recovery["check_recovery"] = route_current_head_failures(number)
                 except Exception as scan_exc:
                     errors += 1
-                    results.append({"pr": number, "state": "check-scan-error",
-                                    "error_type": type(scan_exc).__name__})
+                    recovery["check_recovery"] = {
+                        "state": "check-scan-error",
+                        "error_type": type(scan_exc).__name__,
+                    }
                     print(f"::error::Current-head check scan for PR #{number} failed ({type(scan_exc).__name__}); inspect the recovery job.")
             attempt_state = str(recovery.get("state", ""))
             attempt_kind = None
@@ -413,14 +414,14 @@ def main():
                 attempt_kind = "review"
             if attempt_kind:
                 try:
-                    escalation = escalate_attempt_limit(number, attempt_kind, recovery.get("head", ""))
-                    results.append({"pr": number, "state": "attempt-limit-" + escalation,
-                                    "category": attempt_kind, "head": recovery.get("head")})
+                    recovery["escalation"] = escalate_attempt_limit(
+                        number, attempt_kind, recovery.get("head", "")
+                    )
                 except Exception as escalation_exc:
                     errors += 1
-                    results.append({"pr": number, "state": "attempt-limit-escalation-error",
-                                    "error_type": type(escalation_exc).__name__})
+                    recovery["escalation"] = "attempt-limit-escalation-error"
                     print(f"::error::Attempt-limit escalation for PR #{number} failed ({type(escalation_exc).__name__}); inspect the recovery job.")
+            results.append(recovery)
         except Exception as exc:
             errors += 1
             detail = recovery_error_detail(exc)
