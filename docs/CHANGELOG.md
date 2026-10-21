@@ -4,6 +4,16 @@
 > **Last reviewed:** 20 September 2026  
 > **Operational authority:** Current repository README, SECURITY policy and operations guide.
 
+## 21 October 2026 - certifi security update
+
+- Added a direct `certifi==2026.10.19` security pin to `requirements.in` and regenerated its compiled lock entry to address GHSA-6q48-6c7w-9gw2. The source pin prevents a later lock refresh from silently reverting this security floor.
+
+
+
+
+## 21 October 2026 - dependency security refresh
+
+- Updated certifi to 2026.10.19, removing the GHSA-6q48-6c7w-9gw2 advisory exposure.
 
 
 ## 20 September 2026 - R2/embeddings regression depth and dependency refresh
