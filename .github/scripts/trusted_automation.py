@@ -810,10 +810,16 @@ def admit_manual_pr(pr: dict[str, Any]) -> None:
         raise RuntimeError(f"PR #{number} has no valid head SHA for admission")
     if pr.get("base", {}).get("ref") != DEFAULT_BRANCH:
         return
+    if not is_same_repo(pr):
+        log(f"Manual PR #{number} is not from this repository; withholding trusted admission.")
+        return
 
     labels = issue_labels(pr)
+    if "autonomy:admitted" in labels:
+        remove_label(number, "autonomy:admitted")
+        labels.discard("autonomy:admitted")
     blocking_labels = {
-        "autonomy:human-hold", RISK_APPROVAL_LABEL, "autonomy:council-freeze",
+        "autonomy:human-hold", "autonomy:council-freeze",
         "autonomy:superseded", "autonomy:obsolete", "do-not-merge",
         "do not merge", "hold", "needs-manual-review", "needs-human-review",
     }
@@ -860,6 +866,11 @@ def _reconcile_pr_candidate(pr: dict[str, Any]) -> None:
         # Carriers record the failed run and remain blocked until the linked
         # implementation succeeds. Never merge one just because its marker was removed.
         log(f"Carrier PR #{pr['number']} is lifecycle evidence; withholding auto-merge.")
+        return
+
+    if kind == "renovate" and "dependency:manual" in issue_labels(pr):
+        # Manual Renovate updates use the same exact-head and owner-risk admission as other manual PRs.
+        admit_manual_pr(pr)
         return
 
     if kind == "renovate" and not renovate_auto_eligible(pr):
@@ -911,7 +922,7 @@ def reconcile_pr(pr: dict[str, Any]) -> None:
     key = (number, sha)
     VERIFIED_ADMISSION_HEADS.discard(key)
     try:
-        if os.environ.get("ADMISSION_TOKEN") and re.fullmatch(r"[0-9a-f]{40}", sha):
+        if os.environ.get("ADMISSION_TOKEN") and is_same_repo(pr) and re.fullmatch(r"[0-9a-f]{40}", sha):
             set_admission_check(
                 number, sha, "failure",
                 "Trusted admission is being re-evaluated; merge remains blocked until current evidence passes.",
@@ -973,7 +984,10 @@ def main() -> int:
     # Reconcile current trusted PRs. Runs admitted above will normally become ready on a later
     # workflow_run completion or scheduled reconciliation.
     for pr in open_prs:
-        reconcile_pr(pr)
+        try:
+            reconcile_pr(pr)
+        except Exception as exc:
+            log(f"Unable to reconcile PR #{pr.get('number')} ({type(exc).__name__}); continuing the sweep.")
     return 0
 
 
