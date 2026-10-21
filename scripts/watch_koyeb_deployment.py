@@ -114,27 +114,37 @@ def _parse_timestamp(value: str) -> datetime | None:
 
 
 def _deployment_sha(item: dict[str, Any]) -> str:
-    candidates = {"commit_sha", "commitSha", "git_sha", "gitSha", "sha", "revision"}
-    stack: list[Any] = [item]
-    while stack:
-        value = stack.pop()
-        if isinstance(value, dict):
-            for key, child in value.items():
-                if key in candidates and isinstance(child, str) and len(child.strip()) >= 7:
-                    return child.strip()
-                stack.append(child)
-        elif isinstance(value, list):
-            stack.extend(value)
-    return ""
+    """Return one unambiguous full source SHA from authoritative deployment fields."""
+    keys = {"commit_sha", "commitSha", "git_sha", "gitSha", "sha", "revision"}
+    containers = [item, item.get("git"), item.get("definition")]
+    definition = item.get("definition")
+    if isinstance(definition, dict):
+        containers.append(definition.get("git"))
+    values: set[str] = set()
+    for container in containers:
+        if not isinstance(container, dict):
+            continue
+        for key in keys:
+            if key not in container:
+                continue
+            value = container[key]
+            if not isinstance(value, str):
+                return ""
+            cleaned = value.strip().lower()
+            if not re.fullmatch(r"[0-9a-f]{40}", cleaned):
+                return ""
+            values.add(cleaned)
+    return next(iter(values)) if len(values) == 1 else ""
 
 
 def _matches_expected_deployment(item: dict[str, Any], expected_sha: str, expected_after: datetime | None) -> bool:
+    expected = expected_sha.strip().lower()
     candidate_sha = _deployment_sha(item)
-    if expected_sha and candidate_sha and not candidate_sha.lower().startswith(expected_sha.lower()):
+    if not re.fullmatch(r"[0-9a-f]{40}", expected) or not candidate_sha or candidate_sha != expected:
         return False
     if expected_after is not None:
         created = _parse_timestamp(_created(item))
-        if created is not None and created < expected_after - timedelta(minutes=5):
+        if created is None or created < expected_after - timedelta(minutes=5):
             return False
     return True
 
@@ -147,10 +157,15 @@ def main() -> int:
         print("Koyeb deployment watcher is not configured; skipping.")
         return 0
     service = _resolve_service(service, token)
-    attempts = max(1, int(os.getenv("KOYEB_DEPLOYMENT_MAX_ATTEMPTS", "40")))
-    poll_seconds = max(5, int(os.getenv("KOYEB_DEPLOYMENT_POLL_SECONDS", "15")))
+    attempts = min(40, max(1, int(os.getenv("KOYEB_DEPLOYMENT_MAX_ATTEMPTS", "40"))))
+    poll_seconds = min(60, max(5, int(os.getenv("KOYEB_DEPLOYMENT_POLL_SECONDS", "15"))))
     expected_sha = os.getenv("EXPECTED_DEPLOYMENT_SHA", os.getenv("GITHUB_SHA", "")).strip()
-    expected_after = _parse_timestamp(os.getenv("EXPECTED_DEPLOYMENT_AFTER", ""))
+    if not re.fullmatch(r"[0-9a-fA-F]{40}", expected_sha):
+        raise ValueError("An exact 40-character expected deployment SHA is required")
+    expected_after_value = os.getenv("EXPECTED_DEPLOYMENT_AFTER", "").strip()
+    expected_after = _parse_timestamp(expected_after_value)
+    if expected_after_value and expected_after is None:
+        raise ValueError("EXPECTED_DEPLOYMENT_AFTER must be a valid ISO-8601 timestamp")
     degraded_seen = 0
     last: dict[str, Any] | None = None
     for attempt in range(1, attempts + 1):
