@@ -829,5 +829,46 @@ class CurrentHeadFailureCoverage(unittest.TestCase):
         self.assertEqual(dispatch.call_args.args[1], "check")
 
 
+
+    def test_does_not_dispatch_when_hold_label_is_added_during_scan(self):
+        held = {**self.pr, "labels": [{"name": "autonomy:human-hold"}]}
+        with (
+            patch.object(m.router, "pr_details", side_effect=[self.pr, held]),
+            patch.object(m, "current_head_failure_findings", return_value=["failed check"]),
+            patch.object(m.router, "dispatch") as dispatch,
+        ):
+            result = m.route_current_head_failures(17)
+        self.assertEqual(result["state"], "changed-before-check-dispatch")
+        dispatch.assert_not_called()
+
+    def test_ignores_kilo_authored_commit_status_failures(self):
+        def api(method, path, payload=None):
+            if "check-runs" in path:
+                return {"check_runs": []}
+            if "/status?" in path:
+                return {"statuses": [
+                    {"state": "failure", "context": "Kilo Code Review",
+                     "creator": {"login": "kilo-code-bot[bot]"}},
+                    {"state": "failure", "context": "Build",
+                     "creator": {"login": "github-actions[bot]"}},
+                ]}
+            raise AssertionError(path)
+
+        with patch.object(m.router, "api", side_effect=api):
+            findings = m.current_head_failure_findings(self.pr)
+        self.assertEqual(len(findings), 1)
+        self.assertIn("Build", findings[0])
+
+    def test_untrusted_escalation_marker_does_not_suppress_maintainer_notice(self):
+        marker = "<!-- kilo-auto-repair-escalation:" + "a" * 40 + ":check -->"
+        with (
+            patch.object(m.router, "all_pages", return_value=[
+                {"user": {"login": "external-user"}, "body": marker}
+            ]),
+            patch.object(m.router, "api") as api,
+        ):
+            self.assertEqual(m.escalate_attempt_limit(17, "check", "a" * 40), "escalated")
+        self.assertEqual(api.call_args.args[0], "POST")
+
 if __name__ == "__main__":
     unittest.main()
