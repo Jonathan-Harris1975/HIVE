@@ -116,9 +116,13 @@ class ExplicitKiloFixCommandTests(unittest.TestCase):
 
 
 class TriggerSecretRoutingTests(unittest.TestCase):
-    def test_only_failed_check_repairs_use_debug_trigger(self):
-        self.assertEqual(router.trigger_secret_for("check"), "KILO_DEBUG_TRIGGER_URL")
-        for kind in ("review", "fix-command", "merge-conflict-base", "review-threads-base"):
+    def test_failed_checks_and_branch_state_repairs_use_debug_trigger(self):
+        for kind in ("check", "merge-conflict-" + "a" * 40, "branch-behind-" + "b" * 40):
+            with self.subTest(kind=kind):
+                self.assertEqual(router.trigger_secret_for(kind), "KILO_DEBUG_TRIGGER_URL")
+
+    def test_review_and_explicit_repairs_stay_on_code_trigger(self):
+        for kind in ("review", "fix-command", "review-threads-" + "c" * 40):
             with self.subTest(kind=kind):
                 self.assertEqual(router.trigger_secret_for(kind), "KILO_REPAIR_TRIGGER_URL")
 
