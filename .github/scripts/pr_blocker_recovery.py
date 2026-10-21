@@ -139,6 +139,94 @@ def has_unresolved_repair_handoff(comments, sha):
     )
 
 
+def current_head_failure_findings(pr):
+    """Return bounded failed check evidence for this exact PR head, across providers."""
+    sha = pr.get("head", {}).get("sha", "")
+    if not re.fullmatch(r"[0-9a-f]{40}", sha):
+        raise ValueError("Invalid PR head SHA for check recovery")
+    findings = []
+    seen = set()
+    encoded_sha = router.urllib.parse.quote(sha, safe="")
+    for page in range(1, 11):
+        payload = router.api(
+            "GET",
+            f"/repos/{router.REPO}/commits/{encoded_sha}/check-runs?filter=latest&per_page=100&page={page}",
+        )
+        rows = payload.get("check_runs", [])
+        for check in rows:
+            if check.get("head_sha") != sha or check.get("status") != "completed" or check.get("conclusion") not in {"failure", "timed_out"}:
+                continue
+            app = str((check.get("app") or {}).get("slug") or "external-check")
+            # Never feed Kilo's own review status back into its repair loop.
+            if app.startswith("kilo"):
+                continue
+            name = str(check.get("name") or "unnamed check")[:160]
+            key = (app, name)
+            if key in seen:
+                continue
+            seen.add(key)
+            findings.append(f"Failed check on exact PR head {sha}: {app}/{name} (conclusion={check['conclusion']}).")
+            if len(findings) >= 12:
+                return findings
+        if len(rows) < 100:
+            break
+    else:
+        raise RuntimeError("Check-run pagination exceeds safe limit")
+
+    status_payload = router.api(
+        "GET", f"/repos/{router.REPO}/commits/{encoded_sha}/status"
+    )
+    for status in status_payload.get("statuses", []):
+        if status.get("state") not in {"failure", "error"}:
+            continue
+        name = str(status.get("context") or "unnamed status")[:160]
+        key = ("commit-status", name)
+        if key not in seen:
+            seen.add(key)
+            findings.append(f"Failed commit status on exact PR head {sha}: {name} (state={status['state']}).")
+        if len(findings) >= 12:
+            break
+    return findings
+
+
+def route_current_head_failures(number):
+    """Route failures found by the scheduled all-PR sweep, with exact-head revalidation."""
+    pr = router.pr_details(number)
+    if not pr:
+        return {"pr": number, "state": "excluded"}
+    if {x.get("name") for x in pr.get("labels", [])} & HOLD_LABELS:
+        return {"pr": number, "state": "excluded"}
+    sha = pr["head"]["sha"]
+    findings = current_head_failure_findings(pr)
+    if not findings:
+        return {"pr": number, "state": "no-failed-current-head-checks", "head": sha}
+    fresh = router.pr_details(number)
+    if not fresh or fresh.get("head", {}).get("sha") != sha:
+        return {"pr": number, "state": "changed-before-check-dispatch", "head": sha}
+    request = router.dispatch(pr, "check", findings)
+    return {"pr": number, "state": "check-" + request, "head": sha}
+
+
+def escalate_attempt_limit(number, state, sha):
+    """Post one visible PR escalation when an automated repair category is exhausted."""
+    kind = state.rsplit("-", 1)[0]
+    marker = f"<!-- kilo-auto-repair-escalation:{sha}:{kind} -->"
+    comments = router.all_pages(f"/repos/{router.REPO}/issues/{number}/comments")
+    if any(marker in (item.get("body") or "") for item in comments):
+        return "already-escalated"
+    router.api(
+        "POST",
+        f"/repos/{router.REPO}/issues/{number}/comments",
+        {"body": (
+            f"{marker}\n"
+            f"Automatic repair paused for `{kind}` at head `{sha}` after the configured attempt limit. "
+            "A maintainer needs to inspect the latest repair handoffs and failed checks, then either correct the blocker "
+            "or make a new commit to start a fresh exact-head recovery cycle. No merge or deployment was performed."
+        )},
+    )
+    return "escalated"
+
+
 def recover(number):
     pr = router.pr_details(number)
     if not pr or {x.get("name") for x in pr.get("labels", [])} & HOLD_LABELS:
