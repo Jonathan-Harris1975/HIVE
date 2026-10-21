@@ -115,3 +115,11 @@ class ExplicitKiloFixCommandTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TriggerSecretRoutingTests(unittest.TestCase):
+    def test_only_failed_check_repairs_use_debug_trigger(self):
+        self.assertEqual(router.trigger_secret_for("check"), "KILO_DEBUG_TRIGGER_URL")
+        for kind in ("review", "fix-command", "merge-conflict-base", "review-threads-base"):
+            with self.subTest(kind=kind):
+                self.assertEqual(router.trigger_secret_for(kind), "KILO_REPAIR_TRIGGER_URL")
