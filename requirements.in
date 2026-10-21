@@ -24,4 +24,4 @@ psycopg[binary]==3.3.6
 # Keep the platform certificate backend deterministic in the compiled lock.
 truststore==0.10.5
 # Direct security pin: fix GHSA-6q48-6c7w-9gw2 (CRITICAL).
-certifi>=2026.10.19
+certifi==2026.10.19
