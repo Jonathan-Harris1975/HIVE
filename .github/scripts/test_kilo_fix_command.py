@@ -113,8 +113,6 @@ class ExplicitKiloFixCommandTests(unittest.TestCase):
         self.assertIn("src/example.py", result[2][0])
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class TriggerSecretRoutingTests(unittest.TestCase):
@@ -123,3 +121,7 @@ class TriggerSecretRoutingTests(unittest.TestCase):
         for kind in ("review", "fix-command", "merge-conflict-base", "review-threads-base"):
             with self.subTest(kind=kind):
                 self.assertEqual(router.trigger_secret_for(kind), "KILO_REPAIR_TRIGGER_URL")
+
+
+if __name__ == "__main__":
+    unittest.main()
