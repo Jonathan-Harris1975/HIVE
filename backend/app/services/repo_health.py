@@ -417,14 +417,14 @@ def _parse_utc_timestamp(value: object) -> datetime | None:
     return parsed.astimezone(UTC)
 
 
-def _mast_monitor_mode(settings: Settings, target: ProbeTarget) -> str:
+def _mast_monitor_mode(settings: Settings, _target: ProbeTarget) -> str:
     mode = settings.mast_monitor_mode
     if mode != "auto":
         return mode
     if settings.koyeb_token.strip() and settings.koyeb_service_id_mast.strip():
         return "koyeb"
-    if target.health_url or target.operational_url:
-        return "http"
+    # MAST is a Koyeb Worker with no public inbound route. A legacy health URL
+    # must not make auto mode probe it as HTTP; use its durable R2 heartbeat.
     lane = settings.internal_r2_lane(settings.mast_state_r2_lane)
     if lane and (lane.get("readable") or lane.get("public_base_url")):
         return "r2"
