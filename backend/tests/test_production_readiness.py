@@ -166,7 +166,7 @@ def test_production_readiness_requires_dedicated_ops_event_token() -> None:
 def test_production_readiness_accepts_koyeb_worker_monitoring_and_wake_control() -> None:
     settings = _production_settings(
         REPO_HEALTH_ENABLED=True,
-        MAST_MONITOR_MODE="koyeb",
+        MAST_MONITOR_MODE="auto",
         KOYEB_TOKEN="k" * 48,
         KOYEB_SERVICE_ID_AIMS="aims-service-id",
         KOYEB_SERVICE_ID_RAMS="rams-service-id",
