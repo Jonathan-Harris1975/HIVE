@@ -1,5 +1,8 @@
 from pathlib import Path
 
+from app.core.config import Settings
+from app.services.repo_health import _mast_monitor_mode, _targets
+
 
 def test_production_shared_env_contains_no_secret_placeholders() -> None:
     text = Path("HIVE-PRODUCTION-SHARED.env").read_text()
@@ -83,8 +86,20 @@ def test_settings_loads_repo_shared_env_file() -> None:
     assert settings.aims_operational_health_url == "https://zeroth-kara-jonathanharris-3296ed37.koyeb.app/readyz"
     assert settings.aims_ui_health_url == "https://chat.jonathan-harris.online/livez"
     assert settings.aims_ui_readiness_url == "https://chat.jonathan-harris.online/readyz"
-    assert settings.mast_monitor_mode == "r2"
+    assert settings.mast_monitor_mode == "auto"
     assert settings.repository_github_refresh_enabled is True
+
+
+def test_mast_auto_monitoring_uses_koyeb_control_plane_for_worker() -> None:
+    settings = Settings(
+        app_env="test",
+        mast_monitor_mode="auto",
+        koyeb_token="test-token",
+        koyeb_service_id_mast="mast-service",
+    )
+    mast_target = next(target for target in _targets(settings) if target.repo == "MAST")
+
+    assert _mast_monitor_mode(settings, mast_target) == "koyeb"
 
 
 def test_start_script_does_not_trust_all_forwarded_headers_by_default() -> None:
