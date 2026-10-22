@@ -297,18 +297,18 @@ curl "$HIVE_URL/v1/files/r2-lanes" -H "Authorization: Bearer $ADMIN_BEARER_TOKEN
 ```
 
 
-MAST may still use `/healthz` for a minimal dependency check, but HIVE monitors
-the MAST Worker itself through the durable R2 scheduler heartbeat rather than a
-public MAST URL.
+MAST is deployed as a Koyeb Worker and does not expose public inbound routes.
+HIVE must not probe it as an HTTP service. In `auto` mode, HIVE uses the Koyeb
+control plane for Worker liveness when `KOYEB_TOKEN` and `KOYEB_SERVICE_ID_MAST`
+are configured. The durable R2 scheduler heartbeat remains the fallback and
+reports worker progress when Koyeb control-plane credentials are unavailable.
 
 ## MAST Worker monitoring
 
-MAST is deployed as a Koyeb Worker and does not expose public inbound routes.
-Configure HIVE to inspect the scheduler heartbeat that MAST persists in the
-`metasystem` R2 bucket:
+Configure the automatic Koyeb-first check and the R2 heartbeat fallback:
 
 ```env
-MAST_MONITOR_MODE=r2
+MAST_MONITOR_MODE=auto
 MAST_STATE_R2_LANE=meta_system
 MAST_STATE_OBJECT_KEY=state/mast/scheduler-state.json
 MAST_STATE_HEALTHY_MAX_AGE_SECONDS=90

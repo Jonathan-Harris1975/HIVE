@@ -149,16 +149,19 @@ def build_readiness_report(settings: Settings) -> ReadinessReport:
     )
 
     mast_mode = settings.mast_monitor_mode.strip().lower()
+    koyeb_monitor_ready = bool(settings.koyeb_token.strip()) and bool(
+        settings.koyeb_service_id_mast.strip()
+    )
+    r2_monitor_ready = (
+        bool(settings.r2_bucket_meta_system.strip())
+        and bool(settings.mast_state_object_key.strip())
+        and settings.r2_read_credentials_configured
+    )
     mast_monitor_ready = (
         mast_mode == "disabled"
-        or (mast_mode == "koyeb" and bool(settings.koyeb_token.strip()) and bool(settings.koyeb_service_id_mast.strip()))
+        or (mast_mode in {"auto", "koyeb"} and koyeb_monitor_ready)
+        or (mast_mode in {"auto", "r2"} and r2_monitor_ready)
         or (mast_mode == "http" and bool(settings.mast_health_url.strip()))
-        or (
-            mast_mode == "r2"
-            and bool(settings.r2_bucket_meta_system.strip())
-            and bool(settings.mast_state_object_key.strip())
-            and settings.r2_read_credentials_configured
-        )
     )
     checks.append(
         _check(
