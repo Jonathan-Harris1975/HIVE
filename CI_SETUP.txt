@@ -3,7 +3,7 @@ HIVE CI SECURITY/QUALITY SETUP
 
 Weekly schedule
 ---------------
-The authoritative HIVE MAST-aware slots are: Renovate refresh Saturday 08:30-11:00, CI Saturday 11:00-13:30, DAST monthly on the 1st at 02:18 Europe/London, and Repository Council Sunday 16:00-18:30 Europe/London. The DST-safe weekend-phase launcher owns those scheduled phase dispatches. Normal push and pull-request CI continues to run immediately.
+The authoritative HIVE MAST-aware slots are: Renovate refresh Saturday 08:30-11:00, CI Saturday 11:00-13:30, DAST monthly on the 1st at 02:21 Europe/London, and Repository Council Sunday 16:00-18:30 Europe/London. The DST-safe weekend-phase launcher owns those scheduled phase dispatches. Normal push and pull-request CI continues to run immediately.
 
 CI-specific secrets
 -------------------
@@ -44,7 +44,7 @@ HIVE's supplied repository was marked as using GitHub CodeQL Default Setup. This
 Renovate lets pip-compile own requirements.txt; direct pip_requirements updates to that generated file are disabled to avoid duplicate/conflicting dependency PRs.
 
 AUTONOMOUS PROVING-GROUP SETUP
-- Authoritative HIVE CI window: Saturday 11:00-13:30 Europe/London. Renovate refresh runs immediately beforehand, 08:30-11:00; DAST runs monthly on the 1st at 02:18 Europe/London; Council retains its Sunday slot.
+- Authoritative HIVE CI window: Saturday 11:00-13:30 Europe/London. Renovate refresh runs immediately beforehand, 08:30-11:00; DAST runs monthly on the 1st at 02:21 Europe/London; Council retains its Sunday slot.
 - KiloConnect + Kilo Code Bot: authorise both GitHub integrations for this repository. Failed default-branch CI/deployment-watch runs create one deduplicated carrier PR and trigger a Kilo Cloud Agent webhook.
 - Configure the repository Actions secrets `KILO_REPAIR_TRIGGER_URL` for Code-mode review repairs and `KILO_DEBUG_TRIGGER_URL` for Debug-mode failed-check, merge-conflict, and branch-behind repairs. Keep each trigger scoped to this repository.
 - Kilo may repair deterministic application/build compatibility defects exposed by a Renovate update, but it must not independently select or change the dependency version. All changes remain PR-only and must pass existing gates.

@@ -19,10 +19,10 @@ def test_every_weekend_phase_cron_has_a_dst_resolver_arm() -> None:
 def test_dast_schedule_resolves_to_0218_london_in_both_dst_states() -> None:
     workflow = LAUNCHER.read_text(encoding="utf-8")
 
-    assert '- cron: "18 1 1 * *"' in workflow
-    assert '- cron: "18 2 1 * *"' in workflow
-    assert '"18 1 1 * *:+0100"|"18 2 1 * *:+0000"' in workflow
-    assert "DAST: monthly on the 1st at 02:18 Europe/London" in workflow
+    assert '- cron: "21 1 1 * *"' in workflow
+    assert '- cron: "21 2 1 * *"' in workflow
+    assert '"21 1 1 * *:+0100"|"21 2 1 * *:+0000"' in workflow
+    assert "DAST: monthly on the 1st at 02:21 Europe/London" in workflow
 
 
 def test_trusted_weekend_sweeps_keep_two_reconciliation_slots_per_hour() -> None:
