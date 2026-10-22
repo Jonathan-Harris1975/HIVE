@@ -3,7 +3,7 @@ HIVE CI SECURITY/QUALITY SETUP
 
 Weekly schedule
 ---------------
-The authoritative HIVE MAST-aware slots are: Renovate refresh Saturday 08:30-11:00, CI Saturday 11:00-13:30, DAST Sunday 02:00-04:00, and Repository Council Sunday 16:00-18:30 Europe/London. The DST-safe weekend-phase launcher owns those scheduled phase dispatches. Normal push and pull-request CI continues to run immediately.
+The authoritative HIVE MAST-aware slots are: Renovate refresh Saturday 08:30-11:00, CI Saturday 11:00-13:30, DAST monthly on the 1st at 02:00 Europe/London, and Repository Council Sunday 16:00-18:30 Europe/London. The DST-safe weekend-phase launcher owns those scheduled phase dispatches. Normal push and pull-request CI continues to run immediately.
 
 CI-specific secrets
 -------------------
