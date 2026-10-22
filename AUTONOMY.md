@@ -1,6 +1,6 @@
 # Autonomous Repository Policy
 
-Authoritative MAST-aware HIVE schedule: **Renovate Saturday 08:30–11:00; CI Saturday 11:00–13:30; DAST monthly on the 1st at 02:00; Repository Council Sunday 16:00–18:30 Europe/London**.
+Authoritative MAST-aware HIVE schedule: **Renovate Saturday 08:30–11:00; CI Saturday 11:00–13:30; DAST monthly on the 1st at 02:18; Repository Council Sunday 16:00–18:30 Europe/London**.
 
 ## Weekend orchestration
 `.github/workflows/weekend-phase-launcher.yml` is the sole scheduled dispatcher for the MAST-aware CI/DAST/Council slots. `.github/workflows/weekend-orchestrator.yml` is manual proving/recovery only and must not move or duplicate those scheduled phases:
