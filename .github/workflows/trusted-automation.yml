@@ -12,10 +12,10 @@ on:
     types: [requested, completed]
   # Retain repair reconciliation slots and add hourly branch signal recovery.
   schedule:
-    - cron: "17,47 22-23 * * 6"
-    - cron: "17,47 0-5 * * 0"
-    - cron: "17 6 * * *"
-    - cron: "23 * * * *"
+    - cron: "12,42 22-23 * * 6"
+    - cron: "12,42 0-5 * * 0"
+    - cron: "12 6 * * *"
+    - cron: "27 * * * *"
   # Recover branch signals dropped by GitHub concurrency/event delivery.
   pull_request_target: # zizmor: ignore[dangerous-triggers] trusted default-branch automation reads metadata only and never executes PR code
     types: [opened, reopened, edited, synchronize, ready_for_review, converted_to_draft, labeled, unlabeled]
