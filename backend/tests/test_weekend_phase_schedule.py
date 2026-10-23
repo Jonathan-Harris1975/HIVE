@@ -16,7 +16,8 @@ def test_every_weekend_phase_cron_has_a_dst_resolver_arm() -> None:
     assert scheduled == routed
 
 
-def test_dast_schedule_resolves_to_0218_london_in_both_dst_states() -> None:
+def test_dast_schedule_resolves_to_0221_london_in_both_dst_states() -> None:
+    """The UTC cron arms must resolve to one 02:21 Europe/London wall-clock slot."""
     workflow = LAUNCHER.read_text(encoding="utf-8")
 
     assert '- cron: "21 1 1 * *"' in workflow
