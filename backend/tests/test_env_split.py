@@ -102,6 +102,30 @@ def test_mast_auto_monitoring_uses_koyeb_control_plane_for_worker() -> None:
     assert _mast_monitor_mode(settings, mast_target) == "koyeb"
 
 
+def test_mast_auto_monitoring_ignores_legacy_http_urls_without_worker_credentials() -> None:
+    settings = Settings(
+        app_env="test",
+        mast_monitor_mode="auto",
+        mast_health_url="https://mast.example/health",
+        mast_status_url="https://mast.example/status",
+    )
+    mast_target = next(target for target in _targets(settings) if target.repo == "MAST")
+
+    assert mast_target.health_url == "https://mast.example/health"
+    assert _mast_monitor_mode(settings, mast_target) == "disabled"
+
+
+def test_mast_http_monitoring_requires_explicit_mode() -> None:
+    settings = Settings(
+        app_env="test",
+        mast_monitor_mode="http",
+        mast_health_url="https://mast.example/health",
+    )
+    mast_target = next(target for target in _targets(settings) if target.repo == "MAST")
+
+    assert _mast_monitor_mode(settings, mast_target) == "http"
+
+
 def test_start_script_does_not_trust_all_forwarded_headers_by_default() -> None:
     text = Path("scripts/start.sh").read_text()
     assert 'FORWARDED_ALLOW_IPS="${FORWARDED_ALLOW_IPS:-127.0.0.1}"' in text
