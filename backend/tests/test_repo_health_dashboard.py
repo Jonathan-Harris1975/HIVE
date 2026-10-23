@@ -33,6 +33,7 @@ async def test_repo_health_reports_all_governed_repositories() -> None:
         rams_health_url="https://rams.example/health",
         rams_readiness_url="https://rams.example/readiness",
         rams_health_bearer_token="rams-secret",
+        mast_monitor_mode="http",
         mast_health_url="https://mast.example/health",
         mast_status_url="https://mast.example/status",
         irs_health_url="https://images.example/",
