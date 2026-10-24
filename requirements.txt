@@ -60,7 +60,7 @@ fastapi==0.143.2
     # via -r requirements.in
 fastuuid==0.14.0
     # via litellm
-filelock==3.32.7
+filelock==4.2.1
     # via
     #   huggingface-hub
     #   litellm
@@ -167,7 +167,7 @@ pydantic-settings==2.16.0
     #   litellm
 pygments==2.21.0
     # via rich
-pypdf==6.21.1
+pypdf==6.21.2
     # via -r requirements.in
 python-dateutil==2.9.0.post0
     # via botocore
