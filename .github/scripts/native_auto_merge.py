@@ -52,10 +52,18 @@ def request(method: str, path: str, data: dict[str, Any] | None = None) -> Any:
         raise RuntimeError(f"GitHub API HTTP {exc.code}: {message[:500]}") from exc
 
 
+class GraphQLError(RuntimeError):
+    """GraphQL request failure retaining GitHub's structured error payload."""
+
+    def __init__(self, errors: list[dict[str, Any]]) -> None:
+        self.errors = errors
+        super().__init__(f"GitHub GraphQL error: {errors}")
+
+
 def graphql(query: str, variables: dict[str, Any]) -> Any:
     result = request("POST", "https://api.github.com/graphql", {"query": query, "variables": variables})
     if result.get("errors"):
-        raise RuntimeError(f"GitHub GraphQL error: {result['errors']}")
+        raise GraphQLError(result["errors"])
     return result.get("data", {})
 
 
@@ -125,13 +133,18 @@ def enable(pr_node_id: str) -> bool:
             "mutation($id: ID!) { enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: " + method + "}) { pullRequest { number } } }",
             {"id": pr_node_id},
         )
-    except RuntimeError as exc:
-        # GitHub can briefly report an otherwise mergeable PR as unstable while
-        # required checks settle. Keep this controller check green and let a
-        # later workflow or scheduled reconciliation retry the native request.
-        if "in unstable status" in str(exc):
+    except GraphQLError as exc:
+        # Defer only GitHub's structured unprocessable response for the known
+        # transient unstable-status condition. Preserve the full payload for
+        # every other error so API changes and unrelated failures stay visible.
+        if any(
+            error.get("type") == "UNPROCESSABLE"
+            and "in unstable status" in str(error.get("message", "")).lower()
+            for error in exc.errors
+        ):
             print("GitHub reports an unstable PR status; deferring native auto-merge until a later reconciliation.")
             return False
+        print(f"Native auto-merge GraphQL mutation failed: {exc.errors!r}")
         raise
     return True
 
