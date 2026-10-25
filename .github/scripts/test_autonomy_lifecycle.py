@@ -575,11 +575,12 @@ class NativeAutoMergeCurrentLabelTests(unittest.TestCase):
             "context": native_auto_merge.ADMISSION_CHECK,
             "target_url": "https://github.com/owner/repo/pull/99",
             "state": "success",
+            "created_at": "2026-10-25T21:00:00Z",
             "creator": {"login": "github-actions[bot]"},
         }]
         with (
             patch.object(native_auto_merge, "REPO", "owner/repo"),
-            patch.object(native_auto_merge, "request", return_value={"statuses": statuses}),
+            patch.object(native_auto_merge, "request", return_value=statuses),
         ):
             self.assertEqual(native_auto_merge.admission_check(7, sha), (False, False))
 
@@ -589,11 +590,12 @@ class NativeAutoMergeCurrentLabelTests(unittest.TestCase):
             "context": native_auto_merge.ADMISSION_CHECK,
             "target_url": "https://github.com/owner/repo/pull/7",
             "state": "success",
+            "created_at": "2026-10-25T21:00:00Z",
             "creator": {"login": "github-actions[bot]"},
         }]
         with (
             patch.object(native_auto_merge, "REPO", "owner/repo"),
-            patch.object(native_auto_merge, "request", return_value={"statuses": statuses}),
+            patch.object(native_auto_merge, "request", return_value=statuses),
         ):
             self.assertEqual(native_auto_merge.admission_check(7, sha), (True, True))
 
