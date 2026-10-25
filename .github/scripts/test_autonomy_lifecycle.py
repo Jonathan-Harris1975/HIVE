@@ -17,6 +17,15 @@ import trusted_automation as automation  # noqa: E402
 import autonomy_admission_check as admission_check  # noqa: E402
 
 
+class RoutineUnitTestRiskClassificationTests(unittest.TestCase):
+    def test_regular_unit_tests_are_low_risk_but_security_tests_stay_high_risk(self):
+        with patch.object(automation, "REPO", "Jonathan-Harris1975/AIMS"):
+            self.assertFalse(automation.sensitive_file("tests/unit/test_routes.py"))
+            self.assertFalse(automation.sensitive_file("test/widgets/widget.test.ts"))
+            self.assertTrue(automation.sensitive_file("tests/security/test_policy.py"))
+            self.assertTrue(automation.sensitive_file("tests/test_auth.py"))
+
+
 class RepairRetirementTests(unittest.TestCase):
     def setUp(self):
         self.current = "a" * 40
