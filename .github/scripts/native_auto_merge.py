@@ -70,28 +70,23 @@ def pages(path: str) -> list[dict[str, Any]]:
 
 
 def admission_check(number: int, sha: str) -> tuple[bool, bool]:
-    """Return (exact successful admission exists, any admission check exists)."""
+    """Return whether exact-head trusted admission has a successful commit status."""
     sha = str(sha).lower()
     if not re.fullmatch(r"[0-9a-f]{40}", sha):
         return False, False
-    name = urllib.parse.quote(ADMISSION_CHECK, safe="")
-    runs = request(
-        "GET",
-        f"/repos/{REPO}/commits/{sha}/check-runs?check_name={name}&filter=all&per_page=100",
-    ).get("check_runs", [])
-    exact_id = f"trusted-autonomy-admission:{number}:{sha}"
-    exact_runs = [
-        run for run in runs
-        if (run.get("app") or {}).get("slug") == "github-actions"
-        and run.get("name") == ADMISSION_CHECK
-        and run.get("head_sha") == sha
-        and run.get("external_id") == exact_id
+    statuses = request("GET", f"/repos/{REPO}/commits/{sha}/statuses?per_page=100") or []
+    exact = [
+        status for status in statuses
+        if status.get("context") == ADMISSION_CHECK
+        and status.get("target_url") == f"https://github.com/{REPO}/pull/{number}"
+        and (status.get("creator") or {}).get("login") == "github-actions[bot]"
     ]
-    success = any(
-        run.get("status") == "completed" and run.get("conclusion") == "success"
-        for run in exact_runs
-    )
-    return success, bool(exact_runs)
+    exact.sort(key=lambda status: status.get("created_at") or "", reverse=True)
+    if not exact:
+        return False, False
+    # The status endpoint returns the latest status per context; fail closed
+    # unless GitHub Actions reports success for this exact PR and commit.
+    return exact[0].get("state") == "success", True
 
 
 def merge_request(pr_node_id: str) -> dict[str, Any] | None:

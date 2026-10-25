@@ -146,8 +146,36 @@ def set_admission_check(
     }
     if owned:
         _request("PATCH", f"/repos/{repo}/check-runs/{owned[0]['id']}", payload)
-        return True
-    if not create_if_missing:
+    elif not create_if_missing:
         return False
-    _request("POST", f"/repos/{repo}/check-runs", payload)
+    else:
+        _request("POST", f"/repos/{repo}/check-runs", payload)
+
+    # Commit statuses are append-only and GitHub caps each SHA/context at 1,000.
+    # Avoid publishing transient preflight failures or repeating an unchanged final state.
+    if not summary.startswith("Trusted admission is being re-evaluated;"):
+        target_url = f"https://github.com/{repo}/pull/{number}"
+        desired_state = "success" if conclusion == "success" else "failure"
+        prior_statuses = _request(
+            "GET",
+            f"/repos/{repo}/commits/{sha}/statuses?per_page=100",
+        ) or []
+        matching_statuses = [
+            status for status in prior_statuses
+            if status.get("context") == CHECK_NAME
+            and status.get("target_url") == target_url
+            and (status.get("creator") or {}).get("login") == "github-actions[bot]"
+        ]
+        matching_statuses.sort(key=lambda status: status.get("created_at") or "", reverse=True)
+        if not matching_statuses or matching_statuses[0].get("state") != desired_state:
+            _request(
+                "POST",
+                f"/repos/{repo}/statuses/{sha}",
+                {
+                    "state": desired_state,
+                    "target_url": target_url,
+                    "description": "Trusted admission verified" if conclusion == "success" else "Trusted admission withheld",
+                    "context": CHECK_NAME,
+                },
+            )
     return True
