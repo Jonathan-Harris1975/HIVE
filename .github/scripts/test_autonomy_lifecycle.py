@@ -313,6 +313,23 @@ class TrustedAdmissionProofTests(unittest.TestCase):
 
     @patch.dict(os.environ, {"ADMISSION_TOKEN": "unit-test", "REPO": "owner/repo"})
     @patch("autonomy_admission_check._request")
+    def test_same_exact_pr_status_is_not_republished(self, request):
+        request.side_effect = [
+            {"check_runs": []},
+            {"id": 1},
+            [{
+                "context": "Trusted autonomy admission",
+                "target_url": "https://github.com/owner/repo/pull/17",
+                "state": "success",
+                "created_at": "2026-10-25T21:00:00Z",
+                "creator": {"login": "github-actions[bot]"},
+            }],
+        ]
+        self.assertTrue(admission_check.set_admission_check(17, "a" * 40, "success", "verified"))
+        self.assertEqual(request.call_count, 3)
+
+    @patch.dict(os.environ, {"ADMISSION_TOKEN": "unit-test", "REPO": "owner/repo"})
+    @patch("autonomy_admission_check._request")
     def test_unverified_pr_does_not_create_a_failure_check_unless_label_was_forged(self, request):
         request.return_value = {"check_runs": []}
         self.assertFalse(
