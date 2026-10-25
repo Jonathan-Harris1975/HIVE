@@ -151,17 +151,31 @@ def set_admission_check(
     else:
         _request("POST", f"/repos/{repo}/check-runs", payload)
 
-    # Publish the required ruleset gate as a commit status. Keep the detailed
-    # check run for diagnostics, but make the required context visible directly
-    # to the ruleset on this exact commit.
-    _request(
-        "POST",
-        f"/repos/{repo}/statuses/{sha}",
-        {
-            "state": "success" if conclusion == "success" else "failure",
-            "target_url": f"https://github.com/{repo}/pull/{number}",
-            "description": "Trusted admission verified" if conclusion == "success" else "Trusted admission withheld",
-            "context": CHECK_NAME,
-        },
-    )
+    # Commit statuses are append-only and GitHub caps each SHA/context at 1,000.
+    # Avoid publishing transient preflight failures or repeating an unchanged final state.
+    if not summary.startswith("Trusted admission is being re-evaluated;"):
+        target_url = f"https://github.com/{repo}/pull/{number}"
+        desired_state = "success" if conclusion == "success" else "failure"
+        prior_statuses = _request(
+            "GET",
+            f"/repos/{repo}/commits/{sha}/statuses?per_page=100",
+        ) or []
+        matching_statuses = [
+            status for status in prior_statuses
+            if status.get("context") == CHECK_NAME
+            and status.get("target_url") == target_url
+            and (status.get("creator") or {}).get("login") == "github-actions[bot]"
+        ]
+        matching_statuses.sort(key=lambda status: status.get("created_at") or "", reverse=True)
+        if not matching_statuses or matching_statuses[0].get("state") != desired_state:
+            _request(
+                "POST",
+                f"/repos/{repo}/statuses/{sha}",
+                {
+                    "state": desired_state,
+                    "target_url": target_url,
+                    "description": "Trusted admission verified" if conclusion == "success" else "Trusted admission withheld",
+                    "context": CHECK_NAME,
+                },
+            )
     return True
