@@ -36,6 +36,7 @@ jobs:
     permissions:
       actions: read
       checks: write
+      statuses: write
       contents: read
       security-events: read
     if: >-
