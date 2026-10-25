@@ -577,7 +577,10 @@ class NativeAutoMergeCurrentLabelTests(unittest.TestCase):
             "state": "success",
             "creator": {"login": "github-actions[bot]"},
         }]
-        with patch.object(native_auto_merge, "request", return_value={"statuses": statuses}):
+        with (
+            patch.object(native_auto_merge, "REPO", "owner/repo"),
+            patch.object(native_auto_merge, "request", return_value={"statuses": statuses}),
+        ):
             self.assertEqual(native_auto_merge.admission_check(7, sha), (False, False))
 
     def test_exact_pr_successful_status_counts_for_admission(self):
@@ -588,7 +591,10 @@ class NativeAutoMergeCurrentLabelTests(unittest.TestCase):
             "state": "success",
             "creator": {"login": "github-actions[bot]"},
         }]
-        with patch.object(native_auto_merge, "request", return_value={"statuses": statuses}):
+        with (
+            patch.object(native_auto_merge, "REPO", "owner/repo"),
+            patch.object(native_auto_merge, "request", return_value={"statuses": statuses}),
+        ):
             self.assertEqual(native_auto_merge.admission_check(7, sha), (True, True))
 
     def test_open_pr_listing_fails_closed_at_safety_limit(self):
