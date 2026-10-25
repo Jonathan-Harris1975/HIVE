@@ -20,6 +20,8 @@ soupsieve==2.10
 # Direct security pin: fix CVE-2026-112940.
 filelock==4.2.1
 headroom-ai==0.41.0
+# Keep filelock 4.x compatible; newer LiteLLM pins require filelock<4.
+litellm==1.103.2
 # Direct security pin: 1.2.1 fixes GHSA-6v7p-g79w-8964.
 msgpack==1.2.3
 psycopg[binary]==3.3.6
