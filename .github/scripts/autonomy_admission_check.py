@@ -146,8 +146,22 @@ def set_admission_check(
     }
     if owned:
         _request("PATCH", f"/repos/{repo}/check-runs/{owned[0]['id']}", payload)
-        return True
-    if not create_if_missing:
+    elif not create_if_missing:
         return False
-    _request("POST", f"/repos/{repo}/check-runs", payload)
+    else:
+        _request("POST", f"/repos/{repo}/check-runs", payload)
+
+    # Publish the required ruleset gate as a commit status. Keep the detailed
+    # check run for diagnostics, but make the required context visible directly
+    # to the ruleset on this exact commit.
+    _request(
+        "POST",
+        f"/repos/{repo}/statuses/{sha}",
+        {
+            "state": "success" if conclusion == "success" else "failure",
+            "target_url": f"https://github.com/{repo}/pull/{number}",
+            "description": "Trusted admission verified" if conclusion == "success" else "Trusted admission withheld",
+            "context": CHECK_NAME,
+        },
+    )
     return True
