@@ -74,14 +74,14 @@ def admission_check(number: int, sha: str) -> tuple[bool, bool]:
     sha = str(sha).lower()
     if not re.fullmatch(r"[0-9a-f]{40}", sha):
         return False, False
-    statuses = request("GET", f"/repos/{REPO}/commits/{sha}/status").get("statuses", [])
+    statuses = request("GET", f"/repos/{REPO}/commits/{sha}/statuses?per_page=100") or []
     exact = [
         status for status in statuses
         if status.get("context") == ADMISSION_CHECK
         and status.get("target_url") == f"https://github.com/{REPO}/pull/{number}"
         and (status.get("creator") or {}).get("login") == "github-actions[bot]"
     ]
-    exact.sort(key=lambda status: status.get("updated_at") or "", reverse=True)
+    exact.sort(key=lambda status: status.get("created_at") or "", reverse=True)
     if not exact:
         return False, False
     # The status endpoint returns the latest status per context; fail closed
