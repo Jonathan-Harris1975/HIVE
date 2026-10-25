@@ -36,6 +36,7 @@ jobs:
     permissions:
       actions: read
       checks: write
+      statuses: write
       contents: read
       security-events: read
     if: >-
@@ -142,6 +143,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       checks: read
+      statuses: read
       # Required by GitHub's repository API to expose merge-method settings.
       contents: write
       pull-requests: write

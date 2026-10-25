@@ -17,6 +17,15 @@ import trusted_automation as automation  # noqa: E402
 import autonomy_admission_check as admission_check  # noqa: E402
 
 
+class RoutineUnitTestRiskClassificationTests(unittest.TestCase):
+    def test_regular_unit_tests_are_low_risk_but_security_tests_stay_high_risk(self):
+        with patch.object(automation, "REPO", "Jonathan-Harris1975/AIMS"):
+            self.assertFalse(automation.sensitive_file("tests/unit/test_routes.py"))
+            self.assertFalse(automation.sensitive_file("test/widgets/widget.test.ts"))
+            self.assertTrue(automation.sensitive_file("tests/security/test_policy.py"))
+            self.assertTrue(automation.sensitive_file("tests/test_auth.py"))
+
+
 class RepairRetirementTests(unittest.TestCase):
     def setUp(self):
         self.current = "a" * 40
@@ -264,7 +273,7 @@ class TrustedAdmissionProofTests(unittest.TestCase):
     @patch.dict(os.environ, {"ADMISSION_TOKEN": "unit-test", "REPO": "owner/repo"})
     @patch("autonomy_admission_check._request")
     def test_success_proof_is_created_for_exact_head(self, request):
-        request.side_effect = [{"check_runs": []}, {"id": 1}]
+        request.side_effect = [{"check_runs": []}, {"id": 1}, [], {}]
         sha = "a" * 40
         self.assertTrue(
             admission_check.set_admission_check(17, sha, "success", "verified")
@@ -275,11 +284,19 @@ class TrustedAdmissionProofTests(unittest.TestCase):
         self.assertEqual(payload["head_sha"], sha)
         self.assertEqual(payload["name"], "Trusted autonomy admission")
         self.assertEqual(payload["conclusion"], "success")
+        status_get_method, status_get_path = request.call_args_list[2].args
+        self.assertEqual(status_get_method, "GET")
+        self.assertEqual(status_get_path, f"/repos/owner/repo/commits/{sha}/statuses?per_page=100")
+        status_method, status_path, status_payload = request.call_args_list[3].args
+        self.assertEqual(status_method, "POST")
+        self.assertEqual(status_path, f"/repos/owner/repo/statuses/{sha}")
+        self.assertEqual(status_payload["context"], "Trusted autonomy admission")
+        self.assertEqual(status_payload["state"], "success")
 
     @patch.dict(os.environ, {"ADMISSION_TOKEN": "unit-test", "REPO": "owner/repo"})
     @patch("autonomy_admission_check._request")
     def test_uppercase_head_sha_is_normalized_before_publication(self, request):
-        request.side_effect = [{"check_runs": []}, {"id": 1}]
+        request.side_effect = [{"check_runs": []}, {"id": 1}, [], {}]
         sha = "A" * 40
         self.assertTrue(
             admission_check.set_admission_check(20, sha, "success", "verified")
@@ -300,6 +317,8 @@ class TrustedAdmissionProofTests(unittest.TestCase):
                 {"id": 12, "app": {"slug": "github-actions"}, "name": "Trusted autonomy admission", "head_sha": "b" * 40, "external_id": "trusted-autonomy-admission:18:" + "b" * 40, "started_at": "2026-01-02T00:00:00Z"},
             ]},
             {},
+            [],
+            {},
         ]
         sha = "b" * 40
         self.assertTrue(
@@ -310,6 +329,31 @@ class TrustedAdmissionProofTests(unittest.TestCase):
         self.assertEqual(path, "/repos/owner/repo/check-runs/12")
         self.assertEqual(payload["head_sha"], sha)
         self.assertEqual(payload["conclusion"], "failure")
+        status_get_method, status_get_path = request.call_args_list[2].args
+        self.assertEqual(status_get_method, "GET")
+        self.assertEqual(status_get_path, f"/repos/owner/repo/commits/{sha}/statuses?per_page=100")
+        status_method, status_path, status_payload = request.call_args_list[3].args
+        self.assertEqual(status_method, "POST")
+        self.assertEqual(status_path, f"/repos/owner/repo/statuses/{sha}")
+        self.assertEqual(status_payload["context"], "Trusted autonomy admission")
+        self.assertEqual(status_payload["state"], "failure")
+
+    @patch.dict(os.environ, {"ADMISSION_TOKEN": "unit-test", "REPO": "owner/repo"})
+    @patch("autonomy_admission_check._request")
+    def test_same_exact_pr_status_is_not_republished(self, request):
+        request.side_effect = [
+            {"check_runs": []},
+            {"id": 1},
+            [{
+                "context": "Trusted autonomy admission",
+                "target_url": "https://github.com/owner/repo/pull/17",
+                "state": "success",
+                "created_at": "2026-10-25T21:00:00Z",
+                "creator": {"login": "github-actions[bot]"},
+            }],
+        ]
+        self.assertTrue(admission_check.set_admission_check(17, "a" * 40, "success", "verified"))
+        self.assertEqual(request.call_count, 3)
 
     @patch.dict(os.environ, {"ADMISSION_TOKEN": "unit-test", "REPO": "owner/repo"})
     @patch("autonomy_admission_check._request")
@@ -571,15 +615,33 @@ class NativeAutoMergeCurrentLabelTests(unittest.TestCase):
 
     def test_admission_evidence_from_another_pr_does_not_count(self):
         sha = "a" * 40
-        runs = [{
-            "app": {"slug": "github-actions"},
-            "name": native_auto_merge.ADMISSION_CHECK,
-            "external_id": f"trusted-autonomy-admission:99:{sha}",
-            "status": "completed",
-            "conclusion": "success",
+        statuses = [{
+            "context": native_auto_merge.ADMISSION_CHECK,
+            "target_url": "https://github.com/owner/repo/pull/99",
+            "state": "success",
+            "created_at": "2026-10-25T21:00:00Z",
+            "creator": {"login": "github-actions[bot]"},
         }]
-        with patch.object(native_auto_merge, "request", return_value={"check_runs": runs}):
+        with (
+            patch.object(native_auto_merge, "REPO", "owner/repo"),
+            patch.object(native_auto_merge, "request", return_value=statuses),
+        ):
             self.assertEqual(native_auto_merge.admission_check(7, sha), (False, False))
+
+    def test_exact_pr_successful_status_counts_for_admission(self):
+        sha = "a" * 40
+        statuses = [{
+            "context": native_auto_merge.ADMISSION_CHECK,
+            "target_url": "https://github.com/owner/repo/pull/7",
+            "state": "success",
+            "created_at": "2026-10-25T21:00:00Z",
+            "creator": {"login": "github-actions[bot]"},
+        }]
+        with (
+            patch.object(native_auto_merge, "REPO", "owner/repo"),
+            patch.object(native_auto_merge, "request", return_value=statuses),
+        ):
+            self.assertEqual(native_auto_merge.admission_check(7, sha), (True, True))
 
     def test_open_pr_listing_fails_closed_at_safety_limit(self):
         page = [{"number": number} for number in range(100)]
