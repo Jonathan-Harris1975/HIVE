@@ -44,7 +44,7 @@ RUN npm_dir=/usr/local/lib/node_modules/npm \
          tar -xzf "${patch_dir}/${name}-${version}.tgz" -C "${npm_dir}/node_modules/${name}" --strip-components=1; \
        done \
     && rm -rf "$patch_dir" \
-    && node -e "const base='/usr/local/lib/node_modules/npm/node_modules'; for (const [name, expected] of [['brace-expansion','5.0.12'],['undici','6.29.0']]) { const {version} = require(base + '/' + name + '/package.json'); if (version !== expected) { throw new Error(name + ' is ' + version + ', expected ' + expected); } }"
+    && node -e "const base='/usr/local/lib/node_modules/npm/node_modules'; for (const [name, expected] of [['brace-expansion','5.0.12'],['undici','6.29.1']]) { const {version} = require(base + '/' + name + '/package.json'); if (version !== expected) { throw new Error(name + ' is ' + version + ', expected ' + expected); } }"
 
 FROM python:3.14.8-slim-bookworm@sha256:48b13b003dda20b16f9442b8475aa05fe21bf6579a8c881db92ffb4d8fd20f83 AS runtime
 
