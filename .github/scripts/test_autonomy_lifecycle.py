@@ -571,15 +571,25 @@ class NativeAutoMergeCurrentLabelTests(unittest.TestCase):
 
     def test_admission_evidence_from_another_pr_does_not_count(self):
         sha = "a" * 40
-        runs = [{
-            "app": {"slug": "github-actions"},
-            "name": native_auto_merge.ADMISSION_CHECK,
-            "external_id": f"trusted-autonomy-admission:99:{sha}",
-            "status": "completed",
-            "conclusion": "success",
+        statuses = [{
+            "context": native_auto_merge.ADMISSION_CHECK,
+            "target_url": "https://github.com/owner/repo/pull/99",
+            "state": "success",
+            "creator": {"login": "github-actions[bot]"},
         }]
-        with patch.object(native_auto_merge, "request", return_value={"check_runs": runs}):
+        with patch.object(native_auto_merge, "request", return_value={"statuses": statuses}):
             self.assertEqual(native_auto_merge.admission_check(7, sha), (False, False))
+
+    def test_exact_pr_successful_status_counts_for_admission(self):
+        sha = "a" * 40
+        statuses = [{
+            "context": native_auto_merge.ADMISSION_CHECK,
+            "target_url": "https://github.com/owner/repo/pull/7",
+            "state": "success",
+            "creator": {"login": "github-actions[bot]"},
+        }]
+        with patch.object(native_auto_merge, "request", return_value={"statuses": statuses}):
+            self.assertEqual(native_auto_merge.admission_check(7, sha), (True, True))
 
     def test_open_pr_listing_fails_closed_at_safety_limit(self):
         page = [{"number": number} for number in range(100)]
