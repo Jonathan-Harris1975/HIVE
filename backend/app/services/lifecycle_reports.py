@@ -161,7 +161,10 @@ def render_weekly_html(report: dict[str, Any]) -> str:
         if isinstance(rows, list) and rows and isinstance(rows[0], dict):
             focused_row = rows[0]
     if focused_row is not None:
-        latest = focused_row.get("latest_evidence") if isinstance(focused_row.get("latest_evidence"), dict) else {}
+        raw_latest = focused_row.get("latest_evidence")
+        latest: dict[str, Any] = {}
+        if isinstance(raw_latest, dict):
+            latest = raw_latest
         metric_values = {
             "CI gate": latest.get("ci_gate", "unknown"),
             "Socket": latest.get("socket_status", "unknown"),
