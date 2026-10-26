@@ -46,14 +46,26 @@ class OpenRouterClient:
         self._headroom = HeadroomOptimizer(settings)
 
     def _log_credential_used(self, route_name: str) -> None:
-        if route_name != "openrouter" or not self.settings.openrouter_api_key:
+        route_credentials = {
+            "leanctx": ("HIVE_LEANCTX_API_KEY", self.settings.leanctx_api_key),
+            "context_gateway": (
+                "HIVE_CONTEXT_GATEWAY_API_KEY",
+                self.settings.context_gateway_api_key,
+            ),
+        }
+        configured = route_credentials.get(route_name)
+        key_env = (
+            configured[0]
+            if configured and configured[1]
+            else "OPENROUTER_API_KEY"
+        )
+        source = f"{route_name}:{key_env}"
+        if source in self._logged_credential_sources:
             return
-        key_env = "OPENROUTER_API_KEY"
-        if key_env in self._logged_credential_sources:
-            return
-        self._logged_credential_sources.add(key_env)
+        self._logged_credential_sources.add(source)
         logger.info(
-            "ai.credential.verified repo=HIVE provider=openrouter key_env=%s status=used-successfully",
+            "ai.credential.verified repo=HIVE route=%s key_env=%s status=used-successfully",
+            route_name,
             key_env,
         )
 
