@@ -145,8 +145,8 @@ def render_weekly_html(report: dict[str, Any]) -> str:
     issues = []
     for row in report.get("repositories", []):
         repositories.append(
-            "<tr><th scope=\\\"row\\\">{}</th><td><span class=\\\"status\\\">{}</span></td>"
-            "<td>{}</td><td>{}</td><td><a href=\\\"{}\\\">Open report</a></td></tr>".format(
+            "<tr><th scope=\"row\">{}</th><td><span class=\"status\">{}</span></td>"
+            "<td>{}</td><td>{}</td><td><a href=\"{}\">Open report</a></td></tr>".format(
                 esc(row.get("repository")), esc(row.get("status")),
                 esc(row.get("evidence_count", 0)), esc(row.get("current_sha") or "unavailable"),
                 esc(row.get("report_url") or "#"),
@@ -155,8 +155,12 @@ def render_weekly_html(report: dict[str, Any]) -> str:
         if row.get("evidence_issue"):
             fields = ", ".join(row.get("missing_fields", [])) or "current head or observation"
             issues.append(f"<li><strong>{esc(row.get('repository'))}</strong>: {esc(row['evidence_issue'])} ({esc(fields)})</li>")
-    focused_row = next(iter(report.get("repositories", [])), {}) if report.get("repository_focus") else None
-    if focused_row:
+    focused_row: dict[str, Any] | None = None
+    if report.get("repository_focus"):
+        rows = report.get("repositories")
+        if isinstance(rows, list) and rows and isinstance(rows[0], dict):
+            focused_row = rows[0]
+    if focused_row is not None:
         latest = focused_row.get("latest_evidence") if isinstance(focused_row.get("latest_evidence"), dict) else {}
         metric_values = {
             "CI gate": latest.get("ci_gate", "unknown"),
@@ -199,7 +203,7 @@ h1{{margin-bottom:.25rem}} .meta{{color:#526078}} .summary{{display:flex;gap:1re
 th{{background:#eaf0f8}} ul{{padding-left:1.4rem}} li{{margin:.35rem 0}} code{{overflow-wrap:anywhere}} .metrics{{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));list-style:none;padding:0;gap:.5rem}}
 .metrics li{{display:flex;justify-content:space-between;gap:.5rem;background:white;border:1px solid #dbe2ee;border-radius:.5rem;padding:.65rem}}
 </style></head><body>
-<h1>{esc(title)}</h1><p class="meta">Generated {esc(report.get('generated_at'))} · Scope: {esc(report.get('scope'))}</p>
+<h1>{esc(title)}</h1><p class="meta">All eight repositories · Generated {esc(report.get('generated_at'))} · Scope: {esc(report.get('scope'))}</p>
 <div class="summary"><strong>Overall status: {esc(report.get('overall_status'))}</strong><span>Evidence complete: {('yes' if report.get('evidence_complete') else 'no')}</span></div>
 <h2>Repository overview</h2><table><thead><tr><th>Repository</th><th>Status</th><th>Evidence records</th><th>Current head SHA</th><th>Report</th></tr></thead><tbody>{''.join(repositories)}</tbody></table>
 {issue_section}<h2>Weekly metrics</h2><ul class="metrics">{metrics}</ul>{council_section}
@@ -253,13 +257,17 @@ def _delete_processed_ci_evidence(storage: R2Storage) -> int:
     for offset in range(0, len(keys), 1000):
         batch = keys[offset:offset + 1000]
         result = storage.delete_objects(batch, bucket=BUCKET)
+        requested_count = result.get("requested_count")
+        deleted_count = result.get("deleted_count")
         if (
             result.get("ok") is not True
-            or int(result.get("requested_count") or 0) != len(batch)
-            or int(result.get("deleted_count") or 0) != len(batch)
+            or not isinstance(requested_count, int)
+            or requested_count != len(batch)
+            or not isinstance(deleted_count, int)
+            or deleted_count != len(batch)
         ):
             raise RuntimeError("R2 evidence cleanup did not confirm every requested deletion")
-        deleted += int(result.get("deleted_count") or 0)
+        deleted += deleted_count
     return deleted
 
 
