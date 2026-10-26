@@ -177,10 +177,14 @@ def render_weekly_html(report: dict[str, Any]) -> str:
         f"<li><span>{esc(key)}</span><strong>{esc(value)}</strong></li>"
         for key, value in metric_values.items()
     )
+    council_items = [
+        item for item in report.get("council_evidence", [])
+        if not report.get("repository_focus") or item.get("repository") == report.get("repository_focus")
+    ]
     council = "".join(
         f"<li><strong>{esc(item.get('repository'))}</strong> · {esc(item.get('status'))} · "
-        f"<code>{esc(item.get('source_manifest_key'))}</code></li>"
-        for item in report.get("council_evidence", [])
+        f"run {esc(item.get('workflow_run_id'))} · <code>{esc(item.get('head_sha'))}</code></li>"
+        for item in council_items
     )
     issue_section = f"<h2>Missing or stale evidence</h2><ul>{''.join(issues)}</ul>" if issues else ""
     council_section = f"<h2>Council evidence</h2><ul>{council}</ul>" if council else ""
@@ -247,9 +251,14 @@ def _delete_processed_ci_evidence(storage: R2Storage) -> int:
                 break
     deleted = 0
     for offset in range(0, len(keys), 1000):
-        result = storage.delete_objects(keys[offset:offset + 1000], bucket=BUCKET)
-        if result.get("ok") is not True:
-            raise RuntimeError("R2 evidence cleanup returned deletion errors")
+        batch = keys[offset:offset + 1000]
+        result = storage.delete_objects(batch, bucket=BUCKET)
+        if (
+            result.get("ok") is not True
+            or int(result.get("requested_count") or 0) != len(batch)
+            or int(result.get("deleted_count") or 0) != len(batch)
+        ):
+            raise RuntimeError("R2 evidence cleanup did not confirm every requested deletion")
         deleted += int(result.get("deleted_count") or 0)
     return deleted
 
