@@ -39,7 +39,7 @@ class OpenRouterClient:
     _shared_model_ids_cache: ClassVar[dict[str, tuple[float, set[str]]]] = {}
     _shared_cache_locks: ClassVar[dict[str, asyncio.Lock]] = {}
     _cache_seconds: ClassVar[int] = 10 * 60
-    _logged_credential_fingerprints: ClassVar[set[str]] = set()
+    _logged_credential_sources: ClassVar[set[str]] = set()
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -48,13 +48,13 @@ class OpenRouterClient:
     def _log_credential_used(self, route_name: str) -> None:
         if route_name != "openrouter" or not self.settings.openrouter_api_key:
             return
-        fingerprint = hashlib.sha256(self.settings.openrouter_api_key.encode("utf-8")).hexdigest()[:12]
-        if fingerprint in self._logged_credential_fingerprints:
+        key_env = "OPENROUTER_API_KEY"
+        if key_env in self._logged_credential_sources:
             return
-        self._logged_credential_fingerprints.add(fingerprint)
+        self._logged_credential_sources.add(key_env)
         logger.info(
-            "ai.credential.verified repo=HIVE provider=openrouter key_env=OPENROUTER_API_KEY fingerprint=%s status=used-successfully",
-            fingerprint,
+            "ai.credential.verified repo=HIVE provider=openrouter key_env=%s status=used-successfully",
+            key_env,
         )
 
     def _cache_key(self) -> str:
