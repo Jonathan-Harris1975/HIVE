@@ -73,9 +73,3 @@ jobs:
           EVIDENCE_STATUS="$(python3 -c 'import json; print(json.load(open("lifecycle-evidence/evidence.json", encoding="utf-8"))["final_state"])')"
           export EVIDENCE_STATUS
           python3 .github/scripts/persist_ci_report_r2.py lifecycle "$SOURCE_SHA" lifecycle-evidence
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always()
-        with:
-          name: lifecycle-evidence-${{ github.event.workflow_run.head_sha || github.sha }}
-          path: lifecycle-evidence/evidence.json
-          retention-days: 90
