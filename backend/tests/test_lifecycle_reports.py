@@ -180,14 +180,18 @@ class LifecycleReportTests(unittest.TestCase):
             result = generate_and_store_weekly_report(storage, 2026, 42)
         self.assertTrue(result["ok"])
         self.assertEqual(result["report"]["overall_status"], "UNKNOWN")
-        self.assertEqual(result["objects_written_or_preserved"], 2)
-        self.assertEqual([item["Key"] for item in storage.puts], [
-            "reports/weekly/2026-W42.html", "reports/weekly/2026-W42.json",
-        ])
-        self.assertEqual([item["ContentType"] for item in storage.puts], [
-            "text/html; charset=utf-8", "application/json",
-        ])
-        self.assertEqual(len(storage.puts), 2)
+        self.assertEqual(result["objects_written_or_preserved"], 9)
+        self.assertEqual(
+            [item["Key"] for item in storage.puts],
+            [f"reports/weekly/2026-W42-{repo}.html" for repo in REPOSITORIES]
+            + ["reports/weekly/2026-W42.json"],
+        )
+        self.assertEqual(
+            [item["ContentType"] for item in storage.puts],
+            ["text/html; charset=utf-8"] * 8 + ["application/json"],
+        )
+        self.assertEqual(len(storage.puts), 9)
+        self.assertEqual(set(result["repository_report_keys"]), set(REPOSITORIES))
         self.assertEqual(len(result["report"]["repositories"]), 8)
 
     def test_weekly_report_index_reads_flat_json_pairs_and_skips_bad_documents(self):
