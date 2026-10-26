@@ -156,10 +156,11 @@ class LifecycleReportTests(unittest.TestCase):
         self.assertEqual(refs[0]["workflow_run_id"], "run-1")
         self.assertEqual(storage.puts, [])
 
-    def test_report_generation_writes_one_flat_json_and_one_html_for_all_repositories(self):
+    def test_report_generation_writes_eight_overviews_then_cleans_evidence(self):
         class Storage:
             def __init__(self):
                 self.puts = []
+                self.deleted = []
 
             def client(self):
                 storage = self
@@ -170,16 +171,31 @@ class LifecycleReportTests(unittest.TestCase):
 
                 return Client()
 
+            def list_objects_page(self, *, prefix, **_kwargs):
+                return SimpleNamespace(
+                    objects=[SimpleNamespace(key=f"{prefix}run/evidence.json")],
+                    prefixes=[],
+                    next_cursor=None,
+                    scanned_count=1,
+                )
+
+            def delete_objects(self, keys, *, bucket):
+                self.deleted.extend(keys)
+                return {"ok": True, "requested_count": len(keys), "deleted_count": len(keys)}
+
         storage = Storage()
+        heads = {repo: "a" * 40 for repo in REPOSITORIES}
+        records = {repo: [row(repo)] for repo in REPOSITORIES}
         with self.assertRaises(ValueError):
             generate_and_store_weekly_report(storage, 1999, 0)
         with (
-            patch("app.services.lifecycle_reports.collect_weekly_evidence", return_value={}),
+            patch("app.services.lifecycle_reports._current_repository_heads", return_value=heads),
+            patch("app.services.lifecycle_reports.collect_weekly_evidence", return_value=records),
             patch("app.services.lifecycle_reports.collect_council_references", return_value=[]),
         ):
             result = generate_and_store_weekly_report(storage, 2026, 42)
         self.assertTrue(result["ok"])
-        self.assertEqual(result["report"]["overall_status"], "UNKNOWN")
+        self.assertEqual(result["report"]["overall_status"], "GREEN")
         self.assertEqual(result["objects_written_or_preserved"], 9)
         self.assertEqual(
             [item["Key"] for item in storage.puts],
@@ -193,6 +209,9 @@ class LifecycleReportTests(unittest.TestCase):
         self.assertEqual(len(storage.puts), 9)
         self.assertEqual(set(result["repository_report_keys"]), set(REPOSITORIES))
         self.assertEqual(len(result["report"]["repositories"]), 8)
+        self.assertTrue(result["cleanup_complete"])
+        self.assertEqual(result["deleted_evidence_objects"], 8)
+        self.assertEqual(len(storage.deleted), 8)
 
     def test_weekly_report_index_reads_flat_json_pairs_and_skips_bad_documents(self):
         class Storage:
