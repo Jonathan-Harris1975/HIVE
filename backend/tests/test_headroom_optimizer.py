@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from types import SimpleNamespace
 from typing import Any
 
@@ -52,7 +53,8 @@ def test_oversize_context_passthrough() -> None:
     assert outcome.skipped_reason == "oversize"
 
 
-def test_compression_preserves_system_and_records_savings() -> None:
+def test_compression_preserves_system_and_records_savings(caplog) -> None:
+    caplog.set_level(logging.INFO, logger="uvicorn.error.hive.headroom")
     settings = Settings(headroom_protect_recent=1)
     optimizer = HeadroomOptimizer(settings)
     calls: list[dict[str, Any]] = []
@@ -75,6 +77,7 @@ def test_compression_preserves_system_and_records_savings() -> None:
     outcome = optimizer.optimise(_messages(), model="openai/test")
 
     assert outcome.compressed is True
+    assert "headroom.inline_verified status=responded model=openai/test" in caplog.text
     assert outcome.tokens_saved == 360
     assert outcome.messages[0]["content"] == "Keep this instruction byte-for-byte."
     assert outcome.messages[-1]["content"] == "Current request must remain intact."

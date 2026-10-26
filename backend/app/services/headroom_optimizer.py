@@ -88,6 +88,7 @@ class HeadroomOptimizer:
                 min_tokens_to_compress=self._settings.headroom_min_tokens_to_compress,
                 kompress_model=self._settings.headroom_kompress_model,
             )
+            logger.info("headroom.inline_verified status=responded model=%s", model)
             candidate = self._validated_messages(getattr(result, "messages", None), original)
             tokens_before = self._safe_int(getattr(result, "tokens_before", 0))
             tokens_after = self._safe_int(getattr(result, "tokens_after", 0))
