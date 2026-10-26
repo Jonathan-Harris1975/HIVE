@@ -145,7 +145,7 @@ def render_weekly_html(report: dict[str, Any]) -> str:
     issues = []
     for row in report.get("repositories", []):
         repositories.append(
-            "<tr><th scope=\\\"row\\\">{}</th><td><span class=\\\"status\\\">{}</span></td>"
+            "<tr><th scope=\"row\">{}</th><td><span class=\"status\">{}</span></td>"
             "<td>{}</td><td>{}</td><td><a href=\\\"{}\\\">Open report</a></td></tr>".format(
                 esc(row.get("repository")), esc(row.get("status")),
                 esc(row.get("evidence_count", 0)), esc(row.get("current_sha") or "unavailable"),
