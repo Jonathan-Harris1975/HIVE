@@ -15,7 +15,7 @@ from app.services.ops_events import delete_all_ops_events, delete_ops_event, lis
 from app.services.providers.registry import discover_providers
 from app.services.repo_health import build_repo_health_report
 from app.services.production_manager import build_production_manager_report
-from app.services.lifecycle_reports import accept_review_fix, generate_and_store_weekly_report, list_open_reviews, list_weekly_reports, read_latest_weekly_report, read_weekly_html
+from app.services.lifecycle_reports import accept_review_fix, generate_and_store_weekly_report, list_open_reviews, list_weekly_reports, read_latest_weekly_report, read_repository_html, read_weekly_html
 from app.services.repo_hygiene import repo_hygiene_report
 from app.storage.d1 import D1MetadataStore
 from app.storage.r2 import R2Storage
@@ -83,6 +83,31 @@ def weekly_lifecycle_report_html(
         raise HTTPException(status_code=404, detail="Weekly report is not available") from exc
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=503, detail="Weekly report could not be read") from exc
+    return HTMLResponse(
+        content=content,
+        headers={
+            "Cache-Control": "no-store",
+            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+            "X-Content-Type-Options": "nosniff",
+            "Referrer-Policy": "no-referrer",
+        },
+    )
+
+
+@router.get("/system/lifecycle-reports/repository-html", response_class=HTMLResponse)
+def weekly_repository_lifecycle_report_html(
+    year: int = Query(..., ge=2000, le=9999),
+    week: int = Query(..., ge=1, le=53),
+    repository: str = Query(..., min_length=1, max_length=64),
+    settings: Settings = Depends(get_settings),
+) -> HTMLResponse:
+    """Serve one of the eight stored weekly repository overviews."""
+    try:
+        content = read_repository_html(R2Storage(settings), year, week, repository)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Repository report is not available") from exc
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=503, detail="Repository report could not be read") from exc
     return HTMLResponse(
         content=content,
         headers={

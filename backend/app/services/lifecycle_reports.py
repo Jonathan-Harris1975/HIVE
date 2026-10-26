@@ -44,22 +44,25 @@ def _state(record: dict[str, Any] | None) -> str:
     state = record.get("final_state", "UNKNOWN")
     if state not in FINAL_STATES:
         return "UNKNOWN"
-    # GREEN needs affirmative, exact-revision gate and deployment evidence.
-    if state == "GREEN":
-        statuses = ("ci_gate", "socket_status", "codeql_status", "gitleaks_status", "trivy_status", "codecov_status", "dast_status", "deployment_status")
-        raw_reasons = record.get("not_applicable_reasons")
-        reasons: dict[str, Any] = raw_reasons if isinstance(raw_reasons, dict) else {}
-        if any(record.get(field) not in {"pass", "not_applicable"} for field in statuses):
-            return "UNKNOWN"
-        if any(record.get(field) == "not_applicable" and not reasons.get(field) for field in statuses):
-            return "UNKNOWN"
-        if record.get("human_hold") is True:
-            return "UNKNOWN"
-        if record.get("deployment_status") == "pass" and (record.get("deployment_verified") is not True or record.get("deployed_sha") != record.get("head_sha")):
-            return "UNKNOWN"
-        if record.get("deployment_status") == "not_applicable" and not record.get("deployment_not_applicable_reason"):
-            return "UNKNOWN"
-    return state
+    # DAST runs monthly, so it is reported but does not gate weekly CI completeness.
+    if record.get("dast_status") == "fail":
+        return "SERVICE_BLOCKED"
+    statuses = ("ci_gate", "socket_status", "codeql_status", "gitleaks_status", "trivy_status", "codecov_status", "deployment_status")
+    raw_reasons = record.get("not_applicable_reasons")
+    reasons: dict[str, Any] = raw_reasons if isinstance(raw_reasons, dict) else {}
+    if any(record.get(field) not in {"pass", "not_applicable"} for field in statuses):
+        return state if state in {"RECOVERING", "REVIEW_REQUIRED", "SERVICE_BLOCKED"} else "UNKNOWN"
+    if any(record.get(field) == "not_applicable" and not reasons.get(field) for field in statuses):
+        return "UNKNOWN"
+    if record.get("human_hold") is True:
+        return "UNKNOWN"
+    if record.get("deployment_status") == "pass" and (record.get("deployment_verified") is not True or record.get("deployed_sha") != record.get("head_sha")):
+        return "UNKNOWN"
+    if record.get("deployment_status") == "not_applicable" and not record.get("deployment_not_applicable_reason"):
+        return "UNKNOWN"
+    if state in {"REVIEW_REQUIRED", "SERVICE_BLOCKED", "RECOVERING"}:
+        return state
+    return "GREEN"
 
 
 def build_weekly_overview(records_by_repository: Mapping[str, Iterable[dict[str, Any]]], year: int, week: int, generated_at: str | None = None, *, current_heads: Mapping[str, str] | None = None) -> dict[str, Any]:
@@ -95,7 +98,7 @@ def build_weekly_overview(records_by_repository: Mapping[str, Iterable[dict[str,
             else "incomplete_evidence" if status == "UNKNOWN"
             else None
         )
-        fields = ("ci_gate", "socket_status", "codeql_status", "gitleaks_status", "trivy_status", "codecov_status", "dast_status", "deployment_status")
+        fields = ("ci_gate", "socket_status", "codeql_status", "gitleaks_status", "trivy_status", "codecov_status", "deployment_status")
         repositories.append({
             "repository": name, "status": status, "current_sha": current_sha or None,
             "head_observed_at": observed_at, "evidence_count": len(valid),
@@ -135,7 +138,7 @@ def build_weekly_overview(records_by_repository: Mapping[str, Iterable[dict[str,
 def render_weekly_html(report: dict[str, Any]) -> str:
     """Render the stored report as a self-contained, script-free HTML document."""
     period = report["period"]
-    title = f"HIVE weekly overview · {period['iso_year']} W{period['iso_week']:02d}"
+    title = f"{report.get('repository_focus') or 'HIVE'} weekly overview · {period['iso_year']} W{period['iso_week']:02d}"
     def esc(value: Any) -> str:
         return html.escape(str(value if value is not None else ""), quote=True)
     repositories = []
@@ -143,22 +146,52 @@ def render_weekly_html(report: dict[str, Any]) -> str:
     for row in report.get("repositories", []):
         repositories.append(
             "<tr><th scope=\"row\">{}</th><td><span class=\"status\">{}</span></td>"
-            "<td>{}</td><td>{}</td></tr>".format(
+            "<td>{}</td><td>{}</td><td><a href=\"{}\">Open report</a></td></tr>".format(
                 esc(row.get("repository")), esc(row.get("status")),
                 esc(row.get("evidence_count", 0)), esc(row.get("current_sha") or "unavailable"),
+                esc(row.get("report_url") or "#"),
             )
         )
         if row.get("evidence_issue"):
             fields = ", ".join(row.get("missing_fields", [])) or "current head or observation"
             issues.append(f"<li><strong>{esc(row.get('repository'))}</strong>: {esc(row['evidence_issue'])} ({esc(fields)})</li>")
+    focused_row: dict[str, Any] | None = None
+    if report.get("repository_focus"):
+        rows = report.get("repositories")
+        if isinstance(rows, list) and rows and isinstance(rows[0], dict):
+            focused_row = rows[0]
+    if focused_row is not None:
+        raw_latest = focused_row.get("latest_evidence")
+        latest: dict[str, Any] = {}
+        if isinstance(raw_latest, dict):
+            latest = raw_latest
+        metric_values = {
+            "CI gate": latest.get("ci_gate", "unknown"),
+            "Socket": latest.get("socket_status", "unknown"),
+            "CodeQL": latest.get("codeql_status", "unknown"),
+            "Gitleaks": latest.get("gitleaks_status", "unknown"),
+            "Trivy": latest.get("trivy_status", "unknown"),
+            "Codecov": latest.get("codecov_status", "unknown"),
+            "DAST": latest.get("dast_status", "unknown"),
+            "Deployment": latest.get("deployment_status", "unknown"),
+        }
+    else:
+        metric_values = {
+            key.replace("_", " ").capitalize(): value
+            for key, value in report.get("metrics", {}).items()
+        }
     metrics = "".join(
-        f"<li><span>{esc(key.replace('_', ' ').capitalize())}</span><strong>{esc(value)}</strong></li>"
-        for key, value in report.get("metrics", {}).items()
+        f"<li><span>{esc(key)}</span><strong>{esc(value)}</strong></li>"
+        for key, value in metric_values.items()
     )
+    council_items = [
+        item for item in report.get("council_evidence", [])
+        if not report.get("repository_focus") or item.get("repository") == report.get("repository_focus")
+    ]
     council = "".join(
         f"<li><strong>{esc(item.get('repository'))}</strong> · {esc(item.get('status'))} · "
-        f"<code>{esc(item.get('source_manifest_key'))}</code></li>"
-        for item in report.get("council_evidence", [])
+        f"run {esc(item.get('workflow_run_id'))} · <code>{esc(item.get('head_sha'))}</code></li>"
+        for item in council_items
     )
     issue_section = f"<h2>Missing or stale evidence</h2><ul>{''.join(issues)}</ul>" if issues else ""
     council_section = f"<h2>Council evidence</h2><ul>{council}</ul>" if council else ""
@@ -173,11 +206,72 @@ h1{{margin-bottom:.25rem}} .meta{{color:#526078}} .summary{{display:flex;gap:1re
 th{{background:#eaf0f8}} ul{{padding-left:1.4rem}} li{{margin:.35rem 0}} code{{overflow-wrap:anywhere}} .metrics{{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));list-style:none;padding:0;gap:.5rem}}
 .metrics li{{display:flex;justify-content:space-between;gap:.5rem;background:white;border:1px solid #dbe2ee;border-radius:.5rem;padding:.65rem}}
 </style></head><body>
-<h1>{esc(title)}</h1><p class="meta">Generated {esc(report.get('generated_at'))} · Scope: {esc(report.get('scope'))}</p>
+<h1>{esc(title)}</h1><p class="meta">All eight repositories · Generated {esc(report.get('generated_at'))} · Scope: {esc(report.get('scope'))}</p>
 <div class="summary"><strong>Overall status: {esc(report.get('overall_status'))}</strong><span>Evidence complete: {('yes' if report.get('evidence_complete') else 'no')}</span></div>
-<h2>All eight repositories</h2><table><thead><tr><th>Repository</th><th>Status</th><th>Evidence records</th><th>Current head SHA</th></tr></thead><tbody>{''.join(repositories)}</tbody></table>
+<h2>Repository overview</h2><table><thead><tr><th>Repository</th><th>Status</th><th>Evidence records</th><th>Current head SHA</th><th>Report</th></tr></thead><tbody>{''.join(repositories)}</tbody></table>
 {issue_section}<h2>Weekly metrics</h2><ul class="metrics">{metrics}</ul>{council_section}
 </body></html>\n"""
+
+
+
+def render_repository_html(report: dict[str, Any], row: dict[str, Any]) -> str:
+    """Render one repository's weekly overview using the shared report template."""
+    repository = str(row.get("repository") or "")
+    focused = {
+        **report,
+        "report_id": f"{report.get('report_id')}-{repository}",
+        "repository_focus": repository,
+        "overall_status": row.get("status", "UNKNOWN"),
+        "evidence_complete": row.get("status") != "UNKNOWN" and not row.get("missing_fields"),
+        "repositories": [row],
+    }
+    return render_weekly_html(focused)
+
+
+def read_repository_html(storage: R2Storage, year: int, week: int, repository: str) -> str:
+    """Read one of the eight flat per-repository weekly overview files."""
+    if repository not in REPOSITORIES:
+        raise ValueError("Unknown governed repository")
+    key = f"reports/weekly/{year}-W{week:02d}-{repository}.html"
+    body = storage.read_object(key, max_bytes=2 * 1024 * 1024, bucket=BUCKET).content
+    return body.decode("utf-8")
+
+
+def _delete_processed_ci_evidence(storage: R2Storage) -> int:
+    """Delete governed-repository CI evidence after a complete report is committed."""
+    keys: list[str] = []
+    for repository in REPOSITORIES:
+        prefix = f"ci-reports/{repository}/"
+        cursor = None
+        scanned = 0
+        while True:
+            page = storage.list_objects_page(
+                prefix=prefix, bucket=BUCKET, limit=1000, cursor=cursor,
+                delimiter=None, max_scan_keys=50_000,
+            )
+            keys.extend(str(getattr(item, "key", "")) for item in page.objects if getattr(item, "key", ""))
+            scanned += page.scanned_count
+            if scanned > 50_000:
+                raise RuntimeError(f"Refusing unbounded evidence cleanup for {repository}")
+            cursor = page.next_cursor
+            if not cursor:
+                break
+    deleted = 0
+    for offset in range(0, len(keys), 1000):
+        batch = keys[offset:offset + 1000]
+        result = storage.delete_objects(batch, bucket=BUCKET)
+        requested_count = result.get("requested_count")
+        deleted_count = result.get("deleted_count")
+        if (
+            result.get("ok") is not True
+            or not isinstance(requested_count, int)
+            or requested_count != len(batch)
+            or not isinstance(deleted_count, int)
+            or deleted_count != len(batch)
+        ):
+            raise RuntimeError("R2 evidence cleanup did not confirm every requested deletion")
+        deleted += deleted_count
+    return deleted
 
 
 def build_review_objects(record: dict[str, Any], year: int) -> tuple[str, dict[str, bytes]] | None:
@@ -399,15 +493,32 @@ def _generate_and_store_weekly_report(storage: R2Storage, year: int, week: int) 
     records = collect_weekly_evidence(storage, year, week)
     report = build_weekly_overview(records, year, week, observation.isoformat().replace("+00:00", "Z"), current_heads=current_heads)
     council_references = collect_council_references(storage, year, week)
-    report["council_evidence"] = council_references
+    # The evidence objects are deleted after this report is committed; retain useful
+    # provenance in the report without leaving links to the soon-to-be-cleaned tree.
+    report["council_evidence"] = [
+        {key: value for key, value in item.items() if key != "source_manifest_key"}
+        for item in council_references
+    ]
     report["metrics"]["council_evidence_bundles"] = len(council_references)
     json_key = f"reports/weekly/{year}-W{week:02d}.json"
-    html_key = f"reports/weekly/{year}-W{week:02d}.html"
+    repository_report_keys: dict[str, str] = {}
+    for row in report["repositories"]:
+        repository = str(row["repository"])
+        key = f"reports/weekly/{year}-W{week:02d}-{repository}.html"
+        row["report_key"] = key
+        row["report_url"] = (
+            f"/v1/system/lifecycle-reports/repository-html?year={year}&week={week}&repository={repository}"
+        )
+        row["report_created"] = True
+        repository_report_keys[repository] = key
+    # Write the eight user-facing reports first; the compact JSON index is the commit marker.
+    for row in report["repositories"]:
+        body = render_repository_html(report, row).encode()
+        storage.client().put_object(
+            Bucket=BUCKET, Key=repository_report_keys[str(row["repository"])],
+            Body=body, ContentType="text/html; charset=utf-8",
+        )
     json_body = (json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode()
-    html_body = render_weekly_html(report).encode()
-    # HTML is written first; JSON is the commit marker used by current/history reads.
-    # The process lock also serialises scheduled and operator-triggered builds.
-    storage.client().put_object(Bucket=BUCKET, Key=html_key, Body=html_body, ContentType="text/html; charset=utf-8")
     storage.client().put_object(Bucket=BUCKET, Key=json_key, Body=json_body, ContentType="application/json")
     review_ids: set[str] = set()
     open_review_count = 0
@@ -451,7 +562,17 @@ def _generate_and_store_weekly_report(storage: R2Storage, year: int, week: int) 
             _put_immutable(storage, f"{review_prefix}/{filename}", body, "text/markdown" if filename.endswith(".md") else "application/json")
         open_review_count += 1
     review_count = open_review_count
-    return {"ok": True, "report": report, "r2_keys": [json_key, html_key], "objects_written_or_preserved": 2, "open_review_records": review_count}
+    deleted_evidence_objects = _delete_processed_ci_evidence(storage) if report["evidence_complete"] else 0
+    return {
+        "ok": True,
+        "report": report,
+        "r2_keys": [json_key],
+        "repository_report_keys": repository_report_keys,
+        "objects_written_or_preserved": 9,
+        "deleted_evidence_objects": deleted_evidence_objects,
+        "cleanup_complete": report["evidence_complete"],
+        "open_review_records": review_count,
+    }
 
 
 def generate_and_store_weekly_report(storage: R2Storage, year: int, week: int) -> dict[str, Any]:
