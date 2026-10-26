@@ -39,10 +39,23 @@ class OpenRouterClient:
     _shared_model_ids_cache: ClassVar[dict[str, tuple[float, set[str]]]] = {}
     _shared_cache_locks: ClassVar[dict[str, asyncio.Lock]] = {}
     _cache_seconds: ClassVar[int] = 10 * 60
+    _logged_credential_fingerprints: ClassVar[set[str]] = set()
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self._headroom = HeadroomOptimizer(settings)
+
+    def _log_credential_used(self, route_name: str) -> None:
+        if route_name != "openrouter" or not self.settings.openrouter_api_key:
+            return
+        fingerprint = hashlib.sha256(self.settings.openrouter_api_key.encode("utf-8")).hexdigest()[:12]
+        if fingerprint in self._logged_credential_fingerprints:
+            return
+        self._logged_credential_fingerprints.add(fingerprint)
+        logger.info(
+            "ai.credential.verified repo=HIVE provider=openrouter key_env=OPENROUTER_API_KEY fingerprint=%s status=used-successfully",
+            fingerprint,
+        )
 
     def _cache_key(self) -> str:
         key_digest = hashlib.sha256(self.settings.openrouter_api_key.encode("utf-8")).hexdigest()[:16]
@@ -623,6 +636,7 @@ class OpenRouterClient:
                 raise HTTPException(status_code=response.status_code, detail=message)
 
             data = response.json()
+            self._log_credential_used(route_name)
             if isinstance(data, dict):
                 data.setdefault("hive_context_route", route_name)
             return data
