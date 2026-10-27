@@ -102,6 +102,21 @@ def test_mast_auto_monitoring_uses_koyeb_control_plane_for_worker() -> None:
     assert _mast_monitor_mode(settings, mast_target) == "koyeb"
 
 
+def test_mast_auto_monitoring_prefers_configured_durable_heartbeat() -> None:
+    settings = Settings(
+        app_env="test",
+        mast_monitor_mode="auto",
+        koyeb_token="test-token",
+        koyeb_service_id_mast="mast-service",
+        cf_r2_endpoint_url="https://example.r2.cloudflarestorage.com",
+        cf_r2_access_key_id="access",
+        cf_r2_secret_access_key="secret",
+        r2_bucket_meta_system="metasystem",
+    )
+    mast_target = next(target for target in _targets(settings) if target.repo == "MAST")
+    assert _mast_monitor_mode(settings, mast_target) == "r2"
+
+
 def test_mast_auto_monitoring_ignores_legacy_http_urls_without_worker_credentials() -> None:
     settings = Settings(
         app_env="test",
