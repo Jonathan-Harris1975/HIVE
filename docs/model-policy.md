@@ -5,6 +5,19 @@
 
 # LLM model selection governance plan
 
+## Economy selection adjustment — 28 October 2026
+
+The runtime router now prefers the lowest measured cost per successful task
+within the cheap/fast registry categories, after the existing score and lifecycle
+filters. Cost preference requires confirmed availability, a passing task
+evaluation, positive sample size and traceable evidence. Unknown, negative or
+non-finite task costs cannot promote a challenger; equal costs preserve Council
+ranking. Without qualified cost evidence the existing registry order is retained.
+General reasoning, coding, audit and premium assignments are unchanged. No new
+model is declared evaluated by this change. Verify runtime registry evidence and
+cost per accepted task after deployment; reverting the router change restores
+the former ranking behaviour.
+
 1. **Make the HIVE AI Council accountable for the model catalogue.**
 
    - Run the formal Council cycle monthly, before the consolidated monthly review.

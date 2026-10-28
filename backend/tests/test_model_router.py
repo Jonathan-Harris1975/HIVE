@@ -2,6 +2,35 @@ from app.core.config import Settings
 from app.services.model_router import Mode, ModelRouter, TaskType
 
 
+def test_summary_prefers_available_evaluated_task_cost_without_changing_code(monkeypatch):
+    from types import SimpleNamespace
+
+    def candidate(name, cost, score=0.95, **changes):
+        values = dict(model_id=name, score=score, lifecycle_status="active", available=True,
+                      evaluation_passed=True, evaluation_sample_size=50,
+                      evaluation_evidence="eval://summary", cost_per_successful_task=cost)
+        values.update(changes)
+        return SimpleNamespace(**values)
+
+    models = [candidate("strong-baseline", 0.10), candidate("qualified-economy", 0.01),
+              candidate("below-floor", 0, score=0.1),
+              candidate("failed-eval", 0, evaluation_passed=False),
+              candidate("retired", 0, lifecycle_status="retired")]
+    monkeypatch.setattr("app.services.model_router.model_registry.get_ranked_models", lambda _: models)
+    router = ModelRouter(Settings(_env_file=None))
+    assert router.select_model(TaskType.SUMMARY) == "qualified-economy"
+    assert router.select_model(TaskType.CODE) == "strong-baseline"
+
+
+def test_summary_without_task_cost_evidence_keeps_existing_registry_order(monkeypatch):
+    from types import SimpleNamespace
+
+    models = [SimpleNamespace(model_id=name, score=0.95, lifecycle_status="active")
+              for name in ["existing", "challenger"]]
+    monkeypatch.setattr("app.services.model_router.model_registry.get_ranked_models", lambda _: models)
+    assert ModelRouter(Settings(_env_file=None)).select_model(TaskType.SUMMARY) == "existing"
+
+
 def test_model_defaults_are_pinned_and_routes_keep_distinct_roles(monkeypatch) -> None:
     for name in (
         "DEFAULT_MODEL",
