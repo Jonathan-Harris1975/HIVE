@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from typing import Any
 
 
-def prefer_evaluated_cost(candidates: Sequence[Any]) -> list[Any]:
+def prefer_evaluated_cost(candidates: Sequence[Any], *, evaluated_only: bool = False) -> list[Any]:
     """Keep legacy ranking unless available, evaluated task-cost evidence exists.
 
     Callers must first apply their existing capability, lifecycle and score gates.
@@ -32,4 +32,6 @@ def prefer_evaluated_cost(candidates: Sequence[Any]) -> list[Any]:
             qualified.append(candidate)
     # Stable sorting preserves the Council's ranking when task costs are equal.
     qualified.sort(key=lambda candidate: candidate.cost_per_successful_task)
+    if evaluated_only:
+        return qualified
     return qualified + [candidate for candidate in candidates if candidate not in qualified]

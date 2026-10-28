@@ -201,8 +201,10 @@ async def auto_title_conversation(
                 skipped=True,
             )
 
+    router_policy = ModelRouter(settings)
+    title_model = router_policy.select_title_model()
     payload: dict[str, object] = {
-        "model": settings.cheap_model,
+        "model": title_model,
         "messages": [
             {
                 "role": "system",
@@ -219,9 +221,9 @@ async def auto_title_conversation(
     }
     completion = await OpenRouterClient(settings).chat_completion(
         payload,
-        fallback_models=ModelRouter(settings).fallback_models_for_task(
+        fallback_models=router_policy.fallback_models_for_task(
             TaskType.SUMMARY,
-            settings.cheap_model,
+            title_model,
             allow_free=False,
         ),
     )
@@ -230,7 +232,7 @@ async def auto_title_conversation(
         await asyncio.to_thread(
             store.record_usage_event,
             conversation_id=conversation_id,
-            model_used=str(completion.get("model") or settings.cheap_model),
+            model_used=str(completion.get("model") or title_model),
             provider=(str(completion.get("provider")) if completion.get("provider") else None),
             usage=usage,
             metadata={"operation": "conversation_auto_title"},
