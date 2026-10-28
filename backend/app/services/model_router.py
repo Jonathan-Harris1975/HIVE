@@ -6,6 +6,7 @@ from typing import Any
 
 from app.core.config import Settings
 from app.services import model_registry
+from app.services.model_cost_policy import prefer_evaluated_cost
 from app.services.model_governance import (
     ModelSelectionDecision,
     ModelUseJustification,
@@ -111,15 +112,16 @@ class ModelRouter:
         ranked = model_registry.get_ranked_models(category)
         if not ranked:
             return None
-        return next(
-            (
-                candidate.model_id
-                for candidate in ranked
-                if candidate.score >= self.settings.model_registry_min_visible_score
-                and lifecycle_is_routable(candidate.lifecycle_status)
-            ),
-            None,
-        )
+        eligible = [
+            candidate for candidate in ranked
+            if candidate.score >= self.settings.model_registry_min_visible_score
+            and lifecycle_is_routable(candidate.lifecycle_status)
+        ]
+        # Only economy roles change selection here. General reasoning, coding,
+        # audits and premium work retain the Council's existing quality ranking.
+        if category in {"cheap", "fast"}:
+            eligible = prefer_evaluated_cost(eligible)
+        return eligible[0].model_id if eligible else None
 
     def _audit_registry_default(self) -> str | None:
         """Choose a qualified audit model distinct from general reasoning."""
