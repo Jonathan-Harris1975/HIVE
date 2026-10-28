@@ -53,3 +53,5 @@ Workers AI embeddings are optional unless the deployment policy makes the depend
 For dependency maintenance, update `requirements.in`, regenerate `requirements.txt` with `python -m piptools compile --generate-hashes --output-file=requirements.txt --strip-extras requirements.in`, then run `python scripts/verify_dependency_lock.py --compile`, the full test/static/security gates and the Docker smoke gate.
 
 CI additionally scans the built `hive:ci` image with a pinned Trivy action. Fixable High/Critical OS or library findings block release; unfixed findings remain reviewable under the documented `ignore-unfixed` policy, and the table report is retained for 90 days.
+
+Daily provider spend is available in HIVE-UI under **Operations → LLM spend**. See [Daily LLM spend](DAILY_LLM_SPEND.md) for evidence coverage, private access and unavailable-data behaviour.
