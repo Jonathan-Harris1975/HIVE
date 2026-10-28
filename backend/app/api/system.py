@@ -4,12 +4,13 @@ import asyncio
 import datetime as dt
 import time
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import HTMLResponse
 
 from app.core.config import Settings, get_settings
 from app.core.security import require_admin
 from app.core.version import BUILD_STAGE
+from app.services.llm_spend import read_spend_report
 from app.services import model_registry
 from app.services.ops_events import delete_all_ops_events, delete_ops_event, list_ops_events
 from app.services.providers.registry import discover_providers
@@ -22,6 +23,17 @@ from app.storage.r2 import R2Storage
 from app.storage.sql_store import SqlStore
 
 router = APIRouter(tags=["system"], dependencies=[Depends(require_admin)])
+
+
+@router.get("/system/llm-spend")
+def llm_spend(response: Response, date: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+              settings: Settings = Depends(get_settings)) -> dict[str, object]:
+    """Read private account spend through the existing authenticated HIVE gateway."""
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return read_spend_report(R2Storage(settings), settings.r2_bucket_meta_system, date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Choose a valid completed reporting date") from exc
 
 
 @router.get("/system/repo-hygiene")
