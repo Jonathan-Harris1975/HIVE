@@ -300,8 +300,8 @@ class ModelRouter:
         """Return the bounded expert-review ladder for post-loop councils.
 
         A council is intentionally separate from the self-improvement ladder.
-        The first seat uses the configured audit model and the second may use the
-        configured premium model.  Callers still decide whether a council is
+        The first seat uses the configured audit model; coding escalation may use
+        the configured code model. Premium selection is never implicit.  Callers still decide whether a council is
         necessary; this method only enforces the hard two-model ceiling.
         """
         limit = max(0, min(int(max_models), 2))
@@ -310,29 +310,16 @@ class ModelRouter:
         candidates = [self.settings.audit_model]
         if task == TaskType.CODE:
             candidates.append(self.settings.code_model)
-        candidates.append(self.settings.premium_model)
 
         ordered: list[str] = []
-        seen: set[str] = set()
         for model in candidates:
             model = str(model or "").strip()
-            if not model or model in seen or self._is_free_model_id(model):
+            if not model or model in ordered or self._is_free_model_id(model):
                 continue
             status = self._registered_lifecycle_status(model)
             if status is not None and not lifecycle_is_routable(status):
                 continue
-            seen.add(model)
             ordered.append(model)
-        # Prefer the audit/code reviewer first, but reserve the configured
-        # premium model for the final escalation when it is distinct.
-        if len(ordered) <= limit:
-            return ordered
-        if self.settings.premium_model in ordered and limit >= 2:
-            first = next(
-                (model for model in ordered if model != self.settings.premium_model),
-                ordered[0],
-            )
-            return [first, self.settings.premium_model]
         return ordered[:limit]
 
     def fallback_models_for_task(
