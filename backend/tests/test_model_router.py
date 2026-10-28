@@ -31,6 +31,32 @@ def test_summary_without_task_cost_evidence_keeps_existing_registry_order(monkey
     assert ModelRouter(Settings(_env_file=None)).select_model(TaskType.SUMMARY) == "existing"
 
 
+def test_title_model_requires_comparable_evidence_and_never_promotes_free_or_premium(monkeypatch):
+    from types import SimpleNamespace
+
+    def candidate(name, cost, **changes):
+        values = dict(model_id=name, score=0.95, lifecycle_status="active", available=True,
+                      evaluation_passed=True, evaluation_sample_size=50,
+                      evaluation_evidence="eval://title", cost_per_successful_task=cost,
+                      approved_roles=("conversation_auto_title",))
+        values.update(changes)
+        return SimpleNamespace(**values)
+
+    baseline = candidate("paid-baseline", 0.10)
+    economy = candidate("paid-economy", 0.01)
+    models = [baseline, economy, candidate("public-model:free", 0),
+              candidate("openrouter/free", 0), candidate("anthropic/claude-opus-5.5", 0),
+              candidate("wrong-role", 0, approved_roles=("coding",))]
+    monkeypatch.setattr("app.services.model_router.model_registry.get_ranked_models", lambda _: models)
+    router = ModelRouter(Settings(_env_file=None, cheap_model="paid-baseline"))
+    assert router.select_title_model() == "paid-economy"
+    baseline.evaluation_evidence = ""
+    assert router.select_title_model() == "paid-baseline"
+    baseline.evaluation_evidence = "eval://title"
+    economy.cost_per_successful_task = 0.20
+    assert router.select_title_model() == "paid-baseline"
+
+
 def test_model_defaults_are_pinned_and_routes_keep_distinct_roles(monkeypatch) -> None:
     for name in (
         "DEFAULT_MODEL",

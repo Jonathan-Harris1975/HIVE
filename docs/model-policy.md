@@ -5,6 +5,18 @@
 
 # LLM model selection governance plan
 
+## Auxiliary title routing — 28 October 2026
+
+Conversation titles now use measured economy selection instead of bypassing the
+registry with the static cheap assignment. A replacement must pass the existing
+quality/lifecycle gates, have available/passing task-cost evidence, and explicitly
+approve the `conversation_auto_title` role. The configured baseline must have
+comparable passing evidence too; without it, the existing model remains selected.
+Free and premium candidates are excluded from this internal-text helper. Paid
+fallbacks and usage accounting use the actual selected model. Main chat, audit and
+coding models are unchanged. Savings depend on qualifying registry evidence;
+none are claimed from a static model switch.
+
 ## Economy selection adjustment — 28 October 2026
 
 The runtime router now prefers the lowest measured cost per successful task

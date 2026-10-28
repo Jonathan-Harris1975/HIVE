@@ -175,6 +175,28 @@ class ModelRouter:
 
         return self._baseline_model(task)
 
+    def select_title_model(self) -> str:
+        """Downshift small internal summaries only against a measured baseline.
+
+        Titles contain conversation text. They must not silently enter a free
+        route or use a new premium assignment. Missing comparable task evidence
+        leaves the existing configured helper model in place.
+        """
+        baseline = self.settings.cheap_model
+        eligible = [
+            item for item in model_registry.get_ranked_models("cheap")
+            if item.score >= self.settings.model_registry_min_visible_score
+            and lifecycle_is_routable(item.lifecycle_status)
+            and not self._is_free_model_id(item.model_id)
+            and item.model_id != "openrouter/free"
+            and not is_premium_model(item.model_id, self.settings)
+            and "conversation_auto_title" in (getattr(item, "approved_roles", None) or ())
+        ]
+        evaluated = prefer_evaluated_cost(eligible, evaluated_only=True)
+        if any(item.model_id == baseline for item in evaluated):
+            return evaluated[0].model_id
+        return baseline
+
     def select_model_decision(
         self,
         task: TaskType,

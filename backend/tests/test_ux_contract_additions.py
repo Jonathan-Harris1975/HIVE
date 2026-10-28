@@ -38,12 +38,22 @@ async def test_auto_title_conversation_persists_clean_title(tmp_path: Path, monk
         provider="test-provider",
         usage={"prompt_tokens": 4, "completion_tokens": 6, "total_tokens": 10, "cost": 0.0},
     )["ok"] is True
-    monkeypatch.setattr(chat_api, "OpenRouterClient", _FakeOpenRouterClient)
+    title_requests = []
+
+    class CapturingClient(_FakeOpenRouterClient):
+        async def chat_completion(self, payload, fallback_models=None):
+            title_requests.append((payload, fallback_models))
+            return await super().chat_completion(payload, fallback_models)
+
+    monkeypatch.setattr(chat_api, "OpenRouterClient", CapturingClient)
+    monkeypatch.setattr(chat_api.ModelRouter, "select_title_model", lambda self: "paid/title-economy")
 
     response = await chat_api.auto_title_conversation("conv-title", settings=settings)
 
     assert response.ok is True
     assert response.title == "R2 File Selection Upgrade"
+    assert title_requests[0][0]["model"] == "paid/title-economy"
+    assert not any(model.endswith(":free") for model in title_requests[0][1])
     conversation = store.get_conversation("conv-title")
     assert conversation["conversation"]["title"] == "R2 File Selection Upgrade"
     assert conversation["conversation"]["auto_titled"] is True
