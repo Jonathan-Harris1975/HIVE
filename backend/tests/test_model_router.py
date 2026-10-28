@@ -74,11 +74,11 @@ def test_model_defaults_are_pinned_and_routes_keep_distinct_roles(monkeypatch) -
     )
     router = ModelRouter(settings)
 
-    assert router.select_model(TaskType.GENERAL) == "google/gemini-3.8-flash"
-    assert router.select_model(TaskType.SUMMARY) == "google/gemini-3.8-flash"
-    assert router.select_model(TaskType.FILE_TRIAGE) == "openai/gpt-5.6-terra"
+    assert router.select_model(TaskType.GENERAL) == "openai/gpt-5.6-luna"
+    assert router.select_model(TaskType.SUMMARY) == "openai/gpt-5.6-luna"
+    assert router.select_model(TaskType.FILE_TRIAGE) == "anthropic/claude-sonnet-5.5"
     assert router.select_model(TaskType.AUDIT) == "anthropic/claude-sonnet-5.5"
-    assert router.select_model(TaskType.CODE) == "openai/gpt-5.3-codex"
+    assert router.select_model(TaskType.CODE) == "openai/gpt-5.6-sol"
     assert router.select_model(TaskType.PREMIUM) == "anthropic/claude-opus-5.5"
 
 
@@ -182,4 +182,5 @@ def test_council_model_ladder_has_hard_two_run_ceiling() -> None:
     ladder = router.council_models_for_task(TaskType.CODE, max_models=99)
 
     assert len(ladder) == 2
-    assert ladder[-1] == "premium-expert"
+    assert ladder == ["audit-reviewer", "code-reviewer"]
+    assert "premium-expert" not in ladder

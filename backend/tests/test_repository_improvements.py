@@ -446,7 +446,10 @@ def test_work_scope_rejects_model_response_over_dynamic_limit() -> None:
 
 
 @pytest.mark.asyncio
-async def test_multi_pass_can_exceed_single_pass_scope_without_raising_pass_limit(monkeypatch, tmp_path: Path) -> None:
+@pytest.mark.parametrize("attempt_limit,expected_changes,expected_passes", [(1, 1, 1), (2, 2, 2)])
+async def test_multi_pass_can_exceed_single_pass_scope_without_raising_pass_limit(
+    monkeypatch, tmp_path: Path, attempt_limit: int, expected_changes: int, expected_passes: int,
+) -> None:
     root = tmp_path / "repo-multipass"
     root.mkdir()
     for index in range(10):
@@ -464,7 +467,7 @@ async def test_multi_pass_can_exceed_single_pass_scope_without_raising_pass_limi
         code_model="loop/code",
         audit_model="council/audit",
         premium_model="council/premium",
-        repository_improvement_max_loops=1,
+        repository_improvement_max_loops=attempt_limit,
         repository_improvement_max_council_runs=0,
         repository_improvement_success_threshold=0.95,
         repository_improvement_near_threshold_tolerance=0.05,
@@ -539,9 +542,10 @@ async def test_multi_pass_can_exceed_single_pass_scope_without_raising_pass_limi
     job = repository_improvements._JOBS[job_id]
 
     assert job["status"] == "completed"
-    assert job["change_count"] == 2
-    assert len(job["work_pass_ledger"]) == 2
+    assert job["change_count"] == expected_changes
+    assert len(job["work_pass_ledger"]) == expected_passes
     assert all(item["work_scope"]["effective_file_limit"] == 1 for item in job["work_pass_ledger"])
     assert all(item["work_scope"]["files_modified"] <= 1 for item in job["work_pass_ledger"])
-    assert job["cumulative_work_scope"]["files_modified"] == 2
-    assert job["orchestration"]["accepted_work_pass"] == 2
+    assert job["cumulative_work_scope"]["files_modified"] == expected_changes
+    assert job["orchestration"]["accepted_work_pass"] == expected_passes
+    assert job["orchestration"]["shared_attempt_budget"]["used"]["self_improvement"] == expected_passes

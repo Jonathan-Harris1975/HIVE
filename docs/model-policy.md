@@ -190,3 +190,17 @@ the former ranking behaviour.
     MODEL_RETIREMENT_QUARANTINE_DAYS=7
     OPENROUTER_MAX_FALLBACK_ATTEMPTS=2
     ```
+
+### Shared job attempt allowance (2026-10-28)
+
+Repository improvement uses one allowance across all work passes: up to the
+configured four self-improvement model attempts and two council-stage attempts
+per job, rather than replenishing those allowances on every pass. Attempts are
+charged before execution, including technical failures. Validated partial progress
+is retained when the job allowance is exhausted; security/build gates and change
+scope limits still apply. Reports expose limits and usage in `shared_attempt_budget`.
+Normal paid defaults are Luna for routine work, Sonnet for balanced/audit work,
+and Sol for the strongest coding stage. Automated council selection no longer
+implicitly inserts Opus; explicit premium selection remains governed separately.
+Runtime environment and evaluated registry assignments can override defaults.
+No live quality equivalence or GBP saving is asserted by unit tests.

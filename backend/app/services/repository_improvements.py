@@ -1098,6 +1098,11 @@ async def _run_job(
             max_models=settings.repository_improvement_max_council_runs,
         )
 
+        attempt_budget = {
+            "self_improvement": max(1, int(settings.repository_improvement_max_loops)),
+            "council": max(0, int(settings.repository_improvement_max_council_runs)),
+        }
+        attempts_used = {"self_improvement": 0, "council": 0}
         outcomes: list[dict[str, Any]] = []
         work_pass_ledger: list[dict[str, Any]] = []
         best_score = baseline_qa_score
@@ -1143,6 +1148,10 @@ async def _run_job(
                 nonlocal accepted_work_pass
                 nonlocal accepted_under_tolerance
 
+                if attempts_used[stage] >= attempt_budget[stage]:
+                    return False
+                attempts_used[stage] += 1
+
                 attempt_root = job_root / f"work-pass-{work_pass}-{stage}-{iteration}-workspace"
                 shutil.rmtree(attempt_root, ignore_errors=True)
                 shutil.copytree(staging, attempt_root, dirs_exist_ok=False)
@@ -1165,6 +1174,7 @@ async def _run_job(
                         "work_scope": work_scope,
                         "self_improvement_max_loops": settings.repository_improvement_max_loops,
                         "council_max_runs": settings.repository_improvement_max_council_runs,
+                        "shared_attempt_budget": {"limits": attempt_budget, "used": attempts_used},
                         "outcomes": outcomes,
                     },
                 )
@@ -1353,6 +1363,8 @@ async def _run_job(
                 break
             if normalised_mode == "single_pass":
                 break
+            if all(attempts_used[stage] >= limit for stage, limit in attempt_budget.items()):
+                break
             # A blocked pass must not terminate a multi-pass run. Each pass can
             # receive a different finding slice/model attempt, so later passes
             # may still make safe progress even when this pass made no changes.
@@ -1431,6 +1443,7 @@ async def _run_job(
         council_outcomes = [item for item in outcomes if item.get("stage") == "council"]
         orchestration_report = {
             "protocol": "work_passes_loop_first_bounded_council_v2",
+            "shared_attempt_budget": {"limits": attempt_budget, "used": attempts_used},
             "execution_mode": normalised_mode,
             "max_work_passes": total_work_passes,
             "work_passes_run": len(work_pass_ledger),
