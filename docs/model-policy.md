@@ -204,3 +204,14 @@ and Sol for the strongest coding stage. Automated council selection no longer
 implicitly inserts Opus; explicit premium selection remains governed separately.
 Runtime environment and evaluated registry assignments can override defaults.
 No live quality equivalence or GBP saving is asserted by unit tests.
+
+### Production-template audit — 28 October 2026
+
+The application routes use Settings/ModelRouter; no literal model-ID request
+bypass was found in backend production Python. The committed
+`HIVE-PRODUCTION-SHARED.env` still named the pre-migration Gemini/Terra/Codex
+assignments and could override the newer defaults when copied into deployment.
+Align its routine/balanced/code defaults to Luna/Sonnet/Sol and test both checked-in
+environment templates against Settings. Premium and explicit public free fallback
+remain intentional configurable roles. This commit does not verify or change
+already-deployed environment variables or the live D1 model registry.
