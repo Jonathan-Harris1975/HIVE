@@ -213,6 +213,19 @@ class LifecycleReportTests(unittest.TestCase):
         self.assertEqual(result["deleted_evidence_objects"], 8)
         self.assertEqual(len(storage.deleted), 8)
 
+        storage.puts.clear()
+        storage.deleted.clear()
+        with (
+            patch("app.services.lifecycle_reports._current_repository_heads", return_value=heads),
+            patch("app.services.lifecycle_reports.collect_weekly_evidence", return_value=records),
+            patch("app.services.lifecycle_reports.collect_council_references", return_value=[]),
+        ):
+            restored = generate_and_store_weekly_report(storage, 2026, 42, preserve_evidence=True)
+        self.assertEqual(len(storage.puts), 9)
+        self.assertEqual(storage.deleted, [])
+        self.assertEqual(restored["deleted_evidence_objects"], 0)
+        self.assertFalse(restored["cleanup_complete"])
+
     def test_weekly_report_index_reads_flat_json_pairs_and_skips_bad_documents(self):
         class Storage:
             def list_objects_page(self, *, prefix, **_kwargs):
