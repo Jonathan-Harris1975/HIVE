@@ -88,11 +88,13 @@ jobs:
         run: python scripts/watch_koyeb_deployment.py
       - name: Restore the authorised missing Operations weekly report
         if: ${{ startsWith(github.event.workflow_run.head_commit.message, 'Restore Operations weekly report') }}
+        timeout-minutes: 5
         env:
           KOYEB_TOKEN: ${{ secrets.KOYEB_TOKEN }}
         run: |
           set -euo pipefail
-          output="$(koyeb services exec "$KOYEB_SERVICE" python -- scripts/restore_operations_report.py)"
+          printf -v exec_command 'koyeb services exec %q python -- scripts/restore_operations_report.py' "$KOYEB_SERVICE"
+          output="$(script -q -e -c "$exec_command" /dev/null < /dev/null)"
           printf '%s\n' "$output"
           grep -F '"event":"operations.weekly_report.verified"' <<< "$output" > /dev/null
       - name: Record exact-SHA production deployment attestation
