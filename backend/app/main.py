@@ -19,6 +19,7 @@ from app.api.service_actions import router as service_actions_router
 from app.api.env_audit import router as env_audit_router
 from app.api.execution import router as execution_router
 from app.api.files import router as files_router
+from app.api.headroom_compress import router as headroom_compress_router
 from app.api.health import router as health_router
 from app.api.model_registry import router as model_registry_router
 from app.api.models import router as models_router
@@ -165,6 +166,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Added last so it wraps CORS and TrustedHost responses as well as route responses.
     application.add_middleware(ProductionMiddleware, settings=active_settings)
 
+    application.include_router(headroom_compress_router, prefix="/v1")
     application.include_router(health_router)
     application.include_router(runtime_router)
     application.include_router(models_router, prefix="/v1")
