@@ -485,7 +485,7 @@ def read_weekly_html(storage: R2Storage, year: int, week: int) -> str:
     return body if expected in body else render_weekly_html(report)
 
 
-def _generate_and_store_weekly_report(storage: R2Storage, year: int, week: int) -> dict[str, Any]:
+def _generate_and_store_weekly_report(storage: R2Storage, year: int, week: int, *, preserve_evidence: bool = False) -> dict[str, Any]:
     if not (2000 <= year <= 9999 and 1 <= week <= 53):
         raise ValueError("ISO year/week is out of range")
     observation = dt.datetime.now(dt.timezone.utc)
@@ -562,7 +562,7 @@ def _generate_and_store_weekly_report(storage: R2Storage, year: int, week: int) 
             _put_immutable(storage, f"{review_prefix}/{filename}", body, "text/markdown" if filename.endswith(".md") else "application/json")
         open_review_count += 1
     review_count = open_review_count
-    deleted_evidence_objects = _delete_processed_ci_evidence(storage) if report["evidence_complete"] else 0
+    deleted_evidence_objects = _delete_processed_ci_evidence(storage) if report["evidence_complete"] and not preserve_evidence else 0
     return {
         "ok": True,
         "report": report,
@@ -570,15 +570,15 @@ def _generate_and_store_weekly_report(storage: R2Storage, year: int, week: int) 
         "repository_report_keys": repository_report_keys,
         "objects_written_or_preserved": 9,
         "deleted_evidence_objects": deleted_evidence_objects,
-        "cleanup_complete": report["evidence_complete"],
+        "cleanup_complete": report["evidence_complete"] and not preserve_evidence,
         "open_review_records": review_count,
     }
 
 
-def generate_and_store_weekly_report(storage: R2Storage, year: int, week: int) -> dict[str, Any]:
+def generate_and_store_weekly_report(storage: R2Storage, year: int, week: int, *, preserve_evidence: bool = False) -> dict[str, Any]:
     """Serialise report builds so the weekly JSON/HTML pair cannot interleave in-process."""
     with _WEEKLY_REPORT_LOCK:
-        return _generate_and_store_weekly_report(storage, year, week)
+        return _generate_and_store_weekly_report(storage, year, week, preserve_evidence=preserve_evidence)
 
 
 def list_open_reviews(storage: R2Storage, limit: int = 100) -> list[dict[str, Any]]:
