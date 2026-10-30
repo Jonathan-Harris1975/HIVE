@@ -17,7 +17,6 @@ def test_audit_environment_against_real_env_example_returns_valid_ratio():
         "model_registry_seed_json",
         "provider_framework_extra_providers_json",
         "benchmark_weights_json",
-        "ai_council_promotion_threshold",
         "github_token",
     ):
         undocumented_names = {item["field"] for item in result["undocumented_fields"]}

@@ -114,7 +114,7 @@ def test_seed_from_json_handles_malformed_input_gracefully():
     assert registry.seed_from_json("[]") == 0
 
 
-def test_model_router_prefers_registry_default_for_code_task():
+def test_model_router_keeps_configured_code_model_despite_registry_rank():
     settings = Settings(code_model="static-code-model")
     router = ModelRouter(settings)
 
@@ -122,7 +122,7 @@ def test_model_router_prefers_registry_default_for_code_task():
 
     registry.register_model("coding", "registry-code-model", score=0.99)
 
-    assert router.select_model(TaskType.CODE) == "registry-code-model"
+    assert router.select_model(TaskType.CODE) == "static-code-model"
 
 
 def test_model_router_explicit_request_still_wins_over_registry():
@@ -348,7 +348,7 @@ def test_model_router_ignores_registry_model_below_quality_floor():
     assert router.select_model(TaskType.CODE) == "static-code-model"
 
 
-def test_model_router_uses_registry_categories_beyond_coding():
+def test_model_router_keeps_configured_roles_despite_registry_updates():
     settings = Settings(
         default_model="static-general",
         audit_model="static-audit",
@@ -360,8 +360,8 @@ def test_model_router_uses_registry_categories_beyond_coding():
 
     router = ModelRouter(settings)
 
-    assert router.select_model(TaskType.GENERAL) == "ranked-reasoning"
-    assert router.select_model(TaskType.AUDIT) == "ranked-audit"
+    assert router.select_model(TaskType.GENERAL) == "static-general"
+    assert router.select_model(TaskType.AUDIT) == "static-audit"
     registry.remove_model("audit", "ranked-audit")
     assert router.select_model(TaskType.AUDIT) == "static-audit"
 

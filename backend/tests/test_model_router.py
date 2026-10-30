@@ -2,7 +2,7 @@ from app.core.config import Settings
 from app.services.model_router import Mode, ModelRouter, TaskType
 
 
-def test_summary_prefers_available_evaluated_task_cost_without_changing_code(monkeypatch):
+def test_catalogue_rankings_do_not_override_configured_summary_or_code_models(monkeypatch):
     from types import SimpleNamespace
 
     def candidate(name, cost, score=0.95, **changes):
@@ -18,20 +18,21 @@ def test_summary_prefers_available_evaluated_task_cost_without_changing_code(mon
               candidate("retired", 0, lifecycle_status="retired")]
     monkeypatch.setattr("app.services.model_router.model_registry.get_ranked_models", lambda _: models)
     router = ModelRouter(Settings(_env_file=None))
-    assert router.select_model(TaskType.SUMMARY) == "qualified-economy"
-    assert router.select_model(TaskType.CODE) == "strong-baseline"
+    assert router.select_model(TaskType.SUMMARY) == router.settings.cheap_model
+    assert router.select_model(TaskType.CODE) == router.settings.code_model
 
 
-def test_summary_without_task_cost_evidence_keeps_existing_registry_order(monkeypatch):
+def test_summary_without_task_cost_evidence_keeps_operator_defaults(monkeypatch):
     from types import SimpleNamespace
 
     models = [SimpleNamespace(model_id=name, score=0.95, lifecycle_status="active")
               for name in ["existing", "challenger"]]
     monkeypatch.setattr("app.services.model_router.model_registry.get_ranked_models", lambda _: models)
-    assert ModelRouter(Settings(_env_file=None)).select_model(TaskType.SUMMARY) == "existing"
+    settings = Settings(_env_file=None)
+    assert ModelRouter(settings).select_model(TaskType.SUMMARY) == settings.cheap_model
 
 
-def test_title_model_requires_comparable_evidence_and_never_promotes_free_or_premium(monkeypatch):
+def test_title_model_stays_configured_even_when_catalogue_evidence_changes(monkeypatch):
     from types import SimpleNamespace
 
     def candidate(name, cost, **changes):
@@ -49,7 +50,7 @@ def test_title_model_requires_comparable_evidence_and_never_promotes_free_or_pre
               candidate("wrong-role", 0, approved_roles=("coding",))]
     monkeypatch.setattr("app.services.model_router.model_registry.get_ranked_models", lambda _: models)
     router = ModelRouter(Settings(_env_file=None, cheap_model="paid-baseline"))
-    assert router.select_title_model() == "paid-economy"
+    assert router.select_title_model() == "paid-baseline"
     baseline.evaluation_evidence = ""
     assert router.select_title_model() == "paid-baseline"
     baseline.evaluation_evidence = "eval://title"

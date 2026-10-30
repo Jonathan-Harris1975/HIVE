@@ -33,12 +33,11 @@ def test_governance_and_model_optimisation_routes_are_shipped() -> None:
         ("/v1/providers/health", "GET"),
         ("/v1/environment/audit", "GET"),
         ("/v1/model-registry", "GET"),
-        ("/v1/ai-council/run", "POST"),
-        ("/v1/ai-council/status", "GET"),
         ("/v1/optimisation/stats", "GET"),
         ("/v1/monthly-review/generate", "POST"),
     }
     assert required <= routes
+    assert not any(path.startswith("/v1/ai-council") for path, method in routes)
 
 
 def test_operations_runtime_stats_do_not_duplicate_repository_overview() -> None:

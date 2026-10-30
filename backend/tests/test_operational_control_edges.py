@@ -8,7 +8,7 @@ import pytest
 from fastapi import BackgroundTasks, HTTPException
 
 from app.api import buckets, monthly_review, repositories, service_actions
-from app.services import koyeb_control, model_sync
+from app.services import koyeb_control
 from app.services.service_lifecycle import ServiceResumeError, ServiceWakeTimeout, WakeResult
 
 
@@ -48,23 +48,6 @@ async def test_koyeb_status_handles_missing_http_failure_and_unknown_payload() -
     assert unknown["status"] == "degraded"
 
 
-@pytest.mark.asyncio
-async def test_model_sync_retries_transient_response_and_stops_on_permanent(monkeypatch) -> None:
-    monkeypatch.setattr(model_sync.asyncio, "sleep", lambda _delay: _NoopAwaitable())
-    attempts = 0
-
-    def retry_handler(request: httpx.Request) -> httpx.Response:
-        nonlocal attempts
-        attempts += 1
-        return httpx.Response(503 if attempts == 1 else 200, json={"ok": attempts > 1})
-
-    async with httpx.AsyncClient(transport=httpx.MockTransport(retry_handler)) as client:
-        result = await model_sync._post_with_retry(client, url="https://example.test/apply", token="t", payload={}, attempts=3)
-    assert result["attempt"] == 2
-
-    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(400, text="bad"))) as client:
-        with pytest.raises(model_sync.ModelSyncError, match="HTTP 400"):
-            await model_sync._post_with_retry(client, url="https://example.test/apply", token="t", payload={}, attempts=3)
 
 
 class _NoopAwaitable:
@@ -74,42 +57,10 @@ class _NoopAwaitable:
         return None
 
 
-def test_model_sync_rejects_template_secrets() -> None:
-    assert model_sync._usable_secret("{{ secret.AIMS_API_KEY }}") == ""
-    assert model_sync._usable_secret("  real-key  ") == "real-key"
 
 
-@pytest.mark.asyncio
-async def test_model_sync_disabled_and_missing_configuration_fail_closed() -> None:
-    disabled = SimpleNamespace(model_governance_sync_enabled=False)
-    assert (await model_sync.sync_model_registry_downstream(disabled, source_run_id="r", registry={}))["enabled"] is False
-
-    missing = SimpleNamespace(
-        model_governance_sync_enabled=True,
-        aims_api_key="{{ secret.AIMS_API_KEY }}",
-        rams_api_key="",
-        aims_base_url="",
-        rams_base_url="",
-    )
-    with pytest.raises(model_sync.ModelSyncError, match="configuration is missing"):
-        await model_sync.sync_model_registry_downstream(missing, source_run_id="r", registry={})
 
 
-@pytest.mark.asyncio
-async def test_pause_rams_cleanup_paths(monkeypatch) -> None:
-    settings = SimpleNamespace(koyeb_token="token", koyeb_service_id_rams="svc")
-    async with httpx.AsyncClient() as client:
-        assert (await model_sync._pause_rams_if_woken(client, settings, None))["attempted"] is False
-        online = WakeResult(repo="RAMS", ready=True, already_online=True)
-        assert (await model_sync._pause_rams_if_woken(client, settings, online))["reason"] == "already-online"
-
-        async def fail_action(*args, **kwargs):
-            raise koyeb_control.KoyebControlError("provider down")
-
-        monkeypatch.setattr(model_sync, "service_action", fail_action)
-        woken = WakeResult(repo="RAMS", ready=True, already_online=False)
-        failed = await model_sync._pause_rams_if_woken(client, settings, woken)
-        assert failed == {"attempted": True, "ok": False, "error": "provider down"}
 
 
 @pytest.mark.asyncio
@@ -478,19 +429,3 @@ def test_repository_memory_readiness_requires_profile_and_persisted_intelligence
     assert result["HIVE"]["memory_ready"] is True
     assert result["AIMS"]["memory_status"] == "empty"
     assert result["AIMS"]["memory_ready"] is False
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("response", [
-    httpx.Response(200, json={"ok": False}),
-    httpx.Response(200, json={}),
-    httpx.Response(200, text="not-json"),
-    httpx.Response(302, headers={"location": "https://example.test/login"}),
-    httpx.Response(304),
-])
-async def test_model_sync_requires_explicit_downstream_acknowledgement(response) -> None:
-    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: response)) as client:
-        with pytest.raises(model_sync.ModelSyncError):
-            await model_sync._post_with_retry(
-                client, url="https://example.test/apply", token="token", payload={}, attempts=1
-            )

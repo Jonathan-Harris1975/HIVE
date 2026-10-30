@@ -6,7 +6,6 @@ from typing import Any
 
 from app.core.config import Settings
 from app.services import model_registry
-from app.services.model_cost_policy import prefer_evaluated_cost
 from app.services.model_governance import (
     ModelSelectionDecision,
     ModelUseJustification,
@@ -103,60 +102,9 @@ class ModelRouter:
             TaskType.PREMIUM: Mode.AUDIT,
         }[task]
 
-    def _registry_default(self, category: str) -> str | None:
-        """Return the best model only when it clears HIVE's quality floor.
 
-        Low-ranked models remain in D1 for audit/history, but they must never
-        silently become task defaults just because a category is populated.
-        """
-        ranked = model_registry.get_ranked_models(category)
-        if not ranked:
-            return None
-        eligible = [
-            candidate for candidate in ranked
-            if candidate.score >= self.settings.model_registry_min_visible_score
-            and lifecycle_is_routable(candidate.lifecycle_status)
-        ]
-        # Only economy roles change selection here. General reasoning, coding,
-        # audits and premium work retain the Council's existing quality ranking.
-        if category in {"cheap", "fast"}:
-            eligible = prefer_evaluated_cost(eligible)
-        return eligible[0].model_id if eligible else None
-
-    def _audit_registry_default(self) -> str | None:
-        """Choose a qualified audit model distinct from general reasoning."""
-        reasoning_model = self._registry_default("reasoning")
-        general_model = reasoning_model or self.settings.default_model
-        reasoning_ids = {general_model} if general_model else set()
-        if reasoning_model:
-            for candidate in model_registry.get_ranked_models("reasoning"):
-                if candidate.model_id == reasoning_model or candidate.canonical_slug == reasoning_model:
-                    reasoning_ids.add(candidate.model_id)
-                    if candidate.canonical_slug:
-                        reasoning_ids.add(candidate.canonical_slug)
-                    break
-
-        for candidate in model_registry.get_ranked_models("audit"):
-            if candidate.score < self.settings.model_registry_min_visible_score:
-                continue
-            if not lifecycle_is_routable(candidate.lifecycle_status):
-                continue
-            if reasoning_ids.intersection(
-                model_id for model_id in (candidate.model_id, candidate.canonical_slug) if model_id
-            ):
-                continue
-            return candidate.model_id
-        return None
 
     def _baseline_model(self, task: TaskType) -> str:
-        category_by_task = {
-            TaskType.SUMMARY: "cheap",
-            TaskType.FILE_TRIAGE: "long_context",
-            TaskType.GENERAL: "reasoning",
-            TaskType.CODE: "coding",
-            TaskType.AUDIT: "audit",
-            TaskType.PREMIUM: "reasoning",
-        }
         static_by_task = {
             TaskType.SUMMARY: self.settings.cheap_model,
             TaskType.FILE_TRIAGE: self.settings.balanced_model,
@@ -165,9 +113,7 @@ class ModelRouter:
             TaskType.AUDIT: self.settings.audit_model,
             TaskType.PREMIUM: self.settings.premium_model,
         }
-        if task == TaskType.AUDIT:
-            return self._audit_registry_default() or static_by_task[task]
-        return self._registry_default(category_by_task[task]) or static_by_task[task]
+        return static_by_task[task]
 
     def select_model(self, task: TaskType, requested_model: str | None = None) -> str:
         if requested_model:
@@ -176,26 +122,8 @@ class ModelRouter:
         return self._baseline_model(task)
 
     def select_title_model(self) -> str:
-        """Downshift small internal summaries only against a measured baseline.
-
-        Titles contain conversation text. They must not silently enter a free
-        route or use a new premium assignment. Missing comparable task evidence
-        leaves the existing configured helper model in place.
-        """
-        baseline = self.settings.cheap_model
-        eligible = [
-            item for item in model_registry.get_ranked_models("cheap")
-            if item.score >= self.settings.model_registry_min_visible_score
-            and lifecycle_is_routable(item.lifecycle_status)
-            and not self._is_free_model_id(item.model_id)
-            and item.model_id != "openrouter/free"
-            and not is_premium_model(item.model_id, self.settings)
-            and "conversation_auto_title" in (getattr(item, "approved_roles", None) or ())
-        ]
-        evaluated = prefer_evaluated_cost(eligible, evaluated_only=True)
-        if any(item.model_id == baseline for item in evaluated):
-            return evaluated[0].model_id
-        return baseline
+        """Use the operator-configured helper model; benchmarks are advisory."""
+        return self.settings.cheap_model
 
     def select_model_decision(
         self,
@@ -252,15 +180,6 @@ class ModelRouter:
         limit = max(1, min(int(max_models), 4))
         if task == TaskType.CODE:
             candidates = [self.settings.cheap_model, self.settings.balanced_model]
-            # Registry candidates are Council-ranked. Iterate weakest qualified
-            # to strongest so each loop represents a genuine capability step.
-            ranked = [
-                item
-                for item in reversed(model_registry.get_ranked_models("coding"))
-                if item.score >= self.settings.model_registry_min_visible_score
-                and lifecycle_is_routable(item.lifecycle_status)
-            ]
-            candidates.extend(item.model_id for item in ranked)
             candidates.append(self.settings.code_model)
         else:
             candidates = [

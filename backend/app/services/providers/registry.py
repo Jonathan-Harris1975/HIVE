@@ -13,8 +13,8 @@ from app.services.providers.openrouter_provider import (
 # Phase 4 - Provider Framework.
 #
 # discover_providers() is the single place that knows how many providers are
-# configured. Everything else (Phase 5 AI Council, Phase 6 Benchmark Engine)
-# only depends on the ProviderAdapter shape from base.py, so adding a new
+# configured. Provider health and manual benchmark reporting
+# only depend on the ProviderAdapter shape from base.py, so adding a new
 # OpenRouter-compatible provider is a configuration change here, never a new
 # code path elsewhere.
 

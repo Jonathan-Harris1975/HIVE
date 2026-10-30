@@ -1,7 +1,7 @@
-"""Independent monthly governance worker entrypoint.
+"""Monthly operations report worker entrypoint.
 
 Run from a persistent process or scheduled container with HIVE settings.
-Never automatically reclaim ambiguous claimed jobs: downstream writes may
+Never automatically reclaim ambiguous claimed jobs: report writes may
 already have happened before the worker stopped.
 """
 from __future__ import annotations
@@ -31,10 +31,6 @@ def check_readiness(settings) -> list[str]:
         ("cf_r2_access_key_id", "CF_R2_ACCESS_KEY_ID"),
         ("cf_r2_secret_access_key", "CF_R2_SECRET_ACCESS_KEY"),
         ("r2_bucket_audits", "R2_BUCKET_AUDITS"),
-        ("aims_base_url", "AIMS_BASE_URL"),
-        ("aims_api_key", "AIMS_API_KEY"),
-        ("rams_base_url", "RAMS_BASE_URL"),
-        ("rams_api_key", "RAMS_API_KEY"),
     ):
         if not str(getattr(settings, attribute, "") or "").strip():
             missing.append(label)

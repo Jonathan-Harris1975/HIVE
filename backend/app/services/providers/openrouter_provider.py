@@ -34,7 +34,7 @@ class OpenRouterProvider:
         """Return OpenRouter models allowed by this account's provider/privacy guardrails."""
         headers = {"Authorization": f"Bearer {self.settings.openrouter_api_key}"}
         async with httpx.AsyncClient(
-            timeout=max(5.0, self.settings.ai_council_benchmark_timeout_seconds)
+            timeout=max(5.0, self.settings.openrouter_model_list_timeout_seconds)
         ) as client:
             response = await client.get(
                 f"{self.settings.openrouter_base_url.rstrip('/')}/models/user",
@@ -47,40 +47,6 @@ class OpenRouterProvider:
             raise ValueError("OpenRouter user-model response missing data array")
         return {str(item["id"]) for item in data if item.get("id")}
 
-    async def list_benchmarks(
-        self, *, source: str = "artificial-analysis", task_type: str | None = None
-    ) -> list[dict[str, Any]]:
-        """Return OpenRouter's first-party aggregated benchmark feed.
-
-        OpenRouter exposes measured benchmark data from Artificial Analysis,
-        Design Arena and its own evaluations at ``/benchmarks``. Keeping this
-        call in the provider adapter prevents benchmark-source knowledge from
-        leaking into the rest of HIVE. A failed benchmark request is allowed
-        to bubble to the AI Council, which degrades to catalogue-only scoring
-        and therefore cannot satisfy the automatic-promotion confidence gate.
-        """
-        params: dict[str, str] = {"source": source}
-        if task_type:
-            params["task_type"] = task_type
-        headers = {"Authorization": f"Bearer {self.settings.openrouter_api_key}"}
-        async with httpx.AsyncClient(
-            timeout=max(5.0, self.settings.ai_council_benchmark_timeout_seconds)
-        ) as client:
-            response = await client.get(
-                f"{self.settings.openrouter_base_url.rstrip('/')}/benchmarks",
-                headers=headers,
-                params=params,
-            )
-            response.raise_for_status()
-            payload: Any = response.json()
-        # An unexpected upstream response must not be mistaken for a valid,
-        # empty benchmark feed: that hides provider/API regressions.
-        if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
-            raise ValueError("OpenRouter benchmarks response missing data array")
-        data = payload["data"]
-        if any(not isinstance(item, dict) for item in data):
-            raise ValueError("OpenRouter benchmarks response contains invalid entries")
-        return data
 
     async def health(self) -> ProviderHealth:
         start = time.perf_counter()

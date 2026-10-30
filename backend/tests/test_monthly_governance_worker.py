@@ -77,8 +77,8 @@ def test_readiness_lists_missing_config_without_values():
     settings = SimpleNamespace(d1_enabled=False, d1_account_id="", d1_database_id="", d1_api_key="")
     missing = worker.check_readiness(settings)
     assert any("D1_ENABLED" in item for item in missing)
-    assert "AIMS_API_KEY" in missing
-    assert "RAMS_API_KEY" in missing
+    assert "AIMS_API_KEY" not in missing
+    assert "RAMS_API_KEY" not in missing
 
 
 @pytest.mark.asyncio

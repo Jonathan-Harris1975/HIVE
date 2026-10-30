@@ -38,7 +38,7 @@ The focused September 2026 dependency refresh uses Uvicorn `0.53.0`, pypdf `6.19
 - Upload, extraction and bounded chat for supported documents and ZIPs.
 - Governed R2 upload plus scoped multi-bucket browsing/read paths.
 - Repository Manager, Repository Memory, static Repository QA and Repository Council.
-- AI Council, Benchmark Engine, optimisation decisions and repository-learning workflows.
+- Advisory benchmarks, optimisation decisions, monthly cost/operations reports and repository-learning workflows.
 - Cloudflare Workers AI embeddings, Vectorize retrieval and AI Search fan-out.
 - Environment/configuration audit and authenticated ecosystem health aggregation for HIVE-UI Ops.
 
@@ -95,7 +95,6 @@ R2 and embeddings integrations are deliberately defensive:
 | `POST /v1/repositories/{id}/improvements/run` | Start single- or multi-pass bounded remediation |
 | `GET /v1/model-registry/{category}` | Model category registry |
 | `GET /v1/providers`, `GET /v1/providers/health` | Provider discovery/health |
-| `POST /v1/ai-council/run` | Model/provider Council run |
 | `POST /v1/benchmark/rank` | Ad-hoc model ranking |
 | `GET /v1/buckets` | Accessible bucket registry |
 | `POST /v1/optimisation/decisions` | Record reversible optimisation decision |
