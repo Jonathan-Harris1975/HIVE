@@ -1,4 +1,4 @@
-name: Verify live monthly governance
+name: Verify monthly operations reporting
 on:
   workflow_dispatch:
     inputs:
@@ -7,7 +7,7 @@ on:
         required: false
         type: string
       execute:
-        description: "Explicitly execute the live governance workflow (writes to downstream services)"
+        description: "Explicitly execute the monthly report generation (writes report archives)"
         required: true
         default: false
         type: boolean
@@ -60,7 +60,7 @@ jobs:
               sys.exit(1)
           except Exception as error:
               print("Governance start request failed:", type(error).__name__)
-              print("The request outcome may be ambiguous. Inspect the D1 job and downstream effects before retrying.")
+              print("The request outcome may be ambiguous. Inspect the D1 job and report effects before retrying.")
               sys.exit(1)
 
           accepted_period = accepted.get("period")
@@ -83,9 +83,9 @@ jobs:
                   print("Monthly governance job completed.")
                   sys.exit(0)
               if current == "failed":
-                  sys.exit("Monthly governance job failed; inspect report and downstream effects before retrying.")
+                  sys.exit("Monthly governance job failed; inspect report and report effects before retrying.")
               if current != "claimed":
                   sys.exit("Unexpected monthly governance status: " + str(current))
               time.sleep(15)
-          sys.exit("Polling window expired with the job still claimed. Reconcile its status and downstream writes before retrying.")
+          sys.exit("Polling window expired with the job still claimed. Reconcile its status and report writes before retrying.")
           PY

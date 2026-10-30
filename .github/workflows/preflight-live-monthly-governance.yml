@@ -1,4 +1,4 @@
-name: Preflight live monthly governance (read only)
+name: Preflight monthly operations reporting (read only)
 on:
   workflow_dispatch:
     inputs:
@@ -72,7 +72,7 @@ jobs:
           status, job = get("/v1/monthly-review/jobs/" + period, authenticated=True)
           if status == 404:
               print("No worker job claim found for", period)
-              print("WARNING: 404 does not exclude legacy HTTP execution or downstream writes")
+              print("WARNING: 404 does not exclude legacy HTTP execution or report writes")
           elif status == 200 and isinstance(job, dict):
               print("Job response:", json.dumps(job, sort_keys=True))
               print("Existing job state must be reconciled before any execution")

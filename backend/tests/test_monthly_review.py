@@ -87,22 +87,6 @@ async def test_generate_monthly_review_assembles_all_sections(monkeypatch):
     settings = _settings()
 
     monkeypatch.setattr(
-        monthly_review,
-        "get_run_history",
-        lambda settings, limit=5: [
-            {
-                "run_id": "r1",
-                "completion_status": "completed",
-                "downstream_sync": {"ok": True, "enabled": True},
-            }
-        ],
-    )
-    monkeypatch.setattr(
-        monthly_review,
-        "list_categories",
-        lambda: {"coding": [{"model_id": "acme/coder", "score": 0.91}]},
-    )
-    monkeypatch.setattr(
         monthly_review, "success_rate_report", lambda settings: {"ok": True, "rate": 0.9}
     )
     monkeypatch.setattr(monthly_review, "list_experiments", lambda settings: [])
@@ -132,8 +116,8 @@ async def test_generate_monthly_review_assembles_all_sections(monkeypatch):
 
     assert report["ok"] is True
     assert report["period"] == "2026-06"
-    assert report["sections_total"] == 10
-    assert report["sections_ok"] == 10
+    assert report["sections_total"] == 7
+    assert report["sections_ok"] == 7
     assert report["sections"]["cost_and_tokens"]["data"]["totals"]["cost_usd"] == 4.5
     assert report["sections"]["repo_health"]["data"]["status"] == "healthy"
     assert report["report_id"].startswith("monthly-review-2026-06-")
@@ -148,22 +132,6 @@ async def test_generate_monthly_review_isolates_a_failing_section(monkeypatch):
     def boom(*_args, **_kwargs):
         raise RuntimeError("optimisation metrics unavailable")
 
-    monkeypatch.setattr(
-        monthly_review,
-        "get_run_history",
-        lambda settings, limit=5: [
-            {
-                "run_id": "r1",
-                "completion_status": "completed",
-                "downstream_sync": {"ok": True, "enabled": True},
-            }
-        ],
-    )
-    monkeypatch.setattr(
-        monthly_review,
-        "list_categories",
-        lambda: {"coding": [{"model_id": "acme/coder", "score": 0.91}]},
-    )
     monkeypatch.setattr(monthly_review, "success_rate_report", boom)
     monkeypatch.setattr(monthly_review, "list_experiments", lambda settings: [])
     monkeypatch.setattr(monthly_review, "list_decisions", lambda settings: [])
@@ -194,98 +162,12 @@ async def test_generate_monthly_review_isolates_a_failing_section(monkeypatch):
     assert report["sections_ok"] == report["sections_total"] - 1
 
 
-def test_ai_council_status_fails_closed_for_unverified_or_degraded_history(monkeypatch):
-    settings = _settings()
-
-    monkeypatch.setattr(monthly_review, "get_run_history", lambda settings, limit=5: [])
-    empty = monthly_review._ai_council_status(settings)
-    assert empty["ok"] is False
-    assert "no AI Council run history" in empty["reason"]
-
-    monkeypatch.setattr(
-        monthly_review,
-        "get_run_history",
-        lambda settings, limit=5: [{"run_id": "legacy-run"}],
-    )
-    legacy = monthly_review._ai_council_status(settings)
-    assert legacy["ok"] is False
-    assert legacy["completion_status"] == "unknown"
-    assert "no verified completion state" in legacy["reason"]
-
-    monkeypatch.setattr(
-        monthly_review,
-        "get_run_history",
-        lambda settings, limit=5: [
-            {
-                "run_id": "failed-run",
-                "completion_status": "degraded",
-                "downstream_sync": {"ok": False, "error": "AIMS sync failed"},
-            }
-        ],
-    )
-    degraded = monthly_review._ai_council_status(settings)
-    assert degraded["ok"] is False
-    assert "downstream sync failed" in degraded["reason"]
 
 
-def test_ai_council_status_accepts_verified_completed_history(monkeypatch):
-    settings = _settings()
-    monkeypatch.setattr(
-        monthly_review,
-        "get_run_history",
-        lambda settings, limit=5: [
-            {
-                "run_id": "good-run",
-                "completion_status": "completed",
-                "downstream_sync": {"ok": True, "enabled": True},
-            }
-        ],
-    )
-    result = monthly_review._ai_council_status(settings)
-    assert result["ok"] is True
-    assert result["reason"] is None
 
 
-def test_ai_council_status_rejects_stale_completed_run(monkeypatch):
-    settings = _settings()
-    monkeypatch.setattr(
-        monthly_review,
-        "get_run_history",
-        lambda settings, limit=5: [
-            {
-                "run_id": "old-run",
-                "occurred_at": "2026-08-31T23:59:59+00:00",
-                "completion_status": "completed",
-                "downstream_sync": {"ok": True, "enabled": True},
-            }
-        ],
-    )
-    required_since = monthly_review.datetime(2026, 9, 1, tzinfo=monthly_review.UTC)
-    result = monthly_review._ai_council_status(settings, required_since=required_since)
-    assert result["ok"] is False
-    assert result["fresh"] is False
-    assert "stale" in result["reason"]
 
 
-def test_model_registry_status_requires_a_visible_qualified_model(monkeypatch):
-    settings = _settings()
-    monkeypatch.setattr(
-        monthly_review,
-        "list_categories",
-        lambda: {"coding": [{"model_id": "too-low", "score": 0.71}]},
-    )
-    empty = monthly_review._model_registry_status(settings)
-    assert empty["ok"] is False
-    assert empty["qualified_count"] == 0
-
-    monkeypatch.setattr(
-        monthly_review,
-        "list_categories",
-        lambda: {"coding": [{"model_id": "qualified", "score": 0.9}]},
-    )
-    good = monthly_review._model_registry_status(settings)
-    assert good["ok"] is True
-    assert good["qualified_count"] == 1
 
 
 @pytest.mark.asyncio
@@ -309,17 +191,8 @@ async def test_generate_and_archive_writes_r2_and_indexes_d1(monkeypatch, tmp_pa
             },
         }
 
-    async def fake_cycle(settings, *, reuse_since=None):
-        return {
-            "ok": True,
-            "reused": False,
-            "run": {"run_id": "council-test"},
-            "completion_status": "completed",
-            "downstream_sync": {"ok": True, "enabled": True},
-        }
 
     monkeypatch.setattr(monthly_review, "generate_monthly_review", fake_generate)
-    monkeypatch.setattr(monthly_review, "execute_council_cycle", fake_cycle)
     monkeypatch.setattr(monthly_review, "R2Storage", FakeR2Storage)
     monkeypatch.setattr(monthly_review, "D1MetadataStore", FakeD1Store)
 
@@ -340,29 +213,10 @@ async def test_generate_and_archive_writes_r2_and_indexes_d1(monkeypatch, tmp_pa
     assert history["items"][0]["metadata"]["open_execution_reviews"] == 3
 
 
-def test_ai_council_status_rejects_disabled_downstream_sync(monkeypatch):
-    settings = _settings()
-    monkeypatch.setattr(
-        monthly_review,
-        "get_run_history",
-        lambda settings, limit=5: [
-            {
-                "run_id": "disabled-run",
-                "completion_status": "completed",
-                "downstream_sync": {"ok": True, "enabled": False},
-            }
-        ],
-    )
-    result = monthly_review._ai_council_status(settings)
-    assert result["ok"] is False
-    assert "no verified completion state" in result["reason"]
 
 
 @pytest.mark.asyncio
 async def test_invalid_period_rejected_before_council_side_effects(monkeypatch):
-    async def forbidden_council(*args, **kwargs):
-        raise AssertionError("Council must not run for invalid period")
 
-    monkeypatch.setattr(monthly_review, "execute_council_cycle", forbidden_council)
     with pytest.raises(ValueError, match="Invalid period"):
         await monthly_review.generate_and_archive_monthly_review(_settings(), period="2026-99")

@@ -314,15 +314,7 @@ latency). `OpenRouterProvider` wraps the existing `OpenRouterClient`;
 OpenRouter-shaped provider, added purely through
 `PROVIDER_FRAMEWORK_EXTRA_PROVIDERS_JSON` configuration.
 
-**Phase 5 - AI Council** (`services/ai_council.py`): discovers providers,
-refreshes catalogues, diffs new/retired models against the last snapshot,
-scores eligible models with the Benchmark Engine, auto-promotes above
-`AI_COUNCIL_PROMOTION_THRESHOLD` only when the configured evidence-confidence
-gate is also satisfied, and propagates the governed Model Registry to AIMS and
-RAMS. OpenRouter's authenticated Artificial Analysis benchmark feed supplies
-measured coding, intelligence and agentic evidence when available. Retrieval
-uses bounded retries plus a bounded-age last-known-good D1 snapshot; catalogue-
-only evidence remains below the automatic-promotion confidence gate.
+Automatic model Council selection, promotion and downstream propagation have been retired. Provider catalogue/health, operator model defaults and advisory benchmark tools remain.
 
 **Phase 6 - Benchmark Engine** (`services/benchmark_engine.py`): configurable
 weighted scoring across ten metric axes (coding/reasoning benchmarks, cost,

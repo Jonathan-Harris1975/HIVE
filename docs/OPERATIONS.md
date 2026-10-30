@@ -16,22 +16,16 @@ Model Registry reconciliation uses private R2 objects in the `meta_system` lane.
 HIVE is the formal Ecosystem Production Manager for the eight governed repositories. The authoritative decision is exposed at `GET /v1/system/production-manager` and is derived from the existing repository-health/readiness evidence rather than a second monitoring stack. GREEN permits ecosystem release, DEGRADED holds it, and BLOCKED prevents it. Kilo may execute bounded repairs but never certifies its own work; repository CI/security/deployment gates remain the readiness authority. See [production-manager.md](production-manager.md).
 
 
-## Model governance operating cycle
+## Model defaults and monthly reporting
 
-HIVE owns model selection through the AI Council and the D1-backed Model Registry. MAST triggers the formal monthly cycle on the first day of each month at 07:00 Europe/London. The cycle refreshes configured provider catalogues, loads measured benchmark evidence where available, applies governed category scoring and lifecycle rules, persists qualified promotions, and verifies propagation of the resulting governed registry to AIMS and RAMS.
-
-The authenticated `GET /v1/ai-council/status` endpoint is the standing freshness control. It is healthy only when the current month has a verified completed Council run whose downstream AIMS/RAMS synchronisation succeeded. MAST checks that status every day after the monthly governance window, so a missed or failed monthly cycle remains operationally visible until corrected. MAST also checks `GET /v1/system/production-manager` daily and requires `GREEN / ALLOW`, so model-governance freshness and ecosystem production authority are both continuously supervised.
-
-The 07:25 monthly review is a second recovery and verification boundary. It executes the same idempotent Council cycle when a verified run for the current month is absent, and it refuses to publish a successful monthly review unless Council governance, R2 archival and D1 indexing all succeed.
-
-Production HIVE requires `MODEL_GOVERNANCE_SYNC_ENABLED=true` and fails closed unless the AIMS/RAMS destinations, runtime credentials and Koyeb wake-control configuration needed for downstream propagation are all available.
+Automatic model discovery/promotion and AIMS/RAMS synchronisation are retired. Models are operator-configured with existing fallback routes. MAST still schedules monthly operations and cost reports through the D1-backed reporting job; report success depends on actual report sections, R2 archive and D1 index, not a model qualification cycle. Provider health and repository checks remain active.
 
 
 ## Repository Intelligence and controlled improvements
 
 Single and bulk repository uploads and monthly governed-repository refreshes run the Repository Intelligence pipeline automatically. The canonical estate is the eight repositories defined in `app.core.governed_repositories`; `GET /v1/repositories/estate/readiness` is the operator view for snapshot freshness across all eight. See [`repository-management.md`](repository-management.md) for the ingestion, freshness, work-scope and recovery contract.
 
-The Repository Intelligence pipeline automatically The pipeline seeds Repository Memory, executes one Repository QA pass, feeds that exact QA evidence into Repository Council, refreshes Project DNA, and persists one snapshot-specific consolidated report.
+The Repository Intelligence pipeline seeds Repository Memory, executes one Repository QA pass, feeds that exact QA evidence into Repository Council, refreshes Project DNA, and persists one snapshot-specific consolidated report.
 
 The operator may then start `POST /v1/repositories/{repository_id}/improvements/run`. HIVE requires the latest Intelligence fingerprint to match the currently registered repository snapshot and refuses to run when there are no actionable findings. The improvement worker sends only bounded text context with credential-like values redacted and applies model-proposed changes to isolated candidate workspaces. The registered source snapshot is never modified by the improvement worker.
 

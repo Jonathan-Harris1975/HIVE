@@ -242,7 +242,8 @@ Status: implemented (static-analysis and heuristic scope — see caveats below).
 Known caveats carried forward deliberately rather than papered over:
 
 - Repository QA and Repository Council are static/heuristic — no arbitrary code from an uploaded repository is ever executed, by design (security boundary, not a shortcut).
-- AI Council promotion scoring has no live coding/reasoning benchmark data source yet; it promotes based on price/context/declared-capability signals until one is wired in.
 - The Optimisation Engine retains its documented in-process/runtime scope. The Model Registry is D1-backed and overlays a private R2 pending-operation log on startup, so accepted pending registrations and deletions survive complete instance replacement.
 
-Next logical direction: a real benchmark data source for AI Council and — if HIVE ever needs real dynamic build/test execution — an isolated sandboxed CI runner kept explicitly separate from Repository QA's static pipeline.
+
+
+The automatic model Council and cross-service model promotion have been retired. Production uses stable operator model defaults; benchmarks are advisory.

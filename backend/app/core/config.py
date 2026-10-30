@@ -131,11 +131,7 @@ class Settings(BaseSettings):
         ),
     )
 
-    # Closed-loop monthly model governance. HIVE owns model selection and pushes
-    # ranked defaults into AIMS/RAMS after every AI Council run.
-    model_governance_sync_enabled: bool = Field(
-        True, validation_alias=AliasChoices("MODEL_GOVERNANCE_SYNC_ENABLED")
-    )
+    # Service origins and credentials for operational integrations.
     aims_base_url: str = Field(
         "https://zeroth-kara-jonathanharris-3296ed37.koyeb.app", validation_alias=AliasChoices("AIMS_BASE_URL")
     )
@@ -145,12 +141,6 @@ class Settings(BaseSettings):
     )
     rams_api_key: str = Field(
         "", validation_alias=AliasChoices("RAMS_API_KEY", "RMS_API_KEY")
-    )
-    model_governance_sync_timeout_seconds: float = Field(
-        30.0, ge=5.0, le=120.0, validation_alias=AliasChoices("MODEL_GOVERNANCE_SYNC_TIMEOUT_SECONDS")
-    )
-    model_governance_sync_attempts: int = Field(
-        3, ge=1, le=5, validation_alias=AliasChoices("MODEL_GOVERNANCE_SYNC_ATTEMPTS")
     )
 
     # RAMS QA-event ingestion into the Optimisation Engine. This is the
@@ -688,62 +678,9 @@ class Settings(BaseSettings):
         "", validation_alias=AliasChoices("BENCHMARK_WEIGHTS_JSON")
     )
 
-    # Phase 5 - AI Council. Monthly (or on-demand) discovery/benchmark/
-    # promotion run across all configured providers.
-    ai_council_promotion_threshold: float = Field(
-        0.72, validation_alias=AliasChoices("AI_COUNCIL_PROMOTION_THRESHOLD")
-    )
-    ai_council_auto_promotion_min_confidence: float = Field(
-        0.60,
-        ge=0.0,
-        le=1.0,
-        validation_alias=AliasChoices("AI_COUNCIL_AUTO_PROMOTION_MIN_CONFIDENCE"),
-    )
-    ai_council_require_task_evaluation: bool = Field(
-        True,
-        validation_alias=AliasChoices("AI_COUNCIL_REQUIRE_TASK_EVALUATION"),
-    )
-    # The OpenRouter benchmark feed is independent from the model-catalogue
-    # request and can legitimately take longer than /models.  Do not couple it
-    # to OPENROUTER_MODEL_LIST_TIMEOUT_SECONDS: a transient benchmark timeout
-    # would otherwise make every model look unmeasured and block the whole
-    # monthly Council promotion cycle.
-    ai_council_benchmark_timeout_seconds: float = Field(
-        30.0,
-        ge=5.0,
-        le=120.0,
-        validation_alias=AliasChoices("AI_COUNCIL_BENCHMARK_TIMEOUT_SECONDS"),
-    )
-    ai_council_benchmark_attempts: int = Field(
-        3,
-        ge=1,
-        le=5,
-        validation_alias=AliasChoices("AI_COUNCIL_BENCHMARK_ATTEMPTS"),
-    )
-    ai_council_benchmark_retry_base_seconds: float = Field(
-        1.0,
-        ge=0.0,
-        le=10.0,
-        validation_alias=AliasChoices("AI_COUNCIL_BENCHMARK_RETRY_BASE_SECONDS"),
-    )
-    # Last-known-good measured benchmark data is safe to reuse for a bounded
-    # period when OpenRouter has a transient 429/5xx/timeout.  It is not a
-    # heuristic fallback: the snapshot contains the exact previously measured
-    # feed and its age/source are recorded in Council history.
-    ai_council_benchmark_cache_max_age_days: int = Field(
-        45,
-        ge=1,
-        le=180,
-        validation_alias=AliasChoices("AI_COUNCIL_BENCHMARK_CACHE_MAX_AGE_DAYS"),
-    )
-    ai_council_coding_keywords: str = Field(
-        "code,coder,coding,dev,program",
-        validation_alias=AliasChoices("AI_COUNCIL_CODING_KEYWORDS"),
-    )
     # Models below this quality score remain retained in the registry for
     # history/audit purposes, but are not exposed as selectable defaults in
-    # HIVE-UI and are not used for automatic task routing. Keep this aligned
-    # with the AI Council promotion threshold unless intentionally overridden.
+    # HIVE-UI. This is an advisory catalogue visibility filter.
     model_registry_min_visible_score: float = Field(
         0.72,
         ge=0.0,

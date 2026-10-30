@@ -5,15 +5,12 @@ import logging
 import time
 import tempfile
 import uuid
-from datetime import UTC, datetime, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from app.core.config import Settings
-from app.services.ai_council import get_run_history
-from app.services.council_cycle import execute_council_cycle
 from app.services.execution_reviews import list_execution_review_plans
-from app.services.model_registry import list_categories
 from app.services.optimisation_engine import list_decisions, list_experiments, success_rate_report
 from app.services.repo_health import build_repo_health_report
 from app.storage.d1 import D1MetadataStore
@@ -27,7 +24,6 @@ MONTHLY_REVIEW_LANE = "hive_monthly_reviews"
 # Cap how many past reports we keep indexed/listed by default.
 logger = logging.getLogger(__name__)
 DEFAULT_HISTORY_LIMIT = 24
-
 
 def _period_bounds(period: str | None) -> tuple[str, str, str]:
     """Resolve a 'YYYY-MM' period (or the just-completed month if omitted)
@@ -60,14 +56,12 @@ def _period_bounds(period: str | None) -> tuple[str, str, str]:
     )
     return f"{year:04d}-{month:02d}", since.isoformat(), until.isoformat()
 
-
 def _normalise_section_result(data: Any) -> dict[str, Any]:
     """Wrap a section result without converting an explicit ``ok=False`` into success."""
     if isinstance(data, dict) and data.get("ok") is False:
         error = str(data.get("error") or data.get("reason") or "subsystem reported ok=false")
         return {"ok": False, "data": data, "error": error}
     return {"ok": True, "data": data}
-
 
 def _section(fn, *args, **kwargs) -> dict[str, Any]:
     """Run one report section defensively. A failure in any single subsystem
@@ -78,7 +72,6 @@ def _section(fn, *args, **kwargs) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001 - deliberately broad: isolate section failures
         return {"ok": False, "error": str(exc), "error_type": type(exc).__name__}
 
-
 async def _async_section(coro) -> dict[str, Any]:
     try:
         return _normalise_section_result(await coro)
@@ -86,178 +79,19 @@ async def _async_section(coro) -> dict[str, Any]:
         return {"ok": False, "error": str(exc), "error_type": type(exc).__name__}
 
 
-def _monthly_cycle_start() -> datetime:
-    now = datetime.now(UTC)
-    return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
 
-def _parse_timestamp(value: object) -> datetime | None:
-    text = str(value or "").strip()
-    if not text:
-        return None
-    try:
-        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
-    return parsed.astimezone(UTC)
 
 
-def _model_registry_status(settings: Settings) -> dict[str, Any]:
-    registry = list_categories()
-    qualified: dict[str, list[dict[str, object]]] = {}
-    qualified_count = 0
-    total_count = 0
-    evaluation_ready_count = 0
-    unavailable_count = 0
-    awaiting_evaluation_count = 0
-    for category, items in registry.items():
-        visible: list[dict[str, object]] = []
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            total_count += 1
-            if item.get("available") is False:
-                unavailable_count += 1
-            raw_sample_size = item.get("evaluation_sample_size")
-            try:
-                sample_size = (
-                    max(0, int(raw_sample_size))
-                    if isinstance(raw_sample_size, (int, float, str))
-                    else 0
-                )
-            except (ValueError, OverflowError):
-                sample_size = 0
-            if (
-                item.get("evaluation_passed") is True
-                and item.get("available") is not False
-                and (
-                    str(item.get("provider") or "").lower() != "openrouter"
-                    or item.get("available") is True
-                )
-                and sample_size > 0
-                and bool(item.get("evaluation_evidence"))
-            ):
-                evaluation_ready_count += 1
-            else:
-                awaiting_evaluation_count += 1
-            raw_score = item.get("score")
-            try:
-                score = float(raw_score) if isinstance(raw_score, (int, float, str)) else 0.0
-            except ValueError:
-                score = 0.0
-            lifecycle = str(item.get("lifecycle_status") or "active")
-            if score >= settings.model_registry_min_visible_score and lifecycle in {
-                "active",
-                "watch",
-            }:
-                visible.append(item)
-                qualified_count += 1
-        qualified[category] = visible
-    return {
-        "ok": qualified_count > 0,
-        "qualified_count": qualified_count,
-        "evaluation_ready_count": evaluation_ready_count,
-        "awaiting_evaluation_count": awaiting_evaluation_count,
-        "unavailable_count": unavailable_count,
-        "total_count": total_count,
-        "quality_floor": settings.model_registry_min_visible_score,
-        "registry": qualified,
-        "reason": None if qualified_count > 0 else "model registry has no qualified models",
-    }
-
-
-def _downstream_model_governance(settings: Settings) -> dict[str, Any]:
-    """Summarise the verified AIMS/RAMS apply receipts from the latest Council run."""
-    runs = get_run_history(settings, limit=5)
-    latest = runs[-1] if runs and isinstance(runs[-1], dict) else {}
-    sync_value = latest.get("downstream_sync") if isinstance(latest, dict) else None
-    if not isinstance(sync_value, dict):
-        return {"ok": False, "reason": "no downstream governance receipt"}
-    sync = sync_value
-    targets_value = sync.get("targets")
-    targets = targets_value if isinstance(targets_value, dict) else {}
-    summary: dict[str, Any] = {
-        "ok": sync.get("enabled") is True and sync.get("ok") is True,
-        "sourceRunId": sync.get("sourceRunId"),
-        "targets": {},
-    }
-    for name in ("aims", "rams"):
-        target_value = targets.get(name)
-        target = target_value if isinstance(target_value, dict) else {}
-        response_value = target.get("response")
-        response = response_value if isinstance(response_value, dict) else {}
-        summary["targets"][name] = {
-            "ok": target.get("ok") is True and response.get("ok") is True,
-            "applied": response.get("applied") is True,
-            "reason": response.get("reason"),
-            "assignments": response.get("assignments", response.get("decisions", {})),
-        }
-    return summary
-
-
-def _ai_council_status(
-    settings: Settings,
-    *,
-    limit: int = 5,
-    required_since: datetime | None = None,
-) -> dict[str, Any]:
-    """Return Council history and fail closed for stale or unverified runs."""
-    runs = get_run_history(settings, limit=limit)
-    if not runs:
-        return {
-            "ok": False,
-            "count": 0,
-            "runs": [],
-            "reason": "no AI Council run history available",
-        }
-
-    latest = runs[-1] if isinstance(runs[-1], dict) else {}
-    completion_status = str(latest.get("completion_status") or "unknown")
-    raw_downstream_sync = latest.get("downstream_sync")
-    downstream_sync = raw_downstream_sync if isinstance(raw_downstream_sync, dict) else None
-    completed_at = _parse_timestamp(latest.get("completed_at") or latest.get("occurred_at"))
-    fresh = required_since is None or bool(
-        completed_at and completed_at >= required_since.astimezone(UTC)
-    )
-    verified_complete = bool(
-        completion_status == "completed"
-        and downstream_sync is not None
-        and downstream_sync.get("enabled") is True
-        and downstream_sync.get("ok") is True
-        and fresh
-    )
-    if completion_status == "degraded" or bool(
-        downstream_sync and downstream_sync.get("ok") is False
-    ):
-        reason = "latest AI Council downstream sync failed"
-    elif not fresh:
-        reason = "latest AI Council run is stale for the current monthly governance cycle"
-    elif not verified_complete:
-        reason = "latest AI Council run has no verified completion state"
-    else:
-        reason = None
-    return {
-        "ok": verified_complete,
-        "count": len(runs),
-        "latest": latest,
-        "runs": runs,
-        "completion_status": completion_status,
-        "fresh": fresh,
-        "required_since": required_since.isoformat() if required_since else None,
-        "reason": reason,
-    }
 
 
 async def generate_monthly_review(
     settings: Settings,
     *,
     period: str | None = None,
-    council_required_since: datetime | None = None,
 ) -> dict[str, Any]:
     """Aggregate system metrics, AI model performance, token usage/costs, repo
-    health, benchmark/council history and execution posture for one calendar
+    health, advisory optimisation outcomes and execution posture for one calendar
     month into a single report. Individual subsystem failures are captured
     per-section rather than failing the whole report.
     """
@@ -271,11 +105,6 @@ async def generate_monthly_review(
         "model_governance": _section(
             lambda: SqlStore(settings).model_governance_audit(since=since, until=until)
         ),
-        "ai_council_history": _section(
-            _ai_council_status, settings, limit=5, required_since=council_required_since
-        ),
-        "model_registry": _section(_model_registry_status, settings),
-        "downstream_model_governance": _section(_downstream_model_governance, settings),
         "optimisation_success_rate": _section(success_rate_report, settings),
         "optimisation_experiments": _section(list_experiments, settings),
         "optimisation_decisions": _section(list_decisions, settings),
@@ -295,13 +124,9 @@ async def generate_monthly_review(
         "generated_at": generated_at,
         "sections_ok": ok_sections,
         "sections_total": len(sections),
-        "qualified_model_count": (
-            sections.get("model_registry", {}).get("data", {}).get("qualified_count", 0)
-        ),
         "sections": sections,
     }
     return report
-
 
 def _write_report_to_r2(settings: Settings, report: dict[str, Any]) -> dict[str, Any] | None:
     """Archive the full report JSON to R2 and return a machine-checkable
@@ -332,7 +157,6 @@ def _write_report_to_r2(settings: Settings, report: dict[str, Any]) -> dict[str,
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": str(exc)}
 
-
 def _index_report_in_d1(
     settings: Settings, report: dict[str, Any], r2_object: dict[str, Any] | None
 ) -> dict[str, Any]:
@@ -345,12 +169,6 @@ def _index_report_in_d1(
         "sections_ok": report["sections_ok"],
         "sections_total": report["sections_total"],
         "ok": bool(report.get("ok") and r2_object and r2_object.get("ok")),
-        "qualified_model_count": report.get("qualified_model_count", 0),
-        "council_run_id": (
-            report.get("council_cycle", {}).get("run", {}).get("run_id")
-            if isinstance(report.get("council_cycle"), dict)
-            else None
-        ),
         "r2_object": r2_object,
         "cost_usd_total": (
             report["sections"]
@@ -373,38 +191,20 @@ def _index_report_in_d1(
         metadata=summary,
     )
 
-
 async def generate_and_archive_monthly_review(
     settings: Settings, *, period: str | None = None
 ) -> dict[str, Any]:
-    """Run/reuse this month's Council, then build, archive and index the review.
-
-    This makes the existing MAST ``hive-monthly-review-generate`` call a complete
-    monthly governance operation rather than a report-only step. Repeated calls in
-    the same month reuse the already verified Council run.
-    """
-    # Reject malformed reporting periods before triggering Council or downstream writes.
+    """Build, archive and index the monthly operations/cost report."""
     _period_bounds(period)
-    cycle_start = _monthly_cycle_start()
-    council_started = time.monotonic()
-    logger.info("monthly_review stage started", extra={"stage": "council"})
-    try:
-        council_cycle = await execute_council_cycle(settings, reuse_since=cycle_start)
-    finally:
-        logger.info("monthly_review stage elapsed", extra={"stage": "council", "elapsed_seconds": time.monotonic() - council_started})
     report_started = time.monotonic()
     logger.info("monthly_review stage started", extra={"stage": "report"})
     try:
         report = await generate_monthly_review(
             settings,
             period=period,
-            council_required_since=cycle_start,
         )
     finally:
         logger.info("monthly_review stage elapsed", extra={"stage": "report", "elapsed_seconds": time.monotonic() - report_started})
-    report["council_cycle"] = council_cycle
-    if not council_cycle.get("ok"):
-        report["ok"] = False
 
     archive_started = time.monotonic()
     logger.info("monthly_review stage started", extra={"stage": "r2"})
@@ -424,7 +224,6 @@ async def generate_and_archive_monthly_review(
         report.get("ok") and r2_object and r2_object.get("ok") and index_result.get("ok")
     )
     return report
-
 
 def list_monthly_reviews(
     settings: Settings, *, limit: int = DEFAULT_HISTORY_LIMIT

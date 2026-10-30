@@ -34,7 +34,7 @@ run.
 - A `failed` status means the report or one of its required downstream/archive
   steps failed; inspect Council history, R2, D1 and AIMS/RAMS before any retry.
 - A `claimed` status may mean the operation is running or stopped after partial
-  writes. Never clear or reclaim it automatically. Reconcile downstream writes
+  writes. Never clear or reclaim it automatically. Reconcile report writes
   and worker logs before a manual retry.
 - MAST disables retries for the monthly POST and consumes the monthly schedule
   window after a terminal or transport failure. A timeout is not evidence that

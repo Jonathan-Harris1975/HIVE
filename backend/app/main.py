@@ -8,7 +8,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from app.api.ai_council import router as ai_council_router
 from app.api.benchmark import router as benchmark_router
 from app.api.buckets import router as buckets_router
 from app.api.chat import router as chat_router
@@ -186,7 +185,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(repository_memory_router, prefix="/v1")
     application.include_router(model_registry_router, prefix="/v1")
     application.include_router(providers_router, prefix="/v1")
-    application.include_router(ai_council_router, prefix="/v1")
     application.include_router(benchmark_router, prefix="/v1")
     application.include_router(repository_qa_router, prefix="/v1")
     application.include_router(repository_council_router, prefix="/v1")
