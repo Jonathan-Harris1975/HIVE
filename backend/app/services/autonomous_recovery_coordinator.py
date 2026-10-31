@@ -4,8 +4,6 @@ All operations fail closed. No model calls, GitHub merge, or deployment actions.
 """
 from __future__ import annotations
 
-from hashlib import sha256
-import json
 import time
 from typing import Any
 
