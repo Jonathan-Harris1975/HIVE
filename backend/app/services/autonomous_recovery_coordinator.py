@@ -62,7 +62,28 @@ class RecoveryCoordinator:
             "VALUES (?, ?, ?, ?, ?, ?)",
             [incident_id, repository, revision, signal, now, now],
         )
-        return bool(result.get("ok"))
+        if not result.get("ok"):
+            return False
+        # INSERT OR IGNORE must never disguise a conflicting incident identity.
+        existing = self.d1.query(
+            "SELECT repository, revision, signal FROM recovery_incidents "
+            "WHERE incident_id = ?",
+            [incident_id],
+        )
+        if not existing.get("ok"):
+            return False
+        entries = existing.get("result")
+        if not isinstance(entries, list):
+            return False
+        rows = [
+            row for entry in entries if isinstance(entry, dict)
+            for row in entry.get("results", []) if isinstance(row, dict)
+        ]
+        if len(rows) != 1:
+            return False
+        return all(rows[0].get(field) == value for field, value in (
+            ("repository", repository), ("revision", revision), ("signal", signal),
+        ))
 
     def claim(
         self, *, incident_id: str, revision: str, owner: str,
