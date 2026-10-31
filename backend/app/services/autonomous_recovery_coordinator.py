@@ -76,7 +76,22 @@ class RecoveryCoordinator:
                 incident_id=incident_id, revision=revision, max_attempts=max_attempts,
             )),
         )
-        return _changed(result)
+        if not _changed(result):
+            return False
+        # The claim is already fenced in D1. Record the attempt only while
+        # this owner still holds the exact revision's live lease.
+        audit = self.d1.query(
+            "INSERT INTO recovery_attempts "
+            "(incident_id, attempt, owner, revision, started_at) "
+            "SELECT incident_id, attempts, owner, revision, ? "
+            "FROM recovery_incidents "
+            "WHERE incident_id = ? AND revision = ? AND owner = ? "
+            "AND lease_until > ? AND status = 'open'",
+            [now, incident_id, revision, owner, now],
+        )
+        if not _changed(audit):
+            raise RuntimeError("Recovery lease acquired but attempt audit not confirmed")
+        return True
 
     def release(
         self, *, incident_id: str, revision: str, owner: str,
