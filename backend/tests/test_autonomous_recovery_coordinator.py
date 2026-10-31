@@ -50,3 +50,27 @@ def test_claim_fails_closed_when_attempt_audit_not_written():
     with pytest.raises(RuntimeError, match="audit"):
         service.claim(incident_id="id", revision="sha", owner="worker")
     assert d1.query.call_count == 2
+
+
+def test_register_rejects_conflicting_existing_identity():
+    d1 = SimpleNamespace(query=Mock(side_effect=[
+        {"ok": True},
+        {"ok": True, "result": [{"results": [
+            {"repository": "other/repo", "revision": "sha", "signal": "failure"}
+        ]}]},
+    ]))
+    service = RecoveryCoordinator(d1, SimpleNamespace(), "private")
+    assert service.register(incident_id="id", repository="owner/repo",
+                            revision="sha", signal="failure") is False
+
+
+def test_register_accepts_exact_existing_identity():
+    d1 = SimpleNamespace(query=Mock(side_effect=[
+        {"ok": True},
+        {"ok": True, "result": [{"results": [
+            {"repository": "owner/repo", "revision": "sha", "signal": "failure"}
+        ]}]},
+    ]))
+    service = RecoveryCoordinator(d1, SimpleNamespace(), "private")
+    assert service.register(incident_id="id", repository="owner/repo",
+                            revision="sha", signal="failure") is True
