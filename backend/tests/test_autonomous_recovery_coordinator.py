@@ -39,3 +39,14 @@ def test_receipts_require_private_r2():
     from app.services.autonomous_recovery_evidence import RecoveryReceipt
     with pytest.raises(RuntimeError):
         service.write_receipt(RecoveryReceipt("id", "sha", 1, "held", "0" * 64))
+
+
+def test_claim_fails_closed_when_attempt_audit_not_written():
+    d1 = SimpleNamespace(query=Mock(side_effect=[
+        {"ok": True, "result": [{"meta": {"changes": 1}}]},
+        {"ok": True, "result": [{"meta": {"changes": 0}}]},
+    ]))
+    service = RecoveryCoordinator(d1, SimpleNamespace(), "private")
+    with pytest.raises(RuntimeError, match="audit"):
+        service.claim(incident_id="id", revision="sha", owner="worker")
+    assert d1.query.call_count == 2
