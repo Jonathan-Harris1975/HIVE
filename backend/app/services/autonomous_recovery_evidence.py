@@ -18,7 +18,9 @@ def evidence_key(incident_id: str, revision: str, attempt: int, content: bytes) 
     if not incident_id or not revision or attempt < 1 or not isinstance(content, bytes):
         raise ValueError("invalid evidence identity")
     digest = sha256(content).hexdigest()
-    return f"recovery/{incident_id}/{revision}/{attempt}/{digest}.json"
+    incident_segment = sha256(incident_id.encode("utf-8")).hexdigest()
+    revision_segment = sha256(revision.encode("utf-8")).hexdigest()
+    return f"recovery/{incident_segment}/{revision_segment}/{attempt}/{digest}.json"
 
 
 @dataclass(frozen=True)
