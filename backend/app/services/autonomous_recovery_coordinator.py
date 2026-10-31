@@ -107,7 +107,19 @@ class RecoveryCoordinator:
             [outcome, now + cooldown_seconds, error_code, now,
              incident_id, revision, owner, now],
         )
-        return _changed(result)
+        if not _changed(result):
+            return False
+        audit = self.d1.query(
+            "UPDATE recovery_attempts SET finished_at = ?, outcome = ? "
+            "WHERE incident_id = ? AND revision = ? AND owner = ? "
+            "AND finished_at IS NULL AND attempt = "
+            "(SELECT attempts FROM recovery_incidents WHERE incident_id = ?)",
+            [now, "failed" if outcome == "open" else outcome,
+             incident_id, revision, owner, incident_id],
+        )
+        if not _changed(audit):
+            raise RuntimeError("Recovery outcome released but attempt audit not confirmed")
+        return True
 
     def write_receipt(self, receipt: RecoveryReceipt) -> str:
         if not self.bucket or not self.r2.write_enabled:
