@@ -9,6 +9,10 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.core.config import Settings
+from app.core.governed_repositories import DEFAULT_GITHUB_SOURCES
+from app.services.autonomous_recovery_coordinator import RecoveryCoordinator
+from app.services.autonomous_recovery_signals import correlate_failure
+from app.storage.r2 import R2Storage
 from app.storage.d1 import D1MetadataStore
 
 _ALLOWED_SEVERITIES = {"info", "warning", "critical"}
@@ -114,6 +118,16 @@ def ingest_ops_event(settings: Settings, payload: dict[str, Any]) -> dict[str, A
             raise OpsEventPersistenceError("Operational event was not persisted.") from exc
         if not persisted:
             raise OpsEventPersistenceError("Operational event was not persisted.")
+    # Incident registration is observation-only. Never grant an execution lease
+    # from an externally supplied event, even when the ingestion token is valid.
+    if persisted and settings.recovery_signal_ingest_enabled:
+        coordinator = RecoveryCoordinator(store, R2Storage(settings), settings.cf_r2_bucket)
+        result = correlate_failure(
+            event, coordinator,
+            allowed_repositories=frozenset(DEFAULT_GITHUB_SOURCES.values()),
+        )
+        if result["reason"] == "storage_unavailable":
+            raise OpsEventPersistenceError("Recovery incident registration failed.")
     return {"ok": True, "accepted": True, "persisted": persisted, "event": event}
 
 
