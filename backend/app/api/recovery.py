@@ -12,18 +12,6 @@ from app.storage.d1 import D1MetadataStore
 
 router = APIRouter(tags=["recovery"], dependencies=[Depends(require_admin)])
 
-_SCHEMA = (
-    "CREATE TABLE IF NOT EXISTS recovery_incidents ("
-    "incident_id TEXT PRIMARY KEY NOT NULL, repository TEXT NOT NULL, "
-    "revision TEXT NOT NULL, signal TEXT NOT NULL, "
-    "status TEXT NOT NULL DEFAULT 'open' CHECK "
-    "(status IN ('open','held','escalated','verified')), "
-    "attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0), "
-    "owner TEXT, lease_until INTEGER, next_attempt_after INTEGER NOT NULL DEFAULT 0, "
-    "last_error_code TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)"
-)
-
-
 def _rows(result: object) -> list[dict[str, object]]:
     if not isinstance(result, list):
         return []
