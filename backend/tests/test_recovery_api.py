@@ -47,7 +47,8 @@ def test_observation_only_status(monkeypatch):
 
         def query(self, sql, parameters):
             if "sqlite_master" in sql:
-                return {"ok": True, "result": [{"results": [{"name": "recovery_incidents"}]}]}
+                table = "recovery_attempts" if "recovery_attempts" in sql else "recovery_incidents"
+                return {"ok": True, "result": [{"results": [{"name": table}]}]}
             return {"ok": True, "result": [{"results": [{"incident_id": "a", "status": "open"}]}]}
 
     monkeypatch.setattr("app.api.recovery.D1MetadataStore", ReadyStore)

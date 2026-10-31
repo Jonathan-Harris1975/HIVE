@@ -49,6 +49,18 @@ def recovery_status(
             "mode": "inactive", "incidents": [],
             "message": "Recovery schema not installed",
         }
+    attempts_probe = store.query(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'recovery_attempts'",
+        [],
+    )
+    if not attempts_probe.get("ok"):
+        raise HTTPException(status_code=503, detail="Recovery storage unavailable")
+    if not _rows(attempts_probe.get("result")):
+        return {
+            "ok": False, "configured": True, "schema_ready": False,
+            "mode": "inactive", "incidents": [],
+            "message": "Recovery attempts schema not installed",
+        }
     result = store.query(
         "SELECT incident_id, repository, revision, signal, status, attempts, "
         "lease_until, next_attempt_after, last_error_code, created_at, updated_at "
