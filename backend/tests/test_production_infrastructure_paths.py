@@ -307,6 +307,7 @@ def test_d1_schema_and_diagnostics_fail_closed_and_count_rows(monkeypatch: pytes
     store = d1.D1MetadataStore(settings)
     responses = iter([
         {"ok": True}, {"ok": True}, {"ok": True},  # schema
+        {"ok": True}, {"ok": True}, {"ok": True},  # recovery schema
         {"ok": True}, {"ok": True},  # write probe insert/delete
         {"ok": True},  # diagnostics SELECT 1
         {"ok": True, "result": [{"results": [{"count": 12}]}]},  # count
