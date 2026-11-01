@@ -118,3 +118,26 @@ def test_record_receipt_fails_when_fence_lost_after_r2_write():
             receipt=RecoveryReceipt("id", "sha", 1, "held", "0" * 64),
             owner="worker",
         )
+
+
+def test_verified_release_rejects_missing_durable_evidence():
+    d1 = SimpleNamespace(query=Mock(return_value={
+        "ok": True, "result": [{"results": []}],
+    }))
+    service = RecoveryCoordinator(d1, SimpleNamespace(), "private")
+    with pytest.raises(RuntimeError, match="persisted receipt"):
+        service.release(incident_id="id", revision="sha", owner="worker",
+                        outcome="verified")
+    assert d1.query.call_count == 1
+
+
+def test_verified_release_requires_evidence_and_live_fence():
+    d1 = SimpleNamespace(query=Mock(side_effect=[
+        {"ok": True, "result": [{"results": [{"evidence_key": "recovery/key"}]}]},
+        {"ok": True, "result": [{"meta": {"changes": 1}}]},
+        {"ok": True, "result": [{"meta": {"changes": 1}}]},
+    ]))
+    service = RecoveryCoordinator(d1, SimpleNamespace(), "private")
+    assert service.release(incident_id="id", revision="sha", owner="worker",
+                           outcome="verified")
+    assert d1.query.call_count == 3
