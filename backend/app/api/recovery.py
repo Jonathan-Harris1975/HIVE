@@ -7,6 +7,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from app.core.config import Settings, get_settings
+from app.services.autonomous_recovery_diagnosis import diagnose_signal
 from app.core.security import require_admin
 from app.storage.d1 import D1MetadataStore
 
@@ -70,6 +71,14 @@ def recovery_status(
     if not result.get("ok"):
         raise HTTPException(status_code=503, detail="Recovery status unavailable")
     incidents = _rows(result.get("result"))
+    for incident in incidents:
+        diagnosis = diagnose_signal(str(incident.get("signal") or ""))
+        incident["diagnosis"] = {
+            "category": diagnosis.category,
+            "confidence": diagnosis.confidence,
+            "next_step": diagnosis.next_step,
+            "automatic_patch_allowed": diagnosis.automatic_patch_allowed,
+        }
     return {
         "ok": True, "configured": True, "schema_ready": True,
         "mode": "observation_only", "count": len(incidents), "incidents": incidents,
