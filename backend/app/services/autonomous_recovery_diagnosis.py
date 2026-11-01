@@ -30,12 +30,13 @@ def diagnose_signal(signal: str) -> Diagnosis:
     clean = signal.strip().lower()
     for category, matches in _CATEGORIES:
         if clean in matches or clean.split(":", 1)[-1] in matches:
-            step: Literal["inspect_required_checks", "inspect_security_report", "verify_deployment", "inspect_scheduler", "inspect_runtime_health", "escalate_for_triage"] = {
+            step = {
                 "ci": "inspect_required_checks",
                 "security": "inspect_security_report",
                 "deployment": "verify_deployment",
                 "runtime": "inspect_runtime_health",
                 "missed_job": "inspect_scheduler",
             }[category]
-            return Diagnosis(category, "signal_match", step)
+            from typing import cast
+            return Diagnosis(category, "signal_match", cast(Literal["inspect_required_checks", "inspect_security_report", "verify_deployment", "inspect_scheduler", "inspect_runtime_health", "escalate_for_triage"], step))
     return Diagnosis("unknown", "unknown", "escalate_for_triage")
