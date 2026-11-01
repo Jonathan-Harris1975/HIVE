@@ -123,6 +123,27 @@ class RecoveryCoordinator:
         if not 0 <= cooldown_seconds <= 86400:
             raise ValueError("invalid cooldown")
         now = int(time.time())
+        # A verified release must have durable, owner-fenced evidence for the
+        # current attempt. An unverified worker cannot declare itself healthy.
+        if outcome == "verified":
+            proof = self.d1.query(
+                "SELECT a.evidence_key FROM recovery_attempts a "
+                "JOIN recovery_incidents i ON i.incident_id = a.incident_id "
+                "WHERE a.incident_id = ? AND a.revision = ? AND a.owner = ? "
+                "AND a.attempt = i.attempts AND a.finished_at IS NULL "
+                "AND a.evidence_key IS NOT NULL AND i.revision = ? "
+                "AND i.owner = ? AND i.status = 'open' AND i.lease_until > ?",
+                [incident_id, revision, owner, revision, owner, now],
+            )
+            if not proof.get("ok"):
+                raise RuntimeError("Recovery verification evidence unavailable")
+            entries = proof.get("result")
+            rows = [
+                row for entry in entries if isinstance(entry, dict)
+                for row in entry.get("results", []) if isinstance(row, dict)
+            ] if isinstance(entries, list) else []
+            if len(rows) != 1 or not rows[0].get("evidence_key"):
+                raise RuntimeError("Verified recovery requires a persisted receipt")
         result = self.d1.query(
             RELEASE_INCIDENT,
             [outcome, now + cooldown_seconds, error_code, now,
