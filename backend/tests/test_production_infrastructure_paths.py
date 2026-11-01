@@ -307,7 +307,7 @@ def test_d1_schema_and_diagnostics_fail_closed_and_count_rows(monkeypatch: pytes
     store = d1.D1MetadataStore(settings)
     recovery_schema_statements = [s for s in d1.CREATE_COORDINATION_SCHEMA.split(";") if s.strip()]
     responses = iter([
-        {"ok": True}, {"ok": True}, {"ok": True},  # original schema
+        {"ok": True}, {"ok": True}, {"ok": True},  # schema
         *([{"ok": True}] * len(recovery_schema_statements)),  # recovery schema
         {"ok": True}, {"ok": True},  # write probe insert/delete
         {"ok": True},  # diagnostics SELECT 1
