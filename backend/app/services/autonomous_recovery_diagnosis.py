@@ -5,6 +5,9 @@ from dataclasses import dataclass
 from typing import Literal
 
 Category = Literal["ci", "security", "deployment", "runtime", "missed_job", "unknown"]
+NextStep = Literal["inspect_required_checks", "inspect_security_report",
+                   "verify_deployment", "inspect_scheduler",
+                   "inspect_runtime_health", "escalate_for_triage"]
 
 _CATEGORIES: tuple[tuple[Category, tuple[str, ...]], ...] = (
     ("security", ("codeql", "vulnerability", "security", "secret_scanning", "dependabot")),
@@ -19,9 +22,7 @@ _CATEGORIES: tuple[tuple[Category, tuple[str, ...]], ...] = (
 class Diagnosis:
     category: Category
     confidence: Literal["signal_match", "unknown"]
-    next_step: Literal["inspect_required_checks", "inspect_security_report",
-                       "verify_deployment", "inspect_scheduler",
-                       "inspect_runtime_health", "escalate_for_triage"]
+    next_step: NextStep
     automatic_patch_allowed: bool = False
 
 
@@ -30,12 +31,18 @@ def diagnose_signal(signal: str) -> Diagnosis:
     clean = signal.strip().lower()
     for category, matches in _CATEGORIES:
         if clean in matches or clean.split(":", 1)[-1] in matches:
-            step: Literal["inspect_required_checks", "inspect_security_report", "verify_deployment", "inspect_scheduler", "inspect_runtime_health", "escalate_for_triage"] = {
-                "ci": "inspect_required_checks",
-                "security": "inspect_security_report",
-                "deployment": "verify_deployment",
-                "runtime": "inspect_runtime_health",
-                "missed_job": "inspect_scheduler",
-            }[category]
+            step: NextStep
+            if category == "ci":
+                step = "inspect_required_checks"
+            elif category == "security":
+                step = "inspect_security_report"
+            elif category == "deployment":
+                step = "verify_deployment"
+            elif category == "runtime":
+                step = "inspect_runtime_health"
+            elif category == "missed_job":
+                step = "inspect_scheduler"
+            else:
+                step = "escalate_for_triage"
             return Diagnosis(category, "signal_match", step)
     return Diagnosis("unknown", "unknown", "escalate_for_triage")
