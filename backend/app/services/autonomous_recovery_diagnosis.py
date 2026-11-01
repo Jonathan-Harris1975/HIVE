@@ -30,7 +30,7 @@ def diagnose_signal(signal: str) -> Diagnosis:
     clean = signal.strip().lower()
     for category, matches in _CATEGORIES:
         if clean in matches or clean.split(":", 1)[-1] in matches:
-            step = {
+            step: Literal["inspect_required_checks", "inspect_security_report", "verify_deployment", "inspect_scheduler", "inspect_runtime_health", "escalate_for_triage"] = {
                 "ci": "inspect_required_checks",
                 "security": "inspect_security_report",
                 "deployment": "verify_deployment",
