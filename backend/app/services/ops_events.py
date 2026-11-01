@@ -63,7 +63,7 @@ def normalise_ops_event(payload: dict[str, Any]) -> dict[str, Any]:
     event_type = _text(payload.get("event_type") or payload.get("type") or "operational_event", limit=100)
     title = _text(payload.get("title") or f"{service} {event_type}", limit=180)
     summary = _text(payload.get("summary") or payload.get("message") or title, limit=1200)
-    status = _text(payload.get("status") or "open", limit=40).lower()
+    # Preserve provider failure outcomes when the envelope omits status.\n    # Do not infer failure from severity or arbitrary free-text messages.\n    status = _text(payload.get("status") or payload.get("conclusion") or "open", limit=40).lower()
     release_id = _text(payload.get("release_id") or payload.get("commit_sha"), limit=160) or None
     url = _text(payload.get("url") or payload.get("details_url"), limit=1000) or None
     details = _safe_value(payload.get("details") or {})
