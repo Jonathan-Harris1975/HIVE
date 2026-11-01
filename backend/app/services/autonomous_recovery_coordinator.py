@@ -142,6 +142,52 @@ class RecoveryCoordinator:
             raise RuntimeError("Recovery outcome released but attempt audit not confirmed")
         return True
 
+    def record_receipt(
+        self, *, receipt: RecoveryReceipt, owner: str,
+    ) -> str:
+        """Persist immutable evidence and fence its audit link to the live lease.
+
+        A receipt alone cannot certify a deployment or release an incident.
+        """
+        if not owner:
+            raise ValueError("recovery owner required")
+        now = int(time.time())
+        ownership = self.d1.query(
+            "SELECT a.attempt FROM recovery_attempts a "
+            "JOIN recovery_incidents i ON i.incident_id = a.incident_id "
+            "WHERE a.incident_id = ? AND a.revision = ? AND a.attempt = ? "
+            "AND a.owner = ? AND a.finished_at IS NULL AND a.evidence_key IS NULL "
+            "AND i.owner = ? AND i.revision = ? AND i.attempts = a.attempt "
+            "AND i.status = 'open' AND i.lease_until > ?",
+            [receipt.incident_id, receipt.revision, receipt.attempt,
+             owner, owner, receipt.revision, now],
+        )
+        if not ownership.get("ok"):
+            raise RuntimeError("Recovery evidence ownership check failed")
+        entries = ownership.get("result")
+        rows = [
+            row for entry in entries if isinstance(entry, dict)
+            for row in entry.get("results", []) if isinstance(row, dict)
+        ] if isinstance(entries, list) else []
+        if len(rows) != 1:
+            raise RuntimeError("Recovery evidence lease not held")
+        key = self.write_receipt(receipt)
+        result = self.d1.query(
+            "UPDATE recovery_attempts SET evidence_key = ? "
+            "WHERE incident_id = ? AND revision = ? AND attempt = ? "
+            "AND owner = ? AND finished_at IS NULL AND evidence_key IS NULL "
+            "AND EXISTS (SELECT 1 FROM recovery_incidents i "
+            "WHERE i.incident_id = recovery_attempts.incident_id "
+            "AND i.revision = ? AND i.owner = ? "
+            "AND i.attempts = recovery_attempts.attempt "
+            "AND i.status = 'open' AND i.lease_until > ?)",
+            [key, receipt.incident_id, receipt.revision, receipt.attempt,
+             owner, receipt.revision, owner, int(time.time())],
+        )
+        if not _changed(result):
+            raise RuntimeError("Recovery evidence audit link not confirmed")
+        return key
+
     def write_receipt(self, receipt: RecoveryReceipt) -> str:
         if not self.bucket or not self.r2.write_enabled:
             raise RuntimeError("Private R2 evidence storage not configured")

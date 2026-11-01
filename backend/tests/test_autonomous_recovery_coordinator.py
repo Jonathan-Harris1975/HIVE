@@ -74,3 +74,47 @@ def test_register_accepts_exact_existing_identity():
     service = RecoveryCoordinator(d1, SimpleNamespace(), "private")
     assert service.register(incident_id="id", repository="owner/repo",
                             revision="sha", signal="failure") is True
+
+
+def test_record_receipt_requires_live_lease_before_writing():
+    from app.services.autonomous_recovery_evidence import RecoveryReceipt
+    d1 = SimpleNamespace(query=Mock(return_value={
+        "ok": True, "result": [{"results": []}],
+    }))
+    service = RecoveryCoordinator(d1, SimpleNamespace(), "private")
+    service.write_receipt = Mock()
+    receipt = RecoveryReceipt("id", "sha", 1, "held", "0" * 64)
+    with pytest.raises(RuntimeError, match="lease"):
+        service.record_receipt(receipt=receipt, owner="worker")
+    service.write_receipt.assert_not_called()
+
+
+def test_record_receipt_links_evidence_to_fenced_attempt():
+    from app.services.autonomous_recovery_evidence import RecoveryReceipt
+    d1 = SimpleNamespace(query=Mock(side_effect=[
+        {"ok": True, "result": [{"results": [{"attempt": 1}]}]},
+        {"ok": True, "result": [{"meta": {"changes": 1}}]},
+    ]))
+    service = RecoveryCoordinator(d1, SimpleNamespace(), "private")
+    service.write_receipt = Mock(return_value="recovery/key.json")
+    receipt = RecoveryReceipt("id", "sha", 1, "held", "0" * 64)
+    assert service.record_receipt(receipt=receipt, owner="worker") == "recovery/key.json"
+    sql, params = d1.query.call_args.args
+    assert "lease_until > ?" in sql
+    assert "evidence_key IS NULL" in sql
+    assert params[0] == "recovery/key.json"
+
+
+def test_record_receipt_fails_when_fence_lost_after_r2_write():
+    from app.services.autonomous_recovery_evidence import RecoveryReceipt
+    d1 = SimpleNamespace(query=Mock(side_effect=[
+        {"ok": True, "result": [{"results": [{"attempt": 1}]}]},
+        {"ok": True, "result": [{"meta": {"changes": 0}}]},
+    ]))
+    service = RecoveryCoordinator(d1, SimpleNamespace(), "private")
+    service.write_receipt = Mock(return_value="recovery/key.json")
+    with pytest.raises(RuntimeError, match="audit link"):
+        service.record_receipt(
+            receipt=RecoveryReceipt("id", "sha", 1, "held", "0" * 64),
+            owner="worker",
+        )
