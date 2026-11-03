@@ -13,6 +13,8 @@ from app.storage.d1 import D1MetadataStore
 
 router = APIRouter(tags=["recovery"], dependencies=[Depends(require_admin)])
 
+D1MetadataStore = D1MetadataStore  # ensure module attribute for monkeypatching
+
 def _rows(result: object) -> list[dict[str, object]]:
     if not isinstance(result, list):
         return []
