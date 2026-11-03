@@ -528,7 +528,10 @@ class Settings(BaseSettings):
         ),
     )
     d1_database_id: str = Field("", validation_alias=AliasChoices("D1_DATABASE_ID", "D1_UUID"))
-    recovery_d1_database_id: str = Field("", validation_alias=AliasChoices("RECOVERY_D1_DATABASE_ID"))
+    recovery_d1_database_id: str = Field(
+        "bf78bd7a-e224-465a-a04e-443822204980",
+        validation_alias=AliasChoices("RECOVERY_D1_DATABASE_ID"),
+    )
     d1_database_name: str = Field(
         "database-hive", validation_alias=AliasChoices("D1_DATABASE_NAME", "D1_DATABASE")
     )
