@@ -16,7 +16,7 @@ def test_disabled_recovery_status(monkeypatch):
         def __init__(self, settings):
             self.enabled = False
 
-    monkeypatch.setattr("app.api.recovery.D1MetadataStore", DisabledStore)
+    monkeypatch.setattr("app.api.recovery.RecoveryD1Store", DisabledStore)
     result = recovery_status(Response(), limit=10, settings=SimpleNamespace())
     assert result["ok"] is False
     assert result["mode"] == "disabled"
