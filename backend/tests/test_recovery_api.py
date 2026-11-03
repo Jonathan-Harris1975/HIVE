@@ -51,7 +51,7 @@ def test_observation_only_status(monkeypatch):
                 return {"ok": True, "result": [{"results": [{"name": table}]}]}
             return {"ok": True, "result": [{"results": [{"incident_id": "a", "status": "open"}]}]}
 
-    monkeypatch.setattr("app.api.recovery.D1MetadataStore", ReadyStore)
+    monkeypatch.setattr("app.api.recovery.RecoveryD1Store", ReadyStore)
     result = recovery_status(Response(), limit=10, settings=SimpleNamespace())
     assert result["mode"] == "observation_only"
     assert result["count"] == 1
