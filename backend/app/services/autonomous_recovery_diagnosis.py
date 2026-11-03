@@ -5,9 +5,14 @@ from dataclasses import dataclass
 from typing import Literal
 
 Category = Literal["ci", "security", "deployment", "runtime", "missed_job", "unknown"]
-NextStep = Literal["inspect_required_checks", "inspect_security_report",
-                   "verify_deployment", "inspect_scheduler",
-                   "inspect_runtime_health", "escalate_for_triage"]
+NextStep = Literal[
+    "inspect_required_checks",
+    "inspect_security_report",
+    "verify_deployment",
+    "inspect_scheduler",
+    "inspect_runtime_health",
+    "escalate_for_triage",
+]
 
 _CATEGORIES: tuple[tuple[Category, tuple[str, ...]], ...] = (
     ("security", ("codeql", "vulnerability", "security", "secret_scanning", "dependabot")),
@@ -31,7 +36,7 @@ def diagnose_signal(signal: str) -> Diagnosis:
     clean = signal.strip().lower()
     for category, matches in _CATEGORIES:
         if clean in matches or clean.split(":", 1)[-1] in matches:
-            step: NextStep
+            step: NextStep = "escalate_for_triage"
             if category == "ci":
                 step = "inspect_required_checks"
             elif category == "security":
@@ -42,7 +47,5 @@ def diagnose_signal(signal: str) -> Diagnosis:
                 step = "inspect_runtime_health"
             elif category == "missed_job":
                 step = "inspect_scheduler"
-            else:
-                step = "escalate_for_triage"
             return Diagnosis(category, "signal_match", step)
     return Diagnosis("unknown", "unknown", "escalate_for_triage")
