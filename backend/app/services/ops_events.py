@@ -13,7 +13,7 @@ from app.core.governed_repositories import DEFAULT_GITHUB_SOURCES
 from app.services.autonomous_recovery_coordinator import RecoveryCoordinator
 from app.services.autonomous_recovery_signals import correlate_failure
 from app.storage.r2 import R2Storage
-from app.storage.d1 import D1MetadataStore
+from app.storage.d1 import D1MetadataStore, RecoveryD1Store
 
 _ALLOWED_SEVERITIES = {"info", "warning", "critical"}
 _SECRET_KEY = re.compile(r"(authorization|bearer|credential|password|secret|token|api[_-]?key|access[_-]?key)", re.I)
@@ -123,7 +123,7 @@ def ingest_ops_event(settings: Settings, payload: dict[str, Any]) -> dict[str, A
     # Incident registration is observation-only. Never grant an execution lease
     # from an externally supplied event, even when the ingestion token is valid.
     if persisted and settings.recovery_signal_ingest_enabled:
-        coordinator = RecoveryCoordinator(store, R2Storage(settings), settings.cf_r2_bucket)
+        coordinator = RecoveryCoordinator(RecoveryD1Store(settings), R2Storage(settings), settings.cf_r2_bucket)
         result = correlate_failure(
             event, coordinator,
             allowed_repositories=frozenset(DEFAULT_GITHUB_SOURCES.values()),
