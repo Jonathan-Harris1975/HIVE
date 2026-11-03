@@ -13,6 +13,7 @@ from app.storage.d1 import D1MetadataStore
 
 router = APIRouter(tags=["recovery"], dependencies=[Depends(require_admin)])
 
+
 def _rows(result: object) -> list[dict[str, object]]:
     if not isinstance(result, list):
         return []
