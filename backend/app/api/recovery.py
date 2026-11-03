@@ -13,8 +13,6 @@ from app.storage.d1 import RecoveryD1Store
 
 router = APIRouter(tags=["recovery"], dependencies=[Depends(require_admin)])
 
-D1MetadataStore = D1MetadataStore  # ensure module attribute for monkeypatching
-
 def _rows(result: object) -> list[dict[str, object]]:
     if not isinstance(result, list):
         return []
@@ -23,7 +21,6 @@ def _rows(result: object) -> list[dict[str, object]]:
         if isinstance(entry, dict) and isinstance(entry.get("results"), list):
             rows.extend(item for item in entry["results"] if isinstance(item, dict))
     return rows
-
 
 @router.get("/system/recovery/status")
 def recovery_status(
