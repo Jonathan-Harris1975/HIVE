@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from app.core.config import Settings, get_settings
 from app.services.autonomous_recovery_diagnosis import diagnose_signal
 from app.core.security import require_admin
-from app.storage.d1 import D1MetadataStore
+from app.storage.d1 import RecoveryD1Store
 
 router = APIRouter(tags=["recovery"], dependencies=[Depends(require_admin)])
 
@@ -31,7 +31,7 @@ def recovery_status(
 ) -> dict[str, object]:
     """Operator-readable snapshot; no credentials, raw traces or untrusted logs."""
     response.headers["Cache-Control"] = "no-store"
-    store = D1MetadataStore(settings)
+    store = RecoveryD1Store(settings)
     if not store.enabled:
         return {
             "ok": False, "configured": False, "schema_ready": False,
