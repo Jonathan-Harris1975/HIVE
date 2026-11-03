@@ -16,7 +16,7 @@ def test_disabled_recovery_status(monkeypatch):
         def __init__(self, settings):
             self.enabled = False
 
-    monkeypatch.setattr("app.api.recovery.D1MetadataStore", DisabledStore)
+    monkeypatch.setattr("app.api.recovery.RecoveryD1Store", DisabledStore)
     result = recovery_status(Response(), limit=10, settings=SimpleNamespace())
     assert result["ok"] is False
     assert result["mode"] == "disabled"
@@ -32,7 +32,7 @@ def test_missing_schema_is_not_reported_as_ready(monkeypatch):
         def query(self, sql, parameters):
             return {"ok": True, "result": [{"results": []}]}
 
-    monkeypatch.setattr("app.api.recovery.D1MetadataStore", EmptyStore)
+    monkeypatch.setattr("app.api.recovery.RecoveryD1Store", EmptyStore)
     result = recovery_status(Response(), limit=10, settings=SimpleNamespace())
     assert result["schema_ready"] is False
     assert result["mode"] == "inactive"
@@ -51,7 +51,7 @@ def test_observation_only_status(monkeypatch):
                 return {"ok": True, "result": [{"results": [{"name": table}]}]}
             return {"ok": True, "result": [{"results": [{"incident_id": "a", "status": "open"}]}]}
 
-    monkeypatch.setattr("app.api.recovery.D1MetadataStore", ReadyStore)
+    monkeypatch.setattr("app.api.recovery.RecoveryD1Store", ReadyStore)
     result = recovery_status(Response(), limit=10, settings=SimpleNamespace())
     assert result["mode"] == "observation_only"
     assert result["count"] == 1
