@@ -90,10 +90,9 @@ class D1MetadataStore:
             ON hive_ecosystem_metadata (source_type, source_id)
             """,
         ]
-        statements.extend(statement.strip() for statement in CREATE_COORDINATION_SCHEMA.split(";") if statement.strip())
         results = [self.query(statement, []) for statement in statements]
         ok = all(bool(item.get("ok")) for item in results)
-        return {"ok": ok, "enabled": True, "tables": ["hive_ecosystem_metadata", "recovery_incidents", "recovery_attempts"], "results": results}
+        return {"ok": ok, "enabled": True, "tables": ["hive_ecosystem_metadata"], "results": results}
 
     def ping_write(self) -> dict[str, object]:
         """Verify D1 can write and delete a probe row."""
@@ -544,3 +543,22 @@ def _d1_error_message(payload: dict[str, Any]) -> str:
             return str(first.get("message") or first)
         return str(first)
     return ""
+
+
+class RecoveryD1Store(D1MetadataStore):
+    """Dedicated D1 coordination store; never fall back to ecosystem metadata."""
+
+    def __init__(self, settings: Settings) -> None:
+        recovery_id = settings.recovery_d1_database_id
+        super().__init__(settings.model_copy(update={
+            "d1_database_id": recovery_id,
+            "d1_database_name": "hive-autonomous-recovery",
+        }))
+
+    def init_schema(self) -> dict[str, object]:
+        if not self.enabled:
+            return {"ok": False, "enabled": False}
+        statements = [part.strip() for part in CREATE_COORDINATION_SCHEMA.split(";") if part.strip()]
+        results = [self.query(statement, []) for statement in statements]
+        return {"ok": all(bool(item.get("ok")) for item in results),
+                "enabled": True, "tables": ["recovery_incidents", "recovery_attempts"]}

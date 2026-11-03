@@ -48,6 +48,7 @@ HIVE uses Cloudflare D1 for both operational SQL records and ecosystem metadata.
 
 - Operational D1 (`DATABASE_D1_DATABASE_ID`): conversations, messages, file metadata/chunks and cost events. Set `DATABASE_BACKEND=d1` and keep `DATABASE_ENABLED=true`.
 - Metadata D1 (`D1_DATABASE_ID`, currently `database-hive`): audit run index, council report index, podcast episode index, ebook catalogue cache, social performance snapshots and other AIMS/RAMS ecosystem metadata.
+- Recovery D1 (`RECOVERY_D1_DATABASE_ID`, `hive-autonomous-recovery`): isolated `recovery_incidents` and `recovery_attempts` tables; no fallback to metadata D1. Provision and initialise separately before enabling signal ingestion.
 - Koyeb PostgreSQL remains configured during the rollback period and is not selected when `DATABASE_BACKEND=d1`.
 
 Operational D1 writes use Cloudflare's transactional batch API. Keep large file bodies in R2.
@@ -60,6 +61,7 @@ D1_ACCOUNT_ID=your-cloudflare-account-id
 D1_API_KEY=your-d1-api-token
 D1_DATABASE_ID=your-d1-database-uuid
 D1_DATABASE_NAME=database-hive
+RECOVERY_D1_DATABASE_ID=bf78bd7a-e224-465a-a04e-443822204980
 DATABASE_ENABLED=true
 DATABASE_BACKEND=d1
 DATABASE_D1_DATABASE_ID=your-operational-d1-database-uuid
