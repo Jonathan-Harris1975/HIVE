@@ -90,10 +90,9 @@ class D1MetadataStore:
             ON hive_ecosystem_metadata (source_type, source_id)
             """,
         ]
-        statements.extend(statement.strip() for statement in CREATE_COORDINATION_SCHEMA.split(";") if statement.strip())
         results = [self.query(statement, []) for statement in statements]
         ok = all(bool(item.get("ok")) for item in results)
-        return {"ok": ok, "enabled": True, "tables": ["hive_ecosystem_metadata", "recovery_incidents", "recovery_attempts"], "results": results}
+        return {"ok": ok, "enabled": True, "tables": ["hive_ecosystem_metadata"], "results": results}
 
     def ping_write(self) -> dict[str, object]:
         """Verify D1 can write and delete a probe row."""
