@@ -82,7 +82,7 @@ class Settings(BaseSettings):
         "", validation_alias=AliasChoices("OPS_EVENT_INGEST_TOKEN")
     )
     recovery_signal_ingest_enabled: bool = Field(
-        False, validation_alias=AliasChoices("RECOVERY_SIGNAL_INGEST_ENABLED")
+        True, validation_alias=AliasChoices("RECOVERY_SIGNAL_INGEST_ENABLED")
     )
     ops_event_memory_limit: int = Field(
         200, ge=10, le=2000, validation_alias=AliasChoices("OPS_EVENT_MEMORY_LIMIT")
