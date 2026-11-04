@@ -33,7 +33,7 @@ def test_missing_schema_is_not_reported_as_ready(monkeypatch):
             return {"ok": True, "result": [{"results": []}]}
 
     monkeypatch.setattr("app.api.recovery.RecoveryD1Store", EmptyStore)
-    result = recovery_status(Response(), limit=10, settings=SimpleNamespace())
+    result = recovery_status(Response(), repository="HIVE", limit=10, settings=SimpleNamespace())
     assert result["schema_ready"] is False
     assert result["mode"] == "inactive"
 
@@ -52,7 +52,7 @@ def test_observation_only_status(monkeypatch):
             return {"ok": True, "result": [{"results": [{"incident_id": "a", "status": "open"}]}]}
 
     monkeypatch.setattr("app.api.recovery.RecoveryD1Store", ReadyStore)
-    result = recovery_status(Response(), limit=10, settings=SimpleNamespace())
+    result = recovery_status(Response(), repository="HIVE", limit=10, settings=SimpleNamespace())
     assert result["mode"] == "observation_only"
     assert result["count"] == 1
 
