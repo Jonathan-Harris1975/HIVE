@@ -8,6 +8,7 @@ from typing import Any
 import httpx
 
 from app.core.config import Settings
+from app.core.governed_repositories import DEFAULT_RECOVERY_D1_DATABASES, canonical_governed_repository_id
 from app.services.autonomous_recovery_sql import CREATE_COORDINATION_SCHEMA
 
 
@@ -546,13 +547,26 @@ def _d1_error_message(payload: dict[str, Any]) -> str:
 
 
 class RecoveryD1Store(D1MetadataStore):
-    """Dedicated D1 coordination store; never fall back to ecosystem metadata."""
+    """Repository-isolated D1 coordination store; never fall back to metadata."""
 
-    def __init__(self, settings: Settings) -> None:
-        recovery_id = settings.recovery_d1_database_id
+    def __init__(self, settings: Settings, repository: str | None = None) -> None:
+        if repository is None:
+            recovery_id = settings.recovery_d1_database_id
+            database_name = DEFAULT_RECOVERY_D1_DATABASES["HIVE"]["name"]
+        else:
+            repository_id = canonical_governed_repository_id(repository)
+            database = DEFAULT_RECOVERY_D1_DATABASES.get(repository_id or "")
+            if database is None:
+                raise ValueError("repository has no configured recovery D1 database")
+            recovery_id = (
+                settings.recovery_d1_database_id
+                if repository_id == "HIVE"
+                else database["id"]
+            )
+            database_name = database["name"]
         super().__init__(settings.model_copy(update={
             "d1_database_id": recovery_id,
-            "d1_database_name": "hive-autonomous-recovery",
+            "d1_database_name": database_name,
         }))
 
     def init_schema(self) -> dict[str, object]:
