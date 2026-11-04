@@ -42,7 +42,7 @@ def test_observation_only_status(monkeypatch):
     class ReadyStore:
         enabled = True
 
-        def __init__(self, settings):
+        def __init__(self, settings, repository=None):
             pass
 
         def query(self, sql, parameters):
