@@ -558,11 +558,7 @@ class RecoveryD1Store(D1MetadataStore):
             database = DEFAULT_RECOVERY_D1_DATABASES.get(repository_id or "")
             if database is None:
                 raise ValueError("repository has no configured recovery D1 database")
-            recovery_id = (
-                settings.recovery_d1_database_id
-                if repository_id == "HIVE"
-                else database["id"]
-            )
+            recovery_id = database["id"]
             database_name = database["name"]
         super().__init__(settings.model_copy(update={
             "d1_database_id": recovery_id,
