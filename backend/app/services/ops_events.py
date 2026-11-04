@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.core.config import Settings
-from app.core.governed_repositories import DEFAULT_GITHUB_SOURCES
+from app.core.governed_repositories import DEFAULT_GITHUB_SOURCES, canonical_governed_repository_id
 from app.services.autonomous_recovery_coordinator import RecoveryCoordinator
 from app.services.autonomous_recovery_signals import correlate_failure
 from app.storage.r2 import R2Storage
@@ -123,13 +123,19 @@ def ingest_ops_event(settings: Settings, payload: dict[str, Any]) -> dict[str, A
     # Incident registration is observation-only. Never grant an execution lease
     # from an externally supplied event, even when the ingestion token is valid.
     if persisted and settings.recovery_signal_ingest_enabled:
-        coordinator = RecoveryCoordinator(RecoveryD1Store(settings), R2Storage(settings), settings.cf_r2_bucket)
-        result = correlate_failure(
-            event, coordinator,
-            allowed_repositories=frozenset(DEFAULT_GITHUB_SOURCES.values()),
-        )
-        if result["reason"] == "storage_unavailable":
-            raise OpsEventPersistenceError("Recovery incident registration failed.")
+        repository_id = canonical_governed_repository_id(event["service"])
+        if repository_id is not None:
+            coordinator = RecoveryCoordinator(
+                RecoveryD1Store(settings, repository=repository_id),
+                R2Storage(settings),
+                settings.cf_r2_bucket,
+            )
+            result = correlate_failure(
+                event, coordinator,
+                allowed_repositories=frozenset(DEFAULT_GITHUB_SOURCES.values()),
+            )
+            if result["reason"] == "storage_unavailable":
+                raise OpsEventPersistenceError("Recovery incident registration failed.")
     return {"ok": True, "accepted": True, "persisted": persisted, "event": event}
 
 

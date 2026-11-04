@@ -243,3 +243,54 @@ def test_ops_event_endpoint_returns_retryable_503_when_d1_write_fails(monkeypatc
     assert response.status_code == 503
     assert response.headers["retry-after"] == "1"
     assert "same event ID" in response.json()["detail"]
+
+
+def test_recovery_signal_routes_to_the_repository_d1(monkeypatch) -> None:
+    from app.services import ops_events
+
+    clear_ops_events_for_tests()
+    monkeypatch.setattr(D1MetadataStore, "enabled", property(lambda self: True))
+    monkeypatch.setattr(D1MetadataStore, "upsert_metadata", lambda self, **kwargs: {"ok": True})
+    routed = {}
+
+    class FakeRecoveryStore:
+        def __init__(self, settings, repository=None):
+            routed["repository"] = repository
+            self.enabled = True
+
+    class FakeCoordinator:
+        def __init__(self, store, r2, bucket):
+            routed["store"] = store
+
+        def register(self, **kwargs):
+            routed["incident"] = kwargs
+            return True
+
+    monkeypatch.setattr(ops_events, "RecoveryD1Store", FakeRecoveryStore)
+    monkeypatch.setattr(ops_events, "RecoveryCoordinator", FakeCoordinator)
+    settings = Settings(
+        app_env="test",
+        ops_event_ingest_enabled=True,
+        ops_event_ingest_token="event-token-which-is-long-enough",
+        recovery_signal_ingest_enabled=True,
+        d1_enabled=True,
+        d1_account_id="account",
+        d1_api_key="token",
+        d1_database_id="metadata-id",
+    )
+
+    result = ingest_ops_event(settings, {
+        "event_id": "d1-routing-test",
+        "source": "github",
+        "service": "Jonathan-Harris1975/HIVE-UI",
+        "environment": "production",
+        "severity": "critical",
+        "event_type": "ci_failed",
+        "status": "failure",
+        "release_id": "a" * 40,
+    })
+
+    assert result["persisted"] is True
+    assert routed["repository"] == "HIVE-UI"
+    assert routed["incident"]["repository"] == "Jonathan-Harris1975/HIVE-UI"
+    clear_ops_events_for_tests()
