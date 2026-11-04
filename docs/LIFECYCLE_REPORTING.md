@@ -13,3 +13,8 @@ Kilo remains the code-repair executor. Provider fallback remains unset unless a 
 Council bundles already written by the eight repositories' governed Council workflows are referenced inside the weekly JSON and HTML reports. Their source manifests and evidence remain unchanged; HIVE no longer writes a separate nested council-index object for each bundle.
 
 HIVE creates a review bundle only when an exact evidence record has `REVIEW_REQUIRED`, `SERVICE_BLOCKED`, or an explicit human hold. The immutable bundle contains the original evidence, review summary and proposal. Accept Fix is disabled unless the proposal, repair prompt, governed PR number and exact head are present. When accepted, HIVE verifies the PR is still open at that head, writes a create-only decision record, and dispatches the repository's existing `pr-issue-repair.yml` workflow. That workflow performs its normal eligibility checks and Kilo handoff; it cannot merge or deploy. An uncertain dispatch is not automatically retried. Subsequent complete GREEN evidence indexes the original record under `reports/review-required/resolved/<year>/<review-id>/` without changing the source evidence.
+
+
+### Restoring a missing current-week report
+
+If the current week's report is absent, use the existing guarded Koyeb recovery path. A successful main-branch CI run whose commit message starts with `Restore Operations weekly report` runs `scripts/restore_operations_report.py` after exact-SHA deployment verification. The script regenerates the report only when it is missing, preserves source evidence, and verifies that all eight repositories are present. Missing or stale evidence remains UNKNOWN; report restoration must not manufacture GREEN status or modify source evidence.
