@@ -41,6 +41,13 @@ def test_every_governed_repository_has_its_own_recovery_database():
         assert store.settings.d1_database_id == database["id"]
         assert store.settings.d1_database_name == database["name"]
 
+    overridden_hive = Settings(
+        D1_ENABLED=True, D1_ACCOUNT_ID="account", D1_API_KEY="token",
+        RECOVERY_D1_DATABASE_ID="legacy-or-misconfigured-id",
+    )
+    explicit_hive = RecoveryD1Store(overridden_hive, repository="HIVE")
+    assert explicit_hive.settings.d1_database_id == DEFAULT_RECOVERY_D1_DATABASES["HIVE"]["id"]
+
 
 def test_recovery_database_resolves_full_github_repository_name():
     from app.core.governed_repositories import DEFAULT_RECOVERY_D1_DATABASES
