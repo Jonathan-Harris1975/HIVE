@@ -5,7 +5,7 @@ on:
     paths:
       - "backend/app/core/governed_repositories.py"
       - "backend/app/storage/d1.py"
-      - "backend/scripts/preflight_recovery_d1.py"
+      - "scripts/preflight_recovery_d1.py"
       - ".github/workflows/preflight-governance-worker-d1.yml"
   workflow_dispatch:
 permissions:
