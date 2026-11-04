@@ -7,6 +7,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from app.core.config import Settings, get_settings
+from app.core.governed_repositories import DEFAULT_RECOVERY_D1_DATABASES, canonical_governed_repository_id
 from app.services.autonomous_recovery_diagnosis import diagnose_signal
 from app.core.security import require_admin
 from app.storage.d1 import RecoveryD1Store
@@ -26,12 +27,16 @@ def _rows(result: object) -> list[dict[str, object]]:
 @router.get("/system/recovery/status")
 def recovery_status(
     response: Response,
+    repository: str = Query("HIVE", min_length=1, max_length=100),
     limit: int = Query(50, ge=1, le=100),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, object]:
-    """Operator-readable snapshot; no credentials, raw traces or untrusted logs."""
+    """Operator-readable snapshot for one repository; no credentials or raw logs."""
     response.headers["Cache-Control"] = "no-store"
-    store = RecoveryD1Store(settings)
+    repository_id = canonical_governed_repository_id(repository)
+    if repository_id is None or repository_id not in DEFAULT_RECOVERY_D1_DATABASES:
+        raise HTTPException(status_code=400, detail="Repository has no recovery D1 database")
+    store = RecoveryD1Store(settings, repository=repository_id)
     if not store.enabled:
         return {
             "ok": False, "configured": False, "schema_ready": False,
@@ -81,5 +86,6 @@ def recovery_status(
         }
     return {
         "ok": True, "configured": True, "schema_ready": True,
+        "repository": repository_id, "database_name": DEFAULT_RECOVERY_D1_DATABASES[repository_id]["name"],
         "mode": "observation_only", "count": len(incidents), "incidents": incidents,
     }
