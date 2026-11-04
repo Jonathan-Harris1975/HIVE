@@ -17,7 +17,7 @@ def test_disabled_recovery_status(monkeypatch):
             self.enabled = False
 
     monkeypatch.setattr("app.api.recovery.RecoveryD1Store", DisabledStore)
-    result = recovery_status(Response(), limit=10, settings=SimpleNamespace())
+    result = recovery_status(Response(), repository="HIVE", limit=10, settings=SimpleNamespace())
     assert result["ok"] is False
     assert result["mode"] == "disabled"
 
