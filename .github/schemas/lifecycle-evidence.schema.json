@@ -23,8 +23,6 @@
     "fallback_used",
     "fallback_reason",
     "repair_attempts",
-    "mergify_admitted",
-    "mergify_queued",
     "merged",
     "deployment_status",
     "deployed_sha",
@@ -38,7 +36,6 @@
     "merge_authority",
     "github_auto_merge_enabled",
     "github_auto_merge_queued",
-    "mergify_not_applicable_reason",
     "not_applicable_reasons",
     "source_workflow",
     "source_workflow_conclusion",
@@ -138,18 +135,6 @@
       "type": "integer",
       "minimum": 0
     },
-    "mergify_admitted": {
-      "type": [
-        "boolean",
-        "null"
-      ]
-    },
-    "mergify_queued": {
-      "type": [
-        "boolean",
-        "null"
-      ]
-    },
     "merged": {
       "type": [
         "boolean",
@@ -216,7 +201,6 @@
     "merge_authority": {
       "enum": [
         "github_native_auto_merge",
-        "mergify",
         "unknown"
       ]
     },
@@ -229,12 +213,6 @@
     "github_auto_merge_queued": {
       "type": [
         "boolean",
-        "null"
-      ]
-    },
-    "mergify_not_applicable_reason": {
-      "type": [
-        "string",
         "null"
       ]
     },
