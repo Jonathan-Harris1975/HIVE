@@ -282,7 +282,7 @@ jobs:
             body="$(gh pr view "$old_pr" --repo "$REPO" --json body --jq '.body')"
             [[ "$body" == *"Failed workflow: **${RUN_NAME}**"* ]] || continue
             # A newer authoritative failure in the same workflow supersedes the old carrier.
-            # Clear a stale hold before labelling it superseded so Mergify can close it.
+            # Clear a stale hold before labelling it superseded so GitHub native auto-merge lifecycle reconciliation can close it.
             gh pr edit "$old_pr" --repo "$REPO" --remove-label autonomy:human-hold >/dev/null 2>&1 || true
             gh pr edit "$old_pr" --repo "$REPO" --add-label autonomy:superseded
             gh pr close "$old_pr" --repo "$REPO"
