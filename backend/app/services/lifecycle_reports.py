@@ -34,7 +34,6 @@ def _valid_record(value: Any, repository: str) -> bool:
         and (value.get("fallback_used") is not True or bool(value.get("fallback_reason")))
         and (value.get("kilo_triggered") is not True or bool(value.get("kilo_trigger_reason")))
         and value.get("merge_authority") == "github_native_auto_merge"
-        and bool(value.get("mergify_not_applicable_reason"))
     )
 
 
