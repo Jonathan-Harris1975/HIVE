@@ -44,8 +44,6 @@ TRUSTED_FILE = "trusted-automation.yml"
 
 AUTOMATION_LABELS = {"autonomy:admitted", "autonomy:repair", "autonomy:human-hold",
                      "autonomy:kilo-implementation"}
-# Keep abandoned queue refs visible until they are closed; this is not an active merge dependency.
-LEGACY_MERGE_QUEUE_PREFIX = "mergify/merge-queue/"
 RENOVATE_LOGIN = "renovate[bot]"
 
 
