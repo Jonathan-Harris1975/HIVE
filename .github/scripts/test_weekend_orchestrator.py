@@ -124,7 +124,7 @@ class SettleTests(unittest.TestCase):
     def test_renovate_automerge_pr_and_legacy_queue_branch_block(self):
         api = FakeApi()
         api.prs = [pr(8, login="renovate[bot]", body="**Automerge**: Enabled."),
-                   pr(9, head="mergify/merge-queue/abc")]
+                   pr(9, head="GitHub native auto-merge/merge-queue/abc")]
         orch, _ = make(api, settle_minutes=2)
         found = orch.automation_prs(api.prs)
         self.assertEqual({p["number"] for p in found}, {8, 9})
