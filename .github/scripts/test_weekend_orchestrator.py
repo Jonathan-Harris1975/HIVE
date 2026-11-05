@@ -127,7 +127,7 @@ class SettleTests(unittest.TestCase):
                    pr(9, head="merge-queue/retired/abc")]
         orch, _ = make(api, settle_minutes=2)
         found = orch.automation_prs(api.prs)
-        self.assertEqual({p["number"] for p in found}, {8}
+        self.assertEqual({p["number"] for p in found}, {8})
 
     def test_renovate_major_without_automerge_is_ignored(self):
         api = FakeApi()
