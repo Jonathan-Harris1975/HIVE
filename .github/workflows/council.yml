@@ -1,7 +1,7 @@
 name: Repository Council
 
 on:
-  # Dispatch only: the weekend orchestrator releases the Council once Mergify has completed,
+  # Dispatch only: the weekend orchestrator releases the Council once GitHub native auto-merge has completed,
   # CI/CodeQL/Security and the exact-SHA deployment are green, and at least one hour after
   # the Renovate window has closed.
   workflow_dispatch:
