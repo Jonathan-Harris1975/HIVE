@@ -168,12 +168,10 @@ class Orchestrator:
         """Open PRs the autonomous system is responsible for finishing."""
         found = []
         for pr in prs:
-            head = pr.get("head", {}).get("ref", "")
             login = pr.get("user", {}).get("login", "")
             body = pr.get("body") or ""
             renovate_auto = (login == RENOVATE_LOGIN and "**Automerge**: Enabled." in body)
-            if (self.labels(pr) & AUTOMATION_LABELS or head.startswith(LEGACY_MERGE_QUEUE_PREFIX)
-                    or renovate_auto):
+            if self.labels(pr) & AUTOMATION_LABELS or renovate_auto:
                 found.append(pr)
         return found
 
