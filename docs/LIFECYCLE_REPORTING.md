@@ -6,7 +6,7 @@ HIVE assembles the current ISO week from lifecycle JSON in `hive-repositories`. 
 
 MAST schedules generation Mondays at 07:05 Europe/London, after its 06:55 HIVE governance check. Each generation reads the eight current default-branch SHAs through the existing GitHub read credential. Only matching evidence completed within the requested ISO week and no later than the observation can contribute to status. Every repository records its head, observation time, missing fields and any missing/stale evidence reason. An unavailable head lookup remains UNKNOWN. These are states at the recorded observation time, not proof of present deployment recovery. The HIVE Operations surface reads the persisted report and links to its HTML view.
 
-The live repository audit and operator confirmation establish GitHub native auto-merge as the merge authority. The records keep legacy Mergify fields for contract compatibility, mark them inapplicable with a reason, and add explicit GitHub auto-merge fields. No merge authority, CI gate, or security check is bypassed.
+The live repository audit and operator confirmation establish GitHub native auto-merge as the merge authority. Lifecycle evidence records current GitHub auto-merge state directly. No merge authority, CI gate, or security check is bypassed.
 
 Kilo remains the code-repair executor. Provider fallback remains unset unless a quota, credit, rate-limit, provider-unavailable, or defined timeout signal is recorded. A failed Kilo patch is handled by existing bounded repair logic and does not trigger provider fallback. Reporting is deterministic and has no AI-provider dependency.
 
