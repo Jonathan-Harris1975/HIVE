@@ -63,7 +63,10 @@ class LifecycleReportTests(unittest.TestCase):
         review_id, bundle = build_review_objects(candidate, 2026)
         self.assertTrue(review_id.startswith("review-"))
         self.assertIn("evidence.json", bundle)
-        self.assertIn(b"Accept Fix enabled: True", bundle["review.md"])
+        review = json.loads(bundle["review.json"])
+        self.assertFalse(review["accept_fix_enabled"])
+        self.assertEqual(review["repair_dispatch_owner"], "AIMS")
+        self.assertIn(b"Repair dispatch owner: AIMS", bundle["review.md"])
         routine = row("HIVE", final_state="GREEN")
         self.assertIsNone(build_review_objects(routine, 2026))
 
