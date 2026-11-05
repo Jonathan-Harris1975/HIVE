@@ -12,12 +12,11 @@ concurrency:
 
 jobs:
   autofix:
-    # Skip bot dependency PRs, repair carriers and Mergify queue candidates: nothing to format.
+    # Skip bot dependency PRs, repair carriers and GitHub native auto-merge queue candidates: nothing to format.
     if: >-
       github.actor != 'autofix-ci[bot]' &&
       github.actor != 'renovate[bot]' &&
       github.actor != 'dependabot[bot]' &&
-      !startsWith(github.head_ref, 'mergify/merge-queue/') &&
       !startsWith(github.head_ref, 'autonomy/repair-')
     runs-on: ubuntu-latest
     timeout-minutes: 12
