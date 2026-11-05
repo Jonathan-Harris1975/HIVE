@@ -27,6 +27,27 @@ def test_trusted_production_failure_is_deduplicated_by_identity():
     assert coordinator.register.call_count == 2
 
 
+def test_authenticated_aims_runtime_failure_is_eligible_only_for_canonical_aims_and_exact_sha():
+    coordinator = Mock()
+    coordinator.register.return_value = True
+    allowed = frozenset({"Jonathan-Harris1975/AIMS"})
+    event = _event(
+        source="aims_runtime",
+        service="Jonathan-Harris1975/AIMS",
+        event_type="scheduled_workflow_failed",
+    )
+    result = correlate_failure(event, coordinator, allowed_repositories=allowed)
+    assert result["accepted"] is True
+    assert coordinator.register.call_args.kwargs["repository"] == "Jonathan-Harris1975/AIMS"
+
+    for changes in (
+        {"service": "Jonathan-Harris1975/HIVE"},
+        {"release_id": "version-2.14.1"},
+    ):
+        assert correlate_failure({**event, **changes}, coordinator,
+                                 allowed_repositories=allowed)["accepted"] is False
+
+
 def test_ineligible_signals_cannot_create_incidents():
     coordinator = Mock()
     allowed = frozenset({"Jonathan-Harris1975/HIVE"})

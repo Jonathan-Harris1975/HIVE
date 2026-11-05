@@ -12,7 +12,7 @@ from app.services.autonomous_recovery_coordinator import RecoveryCoordinator
 
 _SHA = re.compile(r"^[0-9a-fA-F]{40}$")
 _FAILURE_STATES = frozenset({"failure", "failed", "error", "down", "blocked", "unavailable"})
-_ALLOWED_SOURCES = frozenset({"github", "koyeb", "cloudflare", "hive"})
+_ALLOWED_SOURCES = frozenset({"github", "koyeb", "cloudflare", "hive", "aims_runtime"})
 _ALLOWED_ENVIRONMENTS = frozenset({"production"})
 
 
