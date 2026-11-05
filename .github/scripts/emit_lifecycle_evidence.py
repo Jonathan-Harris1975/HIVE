@@ -17,7 +17,7 @@ FIELDS = [
     "ci_gate", "autofix_used", "socket_status", "codeql_status",
     "gitleaks_status", "trivy_status", "codecov_status", "dast_status",
     "kilo_triggered", "kilo_trigger_reason", "repair_provider", "fallback_used",
-    "fallback_reason", "repair_attempts", "mergify_admitted", "mergify_queued",
+    "fallback_reason", "repair_attempts",
     "merged", "deployment_status", "deployed_sha", "deployment_verified",
     "human_hold", "failure_class", "final_state", "started_at", "completed_at",
 ]
@@ -277,15 +277,9 @@ def main() -> None:
         fallback_used=None,
         fallback_reason=None,
         repair_attempts=0,
-        mergify_admitted=None,
-        mergify_queued=None,
         merge_authority="github_native_auto_merge",
         github_auto_merge_enabled=None,
         github_auto_merge_queued=None,
-        mergify_not_applicable_reason=(
-            "GitHub native auto-merge is the live merge authority; "
-            "no Mergify state is applicable."
-        ),
         merged=None,
         deployment_status="unknown",
         deployed_sha=None,
