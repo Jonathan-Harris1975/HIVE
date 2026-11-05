@@ -27,7 +27,7 @@ EXCLUDED_PREFIXES = (
     "autonomy/",
     "renovate/",
     "dependabot/",
-        "tmp/",
+    "tmp/",
     "temp/",
     "internal/",
 )
