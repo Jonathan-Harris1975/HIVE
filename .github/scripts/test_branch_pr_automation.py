@@ -51,7 +51,7 @@ class BranchSafety(unittest.TestCase):
             "autonomy/repair-1",
             "renovate/x",
             "dependabot/x",
-            "mergify/merge-queue/x",
+            "merge-queue/retired/x",
             "tmp/x",
             "internal/x",
             "fix/",

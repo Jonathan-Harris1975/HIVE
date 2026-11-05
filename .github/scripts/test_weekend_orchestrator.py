@@ -121,13 +121,13 @@ class SettleTests(unittest.TestCase):
         orch, _ = make(api, settle_minutes=3)
         self.assertFalse(orch.settle())
 
-    def test_renovate_automerge_pr_and_legacy_queue_branch_block(self):
+    def test_renovate_automerge_pr_and_retired_queue_branch_is_ignored(self):
         api = FakeApi()
         api.prs = [pr(8, login="renovate[bot]", body="**Automerge**: Enabled."),
-                   pr(9, head="mergify/merge-queue/abc")]
+                   pr(9, head="merge-queue/retired/abc")]
         orch, _ = make(api, settle_minutes=2)
         found = orch.automation_prs(api.prs)
-        self.assertEqual({p["number"] for p in found}, {8, 9})
+        self.assertEqual({p["number"] for p in found}, {8})
 
     def test_renovate_major_without_automerge_is_ignored(self):
         api = FakeApi()

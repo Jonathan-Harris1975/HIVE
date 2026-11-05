@@ -34,7 +34,6 @@ def row(repository: str, **overrides):
         "deployed_sha": "a" * 40,
         "not_applicable_reasons": {},
         "merge_authority": "github_native_auto_merge",
-        "mergify_not_applicable_reason": "GitHub native auto-merge is current.",
         "completed_at": "2026-10-12T07:00:00Z",
     }
     return {**base, **overrides}

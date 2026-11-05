@@ -61,7 +61,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        # Pull requests (and Mergify queue candidates) test the production Python only;
+        # Pull requests (and GitHub native auto-merge candidates) test the production Python only;
         # the full compatibility matrix runs in the weekend evidence run.
         python-version: ${{ fromJSON(github.event_name == 'pull_request' && '["3.14.7"]' || '["3.11.16","3.12.14","3.13.15","3.14.7"]') }}
 
