@@ -16,7 +16,7 @@ from app.services.ops_events import delete_all_ops_events, delete_ops_event, lis
 from app.services.providers.registry import discover_providers
 from app.services.repo_health import build_repo_health_report
 from app.services.production_manager import build_production_manager_report
-from app.services.lifecycle_reports import accept_review_fix, generate_and_store_weekly_report, list_open_reviews, list_weekly_reports, read_latest_weekly_report, read_repository_html, read_weekly_html
+from app.services.lifecycle_reports import generate_and_store_weekly_report, list_open_reviews, list_weekly_reports, read_latest_weekly_report, read_repository_html, read_weekly_html
 from app.services.repo_hygiene import repo_hygiene_report
 from app.storage.d1 import D1MetadataStore
 from app.storage.r2 import R2Storage
@@ -157,18 +157,6 @@ def lifecycle_reviews(settings: Settings = Depends(get_settings)) -> dict[str, o
     except RuntimeError as exc:
         return {"ok": False, "count": 0, "items": [], "error": type(exc).__name__}
 
-
-@router.post("/system/lifecycle-reviews/{review_id}/accept-fix")
-async def accept_lifecycle_fix(review_id: str, settings: Settings = Depends(get_settings)) -> dict[str, object]:
-    """Record an authenticated Accept Fix decision and dispatch the trusted PR repair workflow."""
-    try:
-        return await asyncio.to_thread(accept_review_fix, R2Storage(settings), settings, review_id)
-    except LookupError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @router.get("/system/ops-events")
