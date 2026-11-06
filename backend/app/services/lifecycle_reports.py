@@ -236,43 +236,6 @@ def read_repository_html(storage: R2Storage, year: int, week: int, repository: s
     return body.decode("utf-8")
 
 
-def _delete_processed_ci_evidence(storage: R2Storage) -> int:
-    """Delete governed-repository CI evidence after a complete report is committed."""
-    keys: list[str] = []
-    for repository in REPOSITORIES:
-        prefix = f"ci-reports/{repository}/"
-        cursor = None
-        scanned = 0
-        while True:
-            page = storage.list_objects_page(
-                prefix=prefix, bucket=BUCKET, limit=1000, cursor=cursor,
-                delimiter=None, max_scan_keys=50_000,
-            )
-            keys.extend(str(getattr(item, "key", "")) for item in page.objects if getattr(item, "key", ""))
-            scanned += page.scanned_count
-            if scanned > 50_000:
-                raise RuntimeError(f"Refusing unbounded evidence cleanup for {repository}")
-            cursor = page.next_cursor
-            if not cursor:
-                break
-    deleted = 0
-    for offset in range(0, len(keys), 1000):
-        batch = keys[offset:offset + 1000]
-        result = storage.delete_objects(batch, bucket=BUCKET)
-        requested_count = result.get("requested_count")
-        deleted_count = result.get("deleted_count")
-        if (
-            result.get("ok") is not True
-            or not isinstance(requested_count, int)
-            or requested_count != len(batch)
-            or not isinstance(deleted_count, int)
-            or deleted_count != len(batch)
-        ):
-            raise RuntimeError("R2 evidence cleanup did not confirm every requested deletion")
-        deleted += deleted_count
-    return deleted
-
-
 def build_review_objects(record: dict[str, Any], year: int) -> tuple[str, dict[str, bytes]] | None:
     """Create a stable, actionable review bundle only for explicit terminal states."""
     if record.get("final_state") not in {"REVIEW_REQUIRED", "SERVICE_BLOCKED"} and record.get("human_hold") is not True:
@@ -492,8 +455,8 @@ def _generate_and_store_weekly_report(storage: R2Storage, year: int, week: int, 
     records = collect_weekly_evidence(storage, year, week)
     report = build_weekly_overview(records, year, week, observation.isoformat().replace("+00:00", "Z"), current_heads=current_heads)
     council_references = collect_council_references(storage, year, week)
-    # The evidence objects are deleted after this report is committed; retain useful
-    # provenance in the report without leaving links to the soon-to-be-cleaned tree.
+    # Preserve source evidence. The governed storage maintenance job owns
+    # archive-before-removal retention, independently of report generation.
     report["council_evidence"] = [
         {key: value for key, value in item.items() if key != "source_manifest_key"}
         for item in council_references
@@ -561,15 +524,15 @@ def _generate_and_store_weekly_report(storage: R2Storage, year: int, week: int, 
             _put_immutable(storage, f"{review_prefix}/{filename}", body, "text/markdown" if filename.endswith(".md") else "application/json")
         open_review_count += 1
     review_count = open_review_count
-    deleted_evidence_objects = _delete_processed_ci_evidence(storage) if report["evidence_complete"] and not preserve_evidence else 0
     return {
         "ok": True,
         "report": report,
         "r2_keys": [json_key],
         "repository_report_keys": repository_report_keys,
         "objects_written_or_preserved": 9,
-        "deleted_evidence_objects": deleted_evidence_objects,
-        "cleanup_complete": report["evidence_complete"] and not preserve_evidence,
+        "deleted_evidence_objects": 0,
+        "cleanup_complete": False,
+        "retention_owner": "storage-housekeeping-weekly",
         "open_review_records": review_count,
     }
 
