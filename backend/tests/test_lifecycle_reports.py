@@ -158,7 +158,7 @@ class LifecycleReportTests(unittest.TestCase):
         self.assertEqual(refs[0]["workflow_run_id"], "run-1")
         self.assertEqual(storage.puts, [])
 
-    def test_report_generation_writes_eight_overviews_then_cleans_evidence(self):
+    def test_report_generation_retains_source_evidence_for_governed_housekeeping(self):
         class Storage:
             def __init__(self):
                 self.puts = []
@@ -211,9 +211,10 @@ class LifecycleReportTests(unittest.TestCase):
         self.assertEqual(len(storage.puts), 9)
         self.assertEqual(set(result["repository_report_keys"]), set(REPOSITORIES))
         self.assertEqual(len(result["report"]["repositories"]), 8)
-        self.assertTrue(result["cleanup_complete"])
-        self.assertEqual(result["deleted_evidence_objects"], 8)
-        self.assertEqual(len(storage.deleted), 8)
+        self.assertFalse(result["cleanup_complete"])
+        self.assertEqual(result["retention_owner"], "storage-housekeeping-weekly")
+        self.assertEqual(result["deleted_evidence_objects"], 0)
+        self.assertEqual(storage.deleted, [])
 
         storage.puts.clear()
         storage.deleted.clear()
