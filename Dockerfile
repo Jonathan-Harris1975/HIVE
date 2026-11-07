@@ -70,6 +70,7 @@ RUN python -m pip uninstall --yes pip
 # Trivy is configured to fail on fixable HIGH/CRITICAL findings, so install all
 # available Bookworm security fixes before assembling the application image.
 RUN apt-get update \
+    && apt-get install -y --no-install-recommends libatomic1 \
     && apt-get upgrade -y --no-install-recommends \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
