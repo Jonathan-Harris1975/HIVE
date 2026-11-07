@@ -20,10 +20,7 @@ RUN python -m pip install --no-cache-dir --requirement /build/requirements.txt \
 # runtime available without relying on Debian Bookworm's older nodejs package.
 FROM node:26.13.0-bookworm-slim@sha256:add5c17c14752c54d2f3d519ec46a3815684d41c33f198bcb09fb998f7dcbf68 AS node_runtime
 
-# Node 22.23.2 bundles npm 10.9.8, whose bundled dependencies trigger the
-# production Trivy HIGH/CRITICAL gate. npm 11.19.1 supports this Node release
-# and refreshes the affected tar, brace-expansion, ip-address and related
-# transitive tooling dependencies while preserving npm/npx for repository QA.
+# Node 26.13.0 bundles npm 11.x; npm 11.19.1 supports this Node release.
 RUN npm install --global npm@11.19.1 \
     && npm cache clean --force
 
