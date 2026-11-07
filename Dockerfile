@@ -1,4 +1,4 @@
-FROM python:3.14.8-slim-bookworm@sha256:44e000a07b48bef1517a2b14adc93c17af728ca98858b5e24c6e1b18de1b2ef2 AS builder
+FROM python:3.15.2-slim-bookworm@sha256:96599df822d0e1c6bb700014a05c7f3c8cabc6e0f7ff3c4f9f69cee033b4b5d9 AS builder
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -18,7 +18,7 @@ RUN python -m pip install --no-cache-dir --requirement /build/requirements.txt \
 
 # HIVE's repository QA executes real repository tooling. Keep a current Node
 # runtime available without relying on Debian Bookworm's older nodejs package.
-FROM node:24.22.0-bookworm-slim@sha256:a5f4366e834695d5f363b920c104953a535d3a9864d1bdf74566a0ebe01daee5 AS node_runtime
+FROM node:24.22.2-bookworm-slim@sha256:01d566e8d94d8c619591d78652babfccd3c6992a3dffa9ed5ab39e11cf6c70e9 AS node_runtime
 
 # Node 22.23.2 bundles npm 10.9.8, whose bundled dependencies trigger the
 # production Trivy HIGH/CRITICAL gate. npm 11.19.1 supports this Node release
@@ -46,7 +46,7 @@ RUN npm_dir=/usr/local/lib/node_modules/npm \
     && rm -rf "$patch_dir" \
     && node -e "const base='/usr/local/lib/node_modules/npm/node_modules'; for (const [name, expected] of [['brace-expansion','5.0.12'],['undici','6.29.1']]) { const {version} = require(base + '/' + name + '/package.json'); if (version !== expected) { throw new Error(name + ' is ' + version + ', expected ' + expected); } }"
 
-FROM python:3.14.8-slim-bookworm@sha256:44e000a07b48bef1517a2b14adc93c17af728ca98858b5e24c6e1b18de1b2ef2 AS runtime
+FROM python:3.15.2-slim-bookworm@sha256:96599df822d0e1c6bb700014a05c7f3c8cabc6e0f7ff3c4f9f69cee033b4b5d9 AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
