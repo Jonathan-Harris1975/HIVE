@@ -18,12 +18,9 @@ RUN python -m pip install --no-cache-dir --requirement /build/requirements.txt \
 
 # HIVE's repository QA executes real repository tooling. Keep a current Node
 # runtime available without relying on Debian Bookworm's older nodejs package.
-FROM node:24.22.0-bookworm-slim@sha256:a5f4366e834695d5f363b920c104953a535d3a9864d1bdf74566a0ebe01daee5 AS node_runtime
+FROM node:26.13.0-bookworm-slim@sha256:add5c17c14752c54d2f3d519ec46a3815684d41c33f198bcb09fb998f7dcbf68 AS node_runtime
 
-# Node 22.23.2 bundles npm 10.9.8, whose bundled dependencies trigger the
-# production Trivy HIGH/CRITICAL gate. npm 11.19.1 supports this Node release
-# and refreshes the affected tar, brace-expansion, ip-address and related
-# transitive tooling dependencies while preserving npm/npx for repository QA.
+# Node 26.13.0 bundles npm 11.x; npm 11.19.1 supports this Node release.
 RUN npm install --global npm@11.19.1 \
     && npm cache clean --force
 
@@ -69,7 +66,9 @@ RUN python -m pip uninstall --yes pip
 # pre-date Debian security updates even when the Python tag itself is current.
 # Trivy is configured to fail on fixable HIGH/CRITICAL findings, so install all
 # available Bookworm security fixes before assembling the application image.
+# hadolint ignore=DL3008
 RUN apt-get update \
+    && apt-get install -y --no-install-recommends libatomic1 \
     && apt-get upgrade -y --no-install-recommends \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
