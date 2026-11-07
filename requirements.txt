@@ -60,7 +60,7 @@ fastapi==0.143.2
     # via -r requirements.in
 fastuuid==0.14.0
     # via litellm
-filelock==4.2.1
+filelock==4.2.9
     # via
     #   -r requirements.in
     #   huggingface-hub
@@ -116,7 +116,7 @@ jsonschema==4.26.0
     # via litellm
 jsonschema-specifications==2025.9.1
     # via jsonschema
-litellm==1.108.0
+litellm==1.103.2
     # via
     #   -r requirements.in
     #   headroom-ai
