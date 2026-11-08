@@ -342,6 +342,7 @@ def active_implementation(pr: dict) -> int | None:
         if (child.get("user", {}).get("login") != KILO_IMPLEMENTER
                 or child.get("head", {}).get("repo", {}).get("full_name") != REPO
                 or child.get("base", {}).get("ref") != DEFAULT
+                or {x.get("name") for x in child.get("labels", [])} & {"autonomy:obsolete", "autonomy:superseded"}
                 or not re.search(re.escape(source) + r"(?![0-9A-Za-z_/#?=-])", child.get("body") or "")):
             continue
         child_sha = str(child.get("head", {}).get("sha", ""))
@@ -370,6 +371,18 @@ def dispatch(pr: dict, kind: str, findings: list[str]) -> str:
         return 'attempt-limit'
     implementation = active_implementation(pr)
     if implementation is not None:
+        # Admission requires trusted linkage to the current source SHA, including
+        # when the source advances into an existing implementation's ancestry.
+        if not any(f"<!-- kilo-auto-repair:{sha}:" in c["body"] for c in markers):
+            fresh = pr_details(int(number))
+            if not fresh or fresh.get("head", {}).get("sha") != sha:
+                return 'changed-before-dispatch'
+            receipt = api("POST", f"/repos/{REPO}/issues/{number}/comments", {"body":
+                f"<!-- kilo-auto-repair:{sha}:implementation-reuse -->\n"
+                f"dispatch-state: reused\nVerified existing Kilo implementation PR #{implementation} "
+                "contains this exact source head. No new agent request was sent."})
+            if not isinstance(receipt, dict) or not isinstance(receipt.get("id"), int):
+                raise RuntimeError("Could not persist exact-head implementation reuse evidence")
         print(f"PR #{number} already has implementation PR #{implementation}; repair that branch instead.")
         return 'implementation-active'
     trigger_secret = trigger_secret_for(kind)
