@@ -69,8 +69,10 @@ RUN python -m pip uninstall --yes pip
 # pre-date Debian security updates even when the Python tag itself is current.
 # Trivy is configured to fail on fixable HIGH/CRITICAL findings, so install all
 # available Bookworm security fixes before assembling the application image.
+# libatomic1 is required by the copied Node runtime binary on Bookworm slim.
 RUN apt-get update \
     && apt-get upgrade -y --no-install-recommends \
+    && apt-get install -y --no-install-recommends libatomic1 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
