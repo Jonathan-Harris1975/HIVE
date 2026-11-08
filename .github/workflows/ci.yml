@@ -240,8 +240,9 @@ jobs:
     name: Notify central operations on CI failure
     needs: [test, performance, lint, docker]
     # Superseded pull-request runs are cancelled by design and must not raise operational events.
-    if: ${{ always() && github.event_name != 'pull_request' && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}
+    if: ${{ always() && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}
     runs-on: ubuntu-latest
+    environment: Koyeb
     continue-on-error: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
