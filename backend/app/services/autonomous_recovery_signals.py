@@ -43,7 +43,8 @@ def correlate_failure(
     source = _SOURCE_ALIASES.get(source, source)
     repository = str(event.get("service") or "").strip()
     repository_id = canonical_governed_repository_id(repository)
-    repository = DEFAULT_GITHUB_SOURCES.get(repository_id, repository)
+    if repository_id is not None:
+        repository = DEFAULT_GITHUB_SOURCES[repository_id]
     revision = str(event.get("release_id") or "").strip().lower()
     state = str(event.get("status") or "").strip().lower()
     environment = str(event.get("environment") or "").strip().lower()
