@@ -69,6 +69,7 @@ RUN python -m pip uninstall --yes pip
 # pre-date Debian security updates even when the Python tag itself is current.
 # Trivy is configured to fail on fixable HIGH/CRITICAL findings, so install all
 # available Bookworm security fixes before assembling the application image.
+# hadolint ignore=DL3008
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libatomic1 \
     && apt-get upgrade -y --no-install-recommends \
