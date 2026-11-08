@@ -11,7 +11,7 @@ from typing import Any
 from app.core.config import Settings
 from app.core.governed_repositories import DEFAULT_GITHUB_SOURCES, canonical_governed_repository_id
 from app.services.autonomous_recovery_coordinator import RecoveryCoordinator
-from app.services.autonomous_recovery_signals import correlate_failure
+from app.services.autonomous_recovery_signals import correlate_failure, producer_failure_status
 from app.storage.r2 import R2Storage
 from app.storage.d1 import D1MetadataStore, RecoveryD1Store
 
@@ -65,7 +65,7 @@ def normalise_ops_event(payload: dict[str, Any]) -> dict[str, Any]:
     summary = _text(payload.get("summary") or payload.get("message") or title, limit=1200)
     # Preserve provider failure outcomes when the envelope omits status.
     # Do not infer failure from severity or arbitrary free-text messages.
-    status = _text(payload.get("status") or payload.get("conclusion") or "open", limit=40).lower()
+    status = _text(payload.get("status") or payload.get("conclusion") or producer_failure_status(source, event_type), limit=40).lower()
     release_id = _text(payload.get("release_id") or payload.get("commit_sha"), limit=160) or None
     url = _text(payload.get("url") or payload.get("details_url"), limit=1000) or None
     details = _safe_value(payload.get("details") or {})
