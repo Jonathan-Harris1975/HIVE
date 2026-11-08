@@ -73,6 +73,20 @@
       "addLabels": [
         "dependency:manual"
       ]
+    },
+    {
+      "description": "Keep Python below 3.15 while the validated production LiteLLM stack declares Python <3.15. Continue compatible patch and digest updates.",
+      "matchPackageNames": [
+        "python"
+      ],
+      "allowedVersions": "<3.15"
+    },
+    {
+      "description": "Preserve the verified LiteLLM release compatible with the mandatory filelock 4.x security floor; review this ceiling with a validated upstream compatibility change.",
+      "matchPackageNames": [
+        "litellm"
+      ],
+      "allowedVersions": "<=1.103.2"
     }
   ],
   "pip-compile": {
