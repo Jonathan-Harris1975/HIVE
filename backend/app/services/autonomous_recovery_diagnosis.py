@@ -11,9 +11,9 @@ NextStep = Literal["inspect_required_checks", "inspect_security_report",
 
 _CATEGORIES: tuple[tuple[Category, tuple[str, ...]], ...] = (
     ("security", ("codeql", "vulnerability", "security", "secret_scanning", "dependabot")),
-    ("deployment", ("deployment", "deploy", "release", "koyeb", "cloudflare_pages")),
+    ("deployment", ("deployment", "deploy", "release", "koyeb", "cloudflare_pages", "deployment_failed", "deployment_sustained_degradation", "deployment_watch_timeout", "deployment_attestation_refused")),
     ("missed_job", ("missed_job", "schedule_missed", "cron_missed")),
-    ("ci", ("ci_failure", "workflow_failed", "test_failure", "lint_failure", "build_failed")),
+    ("ci", ("ci_failure", "ci_failed", "workflow_failed", "test_failure", "lint_failure", "build_failed")),
     ("runtime", ("runtime", "healthcheck", "service_down", "unavailable", "crash")),
 )
 

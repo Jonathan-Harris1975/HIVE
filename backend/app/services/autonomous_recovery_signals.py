@@ -7,6 +7,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from app.core.governed_repositories import DEFAULT_GITHUB_SOURCES, canonical_governed_repository_id
 from app.services.autonomous_incident_policy import incident_fingerprint
 from app.services.autonomous_recovery_coordinator import RecoveryCoordinator
 
@@ -14,6 +15,21 @@ _SHA = re.compile(r"^[0-9a-fA-F]{40}$")
 _FAILURE_STATES = frozenset({"failure", "failed", "error", "down", "blocked", "unavailable"})
 _ALLOWED_SOURCES = frozenset({"github", "koyeb", "cloudflare", "hive", "aims_runtime"})
 _ALLOWED_ENVIRONMENTS = frozenset({"production"})
+_SOURCE_ALIASES = {"github_actions": "github", "koyeb_deployment_watcher": "koyeb"}
+# These authenticated producers send explicit failure event types without status.
+# An arbitrary severity or free-text message must never infer failure.
+_FAILURE_CONTRACTS = {
+    "github_actions": frozenset({"ci_failed"}),
+    "koyeb_deployment_watcher": frozenset({
+        "deployment_failed", "deployment_sustained_degradation",
+        "deployment_watch_timeout", "deployment_attestation_refused",
+    }),
+}
+
+
+def producer_failure_status(source: str, event_type: str) -> str:
+    return "failed" if event_type.lower() in _FAILURE_CONTRACTS.get(source.lower(), ()) else "open"
+
 
 
 def correlate_failure(
@@ -24,7 +40,10 @@ def correlate_failure(
 ) -> dict[str, object]:
     """Register an exact-revision production failure, never untrusted repair intent."""
     source = str(event.get("source") or "").strip().lower()
+    source = _SOURCE_ALIASES.get(source, source)
     repository = str(event.get("service") or "").strip()
+    repository_id = canonical_governed_repository_id(repository)
+    repository = DEFAULT_GITHUB_SOURCES.get(repository_id, repository)
     revision = str(event.get("release_id") or "").strip().lower()
     state = str(event.get("status") or "").strip().lower()
     environment = str(event.get("environment") or "").strip().lower()

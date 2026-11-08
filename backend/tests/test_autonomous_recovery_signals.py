@@ -62,3 +62,39 @@ def test_ineligible_signals_cannot_create_incidents():
         assert correlate_failure(_event(**changes), coordinator,
                                  allowed_repositories=allowed)["accepted"] is False
     coordinator.register.assert_not_called()
+
+
+def test_real_ci_producer_contracts_reach_correct_repository_incident():
+    from app.core.governed_repositories import DEFAULT_GITHUB_SOURCES
+    from app.services.ops_events import normalise_ops_event
+    coordinator = Mock()
+    coordinator.register.return_value = True
+    allowed = frozenset(DEFAULT_GITHUB_SOURCES.values())
+    for service, repository in DEFAULT_GITHUB_SOURCES.items():
+        event = normalise_ops_event({
+            "source": "github_actions", "service": service,
+            "event_type": "ci_failed", "release_id": "a" * 40,
+        })
+        result = correlate_failure(event, coordinator, allowed_repositories=allowed)
+        assert result["accepted"] is True
+        assert coordinator.register.call_args.kwargs["repository"] == repository
+        canonical = {**event, "source": "github", "service": repository}
+        assert correlate_failure(canonical, coordinator, allowed_repositories=allowed)["incident_id"] == result["incident_id"]
+
+
+def test_real_deployment_producer_contract_and_explicit_nonfailure():
+    from app.services.ops_events import normalise_ops_event
+    from app.services.autonomous_recovery_diagnosis import diagnose_signal
+    coordinator = Mock()
+    coordinator.register.return_value = True
+    allowed = frozenset({"Jonathan-Harris1975/HIVE"})
+    payload = {"source": "koyeb_deployment_watcher", "service": "HIVE",
+               "event_type": "deployment_failed", "release_id": "a" * 40}
+    event = normalise_ops_event(payload)
+    assert correlate_failure(event, coordinator, allowed_repositories=allowed)["accepted"] is True
+    assert diagnose_signal(coordinator.register.call_args.kwargs["signal"]).category == "deployment"
+    for extra in ({"status": "success"}, {"status": "open"},
+                  {"source": "external"}, {"service": "foreign/HIVE"},
+                  {"event_type": "free_text", "severity": "critical"}):
+        event = normalise_ops_event({**payload, **extra})
+        assert correlate_failure(event, coordinator, allowed_repositories=allowed)["accepted"] is False
