@@ -69,7 +69,9 @@ jobs:
           set -euo pipefail
           # Run inside the production container; resident credentials stay there.
           # The preflight flag prevents governance jobs, reports and publishing.
-          script -q -e -c 'koyeb services exec "$KOYEB_SERVICE" python -- -m app.monthly_governance_worker --previous-month --preflight-only' /dev/null < /dev/null
-          output="$(script -q -e -c 'koyeb services exec "$KOYEB_SERVICE" python -- scripts/preflight_recovery_d1.py' /dev/null < /dev/null)"
+          printf -v governance_command 'koyeb services exec %q python -- -m app.monthly_governance_worker --previous-month --preflight-only' "$KOYEB_SERVICE"
+          script -q -e -c "$governance_command" /dev/null < /dev/null
+          printf -v recovery_command 'koyeb services exec %q python -- scripts/preflight_recovery_d1.py' "$KOYEB_SERVICE"
+          output="$(script -q -e -c "$recovery_command" /dev/null < /dev/null)"
           printf '%s\n' "$output"
           grep -F '"event":"recovery.d1.preflight","status":"verified"' <<< "$output" > /dev/null
