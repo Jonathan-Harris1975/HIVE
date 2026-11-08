@@ -18,7 +18,7 @@ RUN python -m pip install --no-cache-dir --requirement /build/requirements.txt \
 
 # HIVE's repository QA executes real repository tooling. Keep a current Node
 # runtime available without relying on Debian Bookworm's older nodejs package.
-FROM node:24.22.2-bookworm-slim@sha256:01d566e8d94d8c619591d78652babfccd3c6992a3dffa9ed5ab39e11cf6c70e9 AS node_runtime
+FROM node:26.13.0-bookworm-slim@sha256:add5c17c14752c54d2f3d519ec46a3815684d41c33f198bcb09fb998f7dcbf68 AS node_runtime
 
 # Node 22.23.2 bundles npm 10.9.8, whose bundled dependencies trigger the
 # production Trivy HIGH/CRITICAL gate. npm 11.19.1 supports this Node release
