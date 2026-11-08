@@ -18,7 +18,6 @@ anyio==4.16.0
     # via
     #   -r requirements.in
     #   httpx
-    #   httpx2
     #   openai
     #   starlette
     #   watchfiles
@@ -75,7 +74,6 @@ fsspec==2026.9.0
 h11==0.16.0
     # via
     #   httpcore
-    #   httpcore2
     #   uvicorn
 h2==4.4.1
     # via httpx
@@ -89,8 +87,6 @@ hpack==4.2.0
     # via h2
 httpcore==1.0.9
     # via httpx
-httpcore2==2.16.0
-    # via httpx2
 httptools==0.9.0
     # via uvicorn
 httpx==0.28.1
@@ -98,8 +94,6 @@ httpx==0.28.1
     #   -r requirements.in
     #   litellm
     #   openai
-httpx2==2.16.0
-    # via huggingface-hub
 huggingface-hub==2.4.0
     # via tokenizers
 hyperframe==6.1.0
@@ -108,7 +102,6 @@ idna==3.20
     # via
     #   anyio
     #   httpx
-    #   httpx2
     #   requests
     #   yarl
 importlib-metadata==8.9.0
@@ -238,8 +231,6 @@ truststore==0.10.5
     # via
     #   -r requirements.in
     #   headroom-ai
-    #   httpcore2
-    #   httpx2
 typing-extensions==4.16.0
     # via
     #   anyio
