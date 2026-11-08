@@ -1,16 +1,16 @@
 # Direct production dependencies. Update deliberately and regenerate requirements.txt.
-fastapi==0.143.2
+fastapi==0.162.0
 # Direct pin keeps Starlette above all audited 2026 request/form parsing advisory floors.
-starlette==1.8.0
+starlette==1.10.0
 uvicorn[standard]==0.54.0
 httpx==0.28.1
 # Direct security pin: retain the audited fixes for CVE-2026-63374, CVE-2026-64847 and CVE-2026-63349.
-anyio==4.15.1
-pydantic-settings==2.16.0
-python-multipart==0.0.32
+anyio==4.16.0
+pydantic-settings==2.16.2
+python-multipart==0.0.33
 # Keep the HTTP transport above the audited 2026 advisory floor.
 urllib3==2.8.0
-boto3==1.43.114
+boto3==1.43.125
 pypdf==6.21.4
 python-docx==1.2.0
 openpyxl==3.1.5
@@ -18,14 +18,14 @@ beautifulsoup4==4.15.0
 # Direct security pin: retain the audited fixes for CVE-2026-85999 and CVE-2026-86000.
 soupsieve==2.10
 # Direct security pin: fix CVE-2026-112940.
-filelock==4.2.1
-headroom-ai==0.41.0
+filelock==4.2.9
+headroom-ai==0.43.1
 # Keep filelock 4.x compatible; newer LiteLLM pins require filelock<4.
-litellm==1.103.2
+litellm==1.108.1
 # Direct security pin: 1.2.1 fixes GHSA-6v7p-g79w-8964.
-msgpack==1.2.3
-psycopg[binary]==3.3.6
+msgpack==1.2.4
+psycopg[binary]==3.3.8
 # Keep the platform certificate backend deterministic in the compiled lock.
 truststore==0.10.5
 # Direct security pin: 2026.10.19 fixes GHSA-6q48-6c7w-9gw2.
-certifi==2026.10.19
+certifi==2026.10.23
