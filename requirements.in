@@ -18,10 +18,10 @@ beautifulsoup4==4.15.0
 # Direct security pin: retain the audited fixes for CVE-2026-85999 and CVE-2026-86000.
 soupsieve==2.10
 # Direct security pin: fix CVE-2026-112940.
-filelock==4.2.9
+filelock==4.2.1
 headroom-ai==0.43.1
 # Keep filelock 4.x compatible; newer LiteLLM pins require filelock<4.
-litellm==1.108.1
+litellm==1.103.2
 # Direct security pin: 1.2.1 fixes GHSA-6v7p-g79w-8964.
 msgpack==1.2.4
 psycopg[binary]==3.3.8
