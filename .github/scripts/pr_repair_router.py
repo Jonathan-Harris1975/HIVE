@@ -330,6 +330,29 @@ def trigger_secret_for(kind: str) -> str:
 
 
 
+def active_implementation(pr: dict) -> int | None:
+    """Reuse a verified open Kilo implementation instead of spawning siblings."""
+    if pr.get("user", {}).get("login") == KILO_IMPLEMENTER:
+        return None
+    source = str(pr.get("html_url", ""))
+    sha = str(pr.get("head", {}).get("sha", ""))
+    if not source or not re.fullmatch(r"[0-9a-f]{40}", sha):
+        raise ValueError("Invalid repair source identity")
+    for child in all_pages(f"/repos/{REPO}/pulls?state=open"):
+        if (child.get("user", {}).get("login") != KILO_IMPLEMENTER
+                or child.get("head", {}).get("repo", {}).get("full_name") != REPO
+                or child.get("base", {}).get("ref") != DEFAULT
+                or not re.search(re.escape(source) + r"(?![0-9A-Za-z_/#?=-])", child.get("body") or "")):
+            continue
+        child_sha = str(child.get("head", {}).get("sha", ""))
+        if not re.fullmatch(r"[0-9a-f]{40}", child_sha):
+            continue
+        comparison = api("GET", f"/repos/{REPO}/compare/{sha}...{child_sha}")
+        if comparison.get("behind_by") == 0 and comparison.get("status") in {"ahead", "identical"}:
+            return int(child["number"])
+    return None
+
+
 def dispatch(pr: dict, kind: str, findings: list[str]) -> str:
     number, sha = pr["number"], pr["head"]["sha"]
     marker = f"<!-- kilo-auto-repair:{sha}:{kind} -->"
@@ -345,6 +368,10 @@ def dispatch(pr: dict, kind: str, findings: list[str]) -> str:
     if len(matching_markers) >= 2:
         print(f"::warning::PR #{number} exhausted its two {kind} repair attempts; inspect the repair agent's results.")
         return 'attempt-limit'
+    implementation = active_implementation(pr)
+    if implementation is not None:
+        print(f"PR #{number} already has implementation PR #{implementation}; repair that branch instead.")
+        return 'implementation-active'
     trigger_secret = trigger_secret_for(kind)
     url = os.environ.get(trigger_secret, "")
     if not valid_kilo_webhook_url(url):
