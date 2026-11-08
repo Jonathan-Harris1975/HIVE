@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
+
+from preflight_production import ROOT, load_defaults
 
 from app.core.config import get_settings
 from app.core.governed_repositories import DEFAULT_RECOVERY_D1_DATABASES, GOVERNED_REPOSITORY_IDS
@@ -13,6 +16,7 @@ from app.storage.d1 import RecoveryD1Store
 
 
 def main() -> int:
+    load_defaults(Path(os.environ.get("HIVE_PRODUCTION_ENV_FILE", str(ROOT / "HIVE-PRODUCTION-SHARED.env"))))
     settings = get_settings()
     if not settings.recovery_signal_ingest_enabled:
         raise SystemExit("Recovery signal ingestion is disabled in the live HIVE configuration")

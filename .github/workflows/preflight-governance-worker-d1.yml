@@ -55,6 +55,20 @@ jobs:
           install -d -m 0755 "$HOME/.local/bin"
           install -m 0755 "$workdir/koyeb" "$HOME/.local/bin/koyeb"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Resolve service identifier for watcher and runtime exec
+        env:
+          KOYEB_TOKEN: ${{ secrets.KOYEB_TOKEN }}
+        run: |
+          python - <<'PYCODE'
+          import os, re, sys
+          sys.path.insert(0, "scripts")
+          from watch_koyeb_deployment import _resolve_service
+          service = _resolve_service(os.environ["KOYEB_SERVICE"], os.environ["KOYEB_TOKEN"])
+          if not ("/" in service or re.fullmatch(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}|[0-9a-fA-F]{8}", service)):
+              raise SystemExit("Koyeb service must resolve to one unambiguous ID or app/service reference")
+          with open(os.environ["GITHUB_ENV"], "a") as output:
+              output.write(f"KOYEB_SERVICE={service}\n")
+          PYCODE
       - name: Require exact production revision
         env:
           KOYEB_TOKEN: ${{ secrets.KOYEB_TOKEN }}
@@ -69,9 +83,8 @@ jobs:
           set -euo pipefail
           # Run inside the production container; resident credentials stay there.
           # The preflight flag prevents governance jobs, reports and publishing.
-          printf -v governance_command 'koyeb services exec %q python -- -m app.monthly_governance_worker --previous-month --preflight-only' "$KOYEB_SERVICE"
-          script -q -e -c "$governance_command" /dev/null < /dev/null
-          printf -v recovery_command 'koyeb services exec %q python -- scripts/preflight_recovery_d1.py' "$KOYEB_SERVICE"
-          output="$(script -q -e -c "$recovery_command" /dev/null < /dev/null)"
+          printf -v preflight_command 'koyeb services exec %q python -- scripts/preflight_production.py' "$KOYEB_SERVICE"
+          output="$(script -q -e -c "$preflight_command" /dev/null < /dev/null)"
           printf '%s\n' "$output"
           grep -F '"event":"recovery.d1.preflight","status":"verified"' <<< "$output" > /dev/null
+          grep -F '"event":"production.preflight","status":"verified"' <<< "$output" > /dev/null
