@@ -7,6 +7,7 @@ def test_audit_environment_against_real_env_example_returns_valid_ratio():
     result = audit_environment()
     assert result["env_example_found"] is True
     assert result["total_settings_fields"] > 0
+    assert result["undocumented_field_count"] == 0
     assert 0.0 <= result["coverage_ratio"] <= 1.0
     # Every field this programme itself added across phases 1-13 should be
     # documented; this doesn't assert 100% coverage overall since some

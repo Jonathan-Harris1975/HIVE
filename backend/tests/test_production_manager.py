@@ -542,3 +542,24 @@ async def test_github_get_retries_transient_provider_failure() -> None:
 
     assert response.status_code == 200
     assert attempts["count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_additional_workflow_failure_is_visible_without_changing_required_gate_policy():
+    sha = "a" * 40
+    def handler(request):
+        if request.url.path.endswith("/commits/main"):
+            return httpx.Response(200, json={"sha": sha})
+        names = [*production_manager.REQUIRED_WORKFLOWS["Website"], production_manager.DEPLOYMENT_WORKFLOWS["Website"]]
+        runs = [{"id": i + 1, "name": name, "head_sha": sha, "status": "completed", "conclusion": "success"}
+                for i, name in enumerate(names)]
+        runs.extend([
+            {"id": 99, "name": "Ebook subsystem CI", "head_sha": sha, "status": "completed", "conclusion": "failure"},
+            {"id": 98, "name": "Ebook subsystem CI", "head_sha": sha, "status": "completed", "conclusion": "success"},
+            {"id": 97, "name": "Unrelated old failure", "head_sha": "b" * 40, "status": "completed", "conclusion": "failure"},
+        ])
+        return httpx.Response(200, json={"workflow_runs": runs})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await production_manager._github_repo_evidence(client, repo_id="Website", branch="main")
+    assert result["state"] == "GREEN"
+    assert result["additional_workflow_failures"] == [{"workflow": "Ebook subsystem CI", "status": "failure", "run_id": 99}]

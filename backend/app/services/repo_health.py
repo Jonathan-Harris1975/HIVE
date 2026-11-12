@@ -470,6 +470,26 @@ def _mast_state_summary(payload: dict[str, Any]) -> dict[str, Any]:
     bounded = [item for item in recent_results[:10] if isinstance(item, dict)]
     failures = sum(1 for item in bounded if item.get("ok") is False)
     latest = bounded[0] if bounded else {}
+    # Summarise execution receipts, never infer active schedules from historical
+    # run keys or the review queue (both retain retired jobs indefinitely).
+    recent_jobs: list[dict[str, Any]] = []
+    seen_jobs: set[str] = set()
+    for item in recent_results:
+        if not isinstance(item, dict) or item.get("managedPretrigger") or item.get("skipped"):
+            continue
+        job = str(item.get("job") or "")[:160]
+        if not job or job in seen_jobs or item.get("ok") not in (True, False):
+            continue
+        seen_jobs.add(job)
+        recent_jobs.append({
+            "job": job,
+            "group": str(item.get("group") or "")[:80],
+            "ok": item["ok"],
+            "finished_at": item.get("finishedAt") or item.get("finished_at"),
+            "operation_status": item.get("operationStatus"),
+        })
+        if len(recent_jobs) == 20:
+            break
     return {
         "started_at": payload.get("startedAt") or payload.get("started_at"),
         "last_tick_at": payload.get("lastTickAt") or payload.get("last_tick_at"),
@@ -479,6 +499,7 @@ def _mast_state_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "latest_result_finished_at": (
             (latest.get("finishedAt") or latest.get("finished_at")) if latest else None
         ),
+        "recent_jobs": recent_jobs,
     }
 
 
@@ -545,6 +566,14 @@ async def _fetch_mast_service_ledger(
     if not isinstance(decoded, dict):
         return None
 
+    last_tick = _parse_utc_timestamp(decoded.get("lastTickAt") or decoded.get("last_tick_at"))
+    if last_tick is None:
+        return None
+    age = (datetime.now(UTC) - last_tick).total_seconds()
+    if age < -60 or age > settings.mast_state_healthy_max_age_seconds:
+        # A stopped scheduler cannot certify intentional standby indefinitely.
+        # Fall back to real service probes when its lifecycle evidence is stale.
+        return None
     services = decoded.get("services")
     return services if isinstance(services, dict) else None
 
