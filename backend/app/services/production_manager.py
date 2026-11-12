@@ -236,9 +236,11 @@ async def _github_repo_evidence(
     runs: list[dict[str, Any]] = []
     exhausted = False
     release_evidence_found = False
+    additional_workflows_complete = False
     next_url = f"https://api.github.com/repos/{encoded_repo}/actions/runs"
     next_params: dict[str, str | int] | None = {
         "branch": branch,
+        "head_sha": sha,
         "per_page": GITHUB_RUNS_PER_PAGE,
     }
     for _page in range(1, GITHUB_RUNS_MAX_PAGES + 1):
@@ -278,10 +280,12 @@ async def _github_repo_evidence(
             and deployment_has_non_skipped_run
         )
         if release_evidence_found and set(SMOKE_ONLY_WORKFLOWS[repo_id]).issubset(matched_names):
+            additional_workflows_complete = not bool(runs_response.links.get("next", {}).get("url"))
             exhausted = True
             break
         next_link = runs_response.links.get("next", {}).get("url")
         if not next_link:
+            additional_workflows_complete = True
             exhausted = True
             break
         next_url = str(next_link)
@@ -380,6 +384,7 @@ async def _github_repo_evidence(
         "required_workflows": workflow_evidence,
         "smoke_only_workflows": smoke_only_evidence,
         "additional_workflow_failures": additional_failures,
+        "additional_workflows_complete": additional_workflows_complete,
         "deployment": {
             "workflow": deployment_name,
             "state": deployment_state,

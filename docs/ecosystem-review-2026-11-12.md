@@ -14,7 +14,7 @@ HIVE-UI's live health endpoint reported main commit `ae3cea246321cee23879354a99c
 - Expire UI production decisions after two minutes, and show unknown for missing, incomplete or failed evidence. Keep the longer collection deadline limited to the exact read-only production-report route.
 - Include recent, deduplicated scheduled work in the redacted MAST health summary. Exclude warmups and skipped attempts. Retain explicit execution timestamps and failed receipts even while the scheduler heartbeat is healthy.
 - Reject missing, stale or implausibly future scheduler heartbeats before using lifecycle state to claim intentional standby. Fresh intentional standby remains supported.
-- Surface additional failed workflows on the current commit without silently redefining the required release-gate policy. The failing website ebook publication check is one concrete example.
+- Surface additional failed workflows on the current commit without silently redefining the required release-gate policy. Explicitly mark additional-workflow discovery incomplete when bounded collection stops before all pages are read. The failing website ebook publication check is one concrete example.
 - Document the two missing environment settings. All 241 Settings fields now have documented environment names; values match existing defaults.
 - Describe the alert inbox as historical events and link to current readiness. Do not interpret clearing alerts as repairing a job.
 - Do not invent R2 read permissions from legacy string-only bucket listings; report failed bucket inventory responses as unavailable.
@@ -31,6 +31,6 @@ The checking browser had no authenticated HIVE operator session. Protected dashb
 
 ## Validation
 
-HIVE: 697 tests passed, including ten subtests; coverage 74.79%, above the 74% gate. Ruff's required CI rules passed. The MyPy baseline guard reported no new regressions. Targeted tests cover stale/fresh lifecycle evidence, redacted recent receipts, exact-commit workflow warnings and environment coverage.
+HIVE: 699 tests passed, including ten subtests; coverage 74.82%, above the 74% gate. Ruff's required CI rules passed. The MyPy baseline guard reported no new regressions. Targeted tests cover stale/fresh lifecycle evidence, redacted recent receipts, exact-commit workflow warnings and environment coverage.
 
-HIVE-UI: full `npm run check` passed; 128 unit tests, security/UX contracts, TypeScript, lint, production build and distribution verification. Added coverage for all-eight production reporting, incomplete evidence, expiry, fetch failures, independent business-job failures and the scoped proxy deadline. Local checks do not replace authenticated deployment acceptance.
+HIVE-UI: full `npm run check` passed; 129 unit tests, security/UX contracts, TypeScript, lint, production build and distribution verification. Added coverage for all-eight production reporting, incomplete evidence, expiry, fetch failures, independent business-job failures and the scoped proxy deadline. Local checks do not replace authenticated deployment acceptance.

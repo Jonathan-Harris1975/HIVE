@@ -41,3 +41,12 @@ def test_audit_environment_handles_missing_env_example_gracefully(tmp_path):
     assert result["env_example_found"] is False
     assert result["documented_field_count"] == 0
     assert result["undocumented_field_count"] == result["total_settings_fields"]
+
+
+def test_documented_d1_reset_names_round_trip_through_settings():
+    from pathlib import Path
+    from app.core.config import Settings
+
+    line = next(line for line in Path(".env.example").read_text().splitlines() if line.startswith("D1_RESET_DATABASE_NAMES="))
+    settings = Settings(app_env="test", d1_reset_database_names=line.split("=", 1)[1])
+    assert settings.d1_reset_database_names == ["database-hive", "database-comms-hub"]
