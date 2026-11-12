@@ -563,3 +563,22 @@ async def test_additional_workflow_failure_is_visible_without_changing_required_
         result = await production_manager._github_repo_evidence(client, repo_id="Website", branch="main")
     assert result["state"] == "GREEN"
     assert result["additional_workflow_failures"] == [{"workflow": "Ebook subsystem CI", "status": "failure", "run_id": 99}]
+
+
+@pytest.mark.asyncio
+async def test_additional_workflow_scan_explicitly_reports_unretrieved_pages():
+    sha = "c" * 40
+    def handler(request):
+        if request.url.path.endswith("/commits/main"):
+            return httpx.Response(200, json={"sha": sha})
+        names = [*production_manager.REQUIRED_WORKFLOWS["Website"],
+                 *production_manager.SMOKE_ONLY_WORKFLOWS["Website"], production_manager.DEPLOYMENT_WORKFLOWS["Website"]]
+        runs = [{"id": i + 1, "name": name, "head_sha": sha, "status": "completed", "conclusion": "success"}
+                for i, name in enumerate(names)]
+        return httpx.Response(200, json={"workflow_runs": runs},
+                              headers={"Link": '<https://api.github.com/repos/test/repo/actions/runs?page=2>; rel="next"'})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await production_manager._github_repo_evidence(client, repo_id="Website", branch="main")
+    assert result["state"] == "GREEN"
+    assert result["additional_workflow_failures"] == []
+    assert result["additional_workflows_complete"] is False
