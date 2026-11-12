@@ -476,3 +476,63 @@ async def test_aims_ui_reports_liveness_and_readiness_separately() -> None:
         "aimsApiKey": False,
     }
     assert aims_ui["operational"]["payload"]["missing"] == ["aimsApiKey"]
+
+
+def test_mast_recent_jobs_are_bounded_deduplicated_and_do_not_count_warmups():
+    from app.services.repo_health import _mast_state_summary
+
+    receipts = [
+        {"job": "pretrigger-newsletter", "ok": True, "managedPretrigger": True},
+        {"job": "newsletter", "group": "operations", "ok": True, "finishedAt": "2026-11-12T10:00:00Z", "secret": "not-for-ui"},
+        {"job": "newsletter", "ok": False},
+        {"job": "skipped-job", "ok": False, "skipped": True},
+        *[{"job": f"job-{i}", "ok": False} for i in range(30)],
+    ]
+    recent = _mast_state_summary({"recentResults": receipts})["recent_jobs"]
+    assert len(recent) == 20
+    assert recent[0] == {"job": "newsletter", "group": "operations", "ok": True,
+                         "finished_at": "2026-11-12T10:00:00Z", "operation_status": None}
+    assert len({item["job"] for item in recent}) == 20
+    assert all(item["job"] not in {"pretrigger-newsletter", "skipped-job"} for item in recent)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("age", [None, 600, -120])
+async def test_stale_mast_lifecycle_state_cannot_certify_intentional_standby(monkeypatch, age):
+    import json
+    from types import SimpleNamespace
+    from app.services import repo_health
+
+    last_tick = (datetime.now(UTC) - timedelta(seconds=age)).isoformat() if age is not None else None
+    state = {"lastTickAt": last_tick, "services": {"aims": {"state": "standby"}}}
+    class FakeStorage:
+        def __init__(self, settings):
+            pass
+        def read_object(self, *args, **kwargs):
+            return SimpleNamespace(content=json.dumps(state).encode())
+    monkeypatch.setattr(repo_health, "R2Storage", FakeStorage)
+    settings = Settings(app_env="test", cf_r2_endpoint_url="https://r2.example",
+                        cf_r2_access_key_id="test-key", cf_r2_secret_access_key="test-secret",
+                        r2_bucket_meta_system="metasystem")
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(500))) as client:
+        assert await repo_health._fetch_mast_service_ledger(client, settings=settings) is None
+
+
+@pytest.mark.asyncio
+async def test_fresh_mast_lifecycle_state_preserves_intentional_standby(monkeypatch):
+    import json
+    from types import SimpleNamespace
+    from app.services import repo_health
+
+    state = {"lastTickAt": datetime.now(UTC).isoformat(), "services": {"aims": {"state": "standby"}}}
+    class FakeStorage:
+        def __init__(self, settings):
+            pass
+        def read_object(self, *args, **kwargs):
+            return SimpleNamespace(content=json.dumps(state).encode())
+    monkeypatch.setattr(repo_health, "R2Storage", FakeStorage)
+    settings = Settings(app_env="test", cf_r2_endpoint_url="https://r2.example",
+                        cf_r2_access_key_id="test-key", cf_r2_secret_access_key="test-secret",
+                        r2_bucket_meta_system="metasystem")
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(500))) as client:
+        assert await repo_health._fetch_mast_service_ledger(client, settings=settings) == state["services"]

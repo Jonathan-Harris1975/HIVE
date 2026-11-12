@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote
 
@@ -350,6 +351,23 @@ async def _github_repo_evidence(
             "run_id": run.get("id") if run else None,
         }
 
+    classified = set(REQUIRED_WORKFLOWS[repo_id]) | set(SMOKE_ONLY_WORKFLOWS[repo_id]) | {deployment_name}
+    other_names = dict.fromkeys(
+        str(run.get("name") or "") for run in runs
+        if str(run.get("head_sha") or "") == sha and run.get("name")
+    )
+    additional_failures = []
+    for name in other_names:
+        if name in classified:
+            continue
+        run = latest(name)
+        if _run_state(run)[0] == "BLOCKED" and run:
+            additional_failures.append({
+                "workflow": name,
+                "status": run.get("conclusion"),
+                "run_id": run.get("id"),
+            })
+
     return {
         "configured": True,
         "state": state,
@@ -361,6 +379,7 @@ async def _github_repo_evidence(
         "sha": sha,
         "required_workflows": workflow_evidence,
         "smoke_only_workflows": smoke_only_evidence,
+        "additional_workflow_failures": additional_failures,
         "deployment": {
             "workflow": deployment_name,
             "state": deployment_state,
@@ -456,12 +475,14 @@ async def build_production_manager_report(
         build_repo_health_report(settings, force_refresh=force_refresh),
         _collect_all_gate_evidence(settings, client=github_client),
     )
+    generated_at = datetime.now(UTC).isoformat()
 
     if health.get("overall_status") == "disabled":
         return {
             "ok": True,
             "role": "ecosystem_production_manager",
             "manager": PRODUCTION_MANAGER,
+            "generated_at": generated_at,
             "state": "DEGRADED",
             "release_decision": "HOLD",
             "human_action_required": False,
@@ -525,6 +546,7 @@ async def build_production_manager_report(
         "ok": True,
         "role": "ecosystem_production_manager",
         "manager": PRODUCTION_MANAGER,
+        "generated_at": generated_at,
         "state": state,
         "release_decision": release_decision,
         "human_action_required": False,
