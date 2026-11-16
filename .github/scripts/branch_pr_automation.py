@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -47,6 +48,11 @@ class ApiError(RuntimeError):
         return f"GitHub API HTTP {self.status}: {self.body[:500]}"
 
 
+# Retry only safe reads; never automatically replay PR creation or label writes.
+RETRYABLE_GET_STATUSES = frozenset({429, 500, 502, 503, 504})
+GET_RETRY_DELAYS = (1, 2, 4)
+
+
 def request(
     method: str,
     path: str,
@@ -61,17 +67,33 @@ def request(
     req.add_header("X-GitHub-Api-Version", "2022-11-28")
     if payload is not None:
         req.add_header("Content-Type", "application/json")
-    try:
-        with urllib.request.urlopen(req, timeout=30) as response:
-            raw = response.read()
-            if response.status not in expected:
-                raise ApiError(response.status, raw.decode("utf-8", "replace"))
-            if not raw:
-                return None
-            return json.loads(raw.decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", "replace")
-        raise ApiError(exc.code, body) from exc
+    attempts = 1 + len(GET_RETRY_DELAYS) if method == "GET" else 1
+    for attempt in range(attempts):
+        try:
+            with urllib.request.urlopen(req, timeout=30) as response:
+                raw = response.read()
+                if response.status not in expected:
+                    raise ApiError(response.status, raw.decode("utf-8", "replace"))
+                if not raw:
+                    return None
+                return json.loads(raw.decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode("utf-8", "replace")
+            if method != "GET" or exc.code not in RETRYABLE_GET_STATUSES or attempt + 1 >= attempts:
+                raise ApiError(exc.code, body) from exc
+            # Primary rate-limit exhaustion needs a reset window, not a short retry loop.
+            if exc.code in (403, 429) and exc.headers and exc.headers.get("X-RateLimit-Remaining") == "0":
+                raise ApiError(exc.code, body) from exc
+            delay = GET_RETRY_DELAYS[attempt]
+            log(f"Transient GitHub GET HTTP {exc.code}; retry {attempt + 1}/{attempts - 1} in {delay}s.")
+            time.sleep(delay)
+        except urllib.error.URLError:
+            if method != "GET" or attempt + 1 >= attempts:
+                raise
+            delay = GET_RETRY_DELAYS[attempt]
+            log(f"Transient GitHub GET transport error; retry {attempt + 1}/{attempts - 1} in {delay}s.")
+            time.sleep(delay)
+    raise RuntimeError("Unreachable GitHub request retry state")
 
 
 def get(path: str) -> Any:
