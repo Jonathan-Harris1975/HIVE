@@ -154,6 +154,24 @@ class BranchSafety(unittest.TestCase):
         self.assertEqual(opened.call_count, 2)
         sleep.assert_called_once_with(1)
 
+    def test_primary_rate_limit_does_not_spin(self):
+        err = urllib.error.HTTPError("https://api.github.com/test", 429, "Too Many Requests", {"X-RateLimit-Remaining":"0"}, io.BytesIO(b"rate limited"))
+        with patch.object(m.urllib.request, "urlopen", side_effect=err) as opened, patch.object(m.time, "sleep") as sleep:
+            with self.assertRaises(m.ApiError) as caught:
+                m.get("/repos/owner/repo/compare/main...fix/change")
+        self.assertEqual(caught.exception.status, 429)
+        self.assertEqual(opened.call_count, 1)
+        sleep.assert_not_called()
+
+    def test_exhausted_transport_errors_use_api_error_contract(self):
+        errors = [urllib.error.URLError("temporary connection failure") for _ in range(4)]
+        with patch.object(m.urllib.request, "urlopen", side_effect=errors) as opened, patch.object(m.time, "sleep") as sleep:
+            with self.assertRaises(m.ApiError) as caught:
+                m.get("/repos/owner/repo/compare/main...fix/change")
+        self.assertEqual(caught.exception.status, 0)
+        self.assertEqual(opened.call_count, 4)
+        self.assertEqual([call.args[0] for call in sleep.call_args_list], [1, 2, 4])
+
     def test_permanent_get_failure_is_not_retried(self):
         error = urllib.error.HTTPError("https://api.github.com/test", 404, "Not Found", {}, io.BytesIO(b"missing"))
         with patch.object(m.urllib.request, "urlopen", side_effect=error) as opened, patch.object(m.time, "sleep") as sleep:
