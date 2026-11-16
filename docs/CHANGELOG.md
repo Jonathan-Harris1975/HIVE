@@ -4,6 +4,11 @@
 > **Last reviewed:** 20 September 2026  
 > **Operational authority:** Current repository README, SECURITY policy and operations guide.
 
+## 14 November 2026 - Soup Sieve security update
+
+- Updated the direct Soup Sieve pin to `4.0.1` to address CVE-2026-126190, CVE-2026-126191 and GHSA-8jvp-3x96-xpqw while retaining earlier selector-parser fixes; regenerated the production dependency lock.
+- Included PR #570's `opentelemetry-api==1.45.2` lock update to address CVE-2026-126360 in the combined dependency state.
+
 ## 21 October 2026 - certifi security update
 
 - Added a direct `certifi==2026.10.19` security pin to `requirements.in` and regenerated its compiled lock entry to address GHSA-6q48-6c7w-9gw2. The source pin prevents a later lock refresh from silently reverting this security floor.
