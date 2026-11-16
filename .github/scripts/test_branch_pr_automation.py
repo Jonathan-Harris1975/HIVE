@@ -2,7 +2,9 @@
 import copy
 import importlib.util
 import inspect
+import io
 import os
+import urllib.error
 from pathlib import Path
 import sys
 import unittest
@@ -136,6 +138,46 @@ class BranchSafety(unittest.TestCase):
         ):
             m.recover_branch_signals()
         create.assert_called_once_with(("fix/lost-signal", branch_sha))
+
+    def test_transient_github_compare_get_retries(self):
+        class Response:
+            status = 200
+            def __enter__(self):
+                return self
+            def __exit__(self, *_args):
+                return False
+            def read(self):
+                return b'{"ahead_by": 1}'
+        error = urllib.error.HTTPError("https://api.github.com/test", 500, "Server Error", {}, io.BytesIO(b"diff temporarily unavailable"))
+        with patch.object(m.urllib.request, "urlopen", side_effect=[error, Response()]) as opened, patch.object(m.time, "sleep") as sleep:
+            self.assertEqual(m.get("/repos/owner/repo/compare/main...fix/example")["ahead_by"], 1)
+        self.assertEqual(opened.call_count, 2)
+        sleep.assert_called_once_with(1)
+
+    def test_permanent_get_failure_is_not_retried(self):
+        error = urllib.error.HTTPError("https://api.github.com/test", 404, "Not Found", {}, io.BytesIO(b"missing"))
+        with patch.object(m.urllib.request, "urlopen", side_effect=error) as opened, patch.object(m.time, "sleep") as sleep:
+            with self.assertRaises(m.ApiError):
+                m.get("/repos/owner/repo/branches/missing")
+        self.assertEqual(opened.call_count, 1)
+        sleep.assert_not_called()
+
+    def test_mutating_post_failure_is_not_retried(self):
+        error = urllib.error.HTTPError("https://api.github.com/test", 500, "Server Error", {}, io.BytesIO(b"failed"))
+        with patch.object(m.urllib.request, "urlopen", side_effect=error) as opened, patch.object(m.time, "sleep") as sleep:
+            with self.assertRaises(m.ApiError):
+                m.post("/repos/owner/repo/pulls", {"title":"test"})
+        self.assertEqual(opened.call_count, 1)
+        sleep.assert_not_called()
+
+    def test_repeated_transient_error_is_bounded(self):
+        def error():
+            return urllib.error.HTTPError("https://api.github.com/test", 503, "Unavailable", {}, io.BytesIO(b"temporary"))
+        with patch.object(m.urllib.request, "urlopen", side_effect=[error() for _ in range(4)]) as opened, patch.object(m.time, "sleep") as sleep:
+            with self.assertRaises(m.ApiError):
+                m.get("/repos/owner/repo/compare/main...fix/example")
+        self.assertEqual(opened.call_count, 4)
+        self.assertEqual([call.args[0] for call in sleep.call_args_list], [1,2,4])
 
     def test_controller_contains_no_merge_authority(self):
         source = inspect.getsource(m)
