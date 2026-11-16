@@ -50,7 +50,7 @@ jobs:
         run: |
           set -euo pipefail
           IFS='|' read -r -a required <<< "$REQUIRED_WORKFLOWS"
-          runs="$(gh api --paginate --slurp "repos/${REPO}/actions/runs?head_sha=${TARGET_SHA}&per_page=100" --jq 'map(.workflow_runs) | add')"
+          runs="$(gh api --paginate --slurp "repos/${REPO}/actions/runs?head_sha=${TARGET_SHA}&per_page=100" | jq 'map(.workflow_runs) | add')"
           for workflow in "${required[@]}"; do
             result="$(jq -r --arg name "$workflow" '[.[] | select(.name == $name and .event != "pull_request")] | sort_by(.run_number,.run_attempt) | last | if .status == "completed" then .conclusion else "missing" end' <<< "$runs")"
             test "$result" = success || { echo "::error::$workflow exact-SHA evidence is $result"; exit 1; }
