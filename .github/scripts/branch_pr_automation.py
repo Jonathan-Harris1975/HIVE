@@ -82,18 +82,17 @@ def request(
             if method != "GET" or exc.code not in RETRYABLE_GET_STATUSES or attempt + 1 >= attempts:
                 raise ApiError(exc.code, body) from exc
             # Primary rate-limit exhaustion needs a reset window, not a short retry loop.
-            if exc.code in (403, 429) and exc.headers and exc.headers.get("X-RateLimit-Remaining") == "0":
+            if exc.code == 429 and exc.headers and exc.headers.get("X-RateLimit-Remaining") == "0":
                 raise ApiError(exc.code, body) from exc
             delay = GET_RETRY_DELAYS[attempt]
             log(f"Transient GitHub GET HTTP {exc.code}; retry {attempt + 1}/{attempts - 1} in {delay}s.")
             time.sleep(delay)
-        except urllib.error.URLError:
+        except urllib.error.URLError as exc:
             if method != "GET" or attempt + 1 >= attempts:
-                raise
+                raise ApiError(0, str(exc)) from exc
             delay = GET_RETRY_DELAYS[attempt]
             log(f"Transient GitHub GET transport error; retry {attempt + 1}/{attempts - 1} in {delay}s.")
             time.sleep(delay)
-    raise RuntimeError("Unreachable GitHub request retry state")
 
 
 def get(path: str) -> Any:
