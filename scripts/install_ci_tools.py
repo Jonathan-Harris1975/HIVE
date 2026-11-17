@@ -9,7 +9,9 @@ import shutil
 import sys
 import tarfile
 import tempfile
+import urllib.error
 import urllib.request
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -63,10 +65,23 @@ TOOLS = {
 
 
 def download(url: str, dest: Path) -> None:
-    """Download a CI tool asset."""
+    """Retry only transient download failures; every installed binary remains hash verified."""
     request = urllib.request.Request(url, headers={"User-Agent": "HIVE-CI/1.0"})
-    with urllib.request.urlopen(request, timeout=120) as response, dest.open("wb") as output:
-        shutil.copyfileobj(response, output)
+    attempts = 4
+    for attempt in range(attempts):
+        try:
+            with urllib.request.urlopen(request, timeout=120) as response, dest.open("wb") as output:
+                shutil.copyfileobj(response, output)
+            return
+        except urllib.error.HTTPError as error:
+            dest.unlink(missing_ok=True)
+            if error.code not in (408, 425, 429, 500, 502, 503, 504) or attempt == attempts - 1:
+                raise
+        except (urllib.error.URLError, TimeoutError, ConnectionError):
+            dest.unlink(missing_ok=True)
+            if attempt == attempts - 1:
+                raise
+        time.sleep(min(2 ** attempt, 8))
 
 
 def digest(path: Path) -> str:
