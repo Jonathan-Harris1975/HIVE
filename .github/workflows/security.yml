@@ -25,6 +25,10 @@ jobs:
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
         fetch-depth: 0
+    - name: Enforce owner approval before repository forking
+      run: |
+        python3 .github/scripts/no_fork_guard.py --self-test
+        python3 .github/scripts/no_fork_guard.py
     - name: Verify branch PR safety and idempotency
       run: python3 .github/scripts/test_branch_pr_automation.py
     - name: Verify autonomy lifecycle regressions
