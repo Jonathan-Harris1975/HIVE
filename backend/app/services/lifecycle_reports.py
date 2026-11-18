@@ -294,9 +294,11 @@ def _recovered_failed_check(original: dict[str, Any], candidate: dict[str, Any])
     }
 
 
-def build_review_objects(record: dict[str, Any], year: int) -> tuple[str, dict[str, bytes]] | None:
-    """Create a stable, actionable review bundle only for explicit terminal states."""
-    if not _requires_human_review(record):
+def build_review_objects(record: dict[str, Any], year: int, *, include_operational: bool = False) -> tuple[str, dict[str, bytes]] | None:
+    """Build immutable evidence; only actionable findings become open reviews."""
+    if not include_operational and not _requires_human_review(record):
+        return None
+    if record.get("final_state") not in {"REVIEW_REQUIRED", "SERVICE_BLOCKED"} and record.get("human_hold") is not True:
         return None
     repository = str(record.get("repository") or "")
     sha = str(record.get("head_sha") or "")
@@ -544,7 +546,9 @@ def _generate_and_store_weekly_report(storage: R2Storage, year: int, week: int, 
     open_review_count = 0
     all_records = [record for group in records.values() for record in group]
     for record in all_records:
-        bundle = build_review_objects(record, year)
+        # Include legacy operational failures solely to record proven recovery.
+        # Never recreate them as human-review items in R2.
+        bundle = build_review_objects(record, year, include_operational=True)
         if not bundle:
             continue
         review_id, review_files = bundle
@@ -583,6 +587,8 @@ def _generate_and_store_weekly_report(storage: R2Storage, year: int, week: int, 
             _put_immutable(storage, f"{resolved_prefix}/evidence.json", source_evidence, "application/json")
             _put_immutable(storage, f"{resolved_prefix}/decision.json", decision, "application/json")
             _put_immutable(storage, f"{resolved_prefix}/outcome.json", (json.dumps(outcome, indent=2, sort_keys=True) + "\n").encode(), "application/json")
+            continue
+        if not _requires_human_review(record):
             continue
         review_prefix = f"reports/review-required/open/{review_id}"
         for filename, body in review_files.items():
