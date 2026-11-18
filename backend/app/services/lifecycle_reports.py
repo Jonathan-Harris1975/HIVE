@@ -236,8 +236,68 @@ def read_repository_html(storage: R2Storage, year: int, week: int, repository: s
     return body.decode("utf-8")
 
 
-def build_review_objects(record: dict[str, Any], year: int) -> tuple[str, dict[str, bytes]] | None:
-    """Create a stable, actionable review bundle only for explicit terminal states."""
+def _requires_human_review(record: dict[str, Any]) -> bool:
+    """A failed check alone is an operational incident, not a human decision."""
+    if record.get("human_hold") is True or record.get("final_state") == "REVIEW_REQUIRED":
+        return True
+    if record.get("failure_class") in {"repair_exhausted", "unsafe_repair", "manual_decision_required"}:
+        return True
+    if record.get("final_state") != "SERVICE_BLOCKED":
+        return False
+    attempts = record.get("repair_attempts")
+    if isinstance(attempts, int) and not isinstance(attempts, bool) and attempts > 0:
+        return True
+    pr_number = record.get("pr_number")
+    return (
+        isinstance(pr_number, int) and not isinstance(pr_number, bool) and pr_number > 0
+        and bool(record.get("proposed_solution")) and bool(record.get("repair_prompt"))
+    )
+
+
+def _recovered_failed_check(original: dict[str, Any], candidate: dict[str, Any]) -> bool:
+    """Close a specific historical failure only on later exact-SHA verified recovery.
+
+    An optional Codecov gap still makes the overall lifecycle UNKNOWN. It does
+    not invalidate affirmative recovery of the original CI/security failure.
+    """
+    repository = str(original.get("repository") or "")
+    if original.get("human_hold") is True or not _valid_record(candidate, repository):
+        return False
+    if candidate.get("pr_number") != original.get("pr_number"):
+        return False
+    try:
+        earlier = dt.datetime.fromisoformat(str(original.get("completed_at") or original.get("started_at")).replace("Z", "+00:00"))
+        later = dt.datetime.fromisoformat(str(candidate.get("completed_at") or candidate.get("started_at")).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if earlier.tzinfo is None or later.tzinfo is None or later <= earlier:
+        return False
+    if candidate.get("source_workflow_conclusion") != "success":
+        return False
+    if candidate.get("final_state") in {"SERVICE_BLOCKED", "REVIEW_REQUIRED"}:
+        return False
+    if candidate.get("human_hold") is True or candidate.get("dast_status") == "fail":
+        return False
+    if any(candidate.get(field) != "pass" for field in (
+        "ci_gate", "socket_status", "codeql_status", "gitleaks_status",
+        "trivy_status", "deployment_status",
+    )):
+        return False
+    if candidate.get("deployment_verified") is not True or candidate.get("deployed_sha") != candidate.get("head_sha"):
+        return False
+    # Only checks whose affirmative result is actually represented in the
+    # lifecycle record are eligible. A generic/unknown failure is never cleared.
+    failed_check = str(original.get("failed_check") or "")
+    return failed_check in {
+        "ci_gate", "Trivy, Gitleaks and actionlint", "socket_status",
+        "codeql_status", "gitleaks_status", "trivy_status",
+    }
+
+
+def build_review_objects(record: dict[str, Any], year: int, *, include_operational: bool = False) -> tuple[str, dict[str, bytes]] | None:
+    """Build immutable evidence; only actionable findings become open reviews."""
+    if not include_operational and not _requires_human_review(record):
+        return None
     if record.get("final_state") not in {"REVIEW_REQUIRED", "SERVICE_BLOCKED"} and record.get("human_hold") is not True:
         return None
     repository = str(record.get("repository") or "")
@@ -486,7 +546,9 @@ def _generate_and_store_weekly_report(storage: R2Storage, year: int, week: int, 
     open_review_count = 0
     all_records = [record for group in records.values() for record in group]
     for record in all_records:
-        bundle = build_review_objects(record, year)
+        # Include legacy operational failures solely to record proven recovery.
+        # Never recreate them as human-review items in R2.
+        bundle = build_review_objects(record, year, include_operational=True)
         if not bundle:
             continue
         review_id, review_files = bundle
@@ -496,7 +558,14 @@ def _generate_and_store_weekly_report(storage: R2Storage, year: int, week: int, 
         repository = record["repository"]
         pr_number = record.get("pr_number")
         started = str(record.get("completed_at") or record.get("started_at") or "")
-        resolution = next((item for item in all_records if item.get("repository") == repository and item.get("pr_number") == pr_number and item is not record and str(item.get("completed_at") or item.get("started_at") or "") > started and _state(item) == "GREEN"), None)
+        resolution = next((
+            item for item in all_records
+            if item.get("repository") == repository
+            and item.get("pr_number") == pr_number
+            and item is not record
+            and str(item.get("completed_at") or item.get("started_at") or "") > started
+            and (_state(item) == "GREEN" or _recovered_failed_check(record, item))
+        ), None)
         if resolution:
             resolved_prefix = f"reports/review-required/resolved/{year}/{review_id}"
             source_evidence = review_files["evidence.json"]
@@ -514,10 +583,12 @@ def _generate_and_store_weekly_report(storage: R2Storage, year: int, week: int, 
                     indent=2,
                     sort_keys=True,
                 ).encode()
-            outcome = {"schema_version": 1, "review_id": review_id, "state": "resolved", "resolution_head_sha": resolution.get("head_sha"), "merged": resolution.get("merged") is True, "deployment_verified": resolution.get("deployment_verified") is True, "resolved_at": resolution.get("completed_at") or resolution.get("started_at")}
+            outcome = {"schema_version": 1, "review_id": review_id, "state": "resolved", "resolution_kind": "complete_green_evidence" if _state(resolution) == "GREEN" else "verified_failed_check_recovered", "resolution_head_sha": resolution.get("head_sha"), "merged": resolution.get("merged") is True, "deployment_verified": resolution.get("deployment_verified") is True, "resolved_at": resolution.get("completed_at") or resolution.get("started_at")}
             _put_immutable(storage, f"{resolved_prefix}/evidence.json", source_evidence, "application/json")
             _put_immutable(storage, f"{resolved_prefix}/decision.json", decision, "application/json")
             _put_immutable(storage, f"{resolved_prefix}/outcome.json", (json.dumps(outcome, indent=2, sort_keys=True) + "\n").encode(), "application/json")
+            continue
+        if not _requires_human_review(record):
             continue
         review_prefix = f"reports/review-required/open/{review_id}"
         for filename, body in review_files.items():
@@ -571,6 +642,11 @@ def list_open_reviews(storage: R2Storage, limit: int = 100) -> list[dict[str, An
                 payload["proposal"] = {}
             try:
                 evidence = json.loads(storage.read_object(f"{prefix.rstrip('/')}/evidence.json", max_bytes=256 * 1024, bucket=BUCKET).content)
+                # Legacy immutable SERVICE_BLOCKED bundles may have no PR, hold,
+                # exhausted repair or proposed decision. They belong in the
+                # operational history, not the human-decision queue.
+                if _valid_record(evidence, str(payload.get("source") or "")) and not _requires_human_review(evidence):
+                    continue
                 payload["evidence"] = {key: evidence.get(key) for key in ("failed_check", "failure_class", "repair_attempts", "human_hold", "started_at", "completed_at", "source_workflow", "source_workflow_conclusion")}
             except (FileNotFoundError, RuntimeError, ValueError, json.JSONDecodeError):
                 payload["evidence"] = {}
