@@ -104,6 +104,63 @@ async def test_refresh_job_replaces_each_snapshot_and_waits_for_intelligence(mon
     assert all(result["finding_count"] == 3 for result in current["results"])
 
 
+
+@pytest.mark.asyncio
+async def test_missing_only_refresh_ignores_registered_repositories(monkeypatch) -> None:
+    settings = _settings()
+    repository_refresh._JOBS.clear()
+    repository_refresh._TASKS.clear()
+    registered = {"HIVE", "HIVE-UI"}
+    monkeypatch.setattr(
+        repository_refresh, "get_repository",
+        lambda repository_id: object() if repository_id in registered else None,
+    )
+
+    async def fake_download(_settings, slug: str) -> bytes:
+        return slug.encode()
+
+    downloaded: list[str] = []
+
+    async def fake_ingest(content: bytes, filename: str, repository_id: str):
+        downloaded.append(repository_id)
+        return {
+            "pipeline": {"status": "ready", "required_stages_ready": True},
+        }
+
+    monkeypatch.setattr(repository_refresh, "download_github_archive", fake_download)
+    accepted = repository_refresh.start_refresh_job(settings, fake_ingest, missing_only=True)
+    assert accepted["repository_count"] == 6
+    for _ in range(100):
+        result = repository_refresh.get_refresh_job(settings, str(accepted["job_id"]))
+        if result and result.get("status") == "completed":
+            break
+        await asyncio.sleep(0)
+    else:
+        pytest.fail("missing-only refresh did not complete")
+
+    assert set(downloaded) == {"AIMS", "AIMS-UI", "RAMS", "MAST", "IRS", "Website"}
+    assert result["failed_count"] == 0
+    assert result["completed_count"] == 6
+
+
+def test_missing_only_refresh_noops_when_everything_is_registered(monkeypatch) -> None:
+    settings = _settings()
+    repository_refresh._JOBS.clear()
+    repository_refresh._TASKS.clear()
+    monkeypatch.setattr(repository_refresh, "get_repository", lambda _repository_id: object())
+
+    async def should_not_ingest(*_args):
+        raise AssertionError("No repository should be reprocessed")
+
+    payload = repository_refresh.start_refresh_job(settings, should_not_ingest, missing_only=True)
+    assert payload["status"] == "completed"
+    assert payload["repository_count"] == 0
+    assert payload["completed_count"] == 0
+    assert payload["failed_count"] == 0
+    assert payload["ok"] is True
+
+
+
 def test_repository_refresh_routes_exist_and_do_not_fall_through_dynamic_repository_route() -> None:
     # FastAPI >= 0.137 keeps included routers as lazy _IncludedRouter objects,
     # which intentionally do not expose ``.path``.  Use public contracts rather

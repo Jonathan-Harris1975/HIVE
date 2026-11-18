@@ -5,7 +5,7 @@ import hashlib
 import json
 from typing import Any, cast
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 
 from app.core.config import Settings, get_settings
 from app.core.governed_repositories import GOVERNED_REPOSITORY_IDS
@@ -608,9 +608,10 @@ async def get_repository_refresh_configuration(
 
 @router.post("/repositories/refresh-all", status_code=status.HTTP_202_ACCEPTED)
 async def post_repository_refresh_all(
+    missing_only: bool = Query(False),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, object]:
-    """Start the monthly GitHub snapshot refresh and Intelligence run."""
+    """Start a full monthly refresh, or bootstrap only missing governed snapshots."""
 
     async def ingest(content: bytes, filename: str, expected_id: str) -> dict[str, Any]:
         return await _ingest_repository_content(
@@ -618,7 +619,7 @@ async def post_repository_refresh_all(
         )
 
     try:
-        return start_refresh_job(settings, ingest)
+        return start_refresh_job(settings, ingest, missing_only=missing_only)
     except ValueError as error:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from error
     except RuntimeError as error:

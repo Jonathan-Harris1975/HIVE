@@ -13,6 +13,7 @@ import httpx
 
 from app.core.config import Settings
 from app.core.governed_repositories import GOVERNED_REPOSITORY_ID_SET
+from app.services.repository_manager import get_repository
 from app.storage.d1 import D1MetadataStore
 
 logger = logging.getLogger("uvicorn.error.hive.repository_refresh")
@@ -372,7 +373,7 @@ async def _run_refresh_job(
             _TASKS.pop(job_id, None)
 
 
-def start_refresh_job(settings: Settings, ingest: IngestCallback) -> dict[str, Any]:
+def start_refresh_job(settings: Settings, ingest: IngestCallback, *, missing_only: bool = False) -> dict[str, Any]:
     configuration = refresh_configuration(settings)
     if not settings.repository_github_refresh_enabled:
         raise RuntimeError("Monthly repository refresh is disabled")
@@ -390,6 +391,11 @@ def start_refresh_job(settings: Settings, ingest: IngestCallback) -> dict[str, A
     sources = github_sources(settings)
     if active_refresh_job() is not None:
         raise RuntimeError("A governed repository refresh is already running")
+    # An independent daily bootstrap fills only missing durable registrations.
+    # Registered repositories are never reprocessed merely because a probe ran;
+    # the existing monthly refresh remains responsible for full Intelligence QA.
+    if missing_only:
+        sources = {repo_id: slug for repo_id, slug in sources.items() if get_repository(repo_id) is None}
 
     job_id = uuid.uuid4().hex
     payload = _set_job(
@@ -403,6 +409,11 @@ def start_refresh_job(settings: Settings, ingest: IngestCallback) -> dict[str, A
         results=[],
         ok=None,
     )
+    if not sources:
+        return _set_job(
+            settings, job_id, status="completed", finished_at=_now_iso(),
+            completed_count=0, failed_count=0, ok=True,
+        )
     task = asyncio.create_task(_run_refresh_job(settings, job_id, sources, ingest))
     with _JOB_LOCK:
         _TASKS[job_id] = task
