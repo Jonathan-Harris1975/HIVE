@@ -32,6 +32,25 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  recover_main_ci:
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Check out trusted default-branch recovery code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Recover exact-main CI evidence when no run exists
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          MAIN_CI_NAME: CI
+        run: python .github/scripts/recover_main_ci.py
+
   reconcile:
     permissions:
       actions: read
