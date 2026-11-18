@@ -76,6 +76,7 @@ class LifecycleReportTests(unittest.TestCase):
                      failure_class="check_failed", failed_check="ci_gate",
                      pr_number=None, repair_attempts=0, human_hold=None)
         self.assertIsNone(build_review_objects(failed, 2026))
+        self.assertIsNotNone(build_review_objects(failed, 2026, include_operational=True))
         held = {**failed, "human_hold": True}
         self.assertIsNotNone(build_review_objects(held, 2026))
         exhausted = {**failed, "failure_class": "repair_exhausted"}
