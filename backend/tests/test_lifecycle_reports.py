@@ -7,6 +7,7 @@ from app.services.lifecycle_reports import (
     BUCKET,
     REPOSITORIES,
     _put_immutable,
+    _recovered_failed_check,
     build_review_objects,
     build_weekly_overview,
     collect_council_references,
@@ -69,6 +70,69 @@ class LifecycleReportTests(unittest.TestCase):
         self.assertIn(b"Repair dispatch owner: AIMS", bundle["review.md"])
         routine = row("HIVE", final_state="GREEN")
         self.assertIsNone(build_review_objects(routine, 2026))
+
+    def test_plain_ci_failures_are_operational_not_human_reviews(self):
+        failed = row("HIVE", final_state="SERVICE_BLOCKED", ci_gate="fail",
+                     failure_class="check_failed", failed_check="ci_gate",
+                     pr_number=None, repair_attempts=0, human_hold=None)
+        self.assertIsNone(build_review_objects(failed, 2026))
+        held = {**failed, "human_hold": True}
+        self.assertIsNotNone(build_review_objects(held, 2026))
+        exhausted = {**failed, "failure_class": "repair_exhausted"}
+        self.assertIsNotNone(build_review_objects(exhausted, 2026))
+        proposed = {**failed, "pr_number": 17, "proposed_solution": "Repair gate",
+                    "repair_prompt": "Fix the verified check failure"}
+        self.assertIsNotNone(build_review_objects(proposed, 2026))
+
+    def test_recovery_of_exact_failed_check_does_not_claim_green(self):
+        original = row("HIVE", head_sha="a" * 40, final_state="SERVICE_BLOCKED",
+                       ci_gate="fail", failed_check="ci_gate", pr_number=None,
+                       completed_at="2026-11-16T18:30:00Z")
+        later = row("HIVE", head_sha="b" * 40, deployed_sha="b" * 40,
+                    final_state="UNKNOWN", codecov_status="unknown",
+                    pr_number=None, source_workflow_conclusion="success",
+                    completed_at="2026-11-18T23:21:00Z")
+        self.assertTrue(_recovered_failed_check(original, later))
+        self.assertFalse(_recovered_failed_check(original, {**later, "ci_gate": "unknown"}))
+        self.assertFalse(_recovered_failed_check(original, {**later, "deployment_verified": False}))
+        self.assertFalse(_recovered_failed_check(original, {**later, "deployed_sha": "a" * 40}))
+        self.assertFalse(_recovered_failed_check(original, {**later, "source_workflow_conclusion": "skipped"}))
+        self.assertFalse(_recovered_failed_check({**original, "human_hold": True}, later))
+        self.assertFalse(_recovered_failed_check({**original, "failed_check": "unclassified"}, later))
+        self.assertFalse(_recovered_failed_check(original, {**later, "completed_at": "2026-11-15T00:00:00Z"}))
+        security = {**original, "failed_check": "Trivy, Gitleaks and actionlint"}
+        self.assertTrue(_recovered_failed_check(security, later))
+        self.assertFalse(_recovered_failed_check(security, {**later, "gitleaks_status": "unknown"}))
+
+    def test_legacy_nonactionable_review_is_not_listed(self):
+        from app.services.lifecycle_reports import list_open_reviews
+
+        legacy = row("HIVE", final_state="SERVICE_BLOCKED", ci_gate="fail",
+                     failure_class="check_failed", failed_check="ci_gate",
+                     pr_number=None, repair_attempts=0, human_hold=None)
+        held = {**legacy, "human_hold": True}
+        records = {"review-legacy": legacy, "review-held": held}
+
+        class Storage:
+            def list_objects_page(self, **_kwargs):
+                return SimpleNamespace(
+                    prefixes=[f"reports/review-required/open/{key}/" for key in records],
+                )
+
+            def read_object(self, key, **_kwargs):
+                review_id = key.split("/")[3]
+                if key.endswith("/review.json"):
+                    return SimpleNamespace(content=json.dumps({
+                        "review_id": review_id, "status": "open", "source": "HIVE",
+                    }).encode())
+                if key.endswith("/evidence.json"):
+                    return SimpleNamespace(content=json.dumps(records[review_id]).encode())
+                if "/resolved/" in key or key.endswith("/decision.json") or key.endswith("/outcome.json"):
+                    raise FileNotFoundError(key)
+                return SimpleNamespace(content=b"{}")
+
+        listed = list_open_reviews(Storage())
+        self.assertEqual([item["review_id"] for item in listed], ["review-held"])
 
     def test_html_report_lists_all_eight_repositories_and_escapes_evidence(self):
         report = build_weekly_overview({}, 2026, 42)
