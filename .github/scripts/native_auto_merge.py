@@ -113,7 +113,7 @@ def merge_method() -> str:
     return "SQUASH"
 
 
-def enable(pr_node_id: str) -> bool:
+def enable(pr_node_id: str, number: int, sha: str) -> bool:
     method = merge_method()
     try:
         graphql(
@@ -126,6 +126,18 @@ def enable(pr_node_id: str) -> bool:
         if "in unstable status" in str(exc):
             print("GitHub reports an unstable PR status; deferring native auto-merge until a later reconciliation.")
             return False
+        if "in clean status" in str(exc):
+            # GitHub rejects enabling auto-merge when no required checks remain
+            # pending. Its protected merge endpoint still enforces branch rules;
+            # the exact admitted head SHA prevents a changed PR being merged.
+            result = request(
+                "PUT", f"/repos/{REPO}/pulls/{number}/merge",
+                {"sha": sha, "merge_method": method.lower()},
+            )
+            if not result.get("merged"):
+                raise RuntimeError(f"GitHub declined protected merge for PR #{number}")
+            print(f"Merged admitted clean PR #{number} at exact head {sha}.")
+            return True
         raise
     return True
 
@@ -176,7 +188,7 @@ def reconcile(pr_summary: dict[str, Any]) -> None:
 
     if eligible:
         if active_request is None:
-            if enable(node_id):
+            if enable(node_id, number, sha):
                 print(f"Enabled GitHub native auto-merge for admitted PR #{number} at {sha}.")
             else:
                 print(f"Deferred GitHub native auto-merge for admitted PR #{number} at {sha}; checks are still settling.")
