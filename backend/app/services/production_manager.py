@@ -37,14 +37,14 @@ REQUIRED_WORKFLOWS: dict[str, tuple[str, ...]] = {
 }
 
 SMOKE_ONLY_WORKFLOWS: dict[str, tuple[str, ...]] = {
-    "HIVE": ("OIDC readiness",),
-    "HIVE-UI": ("OIDC readiness",),
-    "AIMS": ("OIDC readiness",),
-    "AIMS-UI": ("OIDC readiness",),
-    "RAMS": ("OIDC readiness",),
-    "MAST": ("OIDC readiness", "OIDC estate readiness"),
-    "IRS": ("OIDC readiness",),
-    "Website": ("OIDC readiness",),
+    "HIVE": (),
+    "HIVE-UI": (),
+    "AIMS": (),
+    "AIMS-UI": (),
+    "RAMS": (),
+    "MAST": ("OIDC estate readiness",),
+    "IRS": (),
+    "Website": (),
 }
 
 GITHUB_API_TIMEOUT = httpx.Timeout(15.0, connect=5.0)
