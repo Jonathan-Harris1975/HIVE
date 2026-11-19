@@ -155,6 +155,10 @@ def test_reconciliation_includes_unresolved_messages_beyond_display_page(tmp_pat
         return httpx.Response(404, request=httpx.Request("GET", url))
 
     monkeypatch.setattr(httpx, "get", unavailable)
-    monkeypatch.setattr("app.services.chat_usage_reconciliation.time.time", lambda: 99)
-    reconcile_conversation_usage(settings, store, "long", display_messages)
+    for now in range(0, 102, 3):
+        monkeypatch.setattr(
+            "app.services.chat_usage_reconciliation.time.time",
+            lambda now=now: now,
+        )
+        reconcile_conversation_usage(settings, store, "long", display_messages)
     assert "gen-0" in requested
