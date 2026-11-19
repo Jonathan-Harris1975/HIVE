@@ -299,6 +299,26 @@ class SqlStore:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    def unresolved_interrupted_usage(self, conversation_id: str) -> list[dict[str, Any]]:
+        """Find recoverable turns even when they are outside the displayed history page."""
+        if not self.enabled:
+            return []
+        try:
+            with self._connect() as conn:
+                cur = conn.cursor()
+                cur.execute(self._sql("""
+                    SELECT id, role, cost_usd, metadata_json FROM hive_messages
+                    WHERE conversation_id=__PARAM__ AND role='assistant' AND cost_usd IS NULL
+                      AND metadata_json LIKE __PARAM__ ORDER BY created_at ASC, id ASC
+                """), (conversation_id, "%generation_id%"))
+                messages = self._fetch_dicts(cur)
+            for message in messages:
+                message["metadata"] = _json_or_none(message.pop("metadata_json", None))
+            return messages
+        except Exception as exc:
+            logger.warning("Unresolved usage lookup failed: %s", type(exc).__name__)
+            return []
+
     def record_file(
         self, file_result: Any, extra_metadata: dict[str, Any] | None = None
     ) -> dict[str, object]:
@@ -841,11 +861,12 @@ class SqlStore:
                 "messages": messages,
             }
         except Exception as exc:  # pragma: no cover
+            logger.warning("Conversation lookup failed: %s", type(exc).__name__)
             return {
                 "ok": False,
                 "enabled": True,
                 "conversation_id": conversation_id,
-                "error": str(exc),
+                "error": "conversation_storage_unavailable",
             }
 
     def first_conversation_exchange(self, conversation_id: str) -> dict[str, str | None]:
