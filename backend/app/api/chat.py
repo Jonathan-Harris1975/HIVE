@@ -311,6 +311,7 @@ async def _stream_and_record_chat(
     reply_parts: list[str] = []
     observed_attempts: list[dict[str, Any]] = []
     recorded = False
+    generation: dict[str, Any] = {}
     stream_started = time.perf_counter()
 
     meta_event: dict[str, Any] = {
@@ -327,6 +328,10 @@ async def _stream_and_record_chat(
     try:
         async for event in client.stream_chat_completion(payload, fallback_models=fallback_models):
             event_name = str(event.get("event") or "message")
+            if event.get("type") in {"model_attempt", "context_attempt_failed"}:
+                generation = {}
+            if event.get("type") == "generation":
+                generation = {key: event.get(key) for key in ("generation_id", "model_used", "provider")}
             if isinstance(event.get("usage_attempt"), dict):
                 observed_attempts.append(event["usage_attempt"])
             if event_name == "token":
@@ -340,11 +345,11 @@ async def _stream_and_record_chat(
                 result = await asyncio.to_thread(
                     _record_streamed_turn,
                     request=request,
-                    event=event,
+                    event={**generation, **event},
                     reply="".join(reply_parts),
                     conversation_id=conversation_id,
                     settings=settings,
-                    stream_ended_early=False,
+                    stream_ended_early=bool(event.get("partial_response") or (reply_parts and not event.get("ok"))),
                     request_context=request_context,
                     timings={
                         **(request_timings or {}),
@@ -370,11 +375,11 @@ async def _stream_and_record_chat(
         # A browser tab can close halfway through an SSE response. Preserve any text
         # already generated so the database and conversation list do not silently
         # diverge from what the user saw.
-        if not recorded and (reply_parts or observed_attempts):
+        if not recorded and (reply_parts or observed_attempts or generation):
             await asyncio.to_thread(
                 _record_streamed_turn,
                 request=request,
-                event={"ok": False, "hive_extra_usage": observed_attempts},
+                event={"ok": False, "hive_extra_usage": observed_attempts, **generation},
                 reply="".join(reply_parts),
                 conversation_id=conversation_id,
                 settings=settings,
@@ -419,6 +424,7 @@ def _record_streamed_turn(
             "finish_reason": event.get("finish_reason"),
             "completion_truncated": bool(event.get("completion_truncated")),
             "partial_response": bool(event.get("partial_response")),
+            "generation_id": event.get("generation_id"),
         },
     )
 
