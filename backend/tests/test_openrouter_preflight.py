@@ -601,3 +601,32 @@ async def test_stream_eof_without_completion_is_not_success(monkeypatch: pytest.
         assert events[-1]["ok"] is False
         assert events[-1]["partial_response"] is True
         assert events[-1]["finish_reason"] == "stream_interrupted"
+
+
+@pytest.mark.asyncio
+async def test_context_proxy_failure_marks_previous_usage_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = OpenRouterClient(Settings(openrouter_api_key="test-key"))
+
+    async def routes(payload):
+        yield "context_gateway", "https://proxy.invalid", {}, payload
+        yield "openrouter", "https://provider.invalid", {}, payload
+
+    class Response:
+        def __init__(self, status): self.status_code = status
+        @property
+        def text(self): return "gateway failed"
+        def json(self): return {"model": "m", "usage": {"cost": 0.02}, "choices": [{"message": {"content": "ok"}}]}
+
+    class Client:
+        def __init__(self, **kwargs): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+        async def post(self, url, **kwargs): return Response(502 if "proxy" in url else 200)
+
+    async def candidates(payload, fallback_models): yield {"model": "m"}
+    monkeypatch.setattr(client, "_context_attempts", routes)
+    monkeypatch.setattr(client, "_payload_attempts", candidates)
+    monkeypatch.setattr("app.services.openrouter.httpx.AsyncClient", Client)
+    result = await client.chat_completion({}, [])
+    assert result["usage"]["cost"] == 0.02
+    assert result["hive_extra_usage"] == [{"model": "m", "provider": None, "usage": None}]
