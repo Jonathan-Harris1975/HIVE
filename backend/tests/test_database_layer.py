@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -823,3 +824,71 @@ def test_chat_history_preserves_turn_order_for_equal_timestamps(
         "user_message": "question one",
         "assistant_reply": "answer one",
     }
+
+
+def test_schema_migration_backfills_legacy_message_sequences(tmp_path: Path) -> None:
+    db_path = tmp_path / "legacy-order.sqlite"
+    settings = Settings(APP_ENV="test", DATABASE_ENABLED=True, DATABASE_URL=f"sqlite:///{db_path}")
+    store = SqlStore(settings)
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """CREATE TABLE hive_conversations (
+                id TEXT PRIMARY KEY, mode TEXT NOT NULL, model TEXT, title TEXT,
+                auto_titled INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+            )"""
+        )
+        conn.execute(
+            """CREATE TABLE hive_messages (
+                id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, role TEXT NOT NULL,
+                content TEXT NOT NULL, model TEXT, provider TEXT, token_total INTEGER,
+                cost_usd REAL, metadata_json TEXT, created_at TEXT NOT NULL
+            )"""
+        )
+        conn.execute(
+            "INSERT INTO hive_conversations (id, mode, created_at, updated_at) VALUES (?, ?, ?, ?)",
+            ("legacy", "general", "2026-01-01", "2026-01-01"),
+        )
+        for message_id, role, content in (
+            ("msg-d", "assistant", "second answer"),
+            ("msg-c", "user", "second question"),
+            ("msg-b", "assistant", "first answer"),
+            ("msg-a", "user", "first question"),
+        ):
+            conn.execute(
+                "INSERT INTO hive_messages "
+                "(id, conversation_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)",
+                (message_id, "legacy", role, content, "2026-01-01T00:00:00+00:00"),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    assert store.init_schema()["ok"] is True
+    with store._transaction() as cur:
+        cur.execute(
+            "SELECT id, message_sequence FROM hive_messages WHERE conversation_id=? "
+            "ORDER BY message_sequence",
+            ("legacy",),
+        )
+        messages = cur.fetchall()
+        cur.execute("SELECT turn_sequence FROM hive_conversations WHERE id=?", ("legacy",))
+        turn_sequence = cur.fetchone()[0]
+    assert messages == [("msg-a", 1), ("msg-b", 2), ("msg-c", 3), ("msg-d", 4)]
+    assert turn_sequence == 2
+
+    assert store.record_chat(
+        conversation_id="legacy",
+        mode="general",
+        user_message="third question",
+        assistant_reply="third answer",
+        model_used="test",
+        provider="test",
+        usage={"cost": 0},
+    )["ok"]
+    with store._transaction() as cur:
+        cur.execute(
+            "SELECT message_sequence FROM hive_messages WHERE conversation_id=? ORDER BY message_sequence",
+            ("legacy",),
+        )
+        assert [row[0] for row in cur.fetchall()] == [1, 2, 3, 4, 5, 6]

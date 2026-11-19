@@ -1485,15 +1485,23 @@ class SqlStore:
                 )
 
     def _ensure_message_sequence_columns(self, cur: Any) -> None:
-        """Add non-destructive per-conversation message ordering to existing schemas."""
+        """Add ordering columns and deterministically sequence legacy messages."""
 
         if self.dialect == "postgres":
+            cur.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema = current_schema() AND table_name = 'hive_messages' "
+                "AND column_name = 'message_sequence'"
+            )
+            message_sequence_exists = cur.fetchone() is not None
             cur.execute(
                 "ALTER TABLE hive_conversations ADD COLUMN IF NOT EXISTS turn_sequence BIGINT NOT NULL DEFAULT 0"
             )
             cur.execute(
                 "ALTER TABLE hive_messages ADD COLUMN IF NOT EXISTS message_sequence BIGINT NOT NULL DEFAULT 0"
             )
+            if not message_sequence_exists:
+                self._backfill_message_sequences(cur)
             return
         if self.dialect in {"sqlite", "d1"}:
             cur.execute("PRAGMA table_info(hive_conversations)")
@@ -1504,10 +1512,35 @@ class SqlStore:
                 )
             cur.execute("PRAGMA table_info(hive_messages)")
             message_columns = {str(row[1]) for row in cur.fetchall()}
-            if "message_sequence" not in message_columns:
+            message_sequence_added = "message_sequence" not in message_columns
+            if message_sequence_added:
                 cur.execute(
                     "ALTER TABLE hive_messages ADD COLUMN message_sequence INTEGER NOT NULL DEFAULT 0"
                 )
+            if message_sequence_added:
+                self._backfill_message_sequences(cur)
+
+    def _backfill_message_sequences(self, cur: Any) -> None:
+        """Use created_at then id as a stable order for legacy rows with timestamp ties."""
+
+        cur.execute(
+            """UPDATE hive_messages
+            SET message_sequence = ordered.sequence
+            FROM (
+                SELECT id, ROW_NUMBER() OVER (
+                    PARTITION BY conversation_id ORDER BY created_at, id
+                ) AS sequence
+                FROM hive_messages
+            ) AS ordered
+            WHERE hive_messages.id = ordered.id"""
+        )
+        cur.execute(
+            """UPDATE hive_conversations
+            SET turn_sequence = COALESCE((
+                SELECT (MAX(message_sequence) + 1) / 2 FROM hive_messages
+                WHERE hive_messages.conversation_id = hive_conversations.id
+            ), 0)"""
+        )
 
     def _fetch_dicts(self, cur: Any) -> list[dict[str, Any]]:
         columns = [item[0] for item in cur.description or []]
