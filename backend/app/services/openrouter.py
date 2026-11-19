@@ -842,6 +842,7 @@ class OpenRouterClient:
         final_usage = None
         final_chunk = None
         final_finish_reason = None
+        generation_id = None
         attempt_started = time.perf_counter()
         saw_visible_token = False
 
@@ -912,6 +913,12 @@ class OpenRouterClient:
                             return
 
                         final_chunk = chunk
+                        chunk_id = chunk.get("id")
+                        if isinstance(chunk_id, str) and chunk_id.startswith("gen-") and chunk_id != generation_id:
+                            generation_id = chunk_id
+                            yield {"event": "meta", "type": "generation", "generation_id": generation_id,
+                                   "model_used": chunk.get("model") or final_model,
+                                   "provider": chunk.get("provider") or final_provider}
                         final_model = chunk.get("model") or final_model
                         final_provider = chunk.get("provider") or final_provider
                         final_usage = chunk.get("usage") or final_usage
