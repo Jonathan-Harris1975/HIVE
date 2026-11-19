@@ -60,7 +60,8 @@ async def test_auto_title_conversation_persists_clean_title(tmp_path: Path, monk
     list_response = store.list_conversations()
     assert list_response["conversations"][0]["auto_titled"] is True
     assert list_response["conversations"][0]["total_tokens"] == 10
-    assert list_response["conversations"][0]["total_cost_usd"] == 0
+    # The title provider omitted usage; the total must not imply zero cost.
+    assert list_response["conversations"][0]["total_cost_usd"] is None
 
 
 @pytest.mark.asyncio
