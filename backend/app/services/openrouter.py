@@ -309,14 +309,25 @@ class OpenRouterClient:
                         usage=event.get("usage"),
                         raw_final_chunk=event.get("raw_final_chunk"),
                     )
-                    if self.settings.openrouter_empty_reply_retry_enabled and not saw_token:
+                    if not saw_token:
+                        if self.settings.openrouter_empty_reply_retry_enabled:
+                            yield {
+                                "event": "meta",
+                                "type": "empty_reply_retry",
+                                "from_model": state.model_used,
+                                "message": "Model returned no visible assistant text; trying fallback if available.",
+                            }
+                            break
                         yield {
-                            "event": "meta",
-                            "type": "empty_reply_retry",
-                            "from_model": state.model_used,
-                            "message": "Model returned no visible assistant text; trying fallback if available.",
+                            "event": "done",
+                            "ok": False,
+                            "model_used": state.model_used,
+                            "provider": state.provider,
+                            "usage": state.usage,
+                            "message": "Model returned no visible assistant text.",
+                            "finish_reason": "empty_reply",
                         }
-                        break
+                        return
                     yield {
                         "event": "done",
                         "ok": True,
