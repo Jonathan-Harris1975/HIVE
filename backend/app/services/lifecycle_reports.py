@@ -616,14 +616,18 @@ def generate_and_store_weekly_report(storage: R2Storage, year: int, week: int, *
 
 def list_open_reviews(storage: R2Storage, limit: int = 100) -> list[dict[str, Any]]:
     page = storage.list_objects_page(prefix="reports/review-required/open/", bucket=BUCKET, limit=1000, delimiter="/", max_scan_keys=20_000)
+    if getattr(page, "next_cursor", None) or len(page.prefixes) > min(limit, 500):
+        raise RuntimeError("Review inventory is incomplete; cannot report a verified queue")
     items: list[dict[str, Any]] = []
-    for prefix in page.prefixes[:max(1, min(limit, 500))]:
+    for prefix in page.prefixes:
         review_path = f"{prefix.rstrip('/')}/review.json"
         try:
             payload = json.loads(storage.read_object(review_path, max_bytes=32 * 1024, bucket=BUCKET).content)
-        except (FileNotFoundError, RuntimeError, ValueError, json.JSONDecodeError):
-            continue
-        if isinstance(payload, dict) and payload.get("status") == "open":
+        except (FileNotFoundError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
+            raise RuntimeError("Review evidence inventory is incomplete") from exc
+        if not isinstance(payload, dict) or payload.get("status") not in {"open", "resolved", "closed"}:
+            raise RuntimeError("Stored review has an invalid lifecycle state")
+        if payload.get("status") == "open":
             current_year = dt.datetime.now(dt.timezone.utc).isocalendar().year
             resolved = False
             for resolved_year in (current_year, current_year - 1, current_year - 2):
@@ -631,8 +635,10 @@ def list_open_reviews(storage: R2Storage, limit: int = 100) -> list[dict[str, An
                     storage.read_object(f"reports/review-required/resolved/{resolved_year}/{payload.get('review_id')}/outcome.json", max_bytes=32 * 1024, bucket=BUCKET)
                     resolved = True
                     break
-                except (FileNotFoundError, RuntimeError, ValueError):
+                except FileNotFoundError:
                     continue
+                except (RuntimeError, ValueError) as exc:
+                    raise RuntimeError("Review-resolution evidence could not be verified") from exc
             if resolved:
                 continue
             try:
@@ -662,6 +668,107 @@ def list_open_reviews(storage: R2Storage, limit: int = 100) -> list[dict[str, An
                 payload["dispatch_status"] = "not_started"
             items.append(payload)
     return items
+
+
+def _current_review_source_heads(storage: R2Storage, reviews: list[dict[str, Any]]) -> dict[tuple[str, int | None], str]:
+    """Verify only reviewed source heads with bounded, authenticated GitHub reads.
+
+    For pull requests, the PR's exact head is authoritative, not main.
+    A failed or missing lookup never falls back to a cached R2 SHA.
+    """
+    settings = getattr(storage, "settings", None)
+    token = str(getattr(settings, "github_token", "") or "").strip()
+    if not settings or not token:
+        return {}
+    import httpx
+    from concurrent.futures import ThreadPoolExecutor
+    from app.core.governed_repositories import canonical_governed_repository_id
+    from app.services.repository_refresh import github_sources
+
+    try:
+        sources = github_sources(settings)
+    except ValueError:
+        return {}
+    targets: dict[tuple[str, int | None], str] = {}
+    for review in reviews[:100]:
+        source = review.get("source")
+        number = review.get("pr_number")
+        if not isinstance(source, str) or source not in REPOSITORIES:
+            continue
+        if number is not None and (not isinstance(number, int) or isinstance(number, bool) or number <= 0):
+            continue
+        slug = sources.get(canonical_governed_repository_id(source) or "")
+        if isinstance(slug, str) and re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", slug):
+            targets[(source, number)] = slug
+    # Bounded unique reads; extra reviews remain unverified rather than
+    # exhausting GitHub quota or HIVE's request time budget.
+    selected = list(targets.items())[:20]
+    result: dict[tuple[str, int | None], str] = {}
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
+               "X-GitHub-Api-Version": "2022-11-28"}
+    with httpx.Client(timeout=httpx.Timeout(4.0, connect=2.0), headers=headers) as client:
+        def lookup(item: tuple[tuple[str, int | None], str]) -> tuple[tuple[str, int | None], str | None]:
+            key, slug = item
+            number = key[1]
+            path = f"https://api.github.com/repos/{slug}/pulls/{number}" if number is not None else f"https://api.github.com/repos/{slug}/commits"
+            try:
+                response = client.get(path, params=None if number is not None else {"per_page": 1})
+                payload = response.json() if response.status_code == 200 else None
+            except (httpx.HTTPError, ValueError):
+                return key, None
+            if number is None:
+                sha = str(payload[0].get("sha") or "") if isinstance(payload, list) and payload and isinstance(payload[0], dict) else ""
+            elif isinstance(payload, dict) and payload.get("state") == "open" and (
+                (payload.get("head") or {}).get("repo") or {}).get("full_name") == slug:
+                sha = str((payload.get("head") or {}).get("sha") or "")
+            else:
+                sha = ""
+            return key, sha if SHA_RE.fullmatch(sha) else None
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            for key, sha in pool.map(lookup, selected):
+                if sha:
+                    result[key] = sha
+    return result
+
+
+def verified_open_review_snapshot(storage: R2Storage, limit: int = 100) -> dict[str, Any]:
+    """Never pass a superseded or unverifiable review as a *current* human task.
+
+    Unverified records remain in a separate diagnostic collection and R2 history.
+    An empty R2 queue is not a claim that every current GitHub workflow is green.
+    """
+    reviews = list_open_reviews(storage, limit)
+    sources = _current_review_source_heads(storage, reviews) if reviews else {}
+    observed = dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z")
+    current: list[dict[str, Any]] = []
+    unverified: list[dict[str, Any]] = []
+    for item in reviews:
+        source = item.get("source")
+        number = item.get("pr_number")
+        head = item.get("head_sha")
+        observed_head = sources.get((source, number)) if isinstance(source, str) and (
+            number is None or (isinstance(number, int) and not isinstance(number, bool) and number > 0)
+        ) else None
+        if isinstance(head, str) and SHA_RE.fullmatch(head) and head == observed_head:
+            current.append({**item, "source_verification": "exact_head_match"})
+        else:
+            unverified.append({
+                "review_id": item.get("review_id"), "source": source,
+                "pr_number": number, "head_sha": head, "title": item.get("title"),
+                "reason": "source_head_mismatch" if observed_head else "source_head_unavailable",
+                "source_verification": "unknown",
+            })
+    return {
+        "ok": True,
+        "scope": "persisted_human_review_records",
+        "observed_at": observed,
+        "verification_status": "verified" if not unverified else "unknown",
+        "count": len(current),
+        "items": current,
+        "unverified_count": len(unverified),
+        "unverified_items": unverified,
+    }
 
 
 def list_weekly_reports(storage: R2Storage, limit: int = 12) -> list[dict[str, Any]]:

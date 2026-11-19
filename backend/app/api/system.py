@@ -16,7 +16,7 @@ from app.services.ops_events import delete_all_ops_events, delete_ops_event, lis
 from app.services.providers.registry import discover_providers
 from app.services.repo_health import build_repo_health_report
 from app.services.production_manager import build_production_manager_report
-from app.services.lifecycle_reports import generate_and_store_weekly_report, list_open_reviews, list_weekly_reports, read_latest_weekly_report, read_repository_html, read_weekly_html
+from app.services.lifecycle_reports import generate_and_store_weekly_report, list_weekly_reports, read_latest_weekly_report, read_repository_html, read_weekly_html, verified_open_review_snapshot
 from app.services.repo_hygiene import repo_hygiene_report
 from app.storage.d1 import D1MetadataStore
 from app.storage.r2 import R2Storage
@@ -74,10 +74,15 @@ async def production_manager(
 def current_lifecycle_report(settings: Settings = Depends(get_settings)) -> dict[str, object]:
     """Read the current ISO-week report assembled from all eight repositories."""
     now = dt.datetime.now(dt.timezone.utc).isocalendar()
-    key = f"reports/weekly/{now.year}/{now.week:02d}/overview.json"
+    key = f"reports/weekly/{now.year}-W{now.week:02d}.json"
     try:
         key, report = read_latest_weekly_report(R2Storage(settings), now.year, now.week)
-        return {"ok": True, "available": True, "report": report, "r2_key": key}
+        return {
+            "ok": True, "available": True, "report": report, "r2_key": key,
+            "scope": "historical_weekly_snapshot", "live_status_verified": False,
+            "observed_at": report.get("generated_at"),
+            "served_at": dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
+        }
     except (FileNotFoundError, RuntimeError, ValueError) as exc:
         return {"ok": True, "available": False, "report": None, "r2_key": key, "reason": type(exc).__name__}
 
@@ -149,11 +154,12 @@ def lifecycle_report_history(limit: int = Query(12, ge=1, le=52), settings: Sett
 
 
 @router.get("/system/lifecycle-reviews")
-def lifecycle_reviews(settings: Settings = Depends(get_settings)) -> dict[str, object]:
+def lifecycle_reviews(response: Response, settings: Settings = Depends(get_settings)) -> dict[str, object]:
     """List durable HIVE review records that require a decision."""
     try:
-        items = list_open_reviews(R2Storage(settings))
-        return {"ok": True, "count": len(items), "items": items}
+        snapshot = verified_open_review_snapshot(R2Storage(settings))
+        response.headers["Cache-Control"] = "no-store, max-age=0"
+        return snapshot
     except RuntimeError as exc:
         return {"ok": False, "count": 0, "items": [], "error": type(exc).__name__}
 
