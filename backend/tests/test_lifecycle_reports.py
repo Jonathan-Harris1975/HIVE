@@ -160,6 +160,74 @@ class LifecycleReportTests(unittest.TestCase):
         self.assertEqual(snapshot["unverified_count"], 2)
         self.assertTrue(snapshot["observed_at"].endswith("Z"))
 
+    def test_fork_review_uses_governed_base_default_branch_head(self):
+        from app.services.lifecycle_reports import _current_review_source_heads
+
+        class Client:
+            def __init__(self, *, headers, timeout):
+                self.responses = [
+                    SimpleNamespace(status_code=200, json=lambda: {
+                        "state": "open",
+                        "base": {"repo": {"full_name": "owner/HIVE"}},
+                        "head": {"repo": {"full_name": "contributor/HIVE"}, "sha": "b" * 40},
+                    }),
+                    SimpleNamespace(status_code=200, json=lambda: [{"sha": "a" * 40}]),
+                ]
+                self.paths = []
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return None
+
+            def get(self, path, params=None):
+                self.paths.append((path, params))
+                return self.responses.pop(0)
+
+        client = Client(headers={}, timeout=None)
+        settings = SimpleNamespace(github_token="token")
+        storage = SimpleNamespace(settings=settings)
+        with (
+            patch("httpx.Client", return_value=client),
+            patch("app.core.governed_repositories.canonical_governed_repository_id", return_value="HIVE"),
+            patch("app.services.repository_refresh.github_sources", return_value={"HIVE": "owner/HIVE"}),
+        ):
+            heads = _current_review_source_heads(storage, [{"source": "HIVE", "pr_number": 7}])
+
+        self.assertEqual(heads, {("HIVE", 7): "a" * 40})
+        self.assertEqual(client.paths[-1], ("https://api.github.com/repos/owner/HIVE/commits", {"per_page": 1}))
+
+    def test_review_with_unexpected_base_repository_is_unavailable(self):
+        from app.services.lifecycle_reports import _current_review_source_heads
+
+        class Client:
+            def __init__(self, *, headers, timeout):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return None
+
+            def get(self, _path, params=None):
+                return SimpleNamespace(status_code=200, json=lambda: {
+                    "state": "open",
+                    "base": {"repo": {"full_name": "attacker/OTHER"}},
+                    "head": {"repo": {"full_name": "contributor/HIVE"}, "sha": "a" * 40},
+                })
+
+        storage = SimpleNamespace(settings=SimpleNamespace(github_token="token"))
+        with (
+            patch("httpx.Client", return_value=Client()),
+            patch("app.core.governed_repositories.canonical_governed_repository_id", return_value="HIVE"),
+            patch("app.services.repository_refresh.github_sources", return_value={"HIVE": "owner/HIVE"}),
+        ):
+            heads = _current_review_source_heads(storage, [{"source": "HIVE", "pr_number": 7}])
+
+        self.assertEqual(heads, {})
+
     def test_review_inventory_fail_closed_when_paginated_or_corrupt(self):
         from app.services.lifecycle_reports import list_open_reviews
 
@@ -405,4 +473,3 @@ class LifecycleReportTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
