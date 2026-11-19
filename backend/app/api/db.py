@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from app.core.config import Settings, get_settings
 from app.core.security import require_admin
+from app.services.chat_usage_reconciliation import reconcile_conversation_usage
 from app.storage.d1 import D1MetadataStore
 from app.storage.sql_store import SqlStore
 
@@ -222,7 +223,14 @@ def get_conversation(
 ) -> dict[str, object]:
     """Return one persisted conversation and its recent messages."""
 
-    return SqlStore(settings).get_conversation(conversation_id, limit=limit)
+    store = SqlStore(settings)
+    result = store.get_conversation(conversation_id, limit=limit)
+    messages = result.get("messages")
+    if result.get("ok") and isinstance(messages, list) and reconcile_conversation_usage(
+        settings, store, conversation_id, messages
+    ):
+        return store.get_conversation(conversation_id, limit=limit)
+    return result
 
 
 @router.patch("/db/conversations/{conversation_id}")
