@@ -228,15 +228,26 @@ async def auto_title_conversation(
         ),
     )
     usage = completion.get("usage")
-    if isinstance(usage, dict):
-        await asyncio.to_thread(
+    title_attempts = completion.get("hive_extra_usage") or []
+    if not completion.get("_all_attempts_failed"):
+        title_attempts = [*title_attempts, {"model": completion.get("model") or title_model,
+                                          "provider": completion.get("provider"), "usage": usage}]
+    for attempt in title_attempts:
+        attempt_usage = attempt.get("usage")
+        usage_record = await asyncio.to_thread(
             store.record_usage_event,
             conversation_id=conversation_id,
-            model_used=str(completion.get("model") or title_model),
-            provider=(str(completion.get("provider")) if completion.get("provider") else None),
-            usage=usage,
+            model_used=str(attempt.get("model") or title_model),
+            provider=(str(attempt.get("provider")) if attempt.get("provider") else None),
+            usage=attempt_usage if isinstance(attempt_usage, dict) else {},
             metadata={"operation": "conversation_auto_title"},
         )
+        if not usage_record.get("ok"):
+            return AutoTitleResponse(ok=False, conversation_id=conversation_id,
+                                     error=str(usage_record.get("error") or "title_usage_not_saved"))
+    if completion.get("_all_attempts_failed"):
+        return AutoTitleResponse(ok=False, conversation_id=conversation_id, skipped=True,
+                                 error=str(completion.get("hive_error_code") or "title_generation_failed"))
     choice = (completion.get("choices") or [{}])[0]
     message = choice.get("message") or {}
     title = _clean_auto_title(_reply_text(message.get("content")))
@@ -298,6 +309,7 @@ async def _stream_and_record_chat(
     conversation_id = request.conversation_id or str(uuid.uuid4())
     client = OpenRouterClient(settings)
     reply_parts: list[str] = []
+    observed_attempts: list[dict[str, Any]] = []
     recorded = False
     stream_started = time.perf_counter()
 
@@ -315,6 +327,8 @@ async def _stream_and_record_chat(
     try:
         async for event in client.stream_chat_completion(payload, fallback_models=fallback_models):
             event_name = str(event.get("event") or "message")
+            if isinstance(event.get("usage_attempt"), dict):
+                observed_attempts.append(event["usage_attempt"])
             if event_name == "token":
                 content = event.get("content")
                 if isinstance(content, str):
@@ -356,11 +370,11 @@ async def _stream_and_record_chat(
         # A browser tab can close halfway through an SSE response. Preserve any text
         # already generated so the database and conversation list do not silently
         # diverge from what the user saw.
-        if not recorded and reply_parts:
+        if not recorded and (reply_parts or observed_attempts):
             await asyncio.to_thread(
                 _record_streamed_turn,
                 request=request,
-                event={"ok": False},
+                event={"ok": False, "hive_extra_usage": observed_attempts},
                 reply="".join(reply_parts),
                 conversation_id=conversation_id,
                 settings=settings,
@@ -394,6 +408,7 @@ def _record_streamed_turn(
         model_used=str(event.get("model_used")) if event.get("model_used") else None,
         provider=str(event.get("provider")) if event.get("provider") else None,
         usage=usage if isinstance(usage, dict) else None,
+        extra_usage=event.get("hive_extra_usage") or [],
         metadata={
             "endpoint": "/v1/chat/stream",
             "ok": finish_ok,
@@ -436,6 +451,7 @@ async def chat(
         model_used=str(model_used) if model_used else None,
         provider=str(provider) if provider else None,
         usage=usage if isinstance(usage, dict) else None,
+        extra_usage=completion.get("hive_extra_usage") or [],
         metadata={
             "endpoint": "/v1/chat",
             "ok": ok,

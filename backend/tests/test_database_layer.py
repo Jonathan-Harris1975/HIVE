@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from app.core.config import Settings
 from app.storage.d1 import D1MetadataStore
 from app.storage.sql_store import SqlStore
@@ -751,3 +753,39 @@ def test_purge_reset_preview_is_read_only(monkeypatch) -> None:
     assert response.status_code == 200
     assert response.json()["total_rows"] == 3
     assert calls == ["preview"]
+
+
+def test_conversation_cost_includes_title_and_extra_attempts_and_unknowns(tmp_path: Path) -> None:
+    settings = Settings(APP_ENV="test", DATABASE_ENABLED=True, DATABASE_URL=f"sqlite:///{tmp_path / 'costs.sqlite'}")
+    store = SqlStore(settings)
+    assert store.init_schema()["ok"]
+    assert store.record_chat(conversation_id="costs", mode="general", user_message="hi", assistant_reply="hello",
+                             model_used="winner", provider="p", usage={"cost": 0.02, "total_tokens": 4},
+                             extra_usage=[{"model": "first", "provider": "p1", "usage": {"cost": 0.01}}])["ok"]
+    assert store.record_usage_event(conversation_id="costs", model_used="title", provider="p2", usage={"cost": 0.03})["ok"]
+    assert store.list_conversations()["conversations"][0]["total_cost_usd"] == pytest.approx(0.06)
+    assert store.record_usage_event(conversation_id="costs", model_used="unknown", provider=None, usage={})["ok"]
+    assert store.list_conversations()["conversations"][0]["total_cost_usd"] is None
+
+
+def test_extra_attempt_write_failure_rolls_back_chat(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = Settings(APP_ENV="test", DATABASE_ENABLED=True, DATABASE_URL=f"sqlite:///{tmp_path / 'rollback.sqlite'}")
+    store = SqlStore(settings)
+    assert store.init_schema()["ok"]
+    original = store._insert_cost_event
+    calls = 0
+
+    def fail_second(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("attempt write failed")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(store, "_insert_cost_event", fail_second)
+    result = store.record_chat(conversation_id="rollback", mode="general", user_message="hi", assistant_reply="hello",
+                               model_used="winner", provider="p", usage={"cost": 0.02},
+                               extra_usage=[{"model": "first", "usage": {"cost": 0.01}}])
+    assert result["ok"] is False
+    assert "attempt write failed" in result["error"]
+    assert store.list_conversations()["count"] == 0
