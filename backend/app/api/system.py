@@ -157,9 +157,9 @@ def lifecycle_report_history(limit: int = Query(12, ge=1, le=52), settings: Sett
 def lifecycle_reviews(response: Response, settings: Settings = Depends(get_settings)) -> dict[str, object]:
     """List durable HIVE review records that require a decision."""
     try:
-        response = verified_open_review_snapshot(R2Storage(settings))
+        snapshot = verified_open_review_snapshot(R2Storage(settings))
         response.headers["Cache-Control"] = "no-store, max-age=0"
-        return response
+        return snapshot
     except RuntimeError as exc:
         return {"ok": False, "count": 0, "items": [], "error": type(exc).__name__}
 
