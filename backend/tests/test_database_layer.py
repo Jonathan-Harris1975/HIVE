@@ -826,22 +826,37 @@ def test_chat_history_preserves_turn_order_for_equal_timestamps(
     }
 
 
-def test_schema_migration_backfills_legacy_message_sequences(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "sequence_columns_present",
+    [False, True],
+    ids=["new-columns", "existing-zero-columns"],
+)
+def test_schema_migration_backfills_legacy_message_sequences(
+    tmp_path: Path, sequence_columns_present: bool
+) -> None:
     db_path = tmp_path / "legacy-order.sqlite"
     settings = Settings(APP_ENV="test", DATABASE_ENABLED=True, DATABASE_URL=f"sqlite:///{db_path}")
     store = SqlStore(settings)
+    turn_sequence_column = (
+        "turn_sequence INTEGER NOT NULL DEFAULT 0, " if sequence_columns_present else ""
+    )
+    message_sequence_column = (
+        "message_sequence INTEGER NOT NULL DEFAULT 0, " if sequence_columns_present else ""
+    )
     conn = sqlite3.connect(db_path)
     try:
         conn.execute(
-            """CREATE TABLE hive_conversations (
+            f"""CREATE TABLE hive_conversations (
                 id TEXT PRIMARY KEY, mode TEXT NOT NULL, model TEXT, title TEXT,
-                auto_titled INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+                auto_titled INTEGER NOT NULL DEFAULT 0, {turn_sequence_column}
+                created_at TEXT NOT NULL, updated_at TEXT NOT NULL
             )"""
         )
         conn.execute(
-            """CREATE TABLE hive_messages (
+            f"""CREATE TABLE hive_messages (
                 id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, role TEXT NOT NULL,
-                content TEXT NOT NULL, model TEXT, provider TEXT, token_total INTEGER,
+                content TEXT NOT NULL, {message_sequence_column}
+                model TEXT, provider TEXT, token_total INTEGER,
                 cost_usd REAL, metadata_json TEXT, created_at TEXT NOT NULL
             )"""
         )

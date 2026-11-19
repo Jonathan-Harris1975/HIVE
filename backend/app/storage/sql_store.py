@@ -1489,18 +1489,13 @@ class SqlStore:
 
         if self.dialect == "postgres":
             cur.execute(
-                "SELECT column_name FROM information_schema.columns "
-                "WHERE table_schema = current_schema() AND table_name = 'hive_messages' "
-                "AND column_name = 'message_sequence'"
-            )
-            message_sequence_exists = cur.fetchone() is not None
-            cur.execute(
                 "ALTER TABLE hive_conversations ADD COLUMN IF NOT EXISTS turn_sequence BIGINT NOT NULL DEFAULT 0"
             )
             cur.execute(
                 "ALTER TABLE hive_messages ADD COLUMN IF NOT EXISTS message_sequence BIGINT NOT NULL DEFAULT 0"
             )
-            if not message_sequence_exists:
+            cur.execute("SELECT 1 FROM hive_messages WHERE message_sequence = 0 LIMIT 1")
+            if cur.fetchone() is not None:
                 self._backfill_message_sequences(cur)
             return
         if self.dialect in {"sqlite", "d1"}:
@@ -1512,12 +1507,12 @@ class SqlStore:
                 )
             cur.execute("PRAGMA table_info(hive_messages)")
             message_columns = {str(row[1]) for row in cur.fetchall()}
-            message_sequence_added = "message_sequence" not in message_columns
-            if message_sequence_added:
+            if "message_sequence" not in message_columns:
                 cur.execute(
                     "ALTER TABLE hive_messages ADD COLUMN message_sequence INTEGER NOT NULL DEFAULT 0"
                 )
-            if message_sequence_added:
+            cur.execute("SELECT 1 FROM hive_messages WHERE message_sequence = 0 LIMIT 1")
+            if cur.fetchone() is not None:
                 self._backfill_message_sequences(cur)
 
     def _backfill_message_sequences(self, cur: Any) -> None:
