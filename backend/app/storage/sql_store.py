@@ -210,10 +210,10 @@ class SqlStore:
                         self._insert_cost_event(
                             cur, conv_id, safe_model_used, safe_provider, usage, created
                         )
-                    for attempt in extra_usage or []:
-                        attempt_usage = attempt.get("usage")
+                    for usage_attempt in extra_usage or []:
+                        attempt_usage = usage_attempt.get("usage")
                         self._insert_cost_event(
-                            cur, conv_id, attempt.get("model"), attempt.get("provider"),
+                            cur, conv_id, usage_attempt.get("model"), usage_attempt.get("provider"),
                             attempt_usage if isinstance(attempt_usage, dict) else {}, created,
                         )
                 response: dict[str, object] = {"ok": True, "conversation_id": conv_id}
