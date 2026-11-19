@@ -747,8 +747,9 @@ def verified_open_review_snapshot(storage: R2Storage, limit: int = 100) -> dict[
         source = item.get("source")
         number = item.get("pr_number")
         head = item.get("head_sha")
-        key = (source, number)
-        observed_head = sources.get(key)
+        observed_head = sources.get((source, number)) if isinstance(source, str) and (
+            number is None or (isinstance(number, int) and not isinstance(number, bool) and number > 0)
+        ) else None
         if isinstance(head, str) and SHA_RE.fullmatch(head) and head == observed_head:
             current.append({**item, "source_verification": "exact_head_match"})
         else:
