@@ -160,6 +160,26 @@ class LifecycleReportTests(unittest.TestCase):
         self.assertEqual(snapshot["unverified_count"], 2)
         self.assertTrue(snapshot["observed_at"].endswith("Z"))
 
+    def test_review_inventory_fail_closed_when_paginated_or_corrupt(self):
+        from app.services.lifecycle_reports import list_open_reviews
+
+        class IncompleteStorage:
+            def list_objects_page(self, **_kwargs):
+                return SimpleNamespace(prefixes=["reports/review-required/open/review-1/"], next_cursor="more")
+
+        with self.assertRaisesRegex(RuntimeError, "incomplete"):
+            list_open_reviews(IncompleteStorage())
+
+        class BrokenStorage:
+            def list_objects_page(self, **_kwargs):
+                return SimpleNamespace(prefixes=["reports/review-required/open/review-1/"], next_cursor=None)
+
+            def read_object(self, *_args, **_kwargs):
+                raise RuntimeError("R2 upstream error")
+
+        with self.assertRaisesRegex(RuntimeError, "incomplete"):
+            list_open_reviews(BrokenStorage())
+
     def test_empty_review_snapshot_is_only_a_persisted_record_claim(self):
         with (
             patch("app.services.lifecycle_reports.list_open_reviews", return_value=[]),
