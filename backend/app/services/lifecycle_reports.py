@@ -719,8 +719,17 @@ def _current_review_source_heads(storage: R2Storage, reviews: list[dict[str, Any
             if number is None:
                 sha = str(payload[0].get("sha") or "") if isinstance(payload, list) and payload and isinstance(payload[0], dict) else ""
             elif isinstance(payload, dict) and payload.get("state") == "open" and (
-                (payload.get("head") or {}).get("repo") or {}).get("full_name") == slug:
-                sha = str((payload.get("head") or {}).get("sha") or "")
+                (payload.get("base") or {}).get("repo") or {}).get("full_name") == slug:
+                head_repo = ((payload.get("head") or {}).get("repo") or {}).get("full_name")
+                if head_repo == slug:
+                    sha = str((payload.get("head") or {}).get("sha") or "")
+                else:
+                    try:
+                        response = client.get(f"https://api.github.com/repos/{slug}/commits", params={"per_page": 1})
+                        commits = response.json() if response.status_code == 200 else None
+                    except (httpx.HTTPError, ValueError):
+                        return key, None
+                    sha = str(commits[0].get("sha") or "") if isinstance(commits, list) and commits and isinstance(commits[0], dict) else ""
             else:
                 sha = ""
             return key, sha if SHA_RE.fullmatch(sha) else None
@@ -813,4 +822,3 @@ def list_weekly_reports(storage: R2Storage, limit: int = 12) -> list[dict[str, A
             summaries.append(summary)
     summaries.sort(key=lambda item: (int(item.get("period", {}).get("iso_year", 0)), int(item.get("period", {}).get("iso_week", 0))), reverse=True)
     return summaries[:limit]
-
