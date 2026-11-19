@@ -616,7 +616,7 @@ def generate_and_store_weekly_report(storage: R2Storage, year: int, week: int, *
 
 def list_open_reviews(storage: R2Storage, limit: int = 100) -> list[dict[str, Any]]:
     page = storage.list_objects_page(prefix="reports/review-required/open/", bucket=BUCKET, limit=1000, delimiter="/", max_scan_keys=20_000)
-    if page.next_cursor or len(page.prefixes) > min(limit, 500):
+    if getattr(page, "next_cursor", None) or len(page.prefixes) > min(limit, 500):
         raise RuntimeError("Review inventory is incomplete; cannot report a verified queue")
     items: list[dict[str, Any]] = []
     for prefix in page.prefixes:
