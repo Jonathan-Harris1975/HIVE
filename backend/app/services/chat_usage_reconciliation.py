@@ -22,9 +22,16 @@ def reconcile_conversation_usage(
         return False
     # The caller's message list is display-limited. Query SQL separately so
     # old unresolved turns remain eligible for the rotating recovery batch.
-    eligible_messages = store.unresolved_interrupted_usage(conversation_id)
+    eligible_messages = {
+        str(message["id"]): message for message in messages if message.get("id")
+    }
+    eligible_messages.update({
+        str(message["id"]): message
+        for message in store.unresolved_interrupted_usage(conversation_id)
+        if message.get("id")
+    })
     candidates = []
-    for message in eligible_messages:
+    for message in eligible_messages.values():
         metadata = message.get("metadata")
         if (message.get("role") == "assistant" and message.get("cost_usd") is None
                 and isinstance(metadata, dict) and metadata.get("stream_ended_early")
