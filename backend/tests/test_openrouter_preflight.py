@@ -366,6 +366,7 @@ async def test_stream_chat_completion_retries_provider_error_before_tokens(
         "from_model": "bad-primary",
         "model_used": "bad-primary",
         "message": "provider stream error",
+        "usage_attempt": {"model": "bad-primary", "provider": None, "usage": None},
     }
     assert events[2]["type"] == "model_attempt"
     assert events[2]["model_used"] == "fallback-good:free"
@@ -510,3 +511,63 @@ async def test_payload_attempts_can_disable_implicit_free_fallback(monkeypatch) 
     ]
 
     assert attempts == []
+
+
+@pytest.mark.asyncio
+async def test_stream_preserves_empty_attempt_usage_for_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = OpenRouterClient(Settings(openrouter_api_key="test-key"))
+
+    async def candidates(payload, fallback_models):
+        yield {"model": "first"}
+        yield {"model": "second"}
+
+    async def stream(payload):
+        if payload["model"] == "first":
+            yield {"event": "done", "ok": True, "model_used": "first", "provider": "p1", "usage": {"total_tokens": 10, "cost": 0.01}}
+        else:
+            yield {"event": "token", "content": "hello"}
+            yield {"event": "done", "ok": True, "model_used": "second", "usage": {"total_tokens": 5, "cost": 0.02}}
+
+    monkeypatch.setattr(client, "_payload_attempts", candidates)
+    monkeypatch.setattr(client, "_stream_one_attempt", stream)
+    events = [event async for event in client.stream_chat_completion({}, [])]
+    assert events[-1]["usage"]["cost"] == 0.02
+    assert events[-1]["hive_extra_usage"] == [{"model": "first", "provider": "p1", "usage": {"total_tokens": 10, "cost": 0.01}}]
+
+
+@pytest.mark.asyncio
+async def test_nonstream_preserves_expanded_budget_attempt_usage(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = OpenRouterClient(Settings(openrouter_api_key="test-key"))
+
+    async def candidates(payload, fallback_models):
+        yield {"model": "first", "max_tokens": 32}
+
+    async def post(payload):
+        if payload["max_tokens"] == 32:
+            return {"model": "first", "usage": {"cost": 0.01}, "choices": [{"message": {"content": ""}}]}
+        return {"model": "first", "usage": {"cost": 0.02}, "choices": [{"message": {"content": "answer"}}]}
+
+    monkeypatch.setattr(client, "_payload_attempts", candidates)
+    monkeypatch.setattr(client, "_post_json", post)
+    result = await client.chat_completion({}, [])
+    assert result["hive_extra_usage"][0]["usage"]["cost"] == 0.01
+    assert result["usage"]["cost"] == 0.02
+
+
+@pytest.mark.asyncio
+async def test_legacy_function_call_is_not_retried_as_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = OpenRouterClient(Settings(openrouter_api_key="test-key"))
+    calls = []
+
+    async def candidates(payload, fallback_models):
+        yield {"model": "first", "max_tokens": 32}
+
+    async def post(payload):
+        calls.append(payload)
+        return {"choices": [{"message": {"content": None, "function_call": {"name": "lookup", "arguments": "{}"}}}]}
+
+    monkeypatch.setattr(client, "_payload_attempts", candidates)
+    monkeypatch.setattr(client, "_post_json", post)
+    result = await client.chat_completion({}, [])
+    assert len(calls) == 1
+    assert result["choices"][0]["message"]["function_call"]["name"] == "lookup"
