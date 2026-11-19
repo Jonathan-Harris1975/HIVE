@@ -375,6 +375,29 @@ async def test_stream_chat_completion_retries_provider_error_before_tokens(
 
 
 @pytest.mark.asyncio
+async def test_empty_stream_is_failure_when_empty_retry_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = Settings(openrouter_api_key="test-key", openrouter_empty_reply_retry_enabled=False)
+    client = OpenRouterClient(settings)
+    attempted = []
+
+    async def fake_attempts(payload, fallback_models):
+        yield {**payload, "model": "primary"}
+        yield {**payload, "model": "fallback"}
+
+    async def fake_stream(payload):
+        attempted.append(payload["model"])
+        yield {"event": "done", "ok": True, "model_used": payload["model"], "usage": {"total_tokens": 10}}
+
+    monkeypatch.setattr(client, "_payload_attempts", fake_attempts)
+    monkeypatch.setattr(client, "_stream_one_attempt", fake_stream)
+    events = [event async for event in client.stream_chat_completion({"model": "primary"}, [])]
+    assert attempted == ["primary"]
+    assert events[-1]["ok"] is False
+    assert events[-1]["finish_reason"] == "empty_reply"
+    assert events[-1]["usage"] == {"total_tokens": 10}
+
+
+@pytest.mark.asyncio
 async def test_payload_attempts_apply_headroom_per_selected_model(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
