@@ -292,14 +292,17 @@ class OpenRouterClient:
                     yield event
                     continue
                 if event.get("event") == "retry_model":
-                    if not event.get("usage_accounted"):
-                        extra_usage.append({"model": event.get("model_used") or state.model_used,
-                                            "provider": event.get("provider"), "usage": event.get("usage")})
                     if saw_token:
                         # Once tokens have left the server, we cannot safely replay into the same stream.
                         yield {"event": "error", "message": event["message"], "model": candidate_payload.get("model")}
-                        yield {"event": "done", "ok": False, "model_used": state.model_used, "hive_extra_usage": extra_usage}
+                        yield {"event": "done", "ok": False, "model_used": event.get("model_used") or state.model_used,
+                               "provider": event.get("provider"), "usage": event.get("usage"),
+                               "partial_response": True, "finish_reason": "stream_interrupted",
+                               "hive_extra_usage": extra_usage}
                         return
+                    if not event.get("usage_accounted"):
+                        extra_usage.append({"model": event.get("model_used") or state.model_used,
+                                            "provider": event.get("provider"), "usage": event.get("usage")})
                     yield {
                         "event": "meta",
                         "type": "model_fallback",
@@ -842,6 +845,7 @@ class OpenRouterClient:
         final_usage = None
         final_chunk = None
         final_finish_reason = None
+        generation_id = None
         attempt_started = time.perf_counter()
         saw_visible_token = False
 
@@ -912,6 +916,12 @@ class OpenRouterClient:
                             return
 
                         final_chunk = chunk
+                        chunk_id = chunk.get("id")
+                        if isinstance(chunk_id, str) and chunk_id.startswith("gen-") and chunk_id != generation_id:
+                            generation_id = chunk_id
+                            yield {"event": "meta", "type": "generation", "generation_id": generation_id,
+                                   "model_used": chunk.get("model") or final_model,
+                                   "provider": chunk.get("provider") or final_provider}
                         final_model = chunk.get("model") or final_model
                         final_provider = chunk.get("provider") or final_provider
                         final_usage = chunk.get("usage") or final_usage
