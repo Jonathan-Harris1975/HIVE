@@ -229,8 +229,9 @@ async def auto_title_conversation(
     )
     usage = completion.get("usage")
     title_attempts = completion.get("hive_extra_usage") or []
-    title_attempts = [*title_attempts, {"model": completion.get("model") or title_model,
-                                      "provider": completion.get("provider"), "usage": usage}]
+    if not completion.get("_all_attempts_failed"):
+        title_attempts = [*title_attempts, {"model": completion.get("model") or title_model,
+                                          "provider": completion.get("provider"), "usage": usage}]
     for attempt in title_attempts:
         attempt_usage = attempt.get("usage")
         usage_record = await asyncio.to_thread(
@@ -244,6 +245,9 @@ async def auto_title_conversation(
         if not usage_record.get("ok"):
             return AutoTitleResponse(ok=False, conversation_id=conversation_id,
                                      error=str(usage_record.get("error") or "title_usage_not_saved"))
+    if completion.get("_all_attempts_failed"):
+        return AutoTitleResponse(ok=False, conversation_id=conversation_id, skipped=True,
+                                 error=str(completion.get("hive_error_code") or "title_generation_failed"))
     choice = (completion.get("choices") or [{}])[0]
     message = choice.get("message") or {}
     title = _clean_auto_title(_reply_text(message.get("content")))
