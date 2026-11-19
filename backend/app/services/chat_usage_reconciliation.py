@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import math
+import secrets
 from typing import Any
 
 import httpx
@@ -19,8 +20,10 @@ def reconcile_conversation_usage(
     """Try a bounded number of lookups; unavailable evidence stays unknown for the next read."""
     if not settings.openrouter_api_key:
         return False
+    eligible = {str(message["id"]): message for message in messages if message.get("id")}
+    eligible.update({str(message["id"]): message for message in store.unresolved_interrupted_usage(conversation_id) if message.get("id")})
     candidates = []
-    for message in messages:
+    for message in eligible.values():
         metadata = message.get("metadata")
         if (message.get("role") == "assistant" and message.get("cost_usd") is None
                 and isinstance(metadata, dict) and metadata.get("stream_ended_early")
@@ -28,7 +31,8 @@ def reconcile_conversation_usage(
                 and metadata["generation_id"].startswith("gen-") and message.get("id")):
             candidates.append((message, metadata["generation_id"]))
     changed = False
-    for message, generation_id in candidates[:3]:
+    start = secrets.randbelow(len(candidates)) if candidates else 0
+    for message, generation_id in (candidates[start:] + candidates[:start])[:3]:
         try:
             response = httpx.get(
                 f"{settings.openrouter_base_url.rstrip('/')}/generation",
