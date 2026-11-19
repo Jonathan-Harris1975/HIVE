@@ -789,7 +789,7 @@ class SqlStore:
                     SELECT id, role, content, model, provider, token_total, cost_usd, metadata_json, created_at
                     FROM hive_messages
                     WHERE conversation_id=__PARAM__
-                    ORDER BY created_at DESC
+                    ORDER BY created_at DESC, CASE WHEN role='assistant' THEN 0 ELSE 1 END ASC, id DESC
                     LIMIT __PARAM__
                     """
                     ),
@@ -829,7 +829,7 @@ class SqlStore:
                     SELECT role, content
                     FROM hive_messages
                     WHERE conversation_id=__PARAM__ AND role IN ('user', 'assistant')
-                    ORDER BY created_at ASC
+                    ORDER BY created_at ASC, CASE WHEN role='user' THEN 0 ELSE 1 END ASC, id ASC
                     LIMIT 8
                     """
                     ),
@@ -874,7 +874,7 @@ class SqlStore:
                     SELECT role, content
                     FROM hive_messages
                     WHERE conversation_id=__PARAM__ AND role IN ('user', 'assistant')
-                    ORDER BY created_at DESC
+                    ORDER BY created_at DESC, CASE WHEN role='assistant' THEN 0 ELSE 1 END ASC, id DESC
                     LIMIT __PARAM__
                     """
                     ),
