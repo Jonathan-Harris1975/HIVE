@@ -180,6 +180,22 @@ class OpenRouterClient:
         for candidate_payload in candidate_payloads:
             model = candidate_payload.get("model")
             response_payload = await self._post_json(candidate_payload)
+            # A reasoning model can consume the entire completion budget without
+            # producing visible text. Retry once with a larger budget before
+            # charging ahead to another provider/model.
+            if (
+                self.settings.openrouter_empty_reply_retry_enabled
+                and not response_payload.get("_retryable_model_error")
+                and self._has_empty_visible_reply(response_payload)
+                and not self._has_tool_calls(response_payload)
+            ):
+                original_budget = candidate_payload.get("max_tokens")
+                if isinstance(original_budget, int) and 0 < original_budget < 2048:
+                    expanded_payload = {
+                        **candidate_payload,
+                        "max_tokens": min(4096, max(2048, original_budget * 2)),
+                    }
+                    response_payload = await self._post_json(expanded_payload)
             if response_payload.get("_retryable_model_error"):
                 attempts.append(
                     {
@@ -190,7 +206,7 @@ class OpenRouterClient:
                 )
                 continue
 
-            if self.settings.openrouter_empty_reply_retry_enabled and self._has_empty_visible_reply(response_payload):
+            if self.settings.openrouter_empty_reply_retry_enabled and self._has_empty_visible_reply(response_payload) and not self._has_tool_calls(response_payload):
                 attempts.append(
                     {
                         "model": model,
@@ -320,6 +336,15 @@ class OpenRouterClient:
             "finish_reason": "all_attempts_failed",
             "completion_truncated": False,
         }
+
+    @staticmethod
+    def _has_tool_calls(response_payload: dict[str, Any]) -> bool:
+        """Tool calls are structured output, not an empty model reply."""
+        return any(
+            bool((choice.get("message") or {}).get("tool_calls"))
+            for choice in (response_payload.get("choices") or [])
+            if isinstance(choice, dict)
+        )
 
     def _has_empty_visible_reply(self, response_payload: dict[str, Any]) -> bool:
         choices = response_payload.get("choices") or []
