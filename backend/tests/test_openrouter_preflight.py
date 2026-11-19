@@ -571,3 +571,33 @@ async def test_legacy_function_call_is_not_retried_as_empty(monkeypatch: pytest.
     result = await client.chat_completion({}, [])
     assert len(calls) == 1
     assert result["choices"][0]["message"]["function_call"]["name"] == "lookup"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("lines,expected", [
+    (["data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}"], "done"),
+    ([], "retry_model"),
+])
+async def test_stream_eof_without_completion_is_not_success(monkeypatch: pytest.MonkeyPatch, lines, expected) -> None:
+    class Response:
+        status_code = 200
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+        async def aiter_lines(self):
+            for line in lines:
+                yield line
+
+    class Client:
+        def __init__(self, **kwargs): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+        def stream(self, *args, **kwargs): return Response()
+
+    monkeypatch.setattr("app.services.openrouter.httpx.AsyncClient", Client)
+    client = OpenRouterClient(Settings(openrouter_api_key="test-key"))
+    events = [e async for e in client._stream_route_attempt({"model": "m"}, url="https://example.test", headers={})]
+    assert events[-1]["event"] == expected
+    if expected == "done":
+        assert events[-1]["ok"] is False
+        assert events[-1]["partial_response"] is True
+        assert events[-1]["finish_reason"] == "stream_interrupted"
