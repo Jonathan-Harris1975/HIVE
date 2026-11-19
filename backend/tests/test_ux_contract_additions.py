@@ -112,3 +112,26 @@ def test_repo_health_readiness_is_derived_from_operational_status() -> None:
 
     assert enriched["readiness"]["status"] == "partial"
     assert enriched["readiness"]["detail"] == "Operational API reported partial capability."
+
+
+@pytest.mark.asyncio
+async def test_failed_auto_title_does_not_invent_an_unknown_cost_event(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = Settings(APP_ENV="test", DATABASE_ENABLED=True, DATABASE_URL=f"sqlite:///{tmp_path / 'title.sqlite'}", OPENROUTER_API_KEY="test")
+    store = SqlStore(settings)
+    assert store.init_schema()["ok"]
+    assert store.record_chat(conversation_id="title-fail", mode="general", user_message="hello", assistant_reply="world",
+                             model_used="chat", provider="p", usage={"cost": 0.01})["ok"]
+
+    class FailedTitleClient:
+        def __init__(self, settings): pass
+        async def chat_completion(self, payload, fallback_models=None):
+            return {"_all_attempts_failed": True, "usage": None, "hive_extra_usage": [
+                {"model": "title", "provider": "p", "usage": {"cost": 0.02}}],
+                "choices": [{"message": {"content": "OpenRouter returned no visible assistant text."}}]}
+
+    monkeypatch.setattr(chat_api, "OpenRouterClient", FailedTitleClient)
+    response = await chat_api.auto_title_conversation("title-fail", settings=settings)
+    assert response.skipped is True
+    assert response.ok is False
+    assert store.get_conversation("title-fail")["conversation"]["title"] == "hello"
+    assert store.list_conversations()["conversations"][0]["total_cost_usd"] == pytest.approx(0.03)
