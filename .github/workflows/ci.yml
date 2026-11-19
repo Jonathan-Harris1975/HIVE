@@ -86,15 +86,15 @@ jobs:
           python -m compileall -q backend/app backend/tests
           python -m pytest backend/tests -q --tb=short --cov=app --cov-report=term-missing --cov-report=xml:coverage.xml --cov-fail-under=74
 
-      - name: Upload coverage to Codecov
-        # Free-tier budget: upload once per week, in the run that precedes the Council.
+      - name: Retain coverage report
+        # Keep weekly coverage evidence without external identity federation.
         if: github.event_name == 'workflow_dispatch' && matrix.python-version == '3.14.7'
-        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          use_oidc: true
-          files: coverage.xml
-          flags: unit
-          fail_ci_if_error: false
+          name: hive-coverage-${{ github.sha }}
+          path: coverage.xml
+          if-no-files-found: error
+          retention-days: 30
 
   performance:
     name: API performance regression gate (Python 3.14)
