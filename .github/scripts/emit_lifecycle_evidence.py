@@ -101,15 +101,42 @@ def collect_current_evidence(record):
         return result_status(latest)
 
     def coverage():
-        payload = read(f"/commits/{record['head_sha']}/status?per_page=100")
-        rows = payload.get("statuses")
-        if payload.get("sha") != record["head_sha"] or not isinstance(rows, list) or len(rows) >= 100:
+        query = urllib.parse.urlencode({
+            "head_sha": record["head_sha"], "branch": record.get("branch") or "",
+            "event": "workflow_dispatch", "per_page": 100,
+        })
+        payload = read(f"/actions/workflows/ci.yml/runs?{query}")
+        rows = payload.get("workflow_runs")
+        if not isinstance(rows, list) or len(rows) >= 100:
             raise EvidenceUnavailable()
-        rows = [row for row in rows if row.get("context") == "codecov/project"]
-        latest = max(rows, key=lambda row: int(row.get("id") or 0), default=None)
-        if latest is None:
-            return check("codecov/project", "codecov")
-        return {"success": "pass", "failure": "fail", "error": "fail", "pending": "running"}.get(latest.get("state"), "unknown")
+        rows = [
+            row for row in rows
+            if row.get("head_sha") == record["head_sha"]
+            and row.get("head_repository", {}).get("full_name") == slug
+            and str(row.get("path", "")).split("@", 1)[0] == ".github/workflows/ci.yml"
+            and row.get("event") == "workflow_dispatch"
+        ]
+        latest = max(
+            rows,
+            key=lambda row: (
+                int(row.get("run_number") or 0),
+                int(row.get("run_attempt") or 0),
+                int(row.get("id") or 0),
+            ),
+            default=None,
+        )
+        status = result_status(latest)
+        if status != "pass":
+            return status
+        payload = read(f"/actions/runs/{latest['id']}/artifacts?per_page=100")
+        artifacts = payload.get("artifacts")
+        if not isinstance(artifacts, list) or len(artifacts) >= 100:
+            raise EvidenceUnavailable()
+        expected = f"hive-coverage-{record['head_sha']}"
+        return "pass" if any(
+            item.get("name") == expected and item.get("expired") is False
+            for item in artifacts
+        ) else "unknown"
 
     def workflow(filename, branch, names, step=None, artifact=None):
         query = urllib.parse.urlencode({"head_sha": record["head_sha"], "branch": branch, "per_page": 100})
