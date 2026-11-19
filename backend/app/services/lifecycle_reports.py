@@ -616,14 +616,18 @@ def generate_and_store_weekly_report(storage: R2Storage, year: int, week: int, *
 
 def list_open_reviews(storage: R2Storage, limit: int = 100) -> list[dict[str, Any]]:
     page = storage.list_objects_page(prefix="reports/review-required/open/", bucket=BUCKET, limit=1000, delimiter="/", max_scan_keys=20_000)
+    if page.next_cursor or len(page.prefixes) > min(limit, 500):
+        raise RuntimeError("Review inventory is incomplete; cannot report a verified queue")
     items: list[dict[str, Any]] = []
-    for prefix in page.prefixes[:max(1, min(limit, 500))]:
+    for prefix in page.prefixes:
         review_path = f"{prefix.rstrip('/')}/review.json"
         try:
             payload = json.loads(storage.read_object(review_path, max_bytes=32 * 1024, bucket=BUCKET).content)
-        except (FileNotFoundError, RuntimeError, ValueError, json.JSONDecodeError):
-            continue
-        if isinstance(payload, dict) and payload.get("status") == "open":
+        except (FileNotFoundError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
+            raise RuntimeError("Review evidence inventory is incomplete") from exc
+        if not isinstance(payload, dict) or payload.get("status") not in {"open", "resolved", "closed"}:
+            raise RuntimeError("Stored review has an invalid lifecycle state")
+        if payload.get("status") == "open":
             current_year = dt.datetime.now(dt.timezone.utc).isocalendar().year
             resolved = False
             for resolved_year in (current_year, current_year - 1, current_year - 2):
@@ -631,8 +635,10 @@ def list_open_reviews(storage: R2Storage, limit: int = 100) -> list[dict[str, An
                     storage.read_object(f"reports/review-required/resolved/{resolved_year}/{payload.get('review_id')}/outcome.json", max_bytes=32 * 1024, bucket=BUCKET)
                     resolved = True
                     break
-                except (FileNotFoundError, RuntimeError, ValueError):
+                except FileNotFoundError:
                     continue
+                except (RuntimeError, ValueError) as exc:
+                    raise RuntimeError("Review-resolution evidence could not be verified") from exc
             if resolved:
                 continue
             try:
