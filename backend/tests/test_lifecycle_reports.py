@@ -14,6 +14,7 @@ from app.services.lifecycle_reports import (
     collect_weekly_evidence,
     generate_and_store_weekly_report,
     list_weekly_reports,
+    verified_open_review_snapshot,
     render_weekly_html,
 )
 
@@ -134,6 +135,41 @@ class LifecycleReportTests(unittest.TestCase):
 
         listed = list_open_reviews(Storage())
         self.assertEqual([item["review_id"] for item in listed], ["review-held"])
+
+    def test_verified_review_snapshot_never_promotes_unverified_heads(self):
+        candidate = {"review_id": "review-current", "source": "HIVE", "pr_number": 7,
+                     "head_sha": "a" * 40, "title": "Human hold"}
+        moved = {"review_id": "review-superseded", "source": "AIMS", "pr_number": None,
+                 "head_sha": "b" * 40, "title": "Old hold"}
+        unavailable = {"review_id": "review-unknown", "source": "HIVE-UI", "pr_number": None,
+                       "head_sha": "c" * 40, "title": "Unverified hold"}
+        with (
+            patch("app.services.lifecycle_reports.list_open_reviews", return_value=[candidate, moved, unavailable]),
+            patch("app.services.lifecycle_reports._current_review_source_heads",
+                  return_value={("HIVE", 7): "a" * 40, ("AIMS", None): "d" * 40}),
+        ):
+            snapshot = verified_open_review_snapshot(object())
+        self.assertEqual(snapshot["verification_status"], "unknown")
+        self.assertEqual(snapshot["scope"], "persisted_human_review_records")
+        self.assertEqual([x["review_id"] for x in snapshot["items"]], ["review-current"])
+        self.assertEqual(snapshot["items"][0]["source_verification"], "exact_head_match")
+        self.assertEqual([x["review_id"] for x in snapshot["unverified_items"]],
+                         ["review-superseded", "review-unknown"])
+        self.assertEqual([x["reason"] for x in snapshot["unverified_items"]],
+                         ["source_head_mismatch", "source_head_unavailable"])
+        self.assertEqual(snapshot["unverified_count"], 2)
+        self.assertTrue(snapshot["observed_at"].endswith("Z"))
+
+    def test_empty_review_snapshot_is_only_a_persisted_record_claim(self):
+        with (
+            patch("app.services.lifecycle_reports.list_open_reviews", return_value=[]),
+            patch("app.services.lifecycle_reports._current_review_source_heads") as lookup,
+        ):
+            snapshot = verified_open_review_snapshot(object())
+        self.assertEqual(snapshot["verification_status"], "verified")
+        self.assertEqual(snapshot["count"], 0)
+        self.assertEqual(snapshot["scope"], "persisted_human_review_records")
+        lookup.assert_not_called()
 
     def test_html_report_lists_all_eight_repositories_and_escapes_evidence(self):
         report = build_weekly_overview({}, 2026, 42)
