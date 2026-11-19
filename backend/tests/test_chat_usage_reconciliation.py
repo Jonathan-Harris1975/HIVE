@@ -9,6 +9,44 @@ from app.storage.sql_store import SqlStore
 
 
 @pytest.mark.asyncio
+async def test_stream_rate_limit_falls_back_once_without_duplicate_text(monkeypatch):
+    from app.services.openrouter import OpenRouterClient
+    settings = Settings(OPENROUTER_API_KEY="test")
+    client = OpenRouterClient(settings)
+    called = []
+
+    async def candidates(payload, fallbacks):
+        yield {"model": "primary"}
+        yield {"model": "fallback"}
+
+    async def routes(payload):
+        yield "openrouter", "https://provider.test/chat", {}, payload
+
+    def serve(request):
+        import json
+        model = json.loads(request.content)["model"]
+        called.append(model)
+        if model == "primary":
+            return httpx.Response(429, text="rate limited", request=request)
+        return httpx.Response(200, request=request, text=(
+            'data: {"id":"gen-ok","model":"fallback","choices":[{"delta":{"content":"hello"}}]}\n\n'
+            'data: {"id":"gen-ok","model":"fallback","choices":[{"delta":{},"finish_reason":"stop"}],'
+            '"usage":{"total_tokens":2,"cost":0.01}}\n\n'
+            'data: [DONE]\n\n'))
+
+    original_client = httpx.AsyncClient
+    monkeypatch.setattr(client, "_payload_attempts", candidates)
+    monkeypatch.setattr(client, "_context_attempts", routes)
+    monkeypatch.setattr("app.services.openrouter.httpx.AsyncClient",
+                        lambda **kwargs: original_client(transport=httpx.MockTransport(serve), trust_env=False))
+    events = [event async for event in client.stream_chat_completion({}, [])]
+    assert called == ["primary", "fallback"]
+    assert [event["content"] for event in events if event["event"] == "token"] == ["hello"]
+    assert any(event.get("generation_id") == "gen-ok" for event in events)
+    assert events[-1]["ok"] is True
+
+
+@pytest.mark.asyncio
 async def test_interrupted_stream_saves_generation_id_for_later_recovery(tmp_path, monkeypatch):
     from app.api.chat import ChatRequest, _stream_and_record_chat
     settings = Settings(APP_ENV="test", DATABASE_ENABLED=True,
