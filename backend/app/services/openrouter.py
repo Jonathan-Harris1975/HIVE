@@ -907,6 +907,19 @@ class OpenRouterClient:
                                     "provider": final_provider,
                                 }
 
+                    if not final_finish_reason:
+                        if saw_visible_token:
+                            yield {
+                                "event": "done", "ok": False,
+                                "message": "OpenRouter stream ended before completion.",
+                                "model_used": final_model, "provider": final_provider,
+                                "usage": final_usage, "finish_reason": "stream_interrupted",
+                                "completion_truncated": True, "partial_response": True,
+                            }
+                        else:
+                            yield {"event": "retry_model", "message": "OpenRouter stream ended before completion.",
+                                   "model_used": final_model, "provider": final_provider, "usage": final_usage}
+                        return
                     yield {
                         "event": "done",
                         "ok": True,
