@@ -220,7 +220,7 @@ class LifecycleReportTests(unittest.TestCase):
 
         storage = SimpleNamespace(settings=SimpleNamespace(github_token="token"))
         with (
-            patch("httpx.Client", return_value=Client()),
+            patch("httpx.Client", return_value=Client(headers={}, timeout=None)),
             patch("app.core.governed_repositories.canonical_governed_repository_id", return_value="HIVE"),
             patch("app.services.repository_refresh.github_sources", return_value={"HIVE": "owner/HIVE"}),
         ):
