@@ -1,0 +1,67 @@
+from __future__ import annotations
+
+import httpx
+import pytest
+
+from app.core.config import Settings
+from app.services.chat_usage_reconciliation import reconcile_conversation_usage
+from app.storage.sql_store import SqlStore
+
+
+@pytest.mark.asyncio
+async def test_interrupted_stream_saves_generation_id_for_later_recovery(tmp_path, monkeypatch):
+    from app.api.chat import ChatRequest, _stream_and_record_chat
+    settings = Settings(APP_ENV="test", DATABASE_ENABLED=True,
+                        DATABASE_URL=f"sqlite:///{tmp_path / 'chat.sqlite'}", OPENROUTER_API_KEY="test")
+    store = SqlStore(settings)
+    assert store.init_schema()["ok"]
+
+    class FakeClient:
+        def __init__(self, settings): pass
+        async def stream_chat_completion(self, payload, fallback_models):
+            yield {"event": "meta", "type": "generation", "generation_id": "gen-test", "model_used": "m"}
+            yield {"event": "token", "content": "partial"}
+
+    monkeypatch.setattr("app.api.chat.OpenRouterClient", FakeClient)
+    stream = _stream_and_record_chat(request=ChatRequest(message="hello", conversation_id="conv"),
+                                     payload={}, fallback_models=[], settings=settings)
+    assert (await anext(stream))["type"] == "conversation"
+    assert (await anext(stream))["generation_id"] == "gen-test"
+    assert (await anext(stream))["content"] == "partial"
+    await stream.aclose()
+    saved = store.get_conversation("conv")["messages"][-1]
+    assert saved["metadata"]["stream_ended_early"] is True
+    assert saved["metadata"]["generation_id"] == "gen-test"
+    assert saved["cost_usd"] is None
+
+
+def test_interrupted_usage_is_recovered_once_and_unavailable_usage_stays_unknown(tmp_path, monkeypatch):
+    settings = Settings(APP_ENV="test", DATABASE_ENABLED=True,
+                        DATABASE_URL=f"sqlite:///{tmp_path / 'chat.sqlite'}", OPENROUTER_API_KEY="test")
+    store = SqlStore(settings)
+    assert store.init_schema()["ok"]
+    assert store.record_chat(conversation_id="test", mode="general", user_message="hello",
+                             assistant_reply="partial", model_used="m", provider=None, usage=None,
+                             metadata={"stream_ended_early": True, "generation_id": "gen-abc"})["ok"]
+    messages = store.get_conversation("test")["messages"]
+    assert store.list_conversations()["conversations"][0]["total_cost_usd"] is None
+
+    def missing(*args, **kwargs):
+        return httpx.Response(404, request=httpx.Request("GET", "https://provider.test"))
+    monkeypatch.setattr(httpx, "get", missing)
+    assert not reconcile_conversation_usage(settings, store, "test", messages)
+    assert store.list_conversations()["conversations"][0]["total_cost_usd"] is None
+
+    def ready(*args, **kwargs):
+        return httpx.Response(200, request=httpx.Request("GET", "https://provider.test"), json={
+            "data": {"id": "gen-abc", "cancelled": True, "model": "actual/model",
+                     "provider_name": "provider", "tokens_prompt": 17,
+                     "tokens_completion": 11, "total_cost": 0.003}})
+    monkeypatch.setattr(httpx, "get", ready)
+    assert reconcile_conversation_usage(settings, store, "test", messages)
+    assert reconcile_conversation_usage(settings, store, "test", messages)
+    assert store.list_conversations()["conversations"][0]["total_cost_usd"] == 0.003
+    result = store.get_conversation("test")
+    assert result["messages"][-1]["model"] == "actual/model"
+    with store._connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM hive_cost_events").fetchone()[0] == 1
