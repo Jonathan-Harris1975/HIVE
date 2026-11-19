@@ -102,7 +102,7 @@ def collect_current_evidence(record):
 
     def coverage():
         query = urllib.parse.urlencode({
-            "head_sha": record["head_sha"], "branch": record.get("branch") or "",
+            "head_sha": record["head_sha"], "branch": branch,
             "event": "workflow_dispatch", "per_page": 100,
         })
         payload = read(f"/actions/workflows/ci.yml/runs?{query}")
