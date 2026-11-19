@@ -1316,7 +1316,7 @@ class SqlStore:
                 auto_titled INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
-                message_sequence INTEGER NOT NULL DEFAULT 0
+                turn_sequence INTEGER NOT NULL DEFAULT 0
             )
             """,
             """
@@ -1435,7 +1435,7 @@ class SqlStore:
 
         if self.dialect == "postgres":
             cur.execute(
-                "ALTER TABLE hive_conversations ADD COLUMN IF NOT EXISTS message_sequence BIGINT NOT NULL DEFAULT 0"
+                "ALTER TABLE hive_conversations ADD COLUMN IF NOT EXISTS turn_sequence BIGINT NOT NULL DEFAULT 0"
             )
             cur.execute(
                 "ALTER TABLE hive_messages ADD COLUMN IF NOT EXISTS message_sequence BIGINT NOT NULL DEFAULT 0"
@@ -1444,9 +1444,9 @@ class SqlStore:
         if self.dialect in {"sqlite", "d1"}:
             cur.execute("PRAGMA table_info(hive_conversations)")
             conversation_columns = {str(row[1]) for row in cur.fetchall()}
-            if "message_sequence" not in conversation_columns:
+            if "turn_sequence" not in conversation_columns:
                 cur.execute(
-                    "ALTER TABLE hive_conversations ADD COLUMN message_sequence INTEGER NOT NULL DEFAULT 0"
+                    "ALTER TABLE hive_conversations ADD COLUMN turn_sequence INTEGER NOT NULL DEFAULT 0"
                 )
             cur.execute("PRAGMA table_info(hive_messages)")
             message_columns = {str(row[1]) for row in cur.fetchall()}
@@ -1592,12 +1592,13 @@ class SqlStore:
         cur.execute(
             self._sql(
                 """
-            INSERT INTO hive_conversations (id, mode, model, title, auto_titled, created_at, updated_at)
-            VALUES (__PARAM__, __PARAM__, __PARAM__, __PARAM__, 0, __PARAM__, __PARAM__)
+            INSERT INTO hive_conversations (id, mode, model, title, auto_titled, created_at, updated_at, turn_sequence)
+            VALUES (__PARAM__, __PARAM__, __PARAM__, __PARAM__, 0, __PARAM__, __PARAM__, 1)
             ON CONFLICT(id) DO UPDATE SET
               mode=excluded.mode,
               model=excluded.model,
-              updated_at=excluded.updated_at
+              updated_at=excluded.updated_at,
+              turn_sequence=hive_conversations.turn_sequence+1
             """
             ),
             (
@@ -1623,22 +1624,14 @@ class SqlStore:
         metadata_json: str,
         created: str,
     ) -> None:
-        cur.execute(
-            self._sql(
-                "UPDATE hive_conversations SET message_sequence=message_sequence+1 WHERE id=__PARAM__ RETURNING message_sequence"
-            ),
-            (_strip_nul_text(conv_id),),
-        )
-        row = cur.fetchone()
-        if row is None:
-            raise RuntimeError("conversation_sequence_update_failed")
-        sequence = int(row[0])
+        sequence_offset = 1 if role == "user" else 0
         cur.execute(
             self._sql(
                 """
             INSERT INTO hive_messages
             (id, conversation_id, role, content, model, provider, token_total, cost_usd, metadata_json, created_at, message_sequence)
-            VALUES (__PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__)
+            VALUES (__PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__,
+              (SELECT turn_sequence * 2 - __PARAM__ FROM hive_conversations WHERE id=__PARAM__))
             """
             ),
             (
@@ -1652,7 +1645,8 @@ class SqlStore:
                 cost,
                 _strip_nul_text(metadata_json),
                 created,
-                sequence,
+                sequence_offset,
+                _strip_nul_text(conv_id),
             ),
         )
 
