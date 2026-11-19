@@ -47,6 +47,29 @@ async def test_stream_rate_limit_falls_back_once_without_duplicate_text(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_provider_error_after_tokens_does_not_duplicate_unknown_usage(monkeypatch):
+    from app.services.openrouter import OpenRouterClient
+    client = OpenRouterClient(Settings(OPENROUTER_API_KEY="test"))
+
+    async def candidates(payload, fallbacks):
+        yield {"model": "primary"}
+        yield {"model": "fallback"}
+
+    async def attempt(payload):
+        yield {"event": "meta", "type": "generation", "generation_id": "gen-partial"}
+        yield {"event": "token", "content": "partial"}
+        yield {"event": "retry_model", "message": "provider disconnected", "model_used": "primary"}
+
+    monkeypatch.setattr(client, "_payload_attempts", candidates)
+    monkeypatch.setattr(client, "_stream_one_attempt", attempt)
+    events = [event async for event in client.stream_chat_completion({}, [])]
+    assert events[-1]["ok"] is False
+    assert events[-1]["partial_response"] is True
+    assert events[-1]["hive_extra_usage"] == []
+    assert [event["content"] for event in events if event["event"] == "token"] == ["partial"]
+
+
+@pytest.mark.asyncio
 async def test_interrupted_stream_saves_generation_id_for_later_recovery(tmp_path, monkeypatch):
     from app.api.chat import ChatRequest, _stream_and_record_chat
     settings = Settings(APP_ENV="test", DATABASE_ENABLED=True,
