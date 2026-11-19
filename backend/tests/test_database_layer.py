@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from app.core.config import Settings
+from app.storage import sql_store as sql_store_module
 from app.storage.d1 import D1MetadataStore
 from app.storage.sql_store import SqlStore
 
@@ -797,13 +798,51 @@ def test_chat_history_orders_equal_timestamp_user_before_assistant(tmp_path: Pat
     assert store.init_schema()["ok"]
     assert store.record_chat(conversation_id="order", mode="general", user_message="question", assistant_reply="answer",
                              model_used="test", provider="test", usage={"cost": 0})["ok"]
-    # Reinsert in the opposite physical order, preserving the equal timestamps
-    # written for a turn, so database tie-breaking cannot depend on row order.
+    # Reinsert in the opposite physical order, preserving the assigned sequence.
     with store._transaction() as cur:
-        cur.execute("SELECT * FROM hive_messages WHERE conversation_id=? ORDER BY role ASC", ("order",))
+        cur.execute(
+            "SELECT id, conversation_id, role, content, model, provider, token_total, cost_usd, "
+            "metadata_json, created_at, message_order FROM hive_messages WHERE conversation_id=? ORDER BY role ASC",
+            ("order",),
+        )
         rows = cur.fetchall()
         cur.execute("DELETE FROM hive_messages WHERE conversation_id=?", ("order",))
         for row in rows:
-            cur.execute("INSERT INTO hive_messages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", row)
+            cur.execute(
+                "INSERT INTO hive_messages (id, conversation_id, role, content, model, provider, "
+                "token_total, cost_usd, metadata_json, created_at, message_order) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                row,
+            )
     assert [m["role"] for m in store.get_conversation("order")["messages"]] == ["user", "assistant"]
     assert [m["role"] for m in store.recent_chat_turns("order")] == ["user", "assistant"]
+
+
+def test_chat_history_preserves_turn_order_for_shared_timestamp(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = Settings(APP_ENV="test", DATABASE_ENABLED=True, DATABASE_URL=f"sqlite:///{tmp_path / 'turn-order.sqlite'}")
+    store = SqlStore(settings)
+    assert store.init_schema()["ok"]
+    monkeypatch.setattr(sql_store_module, "_now", lambda: "2026-01-01T00:00:00+00:00")
+
+    for question, answer in (("first question", "first answer"), ("second question", "second answer")):
+        assert store.record_chat(
+            conversation_id="turn-order",
+            mode="general",
+            user_message=question,
+            assistant_reply=answer,
+            model_used="test",
+            provider="test",
+            usage={"cost": 0},
+        )["ok"]
+
+    expected = [
+        ("user", "first question"),
+        ("assistant", "first answer"),
+        ("user", "second question"),
+        ("assistant", "second answer"),
+    ]
+    conversation = store.get_conversation("turn-order")
+    assert [(message["role"], message["content"]) for message in conversation["messages"]] == expected
+    assert [(message["role"], message["content"]) for message in store.recent_chat_turns("turn-order")] == expected
