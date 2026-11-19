@@ -175,15 +175,6 @@ class SqlStore:
         for attempt in range(2):
             try:
                 with self._transaction() as cur:
-                    cur.execute(
-                        self._sql(
-                            "SELECT COALESCE(MAX(message_order), 0) FROM hive_messages "
-                            "WHERE conversation_id=__PARAM__"
-                        ),
-                        (conv_id,),
-                    )
-                    row = cur.fetchone()
-                    next_message_order = int(row[0]) if row and row[0] is not None else 0
                     self._upsert_conversation(
                         cur,
                         conv_id,
@@ -191,6 +182,13 @@ class SqlStore:
                         safe_model_used,
                         created,
                         title=_default_conversation_title(safe_user_message),
+                    )
+                    cur.execute(
+                        self._sql(
+                            "UPDATE hive_conversations SET message_order=message_order+2 "
+                            "WHERE id=__PARAM__"
+                        ),
+                        (_strip_nul_text(conv_id),),
                     )
                     self._insert_message(
                         cur,
@@ -203,7 +201,7 @@ class SqlStore:
                         None,
                         metadata_json,
                         created,
-                        next_message_order + 1,
+                        -1,
                     )
                     self._insert_message(
                         cur,
@@ -216,7 +214,7 @@ class SqlStore:
                         cost,
                         metadata_json,
                         created,
-                        next_message_order + 2,
+                        0,
                     )
                     if usage:
                         self._insert_cost_event(
@@ -1325,6 +1323,7 @@ class SqlStore:
                 model TEXT,
                 title TEXT,
                 auto_titled INTEGER NOT NULL DEFAULT 0,
+                message_order INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
@@ -1444,26 +1443,78 @@ class SqlStore:
         """Add and backfill a stable per-conversation write sequence."""
 
         if self.dialect == "postgres":
+            cur.execute(
+                "ALTER TABLE hive_conversations ADD COLUMN IF NOT EXISTS "
+                "message_order INTEGER NOT NULL DEFAULT 0"
+            )
             cur.execute("ALTER TABLE hive_messages ADD COLUMN IF NOT EXISTS message_order INTEGER")
         elif self.dialect in {"sqlite", "d1"}:
+            cur.execute("PRAGMA table_info(hive_conversations)")
+            conversation_columns = {str(row[1]) for row in cur.fetchall()}
+            if "message_order" not in conversation_columns:
+                cur.execute(
+                    "ALTER TABLE hive_conversations ADD COLUMN "
+                    "message_order INTEGER NOT NULL DEFAULT 0"
+                )
             cur.execute("PRAGMA table_info(hive_messages)")
             columns = {str(row[1]) for row in cur.fetchall()}
             if "message_order" not in columns:
                 cur.execute("ALTER TABLE hive_messages ADD COLUMN message_order INTEGER")
 
         cur.execute(
-            "SELECT id, conversation_id FROM hive_messages WHERE message_order IS NULL "
-            "ORDER BY conversation_id, created_at, CASE WHEN role='user' THEN 0 ELSE 1 END, id"
-        )
-        next_order: dict[str, int] = {}
-        for message_id, conversation_id in cur.fetchall():
-            key = str(conversation_id)
-            order = next_order.get(key, 0) + 1
-            next_order[key] = order
-            cur.execute(
-                self._sql("UPDATE hive_messages SET message_order=__PARAM__ WHERE id=__PARAM__"),
-                (order, message_id),
+            """
+            WITH existing_orders AS (
+                SELECT conversation_id, MAX(message_order) AS max_order
+                FROM hive_messages
+                WHERE message_order IS NOT NULL
+                GROUP BY conversation_id
+            ),
+            pending AS (
+                SELECT message.id,
+                       COALESCE(existing_orders.max_order, 0) + ROW_NUMBER() OVER (
+                           PARTITION BY message.conversation_id
+                           ORDER BY message.created_at,
+                                    CASE WHEN message.role='user' THEN 0 ELSE 1 END,
+                                    message.id
+                       ) AS assigned_order
+                FROM hive_messages AS message
+                LEFT JOIN existing_orders
+                    ON existing_orders.conversation_id=message.conversation_id
+                WHERE message.message_order IS NULL
             )
+            UPDATE hive_messages
+            SET message_order=(
+                SELECT pending.assigned_order
+                FROM pending
+                WHERE pending.id=hive_messages.id
+            )
+            WHERE message_order IS NULL
+            """
+        )
+        cur.execute(
+            """
+            WITH conversation_orders AS (
+                SELECT conversation_id, MAX(message_order) AS max_order
+                FROM hive_messages
+                GROUP BY conversation_id
+            )
+            UPDATE hive_conversations
+            SET message_order=(
+                SELECT conversation_orders.max_order
+                FROM conversation_orders
+                WHERE conversation_orders.conversation_id=hive_conversations.id
+            )
+            WHERE message_order < (
+                SELECT conversation_orders.max_order
+                FROM conversation_orders
+                WHERE conversation_orders.conversation_id=hive_conversations.id
+            )
+            """
+        )
+        cur.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_hive_messages_conversation_order "
+            "ON hive_messages (conversation_id, message_order)"
+        )
 
     def _fetch_dicts(self, cur: Any) -> list[dict[str, Any]]:
         columns = [item[0] for item in cur.description or []]
@@ -1602,8 +1653,16 @@ class SqlStore:
         cur.execute(
             self._sql(
                 """
-            INSERT INTO hive_conversations (id, mode, model, title, auto_titled, created_at, updated_at)
-            VALUES (__PARAM__, __PARAM__, __PARAM__, __PARAM__, 0, __PARAM__, __PARAM__)
+            INSERT INTO hive_conversations
+                (id, mode, model, title, auto_titled, created_at, updated_at, message_order)
+            VALUES (
+                __PARAM__, __PARAM__, __PARAM__, __PARAM__, 0, __PARAM__, __PARAM__,
+                COALESCE((
+                    SELECT MAX(message_order)
+                    FROM hive_messages
+                    WHERE conversation_id=__PARAM__
+                ), 0)
+            )
             ON CONFLICT(id) DO UPDATE SET
               mode=excluded.mode,
               model=excluded.model,
@@ -1617,6 +1676,7 @@ class SqlStore:
                 _strip_nul_text(title) if title else None,
                 now,
                 now,
+                _strip_nul_text(conv_id),
             ),
         )
 
@@ -1632,14 +1692,17 @@ class SqlStore:
         cost: float | None,
         metadata_json: str,
         created: str,
-        message_order: int,
+        message_order_offset: int,
     ) -> None:
         cur.execute(
             self._sql(
                 """
             INSERT INTO hive_messages
             (id, conversation_id, role, content, model, provider, token_total, cost_usd, metadata_json, created_at, message_order)
-            VALUES (__PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__)
+            SELECT __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__,
+                   hive_conversations.message_order + __PARAM__
+            FROM hive_conversations
+            WHERE hive_conversations.id=__PARAM__
             """
             ),
             (
@@ -1653,7 +1716,8 @@ class SqlStore:
                 cost,
                 _strip_nul_text(metadata_json),
                 created,
-                message_order,
+                message_order_offset,
+                _strip_nul_text(conv_id),
             ),
         )
 

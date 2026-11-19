@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -189,12 +191,96 @@ def test_d1_store_commits_chat_writes_as_one_batch(monkeypatch) -> None:
     )
 
     assert result["ok"] is True
-    assert len(calls) == 2
-    assert calls[0]["json"]["sql"].startswith("SELECT COALESCE(MAX(message_order)")
-    batch = calls[1]["json"]["batch"]
-    assert len(batch) == 4
+    assert len(calls) == 1
+    batch = calls[0]["json"]["batch"]
+    assert len(batch) == 5
     assert "hive_conversations" in batch[0]["sql"]
+    assert "message_order=message_order+2" in batch[1]["sql"]
+    assert "SELECT" in batch[2]["sql"] and "message_order + ?" in batch[2]["sql"]
+    assert "SELECT" in batch[3]["sql"] and "message_order + ?" in batch[3]["sql"]
     assert all("__PARAM__" not in statement["sql"] for statement in batch)
+
+
+def test_sqlite_message_order_migration_backfills_large_history_setwise(tmp_path: Path) -> None:
+    db_path = tmp_path / "legacy-order.sqlite3"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "CREATE TABLE hive_conversations ("
+            "id TEXT PRIMARY KEY, mode TEXT, model TEXT, title TEXT, "
+            "created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"
+        )
+        conn.execute(
+            "CREATE TABLE hive_messages ("
+            "id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, role TEXT NOT NULL, "
+            "content TEXT NOT NULL, model TEXT, provider TEXT, token_total INTEGER, "
+            "cost_usd REAL, metadata_json TEXT, created_at TEXT NOT NULL)"
+        )
+        conn.execute(
+            "INSERT INTO hive_conversations (id, created_at, updated_at) VALUES (?, ?, ?)",
+            ("legacy", "2026-01-01", "2026-01-01"),
+        )
+        conn.executemany(
+            "INSERT INTO hive_messages "
+            "(id, conversation_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)",
+            (
+                (f"message-{index:04d}", "legacy", "user" if index % 2 == 0 else "assistant", "x", "2026-01-01")
+                for index in range(1500)
+            ),
+        )
+    conn.close()
+
+    store = SqlStore(Settings(
+        APP_ENV="test",
+        DATABASE_ENABLED=True,
+        DATABASE_URL=f"sqlite:///{db_path}",
+    ))
+    assert store.init_schema()["ok"] is True
+    with store._transaction() as cur:
+        cur.execute("SELECT COUNT(*), MIN(message_order), MAX(message_order) FROM hive_messages")
+        message_count, first_order, last_order = cur.fetchone()
+        cur.execute("SELECT message_order FROM hive_conversations WHERE id=?", ("legacy",))
+        conversation_order = cur.fetchone()[0]
+
+    assert (message_count, first_order, last_order) == (1500, 1, 1500)
+    assert conversation_order == 1500
+
+
+def test_concurrent_chat_writes_allocate_distinct_message_order(tmp_path: Path) -> None:
+    store = SqlStore(Settings(
+        APP_ENV="test",
+        DATABASE_ENABLED=True,
+        DATABASE_URL=f"sqlite:///{tmp_path / 'concurrent-order.sqlite3'}",
+    ))
+    assert store.init_schema()["ok"] is True
+
+    def record_chat(index: int) -> dict[str, object]:
+        return store.record_chat(
+            conversation_id="concurrent-order",
+            mode="general",
+            user_message=f"question-{index}",
+            assistant_reply=f"answer-{index}",
+            model_used="test",
+            provider="test",
+            usage=None,
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        results = list(executor.map(record_chat, range(8)))
+
+    assert all(result["ok"] for result in results)
+    with store._transaction() as cur:
+        cur.execute(
+            "SELECT role, content, message_order FROM hive_messages "
+            "WHERE conversation_id=? ORDER BY message_order",
+            ("concurrent-order",),
+        )
+        messages = cur.fetchall()
+
+    assert [row[2] for row in messages] == list(range(1, 17))
+    assert all(messages[index][0] == "user" and messages[index + 1][0] == "assistant"
+               for index in range(0, len(messages), 2))
+    assert all(messages[index][1].removeprefix("question-") == messages[index + 1][1].removeprefix("answer-")
+               for index in range(0, len(messages), 2))
 
 
 def test_sql_store_lists_conversations_files_and_costs(tmp_path: Path) -> None:
