@@ -189,8 +189,9 @@ def test_d1_store_commits_chat_writes_as_one_batch(monkeypatch) -> None:
     )
 
     assert result["ok"] is True
-    assert len(calls) == 1
-    batch = calls[0]["json"]["batch"]
+    assert len(calls) == 2
+    assert calls[0]["json"]["sql"].startswith("SELECT COALESCE(MAX(message_order)")
+    batch = calls[1]["json"]["batch"]
     assert len(batch) == 4
     assert "hive_conversations" in batch[0]["sql"]
     assert all("__PARAM__" not in statement["sql"] for statement in batch)
