@@ -86,6 +86,7 @@ class SqlStore:
                 for statement in statements:
                     cur.execute(statement)
                 self._ensure_auto_titled_column(cur)
+                self._ensure_message_sequence_columns(cur)
             return {
                 "ok": True,
                 "enabled": True,
@@ -789,7 +790,7 @@ class SqlStore:
                     SELECT id, role, content, model, provider, token_total, cost_usd, metadata_json, created_at
                     FROM hive_messages
                     WHERE conversation_id=__PARAM__
-                    ORDER BY created_at DESC, CASE WHEN role='assistant' THEN 0 ELSE 1 END ASC, id DESC
+                    ORDER BY created_at DESC, message_sequence DESC, id DESC
                     LIMIT __PARAM__
                     """
                     ),
@@ -829,7 +830,7 @@ class SqlStore:
                     SELECT role, content
                     FROM hive_messages
                     WHERE conversation_id=__PARAM__ AND role IN ('user', 'assistant')
-                    ORDER BY created_at ASC, CASE WHEN role='user' THEN 0 ELSE 1 END ASC, id ASC
+                    ORDER BY created_at ASC, message_sequence ASC, id ASC
                     LIMIT 8
                     """
                     ),
@@ -874,7 +875,7 @@ class SqlStore:
                     SELECT role, content
                     FROM hive_messages
                     WHERE conversation_id=__PARAM__ AND role IN ('user', 'assistant')
-                    ORDER BY created_at DESC, CASE WHEN role='assistant' THEN 0 ELSE 1 END ASC, id DESC
+                    ORDER BY created_at DESC, message_sequence DESC, id DESC
                     LIMIT __PARAM__
                     """
                     ),
@@ -1314,7 +1315,8 @@ class SqlStore:
                 title TEXT,
                 auto_titled INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+                updated_at TEXT NOT NULL,
+                message_sequence INTEGER NOT NULL DEFAULT 0
             )
             """,
             """
@@ -1332,7 +1334,8 @@ class SqlStore:
                 token_total INTEGER,
                 cost_usd REAL,
                 metadata_json TEXT,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                message_sequence INTEGER NOT NULL DEFAULT 0
             )
             """,
             """
@@ -1425,6 +1428,31 @@ class SqlStore:
             if "auto_titled" not in columns:
                 cur.execute(
                     "ALTER TABLE hive_conversations ADD COLUMN auto_titled INTEGER NOT NULL DEFAULT 0"
+                )
+
+    def _ensure_message_sequence_columns(self, cur: Any) -> None:
+        """Add non-destructive per-conversation message ordering to existing schemas."""
+
+        if self.dialect == "postgres":
+            cur.execute(
+                "ALTER TABLE hive_conversations ADD COLUMN IF NOT EXISTS message_sequence BIGINT NOT NULL DEFAULT 0"
+            )
+            cur.execute(
+                "ALTER TABLE hive_messages ADD COLUMN IF NOT EXISTS message_sequence BIGINT NOT NULL DEFAULT 0"
+            )
+            return
+        if self.dialect in {"sqlite", "d1"}:
+            cur.execute("PRAGMA table_info(hive_conversations)")
+            conversation_columns = {str(row[1]) for row in cur.fetchall()}
+            if "message_sequence" not in conversation_columns:
+                cur.execute(
+                    "ALTER TABLE hive_conversations ADD COLUMN message_sequence INTEGER NOT NULL DEFAULT 0"
+                )
+            cur.execute("PRAGMA table_info(hive_messages)")
+            message_columns = {str(row[1]) for row in cur.fetchall()}
+            if "message_sequence" not in message_columns:
+                cur.execute(
+                    "ALTER TABLE hive_messages ADD COLUMN message_sequence INTEGER NOT NULL DEFAULT 0"
                 )
 
     def _fetch_dicts(self, cur: Any) -> list[dict[str, Any]]:
@@ -1597,10 +1625,20 @@ class SqlStore:
     ) -> None:
         cur.execute(
             self._sql(
+                "UPDATE hive_conversations SET message_sequence=message_sequence+1 WHERE id=__PARAM__ RETURNING message_sequence"
+            ),
+            (_strip_nul_text(conv_id),),
+        )
+        row = cur.fetchone()
+        if row is None:
+            raise RuntimeError("conversation_sequence_update_failed")
+        sequence = int(row[0])
+        cur.execute(
+            self._sql(
                 """
             INSERT INTO hive_messages
-            (id, conversation_id, role, content, model, provider, token_total, cost_usd, metadata_json, created_at)
-            VALUES (__PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__)
+            (id, conversation_id, role, content, model, provider, token_total, cost_usd, metadata_json, created_at, message_sequence)
+            VALUES (__PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__)
             """
             ),
             (
@@ -1614,6 +1652,7 @@ class SqlStore:
                 cost,
                 _strip_nul_text(metadata_json),
                 created,
+                sequence,
             ),
         )
 

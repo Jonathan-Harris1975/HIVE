@@ -791,19 +791,35 @@ def test_extra_attempt_write_failure_rolls_back_chat(tmp_path: Path, monkeypatch
     assert store.list_conversations()["count"] == 0
 
 
-def test_chat_history_orders_equal_timestamp_user_before_assistant(tmp_path: Path) -> None:
+def test_chat_history_preserves_turn_order_for_equal_timestamps(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    timestamp = "2026-01-01T00:00:00+00:00"
+    monkeypatch.setattr("app.storage.sql_store._now", lambda: timestamp)
     settings = Settings(APP_ENV="test", DATABASE_ENABLED=True, DATABASE_URL=f"sqlite:///{tmp_path / 'order.sqlite'}")
     store = SqlStore(settings)
     assert store.init_schema()["ok"]
-    assert store.record_chat(conversation_id="order", mode="general", user_message="question", assistant_reply="answer",
-                             model_used="test", provider="test", usage={"cost": 0})["ok"]
-    # Reinsert in the opposite physical order, preserving the equal timestamps
-    # written for a turn, so database tie-breaking cannot depend on row order.
-    with store._transaction() as cur:
-        cur.execute("SELECT * FROM hive_messages WHERE conversation_id=? ORDER BY role ASC", ("order",))
-        rows = cur.fetchall()
-        cur.execute("DELETE FROM hive_messages WHERE conversation_id=?", ("order",))
-        for row in rows:
-            cur.execute("INSERT INTO hive_messages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", row)
-    assert [m["role"] for m in store.get_conversation("order")["messages"]] == ["user", "assistant"]
-    assert [m["role"] for m in store.recent_chat_turns("order")] == ["user", "assistant"]
+    for user_message, assistant_reply in (("question one", "answer one"), ("question two", "answer two")):
+        assert store.record_chat(
+            conversation_id="order",
+            mode="general",
+            user_message=user_message,
+            assistant_reply=assistant_reply,
+            model_used="test",
+            provider="test",
+            usage={"cost": 0},
+        )["ok"]
+
+    expected = [
+        ("user", "question one"),
+        ("assistant", "answer one"),
+        ("user", "question two"),
+        ("assistant", "answer two"),
+    ]
+    conversation = store.get_conversation("order")
+    assert [(item["role"], item["content"]) for item in conversation["messages"]] == expected
+    assert [(item["role"], item["content"]) for item in store.recent_chat_turns("order")] == expected
+    assert store.first_conversation_exchange("order") == {
+        "user_message": "question one",
+        "assistant_reply": "answer one",
+    }
