@@ -789,3 +789,21 @@ def test_extra_attempt_write_failure_rolls_back_chat(tmp_path: Path, monkeypatch
     assert result["ok"] is False
     assert "attempt write failed" in result["error"]
     assert store.list_conversations()["count"] == 0
+
+
+def test_chat_history_orders_equal_timestamp_user_before_assistant(tmp_path: Path) -> None:
+    settings = Settings(APP_ENV="test", DATABASE_ENABLED=True, DATABASE_URL=f"sqlite:///{tmp_path / 'order.sqlite'}")
+    store = SqlStore(settings)
+    assert store.init_schema()["ok"]
+    assert store.record_chat(conversation_id="order", mode="general", user_message="question", assistant_reply="answer",
+                             model_used="test", provider="test", usage={"cost": 0})["ok"]
+    # Reinsert in the opposite physical order, preserving the equal timestamps
+    # written for a turn, so database tie-breaking cannot depend on row order.
+    with store._transaction() as cur:
+        cur.execute("SELECT * FROM hive_messages WHERE conversation_id=? ORDER BY role ASC", ("order",))
+        rows = cur.fetchall()
+        cur.execute("DELETE FROM hive_messages WHERE conversation_id=?", ("order",))
+        for row in rows:
+            cur.execute("INSERT INTO hive_messages VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", row)
+    assert [m["role"] for m in store.get_conversation("order")["messages"]] == ["user", "assistant"]
+    assert [m["role"] for m in store.recent_chat_turns("order")] == ["user", "assistant"]
