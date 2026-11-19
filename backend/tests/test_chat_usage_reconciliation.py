@@ -73,6 +73,51 @@ async def test_interrupted_stream_saves_generation_id_for_later_recovery(tmp_pat
     assert saved["cost_usd"] is None
 
 
+@pytest.mark.asyncio
+async def test_transport_failure_after_text_is_recoverable(tmp_path, monkeypatch):
+    from app.api.chat import ChatRequest, _stream_and_record_chat
+    settings = Settings(APP_ENV="test", DATABASE_ENABLED=True,
+                        DATABASE_URL=f"sqlite:///{tmp_path / 'chat.sqlite'}", OPENROUTER_API_KEY="test")
+    store = SqlStore(settings)
+    assert store.init_schema()["ok"]
+
+    class FakeClient:
+        def __init__(self, settings): pass
+        async def stream_chat_completion(self, payload, fallback_models):
+            yield {"event": "meta", "type": "generation", "generation_id": "gen-transport"}
+            yield {"event": "token", "content": "partial"}
+            yield {"event": "done", "ok": False}
+
+    monkeypatch.setattr("app.api.chat.OpenRouterClient", FakeClient)
+    events = [e async for e in _stream_and_record_chat(
+        request=ChatRequest(message="hello", conversation_id="conv"), payload={},
+        fallback_models=[], settings=settings)]
+    assert events[-1]["ok"] is False
+    metadata = store.get_conversation("conv")["messages"][-1]["metadata"]
+    assert metadata["stream_ended_early"] is True
+    assert metadata["generation_id"] == "gen-transport"
+
+
+def test_reconciliation_can_reach_older_unavailable_turns(tmp_path, monkeypatch):
+    settings = Settings(APP_ENV="test", DATABASE_ENABLED=True,
+                        DATABASE_URL=f"sqlite:///{tmp_path / 'chat.sqlite'}", OPENROUTER_API_KEY="test")
+    store = SqlStore(settings)
+    assert store.init_schema()["ok"]
+    for index in range(5):
+        assert store.record_chat(conversation_id="conv", mode="general", user_message="hello",
+                                 assistant_reply="partial", model_used="m", provider=None, usage=None,
+                                 metadata={"stream_ended_early": True, "generation_id": f"gen-{index}"})["ok"]
+    requested = []
+    def unavailable(url, *, params, **kwargs):
+        requested.append(params["id"])
+        return httpx.Response(404, request=httpx.Request("GET", url))
+    monkeypatch.setattr(httpx, "get", unavailable)
+    monkeypatch.setattr("app.services.chat_usage_reconciliation.secrets.randbelow", lambda n: 3)
+    assert not reconcile_conversation_usage(settings, store, "conv", [])
+    assert len(requested) == 3
+    assert "gen-3" in requested
+
+
 def test_interrupted_usage_is_recovered_once_and_unavailable_usage_stays_unknown(tmp_path, monkeypatch):
     settings = Settings(APP_ENV="test", DATABASE_ENABLED=True,
                         DATABASE_URL=f"sqlite:///{tmp_path / 'chat.sqlite'}", OPENROUTER_API_KEY="test")
