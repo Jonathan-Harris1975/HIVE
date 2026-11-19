@@ -292,14 +292,17 @@ class OpenRouterClient:
                     yield event
                     continue
                 if event.get("event") == "retry_model":
-                    if not event.get("usage_accounted"):
-                        extra_usage.append({"model": event.get("model_used") or state.model_used,
-                                            "provider": event.get("provider"), "usage": event.get("usage")})
                     if saw_token:
                         # Once tokens have left the server, we cannot safely replay into the same stream.
                         yield {"event": "error", "message": event["message"], "model": candidate_payload.get("model")}
-                        yield {"event": "done", "ok": False, "model_used": state.model_used, "hive_extra_usage": extra_usage}
+                        yield {"event": "done", "ok": False, "model_used": event.get("model_used") or state.model_used,
+                               "provider": event.get("provider"), "usage": event.get("usage"),
+                               "partial_response": True, "finish_reason": "stream_interrupted",
+                               "hive_extra_usage": extra_usage}
                         return
+                    if not event.get("usage_accounted"):
+                        extra_usage.append({"model": event.get("model_used") or state.model_used,
+                                            "provider": event.get("provider"), "usage": event.get("usage")})
                     yield {
                         "event": "meta",
                         "type": "model_fallback",
