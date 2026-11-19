@@ -113,6 +113,11 @@ def test_reconciliation_rotates_bounded_batch_to_later_generations(monkeypatch):
         for index in range(4)
     ]
     requested = []
+    monkeypatch.setattr(
+        SqlStore,
+        "unresolved_interrupted_usage",
+        lambda self, conversation_id: messages,
+    )
 
     def unavailable(url, *, params, **kwargs):
         requested.append(params["id"])
@@ -126,3 +131,30 @@ def test_reconciliation_rotates_bounded_batch_to_later_generations(monkeypatch):
     monkeypatch.setattr("app.services.chat_usage_reconciliation.time.time", lambda: 3)
     reconcile_conversation_usage(settings, SqlStore(settings), "test", messages)
     assert "gen-3" in requested[3:]
+
+
+def test_reconciliation_includes_unresolved_messages_beyond_display_page(tmp_path, monkeypatch):
+    settings = Settings(APP_ENV="test", DATABASE_ENABLED=True,
+                        DATABASE_URL=f"sqlite:///{tmp_path / 'chat.sqlite'}", OPENROUTER_API_KEY="test")
+    store = SqlStore(settings)
+    assert store.init_schema()["ok"]
+    for index in range(101):
+        assert store.record_chat(
+            conversation_id="long", mode="general", user_message=f"user-{index}",
+            assistant_reply=f"partial-{index}", model_used="m", provider=None, usage=None,
+            metadata={"stream_ended_early": True, "generation_id": f"gen-{index}"},
+        )["ok"]
+    display_messages = store.get_conversation("long")["messages"]
+    assert len(display_messages) == 100
+    assert "gen-0" not in {message["metadata"]["generation_id"] for message in display_messages}
+
+    requested = []
+
+    def unavailable(url, *, params, **kwargs):
+        requested.append(params["id"])
+        return httpx.Response(404, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(httpx, "get", unavailable)
+    monkeypatch.setattr("app.services.chat_usage_reconciliation.time.time", lambda: 0)
+    reconcile_conversation_usage(settings, store, "long", display_messages)
+    assert "gen-0" in requested

@@ -20,8 +20,11 @@ def reconcile_conversation_usage(
     """Try a bounded number of lookups; unavailable evidence stays unknown for the next read."""
     if not settings.openrouter_api_key:
         return False
+    # The caller's message list is display-limited. Query SQL separately so
+    # old unresolved turns remain eligible for the rotating recovery batch.
+    eligible_messages = store.unresolved_interrupted_usage(conversation_id)
     candidates = []
-    for message in messages:
+    for message in eligible_messages:
         metadata = message.get("metadata")
         if (message.get("role") == "assistant" and message.get("cost_usd") is None
                 and isinstance(metadata, dict) and metadata.get("stream_ended_early")

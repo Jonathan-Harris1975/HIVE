@@ -299,6 +299,32 @@ class SqlStore:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    def unresolved_interrupted_usage(self, conversation_id: str) -> list[dict[str, Any]]:
+        """Return every assistant message that may need interrupted-usage recovery."""
+        if not self.enabled:
+            return []
+        try:
+            with self._connect() as conn:
+                cur = conn.cursor()
+                cur.execute(self._sql("""
+                    SELECT id, role, cost_usd, metadata_json
+                    FROM hive_messages
+                    WHERE conversation_id=__PARAM__ AND role='assistant' AND cost_usd IS NULL
+                      AND metadata_json LIKE __PARAM__
+                    ORDER BY created_at ASC, id ASC
+                """), (conversation_id, "%stream_ended_early%"))
+                messages = self._fetch_dicts(cur)
+            for message in messages:
+                message["metadata"] = _json_or_none(message.pop("metadata_json", None))
+            return messages
+        except Exception as error:
+            logger.warning(
+                "SQL query failed conversation_id=%s method=unresolved_interrupted_usage error_type=%s",
+                conversation_id,
+                type(error).__name__,
+            )
+            return []
+
     def record_file(
         self, file_result: Any, extra_metadata: dict[str, Any] | None = None
     ) -> dict[str, object]:
