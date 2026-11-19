@@ -349,7 +349,7 @@ async def _stream_and_record_chat(
                     reply="".join(reply_parts),
                     conversation_id=conversation_id,
                     settings=settings,
-                    stream_ended_early=bool(event.get("partial_response")),
+                    stream_ended_early=bool(event.get("partial_response") or (reply_parts and not event.get("ok"))),
                     request_context=request_context,
                     timings={
                         **(request_timings or {}),
