@@ -94,7 +94,7 @@ The automatic `main` deployment watcher also fails closed when `KOYEB_TOKEN` or 
 
 ## Autonomy dispatch, incident durability, and owner verification
 
-Repository code cannot verify the current Koyeb deployment settings, GitHub environment protection, Kilo webhook authorisation, or an external OIDC provider's trust policy. Keep the HIVE controller in reviewable, exact-SHA operation until the service owners complete the following checks.
+Repository code cannot verify the current Koyeb deployment settings, GitHub environment protection, or Kilo webhook authorisation. Keep the HIVE controller in reviewable, exact-SHA operation until the service owners complete the following checks.
 
 ### Owner configuration checks
 
@@ -103,7 +103,6 @@ Repository code cannot verify the current Koyeb deployment settings, GitHub envi
 - **Circuit breaker:** add repository variable `HIVE_REPAIR_CIRCUIT_BREAKER` with value `open` only after the Kilo 403 and queued incidents have been reconciled. Missing or any value other than `open` pauses automatic dispatch and records a `circuit-open` marker. Set it to `closed` for an emergency stop. Reopening permits only a current, exact-SHA incident with an explicit non-acceptance state; accepted, pending, and uncertain deliveries remain stopped.
 - **Kilo:** investigate the historical HTTP 403 from run `39179584274`. Restore the intended webhook URL/authorisation through the service owner, then run one controlled non-production handoff. Verify a 2xx response, an `accepted` marker carrying the run ID and source SHA, one Kilo task, and no duplicate task on a replay of the same event. The repository keeps a bounded two-attempt budget for explicit 4xx rejection; timeouts and 5xx responses are recorded as uncertain and require owner reconciliation before replay.
 - **Operational event store and alert route:** verify D1 is enabled and readable/writable in production, then deliver a test event with a stable event ID. Confirm it is visible after a fresh service instance starts. Verify the webhook endpoint accepts the same ID idempotently, transient 429/5xx or transport failures receive at most three identical delivery attempts, and a final failure remains a failed workflow with a run-linked alert for follow-up.
-- **OIDC federation, where a cloud/service provider supports it:** the retired `oidc-readiness.yml` workflow is not an active readiness signal, and this repository does not verify an external provider's trust policy. Configure provider trust only for the exact issuer, audience, repository, branch or immutable subject, and workflow claims emitted by the workflow that actually requests the token. Grant only the intended role and audience, then validate the trust independently with the provider; do not treat repository CI evidence as proof of provider trust or least privilege.
 - **Cloudflare account security:** resolve the audit's disabled account-level 2FA enforcement finding and independently verify user MFA. Repository changes cannot alter or verify this account setting.
 
 ### Exact-revision live test after owner configuration
@@ -112,8 +111,7 @@ Repository code cannot verify the current Koyeb deployment settings, GitHub envi
 2. Deploy only that SHA through the existing protected release path. Confirm Koyeb reports that exact revision and `/readyz` returns ready.
 3. From a non-production test event, verify the dispatch lifecycle: one failure produces one durable marker with exact run ID/SHA; explicit 403 becomes a visible rejected incident; a timeout or 5xx becomes uncertain and stops replay; one replay after an owner-confirmed rejection creates no duplicate task; and two explicit rejections exhaust the automatic budget.
 4. Temporarily make the test D1 write/read unavailable in a non-production environment. Confirm ingestion returns retryable 503 rather than 202, the sender retries the same event ID no more than twice after the first attempt, the inbox reports unavailable rather than empty, and successful replay makes exactly one durable incident visible.
-5. Test any configured OIDC federation directly against the external provider using the active requesting workflow, not the retired GitHub JWT readiness workflow or its deleted artifact. Record issuer, audience, exact subject/workflow restriction, role, source SHA, and the provider's acceptance or rejection without recording token contents.
-6. Confirm operator notification receipt and close the test incident only after the durable event and the provider's final state agree. Retain evidence and the owner who reconciled uncertain delivery.
+5. Confirm operator notification receipt and close the test incident only after the durable event and the provider's final state agree. Retain evidence and the owner who reconciled uncertain delivery.
 
 These tests establish implementation behaviour only for the tested revision and environment. They do not establish broad production readiness, unattended recovery, or successful recovery of the historical 403 until the owner-run checks pass.
 

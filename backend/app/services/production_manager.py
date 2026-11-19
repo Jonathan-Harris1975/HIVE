@@ -42,7 +42,7 @@ SMOKE_ONLY_WORKFLOWS: dict[str, tuple[str, ...]] = {
     "AIMS": (),
     "AIMS-UI": (),
     "RAMS": (),
-    "MAST": ("OIDC estate readiness",),
+    "MAST": (),
     "IRS": (),
     "Website": (),
 }
