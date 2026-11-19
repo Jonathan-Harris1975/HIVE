@@ -74,7 +74,7 @@ async def production_manager(
 def current_lifecycle_report(settings: Settings = Depends(get_settings)) -> dict[str, object]:
     """Read the current ISO-week report assembled from all eight repositories."""
     now = dt.datetime.now(dt.timezone.utc).isocalendar()
-    key = f"reports/weekly/{now.year}/{now.week:02d}/overview.json"
+    key = f"reports/weekly/{now.year}-W{now.week:02d}.json"
     try:
         key, report = read_latest_weekly_report(R2Storage(settings), now.year, now.week)
         return {
