@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import math
+import time
 from typing import Any
 
 import httpx
@@ -27,8 +28,15 @@ def reconcile_conversation_usage(
                 and isinstance(metadata.get("generation_id"), str)
                 and metadata["generation_id"].startswith("gen-") and message.get("id")):
             candidates.append((message, metadata["generation_id"]))
+    if not candidates:
+        return False
     changed = False
-    for message, generation_id in candidates[:3]:
+    batch_size = 3
+    batch_count = (len(candidates) + batch_size - 1) // batch_size
+    batch = int(time.time() // 3) % batch_count
+    start = batch * batch_size
+    ordered_candidates = candidates[start:] + candidates[:start]
+    for message, generation_id in ordered_candidates[:batch_size]:
         try:
             response = httpx.get(
                 f"{settings.openrouter_base_url.rstrip('/')}/generation",

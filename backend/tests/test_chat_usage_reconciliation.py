@@ -103,3 +103,26 @@ def test_interrupted_usage_is_recovered_once_and_unavailable_usage_stays_unknown
     assert result["messages"][-1]["model"] == "actual/model"
     with store._connect() as conn:
         assert conn.execute("SELECT COUNT(*) FROM hive_cost_events").fetchone()[0] == 1
+
+
+def test_reconciliation_rotates_bounded_batch_to_later_generations(monkeypatch):
+    settings = Settings(OPENROUTER_API_KEY="test")
+    messages = [
+        {"id": f"message-{index}", "role": "assistant", "cost_usd": None,
+         "metadata": {"stream_ended_early": True, "generation_id": f"gen-{index}"}}
+        for index in range(4)
+    ]
+    requested = []
+
+    def unavailable(url, *, params, **kwargs):
+        requested.append(params["id"])
+        return httpx.Response(404, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(httpx, "get", unavailable)
+    monkeypatch.setattr("app.services.chat_usage_reconciliation.time.time", lambda: 0)
+    reconcile_conversation_usage(settings, SqlStore(settings), "test", messages)
+    assert requested == ["gen-0", "gen-1", "gen-2"]
+
+    monkeypatch.setattr("app.services.chat_usage_reconciliation.time.time", lambda: 3)
+    reconcile_conversation_usage(settings, SqlStore(settings), "test", messages)
+    assert "gen-3" in requested[3:]
