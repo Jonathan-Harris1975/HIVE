@@ -189,6 +189,7 @@ class OpenRouterClient:
         for candidate_payload in candidate_payloads:
             model = candidate_payload.get("model")
             response_payload = await self._post_json(candidate_payload)
+            extra_usage.extend(response_payload.pop("hive_prior_context_attempts", []))
             # A reasoning model can consume the entire completion budget without
             # producing visible text. Retry once with a larger budget before
             # charging ahead to another provider/model.
@@ -206,6 +207,7 @@ class OpenRouterClient:
                         "max_tokens": min(4096, max(2048, original_budget * 2)),
                     }
                     response_payload = await self._post_json(expanded_payload)
+                    extra_usage.extend(response_payload.pop("hive_prior_context_attempts", []))
             if response_payload.get("_retryable_model_error"):
                 remember_attempt(response_payload, model)
                 attempts.append(
@@ -285,9 +287,14 @@ class OpenRouterClient:
             }
 
             async for event in self._stream_one_attempt(candidate_payload):
+                if event.get("type") == "context_attempt_failed" and isinstance(event.get("usage_attempt"), dict):
+                    extra_usage.append(event["usage_attempt"])
+                    yield event
+                    continue
                 if event.get("event") == "retry_model":
-                    extra_usage.append({"model": event.get("model_used") or state.model_used,
-                                        "provider": event.get("provider"), "usage": event.get("usage")})
+                    if not event.get("usage_accounted"):
+                        extra_usage.append({"model": event.get("model_used") or state.model_used,
+                                            "provider": event.get("provider"), "usage": event.get("usage")})
                     if saw_token:
                         # Once tokens have left the server, we cannot safely replay into the same stream.
                         yield {"event": "error", "message": event["message"], "model": candidate_payload.get("model")}
@@ -299,7 +306,7 @@ class OpenRouterClient:
                         "from_model": candidate_payload.get("model"),
                         "model_used": candidate_payload.get("model"),
                         "message": event["message"],
-                        "usage_attempt": extra_usage[-1],
+                        **({"usage_attempt": extra_usage[-1]} if not event.get("usage_accounted") else {}),
                     }
                     break
 
@@ -645,6 +652,13 @@ class OpenRouterClient:
 
     async def _post_json(self, payload: dict[str, Any]) -> dict[str, Any]:
         last_failure: dict[str, Any] | None = None
+        prior_context_attempts: list[dict[str, Any]] = []
+
+        def with_prior(result: dict[str, Any]) -> dict[str, Any]:
+            if prior_context_attempts:
+                result["hive_prior_context_attempts"] = prior_context_attempts
+            return result
+
         async for route_name, url, headers, route_payload in self._context_attempts(payload):
             try:
                 async with httpx.AsyncClient(timeout=self._attempt_timeout()) as client:
@@ -664,8 +678,9 @@ class OpenRouterClient:
                     "message": f"Context route {route_name} timed out for {payload.get('model')}: {exc}",
                 }
                 if route_name in {"leanctx", "context_gateway"}:
+                    prior_context_attempts.append({"model": payload.get("model"), "provider": None, "usage": None})
                     continue
-                return last_failure
+                return with_prior(last_failure)
             except httpx.HTTPError as exc:
                 logger.info(
                     "Context route failed route=%s model=%s error=%s",
@@ -679,8 +694,9 @@ class OpenRouterClient:
                     "message": f"Context route {route_name} failed for {payload.get('model')}: {exc}",
                 }
                 if route_name in {"leanctx", "context_gateway"}:
+                    prior_context_attempts.append({"model": payload.get("model"), "provider": None, "usage": None})
                     continue
-                return last_failure
+                return with_prior(last_failure)
 
             if response.status_code >= 400:
                 message = response.text
@@ -695,6 +711,7 @@ class OpenRouterClient:
                         route_name,
                         response.status_code,
                     )
+                    prior_context_attempts.append({"model": payload.get("model"), "provider": None, "usage": None})
                     continue
                 if route_name in {"openrouter", "deterministic"} and self._is_context_limit_response(
                     response.status_code, message
@@ -703,22 +720,24 @@ class OpenRouterClient:
                         "Context route could not fit prompt route=%s; trying fallback",
                         route_name,
                     )
+                    prior_context_attempts.append({"model": payload.get("model"), "provider": None, "usage": None})
                     continue
                 if response.status_code in RETRYABLE_STATUS_CODES:
-                    return last_failure
+                    return with_prior(last_failure)
                 raise HTTPException(status_code=response.status_code, detail=message)
 
             data = response.json()
             self._log_credential_used(route_name)
             if isinstance(data, dict):
                 data.setdefault("hive_context_route", route_name)
+                return with_prior(data)
             return data
 
-        return last_failure or {
+        return with_prior(last_failure or {
             "_retryable_model_error": True,
             "status_code": 503,
             "message": "No configured context route was available.",
-        }
+        })
 
     @staticmethod
     def _is_context_limit_response(status_code: int | None, message: str) -> bool:
@@ -765,7 +784,12 @@ class OpenRouterClient:
                             "message": message or f"Context route {route_name} failed",
                             "status_code": status_code,
                             "model_used": payload.get("model"),
+                            "usage_accounted": True,
                         }
+                        yield {"event": "meta", "type": "context_attempt_failed", "usage_attempt": {
+                            "model": event.get("model_used") or payload.get("model"),
+                            "provider": event.get("provider"), "usage": event.get("usage"),
+                        }}
                         logger.warning(
                             "Streaming context route failed route=%s; trying fallback",
                             route_name,
