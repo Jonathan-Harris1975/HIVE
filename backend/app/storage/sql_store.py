@@ -155,6 +155,7 @@ class SqlStore:
         provider: str | None,
         usage: dict[str, Any] | None,
         metadata: dict[str, Any] | None = None,
+        extra_usage: list[dict[str, Any]] | None = None,
     ) -> dict[str, object]:
         if not self.enabled:
             return {"ok": False, "enabled": False}
@@ -208,6 +209,12 @@ class SqlStore:
                     if usage:
                         self._insert_cost_event(
                             cur, conv_id, safe_model_used, safe_provider, usage, created
+                        )
+                    for attempt in extra_usage or []:
+                        attempt_usage = attempt.get("usage")
+                        self._insert_cost_event(
+                            cur, conv_id, attempt.get("model"), attempt.get("provider"),
+                            attempt_usage if isinstance(attempt_usage, dict) else {}, created,
                         )
                 response: dict[str, object] = {"ok": True, "conversation_id": conv_id}
                 if schema_init_result is not None:
@@ -550,8 +557,14 @@ class SqlStore:
               c.updated_at,
               COUNT(m.id) AS message_count,
               COALESCE(SUM(CASE WHEN m.role='assistant' THEN m.token_total ELSE 0 END), 0) AS total_tokens,
-              COALESCE(SUM(CASE WHEN m.role='assistant' THEN m.cost_usd ELSE 0 END), 0) AS total_cost_usd,
-              COALESCE(SUM(CASE WHEN m.role='assistant' THEN m.cost_usd ELSE 0 END), 0) AS cost_usd
+              CASE WHEN COUNT(CASE WHEN m.role='assistant' AND m.cost_usd IS NULL THEN 1 END) > 0
+                OR (SELECT COUNT(*) FROM hive_cost_events e WHERE e.conversation_id=c.id AND e.cost_usd IS NULL) > 0
+                OR (SELECT COUNT(*) FROM hive_cost_events e WHERE e.conversation_id=c.id) < COUNT(CASE WHEN m.role='assistant' THEN 1 END)
+                THEN NULL ELSE (SELECT SUM(e.cost_usd) FROM hive_cost_events e WHERE e.conversation_id=c.id) END AS total_cost_usd,
+              CASE WHEN COUNT(CASE WHEN m.role='assistant' AND m.cost_usd IS NULL THEN 1 END) > 0
+                OR (SELECT COUNT(*) FROM hive_cost_events e WHERE e.conversation_id=c.id AND e.cost_usd IS NULL) > 0
+                OR (SELECT COUNT(*) FROM hive_cost_events e WHERE e.conversation_id=c.id) < COUNT(CASE WHEN m.role='assistant' THEN 1 END)
+                THEN NULL ELSE (SELECT SUM(e.cost_usd) FROM hive_cost_events e WHERE e.conversation_id=c.id) END AS cost_usd
             FROM recent_conversations c
             LEFT JOIN hive_messages m ON m.conversation_id = c.id
             GROUP BY c.id, c.mode, c.model, c.title, c.auto_titled, c.created_at, c.updated_at
