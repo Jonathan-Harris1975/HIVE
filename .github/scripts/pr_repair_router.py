@@ -365,7 +365,6 @@ def dispatch(pr: dict, kind: str, findings: list[str]) -> str:
         # A successful webhook handoff is not evidence that Kilo changed code.
         # A stale handoff without an implementation gets one bounded recovery.
         from datetime import datetime, timezone
-
         states = [re.search(r"(?m)^dispatch-state: ([a-z0-9-]+)\s*$", c["body"])
                   for c in matching_markers]
         states = [state.group(1) if state else "unknown" for state in states]
