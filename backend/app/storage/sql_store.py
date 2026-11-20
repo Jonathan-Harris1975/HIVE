@@ -203,6 +203,7 @@ class SqlStore:
                         created,
                         -1,
                     )
+                    assistant_message_id = "tracked:" + str(uuid.uuid4())
                     self._insert_message(
                         cur,
                         conv_id,
@@ -215,10 +216,12 @@ class SqlStore:
                         metadata_json,
                         created,
                         0,
+                        message_id=assistant_message_id,
                     )
                     if usage:
                         self._insert_cost_event(
-                            cur, conv_id, safe_model_used, safe_provider, usage, created
+                            cur, conv_id, safe_model_used, safe_provider, usage, created,
+                            event_id="assistant:" + assistant_message_id,
                         )
                     for usage_attempt in extra_usage or []:
                         attempt_usage = usage_attempt.get("usage")
@@ -283,7 +286,7 @@ class SqlStore:
         """Attach provider-confirmed usage once, atomically, to an interrupted turn."""
         if not self.enabled:
             return {"ok": False, "enabled": False}
-        event_id = "reconciled:" + message_id
+        event_id = "assistant:" + message_id
         try:
             with self._transaction() as cur:
                 cur.execute(self._sql("""
@@ -622,11 +625,17 @@ class SqlStore:
               COALESCE(SUM(CASE WHEN m.role='assistant' THEN m.token_total ELSE 0 END), 0) AS total_tokens,
               CASE WHEN COUNT(CASE WHEN m.role='assistant' AND m.cost_usd IS NULL THEN 1 END) > 0
                 OR (SELECT COUNT(*) FROM hive_cost_events e WHERE e.conversation_id=c.id AND e.cost_usd IS NULL) > 0
-                OR (SELECT COUNT(*) FROM hive_cost_events e WHERE e.conversation_id=c.id) < COUNT(CASE WHEN m.role='assistant' THEN 1 END)
+              OR COUNT(CASE WHEN m.role='assistant' AND m.id LIKE 'tracked:%' AND NOT EXISTS (
+                    SELECT 1 FROM hive_cost_events e
+                    WHERE e.conversation_id=c.id AND e.id='assistant:' || m.id
+                 ) THEN 1 END) > 0
                 THEN NULL ELSE (SELECT SUM(e.cost_usd) FROM hive_cost_events e WHERE e.conversation_id=c.id) END AS total_cost_usd,
               CASE WHEN COUNT(CASE WHEN m.role='assistant' AND m.cost_usd IS NULL THEN 1 END) > 0
                 OR (SELECT COUNT(*) FROM hive_cost_events e WHERE e.conversation_id=c.id AND e.cost_usd IS NULL) > 0
-                OR (SELECT COUNT(*) FROM hive_cost_events e WHERE e.conversation_id=c.id) < COUNT(CASE WHEN m.role='assistant' THEN 1 END)
+              OR COUNT(CASE WHEN m.role='assistant' AND m.id LIKE 'tracked:%' AND NOT EXISTS (
+                    SELECT 1 FROM hive_cost_events e
+                    WHERE e.conversation_id=c.id AND e.id='assistant:' || m.id
+                 ) THEN 1 END) > 0
                 THEN NULL ELSE (SELECT SUM(e.cost_usd) FROM hive_cost_events e WHERE e.conversation_id=c.id) END AS cost_usd
             FROM recent_conversations c
             LEFT JOIN hive_messages m ON m.conversation_id = c.id
@@ -1747,6 +1756,8 @@ class SqlStore:
         metadata_json: str,
         created: str,
         message_order_offset: int,
+        *,
+        message_id: str | None = None,
     ) -> None:
         cur.execute(
             self._sql(
@@ -1760,7 +1771,7 @@ class SqlStore:
             """
             ),
             (
-                str(uuid.uuid4()),
+                message_id or str(uuid.uuid4()),
                 _strip_nul_text(conv_id),
                 _strip_nul_text(role),
                 _strip_nul_text(content or ""),
@@ -1868,6 +1879,8 @@ class SqlStore:
         provider: str | None,
         usage: dict[str, Any],
         created: str,
+        *,
+        event_id: str | None = None,
     ) -> None:
         cur.execute(
             self._sql(
@@ -1878,7 +1891,7 @@ class SqlStore:
             """
             ),
             (
-                str(uuid.uuid4()),
+                event_id or str(uuid.uuid4()),
                 _strip_nul_text(conv_id),
                 _strip_nul_text(model) if model else None,
                 _strip_nul_text(provider) if provider else None,
