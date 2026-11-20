@@ -30,7 +30,7 @@ def provider_order(primary: str, fallbacks: str | Iterable[str]) -> tuple[str, .
             ordered.append(item)
     # An empty/malformed fallback setting must not silently reduce resilience
     # to the primary and raw OpenRouter. Respect explicit valid fallback orders.
-    if len(ordered) == 1:
+    if len(ordered) == 1 and ordered[0] != "direct":
         for fallback in ("context_gateway", "headroom", "openrouter", "deterministic"):
             if fallback not in ordered:
                 ordered.append(fallback)
