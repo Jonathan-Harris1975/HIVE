@@ -365,8 +365,19 @@ def dispatch(pr: dict, kind: str, findings: list[str]) -> str:
         # A successful webhook handoff is not evidence that Kilo changed code.
         # A stale handoff without an implementation gets one bounded recovery.
         from datetime import datetime, timezone
-        latest = max(str(c.get("created_at") or "") for c in matching_markers)
+
+        states = [re.search(r"(?m)^dispatch-state: ([a-z0-9-]+)\s*$", c["body"])
+                  for c in matching_markers]
+        states = [state.group(1) if state else "unknown" for state in states]
+        if any(state == "pending" or state.startswith("uncertain-") or state == "unknown"
+               for state in states):
+            return 'already-requested'
+        accepted = [c for c, state in zip(matching_markers, states) if state == "accepted"]
+        if not accepted:
+            print(f"PR #{number} has an unrecognized handoff state; skipping recovery.")
+            return 'already-requested'
         try:
+            latest = max(str(c.get("created_at") or "") for c in accepted)
             age = (datetime.now(timezone.utc) - datetime.fromisoformat(
                 latest.replace("Z", "+00:00"))).total_seconds()
         except (ValueError, TypeError):

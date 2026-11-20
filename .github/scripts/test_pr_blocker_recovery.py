@@ -564,6 +564,47 @@ class Recovery(unittest.TestCase):
 
 
 
+    def test_old_accepted_handoff_timer_ignores_later_rejected_marker(self):
+        marker = "<!-- kilo-auto-repair:" + "a" * 40 + ":review -->"
+        comments = [
+            {
+                "user": {"login": "github-actions[bot]"},
+                "body": marker + "\ndispatch-state: accepted",
+                "created_at": "2020-01-01T00:00:00Z",
+            },
+            {
+                "user": {"login": "github-actions[bot]"},
+                "body": marker + "\ndispatch-state: rejected-http-403",
+                "created_at": "2026-11-20T21:00:00Z",
+            },
+        ]
+        with (
+            patch.object(m.router, "all_pages", return_value=comments),
+            patch.object(m.router, "active_implementation", return_value=None),
+            patch("builtins.print") as output,
+        ):
+            self.assertEqual(m.router.dispatch(self.pr, "review", ["finding"]), "attempt-limit")
+        self.assertTrue(any("after six hours" in str(call) for call in output.call_args_list))
+
+
+    def test_pending_or_uncertain_handoff_never_starts_recovery_timer(self):
+        marker = "<!-- kilo-auto-repair:" + "a" * 40 + ":review -->"
+        for state in ("pending", "uncertain-transport"):
+            comment = {
+                "user": {"login": "github-actions[bot]"},
+                "body": marker + "\ndispatch-state: " + state,
+                "created_at": "2020-01-01T00:00:00Z",
+            }
+            with (
+                patch.object(m.router, "all_pages", return_value=[comment]),
+                patch.object(m.router, "active_implementation") as implementation,
+                patch.object(m.router.urllib.request, "urlopen") as trigger,
+            ):
+                self.assertEqual(m.router.dispatch(self.pr, "review", ["finding"]), "already-requested")
+            implementation.assert_not_called()
+            trigger.assert_not_called()
+
+
     def test_patch_reservation_retries_once(self):
         with patch.object(m.router, "api", side_effect=[RuntimeError("temporary"), {}]) as api, \
              patch("builtins.print"):
