@@ -856,6 +856,40 @@ def test_conversation_cost_includes_title_and_extra_attempts_and_unknowns(tmp_pa
     assert store.list_conversations()["conversations"][0]["total_cost_usd"] is None
 
 
+def test_extra_cost_events_cannot_mask_missing_assistant_event(tmp_path: Path) -> None:
+    settings = Settings(APP_ENV="test", DATABASE_ENABLED=True, DATABASE_URL=f"sqlite:///{tmp_path / 'coverage.sqlite'}")
+    store = SqlStore(settings)
+    assert store.init_schema()["ok"]
+    assert store.record_chat(
+        conversation_id="coverage",
+        mode="general",
+        user_message="hello",
+        assistant_reply="world",
+        model_used="winner",
+        provider="p",
+        usage={"cost": 0.02},
+        extra_usage=[{"model": "retry", "provider": "p1", "usage": {"cost": 0.01}}],
+    )["ok"]
+    assert store.record_usage_event(
+        conversation_id="coverage", model_used="title", provider="p2", usage={"cost": 0.03}
+    )["ok"]
+
+    with store._transaction() as cur:
+        cur.execute(
+            "SELECT id FROM hive_messages WHERE conversation_id=? AND role='assistant'",
+            ("coverage",),
+        )
+        assistant_message_id = cur.fetchone()[0]
+        cur.execute(
+            "DELETE FROM hive_cost_events WHERE id=?",
+            ("assistant:" + assistant_message_id,),
+        )
+
+    conversation = store.list_conversations()["conversations"][0]
+    assert conversation["total_cost_usd"] is None
+    assert conversation["cost_usd"] is None
+
+
 def test_extra_attempt_write_failure_rolls_back_chat(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     settings = Settings(APP_ENV="test", DATABASE_ENABLED=True, DATABASE_URL=f"sqlite:///{tmp_path / 'rollback.sqlite'}")
     store = SqlStore(settings)

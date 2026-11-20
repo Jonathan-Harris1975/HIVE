@@ -156,9 +156,9 @@ def lifecycle_report_history(limit: int = Query(12, ge=1, le=52), settings: Sett
 @router.get("/system/lifecycle-reviews")
 def lifecycle_reviews(response: Response, settings: Settings = Depends(get_settings)) -> dict[str, object]:
     """List durable HIVE review records that require a decision."""
+    response.headers["Cache-Control"] = "no-store, max-age=0"
     try:
         snapshot = verified_open_review_snapshot(R2Storage(settings))
-        response.headers["Cache-Control"] = "no-store, max-age=0"
         return snapshot
     except RuntimeError as exc:
         return {"ok": False, "count": 0, "items": [], "error": type(exc).__name__}
@@ -267,4 +267,3 @@ async def runtime_stats(settings: Settings = Depends(get_settings)) -> dict[str,
             "memory_limit": settings.ops_event_memory_limit,
         },
     }
-
