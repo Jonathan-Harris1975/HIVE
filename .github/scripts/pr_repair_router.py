@@ -362,8 +362,30 @@ def dispatch(pr: dict, kind: str, findings: list[str]) -> str:
                "<!-- kilo-auto-repair:" in (c.get("body") or "")]
     matching_markers = [c for c in markers if marker in c["body"]]
     if matching_markers and not all("dispatch-state: rejected-http-" in c["body"] for c in matching_markers):
-        print(f"PR #{number} already has its current {kind} repair request; skipping.")
-        return 'already-requested'
+        # Pending or uncertain handoffs may have been accepted by the provider;
+        # never start recovery based on their timestamps.
+        from datetime import datetime, timezone
+
+        states = [re.search(r"(?m)^dispatch-state: ([a-z0-9-]+)\s*$", c["body"])
+                  for c in matching_markers]
+        states = [state.group(1) if state else "unknown" for state in states]
+        if any(state == "pending" or state.startswith("uncertain-") or state == "unknown"
+               for state in states):
+            return 'already-requested'
+        accepted = [c for c, state in zip(matching_markers, states) if state == "accepted"]
+        if not accepted:
+            print(f"PR #{number} has an unrecognized handoff state; skipping recovery.")
+            return 'already-requested'
+        try:
+            latest = max(str(c.get("created_at") or "") for c in accepted)
+            age = (datetime.now(timezone.utc) - datetime.fromisoformat(
+                latest.replace("Z", "+00:00"))).total_seconds()
+        except (ValueError, TypeError):
+            age = 0
+        if age < 6 * 3600 or active_implementation(pr) is not None:
+            print(f"PR #{number} has a recent handoff or verified implementation; skipping.")
+            return 'already-requested'
+        print(f"::warning::PR #{number} Kilo handoff has no verified implementation after six hours.")
     if matching_markers:
         print(f"PR #{number} has an explicit rejected handoff; a bounded retry is eligible.")
     if len(matching_markers) >= 2:
