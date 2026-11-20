@@ -88,3 +88,11 @@ def test_openrouter_context_plugin_is_idempotent() -> None:
     assert add_openrouter_context_compression(
         add_openrouter_context_compression(payload)
     )["plugins"] == [{"id": "context-compression"}]
+
+
+def test_empty_or_invalid_fallback_config_keeps_compression_recovery_chain() -> None:
+    expected = ("leanctx", "context_gateway", "headroom", "openrouter", "deterministic", "direct")
+    assert provider_order("leanctx", "") == expected
+    assert provider_order("leanctx", "unknown,invalid") == expected
+    # Explicit valid ordering is honoured, even when it only specifies direct.
+    assert provider_order("leanctx", "direct") == ("leanctx", "direct")
