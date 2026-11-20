@@ -362,8 +362,22 @@ def dispatch(pr: dict, kind: str, findings: list[str]) -> str:
                "<!-- kilo-auto-repair:" in (c.get("body") or "")]
     matching_markers = [c for c in markers if marker in c["body"]]
     if matching_markers and not all("dispatch-state: rejected-http-" in c["body"] for c in matching_markers):
-        print(f"PR #{number} already has its current {kind} repair request; skipping.")
-        return 'already-requested'
+        # A successful webhook handoff is not evidence that Kilo changed code.
+        # A stale handoff without an implementation gets one bounded recovery.
+        from datetime import datetime, timezone
+        latest = max(str(c.get("created_at") or "") for c in matching_markers)
+        try:
+            age = (datetime.now(timezone.utc) - datetime.fromisoformat(
+                latest.replace("Z", "+00:00"))).total_seconds()
+        except (ValueError, TypeError):
+            age = 0
+        if age < 6 * 3600 or active_implementation(pr) is not None:
+            print(f"PR #{number} has a recent handoff or verified implementation; skipping.")
+            return 'already-requested'
+        print(f"::warning::PR #{number} Kilo handoff has no verified implementation after six hours.")
+        if len(matching_markers) >= 2:
+            print(f"::error::PR #{number} exhausted Kilo implementation recovery; human escalation required.")
+            return 'attempt-limit'
     if matching_markers:
         print(f"PR #{number} has an explicit rejected handoff; a bounded retry is eligible.")
     if len(matching_markers) >= 2:
