@@ -592,7 +592,7 @@ class Recovery(unittest.TestCase):
         for state in ("pending", "uncertain-transport"):
             comment = {
                 "user": {"login": "github-actions[bot]"},
-                "body": marker + "\ndispatch-state: " + state,
+                "body": marker + r"\n" + "dispatch-state: " + state,
                 "created_at": "2020-01-01T00:00:00Z",
             }
             with (
