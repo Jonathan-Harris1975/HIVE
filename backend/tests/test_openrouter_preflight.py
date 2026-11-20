@@ -366,12 +366,36 @@ async def test_stream_chat_completion_retries_provider_error_before_tokens(
         "from_model": "bad-primary",
         "model_used": "bad-primary",
         "message": "provider stream error",
+        "usage_attempt": {"model": "bad-primary", "provider": None, "usage": None},
     }
     assert events[2]["type"] == "model_attempt"
     assert events[2]["model_used"] == "fallback-good:free"
     assert events[-1]["event"] == "done"
     assert events[-1]["ok"] is True
     assert events[-1]["model_used"] == "fallback-good:free"
+
+
+@pytest.mark.asyncio
+async def test_empty_stream_is_failure_when_empty_retry_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = Settings(openrouter_api_key="test-key", openrouter_empty_reply_retry_enabled=False)
+    client = OpenRouterClient(settings)
+    attempted = []
+
+    async def fake_attempts(payload, fallback_models):
+        yield {**payload, "model": "primary"}
+        yield {**payload, "model": "fallback"}
+
+    async def fake_stream(payload):
+        attempted.append(payload["model"])
+        yield {"event": "done", "ok": True, "model_used": payload["model"], "usage": {"total_tokens": 10}}
+
+    monkeypatch.setattr(client, "_payload_attempts", fake_attempts)
+    monkeypatch.setattr(client, "_stream_one_attempt", fake_stream)
+    events = [event async for event in client.stream_chat_completion({"model": "primary"}, [])]
+    assert attempted == ["primary"]
+    assert events[-1]["ok"] is False
+    assert events[-1]["finish_reason"] == "empty_reply"
+    assert events[-1]["usage"] == {"total_tokens": 10}
 
 
 @pytest.mark.asyncio
@@ -487,3 +511,122 @@ async def test_payload_attempts_can_disable_implicit_free_fallback(monkeypatch) 
     ]
 
     assert attempts == []
+
+
+@pytest.mark.asyncio
+async def test_stream_preserves_empty_attempt_usage_for_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = OpenRouterClient(Settings(openrouter_api_key="test-key"))
+
+    async def candidates(payload, fallback_models):
+        yield {"model": "first"}
+        yield {"model": "second"}
+
+    async def stream(payload):
+        if payload["model"] == "first":
+            yield {"event": "done", "ok": True, "model_used": "first", "provider": "p1", "usage": {"total_tokens": 10, "cost": 0.01}}
+        else:
+            yield {"event": "token", "content": "hello"}
+            yield {"event": "done", "ok": True, "model_used": "second", "usage": {"total_tokens": 5, "cost": 0.02}}
+
+    monkeypatch.setattr(client, "_payload_attempts", candidates)
+    monkeypatch.setattr(client, "_stream_one_attempt", stream)
+    events = [event async for event in client.stream_chat_completion({}, [])]
+    assert events[-1]["usage"]["cost"] == 0.02
+    assert events[-1]["hive_extra_usage"] == [{"model": "first", "provider": "p1", "usage": {"total_tokens": 10, "cost": 0.01}}]
+
+
+@pytest.mark.asyncio
+async def test_nonstream_preserves_expanded_budget_attempt_usage(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = OpenRouterClient(Settings(openrouter_api_key="test-key"))
+
+    async def candidates(payload, fallback_models):
+        yield {"model": "first", "max_tokens": 32}
+
+    async def post(payload):
+        if payload["max_tokens"] == 32:
+            return {"model": "first", "usage": {"cost": 0.01}, "choices": [{"message": {"content": ""}}]}
+        return {"model": "first", "usage": {"cost": 0.02}, "choices": [{"message": {"content": "answer"}}]}
+
+    monkeypatch.setattr(client, "_payload_attempts", candidates)
+    monkeypatch.setattr(client, "_post_json", post)
+    result = await client.chat_completion({}, [])
+    assert result["hive_extra_usage"][0]["usage"]["cost"] == 0.01
+    assert result["usage"]["cost"] == 0.02
+
+
+@pytest.mark.asyncio
+async def test_legacy_function_call_is_not_retried_as_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = OpenRouterClient(Settings(openrouter_api_key="test-key"))
+    calls = []
+
+    async def candidates(payload, fallback_models):
+        yield {"model": "first", "max_tokens": 32}
+
+    async def post(payload):
+        calls.append(payload)
+        return {"choices": [{"message": {"content": None, "function_call": {"name": "lookup", "arguments": "{}"}}}]}
+
+    monkeypatch.setattr(client, "_payload_attempts", candidates)
+    monkeypatch.setattr(client, "_post_json", post)
+    result = await client.chat_completion({}, [])
+    assert len(calls) == 1
+    assert result["choices"][0]["message"]["function_call"]["name"] == "lookup"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("lines,expected", [
+    (["data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}"], "done"),
+    ([], "retry_model"),
+])
+async def test_stream_eof_without_completion_is_not_success(monkeypatch: pytest.MonkeyPatch, lines, expected) -> None:
+    class Response:
+        status_code = 200
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+        async def aiter_lines(self):
+            for line in lines:
+                yield line
+
+    class Client:
+        def __init__(self, **kwargs): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+        def stream(self, *args, **kwargs): return Response()
+
+    monkeypatch.setattr("app.services.openrouter.httpx.AsyncClient", Client)
+    client = OpenRouterClient(Settings(openrouter_api_key="test-key"))
+    events = [e async for e in client._stream_route_attempt({"model": "m"}, url="https://example.test", headers={})]
+    assert events[-1]["event"] == expected
+    if expected == "done":
+        assert events[-1]["ok"] is False
+        assert events[-1]["partial_response"] is True
+        assert events[-1]["finish_reason"] == "stream_interrupted"
+
+
+@pytest.mark.asyncio
+async def test_context_proxy_failure_marks_previous_usage_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = OpenRouterClient(Settings(openrouter_api_key="test-key"))
+
+    async def routes(payload):
+        yield "context_gateway", "https://proxy.invalid", {}, payload
+        yield "openrouter", "https://provider.invalid", {}, payload
+
+    class Response:
+        def __init__(self, status): self.status_code = status
+        @property
+        def text(self): return "gateway failed"
+        def json(self): return {"model": "m", "usage": {"cost": 0.02}, "choices": [{"message": {"content": "ok"}}]}
+
+    class Client:
+        def __init__(self, **kwargs): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+        async def post(self, url, **kwargs): return Response(502 if "proxy" in url else 200)
+
+    async def candidates(payload, fallback_models): yield {"model": "m"}
+    monkeypatch.setattr(client, "_context_attempts", routes)
+    monkeypatch.setattr(client, "_payload_attempts", candidates)
+    monkeypatch.setattr("app.services.openrouter.httpx.AsyncClient", Client)
+    result = await client.chat_completion({}, [])
+    assert result["usage"]["cost"] == 0.02
+    assert result["hive_extra_usage"] == [{"model": "m", "provider": None, "usage": None}]

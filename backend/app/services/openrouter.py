@@ -177,9 +177,19 @@ class OpenRouterClient:
                 )
             ]
 
+        extra_usage: list[dict[str, Any]] = []
+
+        def remember_attempt(response: dict[str, Any], model: Any) -> None:
+            extra_usage.append({
+                "model": response.get("model") or model,
+                "provider": response.get("provider"),
+                "usage": response.get("usage") if isinstance(response.get("usage"), dict) else None,
+            })
+
         for candidate_payload in candidate_payloads:
             model = candidate_payload.get("model")
             response_payload = await self._post_json(candidate_payload)
+            extra_usage.extend(response_payload.pop("hive_prior_context_attempts", []))
             # A reasoning model can consume the entire completion budget without
             # producing visible text. Retry once with a larger budget before
             # charging ahead to another provider/model.
@@ -191,12 +201,15 @@ class OpenRouterClient:
             ):
                 original_budget = candidate_payload.get("max_tokens")
                 if isinstance(original_budget, int) and 0 < original_budget < 2048:
+                    remember_attempt(response_payload, model)
                     expanded_payload = {
                         **candidate_payload,
                         "max_tokens": min(4096, max(2048, original_budget * 2)),
                     }
                     response_payload = await self._post_json(expanded_payload)
+                    extra_usage.extend(response_payload.pop("hive_prior_context_attempts", []))
             if response_payload.get("_retryable_model_error"):
+                remember_attempt(response_payload, model)
                 attempts.append(
                     {
                         "model": model,
@@ -207,6 +220,7 @@ class OpenRouterClient:
                 continue
 
             if self.settings.openrouter_empty_reply_retry_enabled and self._has_empty_visible_reply(response_payload) and not self._has_tool_calls(response_payload):
+                remember_attempt(response_payload, model)
                 attempts.append(
                     {
                         "model": model,
@@ -220,6 +234,8 @@ class OpenRouterClient:
 
             if attempts:
                 response_payload.setdefault("hive_attempts", attempts + [{"model": model, "ok": True}])
+            if extra_usage:
+                response_payload["hive_extra_usage"] = extra_usage
             return response_payload
 
         empty_reply_seen = any(attempt.get("empty_reply") for attempt in attempts)
@@ -236,6 +252,7 @@ class OpenRouterClient:
             "provider": None,
             "usage": None,
             "hive_attempts": attempts,
+            "hive_extra_usage": extra_usage,
             "choices": [
                 {
                     "message": {"content": failure_message},
@@ -258,6 +275,7 @@ class OpenRouterClient:
         - one done event with model/provider/usage metadata
         """
 
+        extra_usage: list[dict[str, Any]] = []
         async for candidate_payload in self._payload_attempts(payload, fallback_models):
             saw_token = False
             state = OpenRouterStreamState(model_used=candidate_payload.get("model"))
@@ -269,18 +287,29 @@ class OpenRouterClient:
             }
 
             async for event in self._stream_one_attempt(candidate_payload):
+                if event.get("type") == "context_attempt_failed" and isinstance(event.get("usage_attempt"), dict):
+                    extra_usage.append(event["usage_attempt"])
+                    yield event
+                    continue
                 if event.get("event") == "retry_model":
                     if saw_token:
                         # Once tokens have left the server, we cannot safely replay into the same stream.
                         yield {"event": "error", "message": event["message"], "model": candidate_payload.get("model")}
-                        yield {"event": "done", "ok": False, "model_used": state.model_used}
+                        yield {"event": "done", "ok": False, "model_used": event.get("model_used") or state.model_used,
+                               "provider": event.get("provider"), "usage": event.get("usage"),
+                               "partial_response": True, "finish_reason": "stream_interrupted",
+                               "hive_extra_usage": extra_usage}
                         return
+                    if not event.get("usage_accounted"):
+                        extra_usage.append({"model": event.get("model_used") or state.model_used,
+                                            "provider": event.get("provider"), "usage": event.get("usage")})
                     yield {
                         "event": "meta",
                         "type": "model_fallback",
                         "from_model": candidate_payload.get("model"),
                         "model_used": candidate_payload.get("model"),
                         "message": event["message"],
+                        **({"usage_attempt": extra_usage[-1]} if not event.get("usage_accounted") else {}),
                     }
                     break
 
@@ -301,6 +330,7 @@ class OpenRouterClient:
                             "finish_reason": event.get("finish_reason"),
                             "completion_truncated": bool(event.get("completion_truncated")),
                             "partial_response": bool(event.get("partial_response")),
+                            "hive_extra_usage": extra_usage,
                         }
                         return
                     state = OpenRouterStreamState(
@@ -309,14 +339,28 @@ class OpenRouterClient:
                         usage=event.get("usage"),
                         raw_final_chunk=event.get("raw_final_chunk"),
                     )
-                    if self.settings.openrouter_empty_reply_retry_enabled and not saw_token:
+                    if not saw_token:
+                        if self.settings.openrouter_empty_reply_retry_enabled:
+                            extra_usage.append({"model": state.model_used, "provider": state.provider, "usage": state.usage})
+                            yield {
+                                "event": "meta",
+                                "type": "empty_reply_retry",
+                                "from_model": state.model_used,
+                                "message": "Model returned no visible assistant text; trying fallback if available.",
+                                "usage_attempt": extra_usage[-1],
+                            }
+                            break
                         yield {
-                            "event": "meta",
-                            "type": "empty_reply_retry",
-                            "from_model": state.model_used,
-                            "message": "Model returned no visible assistant text; trying fallback if available.",
+                            "event": "done",
+                            "ok": False,
+                            "model_used": state.model_used,
+                            "provider": state.provider,
+                            "usage": state.usage,
+                            "message": "Model returned no visible assistant text.",
+                            "finish_reason": "empty_reply",
+                            "hive_extra_usage": extra_usage,
                         }
-                        break
+                        return
                     yield {
                         "event": "done",
                         "ok": True,
@@ -325,6 +369,7 @@ class OpenRouterClient:
                         "usage": state.usage,
                         "finish_reason": event.get("finish_reason"),
                         "completion_truncated": bool(event.get("completion_truncated")),
+                        "hive_extra_usage": extra_usage,
                     }
                     return
 
@@ -335,13 +380,14 @@ class OpenRouterClient:
             "message": "All model attempts failed or returned no visible assistant text",
             "finish_reason": "all_attempts_failed",
             "completion_truncated": False,
+            "hive_extra_usage": extra_usage,
         }
 
     @staticmethod
     def _has_tool_calls(response_payload: dict[str, Any]) -> bool:
         """Tool calls are structured output, not an empty model reply."""
         return any(
-            bool((choice.get("message") or {}).get("tool_calls"))
+            bool((choice.get("message") or {}).get("tool_calls") or (choice.get("message") or {}).get("function_call"))
             for choice in (response_payload.get("choices") or [])
             if isinstance(choice, dict)
         )
@@ -609,6 +655,13 @@ class OpenRouterClient:
 
     async def _post_json(self, payload: dict[str, Any]) -> dict[str, Any]:
         last_failure: dict[str, Any] | None = None
+        prior_context_attempts: list[dict[str, Any]] = []
+
+        def with_prior(result: dict[str, Any]) -> dict[str, Any]:
+            if prior_context_attempts:
+                result["hive_prior_context_attempts"] = prior_context_attempts
+            return result
+
         async for route_name, url, headers, route_payload in self._context_attempts(payload):
             try:
                 async with httpx.AsyncClient(timeout=self._attempt_timeout()) as client:
@@ -628,8 +681,9 @@ class OpenRouterClient:
                     "message": f"Context route {route_name} timed out for {payload.get('model')}: {exc}",
                 }
                 if route_name in {"leanctx", "context_gateway"}:
+                    prior_context_attempts.append({"model": payload.get("model"), "provider": None, "usage": None})
                     continue
-                return last_failure
+                return with_prior(last_failure)
             except httpx.HTTPError as exc:
                 logger.info(
                     "Context route failed route=%s model=%s error=%s",
@@ -643,8 +697,9 @@ class OpenRouterClient:
                     "message": f"Context route {route_name} failed for {payload.get('model')}: {exc}",
                 }
                 if route_name in {"leanctx", "context_gateway"}:
+                    prior_context_attempts.append({"model": payload.get("model"), "provider": None, "usage": None})
                     continue
-                return last_failure
+                return with_prior(last_failure)
 
             if response.status_code >= 400:
                 message = response.text
@@ -659,6 +714,7 @@ class OpenRouterClient:
                         route_name,
                         response.status_code,
                     )
+                    prior_context_attempts.append({"model": payload.get("model"), "provider": None, "usage": None})
                     continue
                 if route_name in {"openrouter", "deterministic"} and self._is_context_limit_response(
                     response.status_code, message
@@ -667,22 +723,24 @@ class OpenRouterClient:
                         "Context route could not fit prompt route=%s; trying fallback",
                         route_name,
                     )
+                    prior_context_attempts.append({"model": payload.get("model"), "provider": None, "usage": None})
                     continue
                 if response.status_code in RETRYABLE_STATUS_CODES:
-                    return last_failure
+                    return with_prior(last_failure)
                 raise HTTPException(status_code=response.status_code, detail=message)
 
             data = response.json()
             self._log_credential_used(route_name)
             if isinstance(data, dict):
                 data.setdefault("hive_context_route", route_name)
+                return with_prior(data)
             return data
 
-        return last_failure or {
+        return with_prior(last_failure or {
             "_retryable_model_error": True,
             "status_code": 503,
             "message": "No configured context route was available.",
-        }
+        })
 
     @staticmethod
     def _is_context_limit_response(status_code: int | None, message: str) -> bool:
@@ -729,7 +787,12 @@ class OpenRouterClient:
                             "message": message or f"Context route {route_name} failed",
                             "status_code": status_code,
                             "model_used": payload.get("model"),
+                            "usage_accounted": True,
                         }
+                        yield {"event": "meta", "type": "context_attempt_failed", "usage_attempt": {
+                            "model": event.get("model_used") or payload.get("model"),
+                            "provider": event.get("provider"), "usage": event.get("usage"),
+                        }}
                         logger.warning(
                             "Streaming context route failed route=%s; trying fallback",
                             route_name,
@@ -782,6 +845,7 @@ class OpenRouterClient:
         final_usage = None
         final_chunk = None
         final_finish_reason = None
+        generation_id = None
         attempt_started = time.perf_counter()
         saw_visible_token = False
 
@@ -852,6 +916,12 @@ class OpenRouterClient:
                             return
 
                         final_chunk = chunk
+                        chunk_id = chunk.get("id")
+                        if isinstance(chunk_id, str) and chunk_id.startswith("gen-") and chunk_id != generation_id:
+                            generation_id = chunk_id
+                            yield {"event": "meta", "type": "generation", "generation_id": generation_id,
+                                   "model_used": chunk.get("model") or final_model,
+                                   "provider": chunk.get("provider") or final_provider}
                         final_model = chunk.get("model") or final_model
                         final_provider = chunk.get("provider") or final_provider
                         final_usage = chunk.get("usage") or final_usage
@@ -871,6 +941,19 @@ class OpenRouterClient:
                                     "provider": final_provider,
                                 }
 
+                    if not final_finish_reason:
+                        if saw_visible_token:
+                            yield {
+                                "event": "done", "ok": False,
+                                "message": "OpenRouter stream ended before completion.",
+                                "model_used": final_model, "provider": final_provider,
+                                "usage": final_usage, "finish_reason": "stream_interrupted",
+                                "completion_truncated": True, "partial_response": True,
+                            }
+                        else:
+                            yield {"event": "retry_model", "message": "OpenRouter stream ended before completion.",
+                                   "model_used": final_model, "provider": final_provider, "usage": final_usage}
+                        return
                     yield {
                         "event": "done",
                         "ok": True,

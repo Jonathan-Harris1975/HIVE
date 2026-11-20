@@ -127,3 +127,34 @@ async def test_stream_chat_exposes_and_records_truncation(monkeypatch: pytest.Mo
     saved = store.get_conversation("truncated-stream-conv")
     metadata = saved["messages"][-1]["metadata"]
     assert metadata["completion_truncated"] is True
+
+
+@pytest.mark.asyncio
+async def test_interrupted_stream_retains_partial_text_and_known_fallback_cost(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    settings = Settings(APP_ENV="test", DATABASE_ENABLED=True, DATABASE_URL=f"sqlite:///{tmp_path / 'interrupted.sqlite'}", OPENROUTER_API_KEY="test")
+    store = SqlStore(settings)
+    assert store.init_schema()["ok"]
+
+    class InterruptedClient:
+        def __init__(self, settings):
+            pass
+
+        async def stream_chat_completion(self, payload, fallback_models=None):
+            yield {"event": "meta", "type": "empty_reply_retry", "usage_attempt": {"model": "first", "provider": "p", "usage": {"cost": 0.01}}}
+            yield {"event": "token", "content": "partial"}
+            yield {"event": "token", "content": "not seen"}
+
+    monkeypatch.setattr(chat_api, "OpenRouterClient", InterruptedClient)
+    request = ChatRequest(message="Test interruption", mode="general", conversation_id="interrupted")
+    stream = chat_api._stream_and_record_chat(request=request, payload={}, fallback_models=[], settings=settings)
+    assert (await anext(stream))["type"] == "conversation"
+    assert (await anext(stream))["type"] == "empty_reply_retry"
+    assert (await anext(stream))["content"] == "partial"
+    await stream.aclose()
+    saved = store.get_conversation("interrupted")
+    assert saved["messages"][-1]["content"] == "partial"
+    assert saved["messages"][-1]["metadata"]["stream_ended_early"] is True
+    assert store.list_conversations()["conversations"][0]["total_cost_usd"] is None
+    costs = store.cost_summary()
+    assert costs["ok"] is True
+    assert costs["totals"]["cost_usd"] == pytest.approx(0.01)
