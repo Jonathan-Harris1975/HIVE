@@ -510,6 +510,8 @@ class OpenRouterClient:
 
         openrouter_url = f"{self.settings.openrouter_base_url.rstrip('/')}/chat/completions"
         openrouter_headers = self._headers()
+        logger.info("context.fallback.config profile=%s primary=%s order=%s headroom_enabled=%s",
+                    profile, primary, ",".join(provider_order(primary, fallbacks)), self.settings.headroom_enabled)
         for route_name in provider_order(primary, fallbacks):
             if route_name == "leanctx":
                 base = self.settings.leanctx_base_url.strip().rstrip("/")
@@ -547,6 +549,10 @@ class OpenRouterClient:
                     exact_context=exact_context,
                 )
                 self._log_headroom(outcome, model=model, route_name=route_name)
+                logger.info("context.headroom.outcome model=%s attempted=%s compressed=%s failed=%s reason=%s tokens_before=%d tokens_after=%d tokens_saved=%d",
+                            model, outcome.attempted, outcome.compressed, outcome.failed,
+                            outcome.skipped_reason or "none", outcome.tokens_before,
+                            outcome.tokens_after, outcome.tokens_saved)
                 if outcome.failed or (
                     outcome.skipped_reason and outcome.skipped_reason != "exact_context"
                 ):
@@ -590,6 +596,7 @@ class OpenRouterClient:
                 continue
 
             if route_name == "direct":
+                logger.info("context.fallback.direct model=%s profile=%s exact_context=%s", model, profile, exact_context)
                 yield route_name, openrouter_url, openrouter_headers, dict(clean_payload)
 
     @staticmethod
