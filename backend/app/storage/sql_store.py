@@ -86,6 +86,7 @@ class SqlStore:
                 for statement in statements:
                     cur.execute(statement)
                 self._ensure_auto_titled_column(cur)
+                self._ensure_message_order_column(cur)
             return {
                 "ok": True,
                 "enabled": True,
@@ -155,6 +156,7 @@ class SqlStore:
         provider: str | None,
         usage: dict[str, Any] | None,
         metadata: dict[str, Any] | None = None,
+        extra_usage: list[dict[str, Any]] | None = None,
     ) -> dict[str, object]:
         if not self.enabled:
             return {"ok": False, "enabled": False}
@@ -181,6 +183,13 @@ class SqlStore:
                         created,
                         title=_default_conversation_title(safe_user_message),
                     )
+                    cur.execute(
+                        self._sql(
+                            "UPDATE hive_conversations SET message_order=message_order+2 "
+                            "WHERE id=__PARAM__"
+                        ),
+                        (_strip_nul_text(conv_id),),
+                    )
                     self._insert_message(
                         cur,
                         conv_id,
@@ -192,6 +201,7 @@ class SqlStore:
                         None,
                         metadata_json,
                         created,
+                        -1,
                     )
                     self._insert_message(
                         cur,
@@ -204,10 +214,17 @@ class SqlStore:
                         cost,
                         metadata_json,
                         created,
+                        0,
                     )
                     if usage:
                         self._insert_cost_event(
                             cur, conv_id, safe_model_used, safe_provider, usage, created
+                        )
+                    for usage_attempt in extra_usage or []:
+                        attempt_usage = usage_attempt.get("usage")
+                        self._insert_cost_event(
+                            cur, conv_id, usage_attempt.get("model"), usage_attempt.get("provider"),
+                            attempt_usage if isinstance(attempt_usage, dict) else {}, created,
                         )
                 response: dict[str, object] = {"ok": True, "conversation_id": conv_id}
                 if schema_init_result is not None:
@@ -258,6 +275,59 @@ class SqlStore:
             return {"ok": True, "conversation_id": conversation_id}
         except Exception as exc:  # pragma: no cover - driver-specific failures
             return {"ok": False, "conversation_id": conversation_id, "error": str(exc)}
+
+    def reconcile_interrupted_usage(
+        self, *, conversation_id: str, message_id: str, usage: dict[str, Any],
+        model: str | None, provider: str | None,
+    ) -> dict[str, object]:
+        """Attach provider-confirmed usage once, atomically, to an interrupted turn."""
+        if not self.enabled:
+            return {"ok": False, "enabled": False}
+        event_id = "reconciled:" + message_id
+        try:
+            with self._transaction() as cur:
+                cur.execute(self._sql("""
+                    INSERT INTO hive_cost_events
+                    (id, conversation_id, model, provider, prompt_tokens, completion_tokens,
+                     total_tokens, cost_usd, usage_json, created_at)
+                    SELECT __PARAM__, conversation_id, __PARAM__, __PARAM__, __PARAM__, __PARAM__,
+                           __PARAM__, __PARAM__, __PARAM__, __PARAM__
+                    FROM hive_messages WHERE id=__PARAM__ AND conversation_id=__PARAM__
+                      AND role='assistant' AND cost_usd IS NULL
+                    ON CONFLICT(id) DO NOTHING
+                """), (event_id, model, provider, usage.get("prompt_tokens"),
+                       usage.get("completion_tokens"), usage.get("total_tokens"), usage.get("cost"),
+                       _json_dumps_safe(usage), _now(), message_id, conversation_id))
+                cur.execute(self._sql("""
+                    UPDATE hive_messages SET cost_usd=__PARAM__, token_total=__PARAM__,
+                      model=COALESCE(__PARAM__, model), provider=COALESCE(__PARAM__, provider)
+                    WHERE id=__PARAM__ AND conversation_id=__PARAM__ AND role='assistant'
+                      AND cost_usd IS NULL AND EXISTS (SELECT 1 FROM hive_cost_events WHERE id=__PARAM__)
+                """), (usage.get("cost"), usage.get("total_tokens"), model, provider,
+                       message_id, conversation_id, event_id))
+            return {"ok": True}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def unresolved_interrupted_usage(self, conversation_id: str) -> list[dict[str, Any]]:
+        """Find recoverable turns even when they are outside the displayed history page."""
+        if not self.enabled:
+            return []
+        try:
+            with self._connect() as conn:
+                cur = conn.cursor()
+                cur.execute(self._sql("""
+                    SELECT id, role, cost_usd, metadata_json FROM hive_messages
+                    WHERE conversation_id=__PARAM__ AND role='assistant' AND cost_usd IS NULL
+                      AND metadata_json LIKE __PARAM__ ORDER BY created_at ASC, id ASC
+                """), (conversation_id, "%generation_id%"))
+                messages = self._fetch_dicts(cur)
+            for message in messages:
+                message["metadata"] = _json_or_none(message.pop("metadata_json", None))
+            return messages
+        except Exception as exc:
+            logger.warning("Unresolved usage lookup failed: %s", type(exc).__name__)
+            return []
 
     def record_file(
         self, file_result: Any, extra_metadata: dict[str, Any] | None = None
@@ -550,8 +620,14 @@ class SqlStore:
               c.updated_at,
               COUNT(m.id) AS message_count,
               COALESCE(SUM(CASE WHEN m.role='assistant' THEN m.token_total ELSE 0 END), 0) AS total_tokens,
-              COALESCE(SUM(CASE WHEN m.role='assistant' THEN m.cost_usd ELSE 0 END), 0) AS total_cost_usd,
-              COALESCE(SUM(CASE WHEN m.role='assistant' THEN m.cost_usd ELSE 0 END), 0) AS cost_usd
+              CASE WHEN COUNT(CASE WHEN m.role='assistant' AND m.cost_usd IS NULL THEN 1 END) > 0
+                OR (SELECT COUNT(*) FROM hive_cost_events e WHERE e.conversation_id=c.id AND e.cost_usd IS NULL) > 0
+                OR (SELECT COUNT(*) FROM hive_cost_events e WHERE e.conversation_id=c.id) < COUNT(CASE WHEN m.role='assistant' THEN 1 END)
+                THEN NULL ELSE (SELECT SUM(e.cost_usd) FROM hive_cost_events e WHERE e.conversation_id=c.id) END AS total_cost_usd,
+              CASE WHEN COUNT(CASE WHEN m.role='assistant' AND m.cost_usd IS NULL THEN 1 END) > 0
+                OR (SELECT COUNT(*) FROM hive_cost_events e WHERE e.conversation_id=c.id AND e.cost_usd IS NULL) > 0
+                OR (SELECT COUNT(*) FROM hive_cost_events e WHERE e.conversation_id=c.id) < COUNT(CASE WHEN m.role='assistant' THEN 1 END)
+                THEN NULL ELSE (SELECT SUM(e.cost_usd) FROM hive_cost_events e WHERE e.conversation_id=c.id) END AS cost_usd
             FROM recent_conversations c
             LEFT JOIN hive_messages m ON m.conversation_id = c.id
             GROUP BY c.id, c.mode, c.model, c.title, c.auto_titled, c.created_at, c.updated_at
@@ -776,7 +852,7 @@ class SqlStore:
                     SELECT id, role, content, model, provider, token_total, cost_usd, metadata_json, created_at
                     FROM hive_messages
                     WHERE conversation_id=__PARAM__
-                    ORDER BY created_at DESC
+                    ORDER BY created_at DESC, message_order DESC, id DESC
                     LIMIT __PARAM__
                     """
                     ),
@@ -795,11 +871,12 @@ class SqlStore:
                 "messages": messages,
             }
         except Exception as exc:  # pragma: no cover
+            logger.warning("Conversation lookup failed: %s", type(exc).__name__)
             return {
                 "ok": False,
                 "enabled": True,
                 "conversation_id": conversation_id,
-                "error": str(exc),
+                "error": "conversation_storage_unavailable",
             }
 
     def first_conversation_exchange(self, conversation_id: str) -> dict[str, str | None]:
@@ -816,7 +893,7 @@ class SqlStore:
                     SELECT role, content
                     FROM hive_messages
                     WHERE conversation_id=__PARAM__ AND role IN ('user', 'assistant')
-                    ORDER BY created_at ASC
+                    ORDER BY created_at ASC, message_order ASC, id ASC
                     LIMIT 8
                     """
                     ),
@@ -861,7 +938,7 @@ class SqlStore:
                     SELECT role, content
                     FROM hive_messages
                     WHERE conversation_id=__PARAM__ AND role IN ('user', 'assistant')
-                    ORDER BY created_at DESC
+                    ORDER BY created_at DESC, message_order DESC, id DESC
                     LIMIT __PARAM__
                     """
                     ),
@@ -1300,6 +1377,7 @@ class SqlStore:
                 model TEXT,
                 title TEXT,
                 auto_titled INTEGER NOT NULL DEFAULT 0,
+                message_order INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
@@ -1319,7 +1397,8 @@ class SqlStore:
                 token_total INTEGER,
                 cost_usd REAL,
                 metadata_json TEXT,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                message_order INTEGER
             )
             """,
             """
@@ -1413,6 +1492,83 @@ class SqlStore:
                 cur.execute(
                     "ALTER TABLE hive_conversations ADD COLUMN auto_titled INTEGER NOT NULL DEFAULT 0"
                 )
+
+    def _ensure_message_order_column(self, cur: Any) -> None:
+        """Add and backfill a stable per-conversation write sequence."""
+
+        if self.dialect == "postgres":
+            cur.execute(
+                "ALTER TABLE hive_conversations ADD COLUMN IF NOT EXISTS "
+                "message_order INTEGER NOT NULL DEFAULT 0"
+            )
+            cur.execute("ALTER TABLE hive_messages ADD COLUMN IF NOT EXISTS message_order INTEGER")
+        elif self.dialect in {"sqlite", "d1"}:
+            cur.execute("PRAGMA table_info(hive_conversations)")
+            conversation_columns = {str(row[1]) for row in cur.fetchall()}
+            if "message_order" not in conversation_columns:
+                cur.execute(
+                    "ALTER TABLE hive_conversations ADD COLUMN "
+                    "message_order INTEGER NOT NULL DEFAULT 0"
+                )
+            cur.execute("PRAGMA table_info(hive_messages)")
+            columns = {str(row[1]) for row in cur.fetchall()}
+            if "message_order" not in columns:
+                cur.execute("ALTER TABLE hive_messages ADD COLUMN message_order INTEGER")
+
+        cur.execute(
+            """
+            WITH existing_orders AS (
+                SELECT conversation_id, MAX(message_order) AS max_order
+                FROM hive_messages
+                WHERE message_order IS NOT NULL
+                GROUP BY conversation_id
+            ),
+            pending AS (
+                SELECT message.id,
+                       COALESCE(existing_orders.max_order, 0) + ROW_NUMBER() OVER (
+                           PARTITION BY message.conversation_id
+                           ORDER BY message.created_at,
+                                    CASE WHEN message.role='user' THEN 0 ELSE 1 END,
+                                    message.id
+                       ) AS assigned_order
+                FROM hive_messages AS message
+                LEFT JOIN existing_orders
+                    ON existing_orders.conversation_id=message.conversation_id
+                WHERE message.message_order IS NULL
+            )
+            UPDATE hive_messages
+            SET message_order=(
+                SELECT pending.assigned_order
+                FROM pending
+                WHERE pending.id=hive_messages.id
+            )
+            WHERE message_order IS NULL
+            """
+        )
+        cur.execute(
+            """
+            WITH conversation_orders AS (
+                SELECT conversation_id, MAX(message_order) AS max_order
+                FROM hive_messages
+                GROUP BY conversation_id
+            )
+            UPDATE hive_conversations
+            SET message_order=(
+                SELECT conversation_orders.max_order
+                FROM conversation_orders
+                WHERE conversation_orders.conversation_id=hive_conversations.id
+            )
+            WHERE message_order < (
+                SELECT conversation_orders.max_order
+                FROM conversation_orders
+                WHERE conversation_orders.conversation_id=hive_conversations.id
+            )
+            """
+        )
+        cur.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_hive_messages_conversation_order "
+            "ON hive_messages (conversation_id, message_order)"
+        )
 
     def _fetch_dicts(self, cur: Any) -> list[dict[str, Any]]:
         columns = [item[0] for item in cur.description or []]
@@ -1551,8 +1707,16 @@ class SqlStore:
         cur.execute(
             self._sql(
                 """
-            INSERT INTO hive_conversations (id, mode, model, title, auto_titled, created_at, updated_at)
-            VALUES (__PARAM__, __PARAM__, __PARAM__, __PARAM__, 0, __PARAM__, __PARAM__)
+            INSERT INTO hive_conversations
+                (id, mode, model, title, auto_titled, created_at, updated_at, message_order)
+            VALUES (
+                __PARAM__, __PARAM__, __PARAM__, __PARAM__, 0, __PARAM__, __PARAM__,
+                COALESCE((
+                    SELECT MAX(message_order)
+                    FROM hive_messages
+                    WHERE conversation_id=__PARAM__
+                ), 0)
+            )
             ON CONFLICT(id) DO UPDATE SET
               mode=excluded.mode,
               model=excluded.model,
@@ -1566,6 +1730,7 @@ class SqlStore:
                 _strip_nul_text(title) if title else None,
                 now,
                 now,
+                _strip_nul_text(conv_id),
             ),
         )
 
@@ -1581,13 +1746,17 @@ class SqlStore:
         cost: float | None,
         metadata_json: str,
         created: str,
+        message_order_offset: int,
     ) -> None:
         cur.execute(
             self._sql(
                 """
             INSERT INTO hive_messages
-            (id, conversation_id, role, content, model, provider, token_total, cost_usd, metadata_json, created_at)
-            VALUES (__PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__)
+            (id, conversation_id, role, content, model, provider, token_total, cost_usd, metadata_json, created_at, message_order)
+            SELECT __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__, __PARAM__,
+                   hive_conversations.message_order + __PARAM__
+            FROM hive_conversations
+            WHERE hive_conversations.id=__PARAM__
             """
             ),
             (
@@ -1601,6 +1770,8 @@ class SqlStore:
                 cost,
                 _strip_nul_text(metadata_json),
                 created,
+                message_order_offset,
+                _strip_nul_text(conv_id),
             ),
         )
 
