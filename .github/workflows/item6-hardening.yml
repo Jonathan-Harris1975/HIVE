@@ -35,7 +35,7 @@ jobs:
           persist-credentials: false
 
       - name: Review dependency changes
-        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        uses: actions/dependency-review-action@bbc44d14a204704ccc493733616cd1e93a0321ec # v5.0.1
         with:
           fail-on-severity: high
 
@@ -127,7 +127,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24.22.2
+          node-version: 24.22.3
 
       - name: Prove malformed Renovate configuration is rejected
         shell: bash
