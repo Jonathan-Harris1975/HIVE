@@ -248,7 +248,7 @@ class Settings(BaseSettings):
     premium_model_test_override: str = ""
     code_model_test_override: str = ""
     audit_model_test_override: str = ""
-    openrouter_scheduled_flex_enabled: bool = False
+    openrouter_scheduled_flex_enabled: bool = True
     openrouter_flex_timeout_seconds: float = Field(default=240, ge=30, le=600)
 
     @model_validator(mode="after")
