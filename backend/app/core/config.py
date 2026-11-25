@@ -2,7 +2,7 @@ from functools import lru_cache
 from typing import Annotated, Any, Literal
 from urllib.parse import quote, unquote
 
-from pydantic import AliasChoices, Field, field_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from app.core.governed_repositories import DEFAULT_GITHUB_SOURCES_JSON
@@ -243,6 +243,31 @@ class Settings(BaseSettings):
     premium_model: str = "openai/gpt-6.1-sol"
     code_model: str = "openai/gpt-5.6-luna"
     audit_model: str = "openai/gpt-6.1-terra"
+    openrouter_model_migration_enabled: bool = True
+    balanced_model_test_override: str = ""
+    premium_model_test_override: str = ""
+    code_model_test_override: str = ""
+    audit_model_test_override: str = ""
+    openrouter_scheduled_flex_enabled: bool = False
+    openrouter_flex_timeout_seconds: float = Field(default=240, ge=30, le=600)
+
+    @model_validator(mode="after")
+    def apply_model_migration(self) -> "Settings":
+        """Migrate stale deployment values; explicit per-role overrides win."""
+        replacements = {
+            "balanced_model": ("anthropic/claude-sonnet-5.5", "openai/gpt-6.1-terra"),
+            "audit_model": ("anthropic/claude-sonnet-5.5", "openai/gpt-6.1-terra"),
+            "premium_model": ("anthropic/claude-opus-5.5", "openai/gpt-6.1-sol"),
+            "code_model": ("openai/gpt-5.6-sol", "openai/gpt-5.6-luna"),
+        }
+        for field, (baseline, candidate) in replacements.items():
+            override = getattr(self, f"{field}_test_override").strip()
+            if override:
+                setattr(self, field, override)
+            elif self.openrouter_model_migration_enabled and getattr(self, field) == baseline:
+                setattr(self, field, candidate)
+        return self
+
     openrouter_free_fallback_model: str = "nvidia/nemotron-3-ultra-550b-a55b:free"
     allow_paid_fallback: bool = False
     # Free OpenRouter endpoints may retain prompts for provider improvement and
