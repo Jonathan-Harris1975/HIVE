@@ -239,10 +239,10 @@ class Settings(BaseSettings):
     # last-known-good fallbacks with distinct quality and cost roles.
     default_model: str = "openai/gpt-5.6-luna"
     cheap_model: str = "openai/gpt-5.6-luna"
-    balanced_model: str = "anthropic/claude-sonnet-5.5"
-    premium_model: str = "anthropic/claude-opus-5.5"
-    code_model: str = "openai/gpt-5.6-sol"
-    audit_model: str = "anthropic/claude-sonnet-5.5"
+    balanced_model: str = "openai/gpt-6.1-terra"
+    premium_model: str = "openai/gpt-6.1-terra"
+    code_model: str = "openai/gpt-6.1-terra"
+    audit_model: str = "openai/gpt-6.1-terra"
     openrouter_free_fallback_model: str = "nvidia/nemotron-3-ultra-550b-a55b:free"
     allow_paid_fallback: bool = False
     # Free OpenRouter endpoints may retain prompts for provider improvement and
