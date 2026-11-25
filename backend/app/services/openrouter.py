@@ -673,10 +673,10 @@ class OpenRouterClient:
         try:
             result = await self._post_json_once(flex)
         except HTTPException as exc:
-            if exc.status_code not in {404, 408, 429, 502, 503, 504}:
+            if exc.status_code not in {400, 404, 408, 429, 502, 503, 504}:
                 raise
             result = {"_retryable_model_error": True, "status_code": exc.status_code}
-        if not result.get("_retryable_model_error") or result.get("status_code") not in {404, 408, 429, 502, 503, 504}:
+        if not result.get("_retryable_model_error") or result.get("status_code") not in {400, 404, 408, 429, 502, 503, 504}:
             return result
         # One standard attempt with identical model, context and privacy controls.
         logger.info("Flex unavailable for scheduled model=%s; retrying standard once", clean.get("model"))
