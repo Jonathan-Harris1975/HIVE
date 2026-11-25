@@ -77,10 +77,10 @@ def test_model_defaults_are_pinned_and_routes_keep_distinct_roles(monkeypatch) -
 
     assert router.select_model(TaskType.GENERAL) == "openai/gpt-5.6-luna"
     assert router.select_model(TaskType.SUMMARY) == "openai/gpt-5.6-luna"
-    assert router.select_model(TaskType.FILE_TRIAGE) == "anthropic/claude-sonnet-5.5"
-    assert router.select_model(TaskType.AUDIT) == "anthropic/claude-sonnet-5.5"
-    assert router.select_model(TaskType.CODE) == "openai/gpt-5.6-sol"
-    assert router.select_model(TaskType.PREMIUM) == "anthropic/claude-opus-5.5"
+    assert router.select_model(TaskType.FILE_TRIAGE) == "openai/gpt-6.1-terra"
+    assert router.select_model(TaskType.AUDIT) == "openai/gpt-6.1-terra"
+    assert router.select_model(TaskType.CODE) == "openai/gpt-5.6-luna"
+    assert router.select_model(TaskType.PREMIUM) == "openai/gpt-6.1-sol"
 
 
 def test_model_router_detects_audit() -> None:

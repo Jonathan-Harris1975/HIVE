@@ -744,6 +744,7 @@ async def _run_model(
             "max_tokens": 16_000,
             "usage": {"include": True},
             "_hive_context_profile": "coding",
+            "_hive_scheduled_flex": True,
         },
         fallback_models=fallbacks,
         allow_implicit_free_fallback=False,

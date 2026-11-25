@@ -486,6 +486,7 @@ class OpenRouterClient:
         profile = str(payload.get("_hive_context_profile") or "general").strip().lower()
         clean_payload = dict(payload)
         clean_payload.pop("_hive_context_profile", None)
+        clean_payload.pop("_hive_scheduled_flex", None)
         model = clean_payload.get("model")
         raw_messages = clean_payload.get("messages")
         messages: list[dict[str, str]] | None = None
@@ -661,6 +662,34 @@ class OpenRouterClient:
             return None
 
     async def _post_json(self, payload: dict[str, Any]) -> dict[str, Any]:
+        # The private marker is supplied only by the autonomous repository
+        # improvement workflow, not by interactive chat or file requests.
+        scheduled = payload.get("_hive_scheduled_flex") is True
+        clean = {key: value for key, value in payload.items() if key != "_hive_scheduled_flex"}
+        eligible = clean.get("model") in {"openai/gpt-5.6-luna", "openai/gpt-6.1-terra", "openai/gpt-6.1-sol"}
+        if not (scheduled and eligible and self.settings.openrouter_scheduled_flex_enabled):
+            return await self._post_json_once(clean)
+        flex = {**clean, "service_tier": "flex"}
+        try:
+            result = await self._post_json_once(flex)
+        except HTTPException as exc:
+            if exc.status_code not in {400, 404, 408, 429, 502, 503, 504}:
+                raise
+            result = {"_retryable_model_error": True, "status_code": exc.status_code}
+        if not result.get("_retryable_model_error") or result.get("status_code") not in {400, 404, 408, 429, 502, 503, 504}:
+            return result
+        # One standard attempt with identical model, context and privacy controls.
+        logger.info("Flex unavailable for scheduled model=%s; retrying standard once", clean.get("model"))
+        standard = await self._post_json_once({**clean, "service_tier": "default"})
+        prior = result.get("hive_prior_context_attempts", [])
+        standard["hive_prior_context_attempts"] = [
+            *prior,
+            {"model": clean.get("model"), "provider": result.get("provider"), "usage": result.get("usage")},
+            *standard.get("hive_prior_context_attempts", []),
+        ]
+        return standard
+
+    async def _post_json_once(self, payload: dict[str, Any]) -> dict[str, Any]:
         last_failure: dict[str, Any] | None = None
         prior_context_attempts: list[dict[str, Any]] = []
 
@@ -671,7 +700,10 @@ class OpenRouterClient:
 
         async for route_name, url, headers, route_payload in self._context_attempts(payload):
             try:
-                async with httpx.AsyncClient(timeout=self._attempt_timeout()) as client:
+                async with httpx.AsyncClient(timeout=(
+                    httpx.Timeout(self.settings.openrouter_flex_timeout_seconds, connect=10.0)
+                    if route_payload.get("service_tier") == "flex" else self._attempt_timeout()
+                )) as client:
                     response = await client.post(
                         url, headers=headers, json={**route_payload, "stream": False}
                     )
