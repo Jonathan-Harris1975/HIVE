@@ -323,9 +323,9 @@ async def _stream_and_record_chat(
         meta_event["timings"] = request_timings
     if request_context is not None:
         meta_event["model_governance"] = request_context.get("model_governance")
-    yield meta_event
 
     try:
+        yield meta_event
         async for event in client.stream_chat_completion(payload, fallback_models=fallback_models):
             event_name = str(event.get("event") or "message")
             if event.get("type") in {"model_attempt", "context_attempt_failed"}:
@@ -375,11 +375,20 @@ async def _stream_and_record_chat(
         # A browser tab can close halfway through an SSE response. Preserve any text
         # already generated so the database and conversation list do not silently
         # diverge from what the user saw.
-        if not recorded and (reply_parts or observed_attempts or generation):
+        if not recorded:
+            # The browser can abort before OpenRouter has returned a token, model
+            # identity or usage receipt. Persist the turn anyway so cancellation
+            # cannot leave a phantom, UI-only conversation. Unknown usage remains
+            # NULL and is reconciled later if the provider exposes a receipt.
             await asyncio.to_thread(
                 _record_streamed_turn,
                 request=request,
-                event={"ok": False, "hive_extra_usage": observed_attempts, **generation},
+                event={
+                    "ok": False,
+                    "hive_extra_usage": observed_attempts,
+                    "client_disconnect_or_cancel": True,
+                    **generation,
+                },
                 reply="".join(reply_parts),
                 conversation_id=conversation_id,
                 settings=settings,
@@ -424,6 +433,7 @@ def _record_streamed_turn(
             "finish_reason": event.get("finish_reason"),
             "completion_truncated": bool(event.get("completion_truncated")),
             "partial_response": bool(event.get("partial_response")),
+            "client_disconnect_or_cancel": bool(event.get("client_disconnect_or_cancel")),
             "generation_id": event.get("generation_id"),
         },
     )
