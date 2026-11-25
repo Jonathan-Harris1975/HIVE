@@ -324,6 +324,7 @@ async def _stream_and_record_chat(
     if request_context is not None:
         meta_event["model_governance"] = request_context.get("model_governance")
 
+    client_disconnect_or_cancel = False
     try:
         yield meta_event
         async for event in client.stream_chat_completion(payload, fallback_models=fallback_models):
@@ -371,6 +372,9 @@ async def _stream_and_record_chat(
                 return
 
             yield event
+    except (asyncio.CancelledError, GeneratorExit):
+        client_disconnect_or_cancel = True
+        raise
     finally:
         # A browser tab can close halfway through an SSE response. Preserve any text
         # already generated so the database and conversation list do not silently
@@ -386,7 +390,7 @@ async def _stream_and_record_chat(
                 event={
                     "ok": False,
                     "hive_extra_usage": observed_attempts,
-                    "client_disconnect_or_cancel": True,
+                    "client_disconnect_or_cancel": client_disconnect_or_cancel,
                     **generation,
                 },
                 reply="".join(reply_parts),
