@@ -622,7 +622,8 @@ class SqlStore:
               c.created_at,
               c.updated_at,
               COUNT(m.id) AS message_count,
-              COALESCE(SUM(CASE WHEN m.role='assistant' THEN m.token_total ELSE 0 END), 0) AS total_tokens,
+              CASE WHEN COUNT(CASE WHEN m.role='assistant' AND m.token_total IS NULL THEN 1 END) > 0
+                THEN NULL ELSE SUM(CASE WHEN m.role='assistant' THEN m.token_total ELSE 0 END) END AS total_tokens,
               CASE WHEN COUNT(CASE WHEN m.role='assistant' AND m.cost_usd IS NULL THEN 1 END) > 0
                 OR (SELECT COUNT(*) FROM hive_cost_events e WHERE e.conversation_id=c.id AND e.cost_usd IS NULL) > 0
               OR COUNT(CASE WHEN m.role='assistant' AND m.id LIKE 'tracked:%' AND NOT EXISTS (

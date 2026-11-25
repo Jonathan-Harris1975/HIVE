@@ -193,3 +193,6 @@ async def test_cancelled_stream_before_first_provider_event_is_persisted(monkeyp
     assert saved["messages"][-1]["metadata"]["ok"] is False
     assert saved["messages"][-1]["metadata"]["client_disconnect_or_cancel"] is True
     assert saved["messages"][-1]["cost_usd"] is None
+    listed = store.list_conversations()["conversations"][0]
+    assert listed["total_tokens"] is None
+    assert listed["total_cost_usd"] is None
