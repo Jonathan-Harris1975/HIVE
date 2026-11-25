@@ -666,7 +666,7 @@ class OpenRouterClient:
         # improvement workflow, not by interactive chat or file requests.
         scheduled = payload.get("_hive_scheduled_flex") is True
         clean = {key: value for key, value in payload.items() if key != "_hive_scheduled_flex"}
-        eligible = clean.get("model") in {"openai/gpt-6.1-terra", "openai/gpt-6.1-sol"}
+        eligible = clean.get("model") in {"openai/gpt-5.6-luna", "openai/gpt-6.1-terra", "openai/gpt-6.1-sol"}
         if not (scheduled and eligible and self.settings.openrouter_scheduled_flex_enabled):
             return await self._post_json_once(clean)
         flex = {**clean, "service_tier": "flex"}
