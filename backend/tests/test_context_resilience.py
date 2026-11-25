@@ -96,3 +96,43 @@ def test_empty_or_invalid_fallback_config_keeps_compression_recovery_chain() -> 
     assert provider_order("leanctx", "unknown,invalid") == expected
     # Explicit valid ordering is honoured, even when it only specifies direct.
     assert provider_order("leanctx", "direct") == ("leanctx", "direct")
+
+
+def test_approved_model_migration_and_explicit_rollback() -> None:
+    settings = Settings(
+        balanced_model="anthropic/claude-sonnet-5.5",
+        premium_model="anthropic/claude-opus-5.5",
+        code_model="openai/gpt-5.6-sol",
+        audit_model="anthropic/claude-sonnet-5.5",
+        audit_model_test_override="anthropic/claude-sonnet-5.5",
+        openrouter_model_migration_enabled=True,
+    )
+    assert settings.balanced_model == "openai/gpt-6.1-terra"
+    assert settings.premium_model == "openai/gpt-6.1-sol"
+    assert settings.code_model == "openai/gpt-5.6-luna"
+    assert settings.audit_model == "anthropic/claude-sonnet-5.5"
+
+
+@pytest.mark.asyncio
+async def test_scheduled_flex_falls_back_to_same_model_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = OpenRouterClient(Settings(openrouter_scheduled_flex_enabled=True))
+    calls: list[dict] = []
+
+    async def fake_post(payload: dict) -> dict:
+        calls.append(payload)
+        if payload.get("service_tier") == "flex":
+            return {"_retryable_model_error": True, "status_code": 429}
+        return {"choices": [{"message": {"content": "ok"}}]}
+
+    monkeypatch.setattr(client, "_post_json_once", fake_post)
+    base = {"model": "openai/gpt-6.1-terra", "messages": [], "provider": {"data_collection": "deny"}}
+    result = await client._post_json({**base, "_hive_scheduled_flex": True})
+    assert result["choices"][0]["message"]["content"] == "ok"
+    assert calls == [{**base, "service_tier": "flex"}, {**base, "service_tier": "default"}]
+    calls.clear()
+    await client._post_json(base)
+    assert calls == [base]
+    calls.clear()
+    unsupported = {**base, "model": "openai/gpt-5.6-luna"}
+    await client._post_json({**unsupported, "_hive_scheduled_flex": True})
+    assert calls == [unsupported]
