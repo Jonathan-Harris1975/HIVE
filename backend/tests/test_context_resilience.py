@@ -133,6 +133,10 @@ async def test_scheduled_flex_falls_back_to_same_model_once(monkeypatch: pytest.
     await client._post_json(base)
     assert calls == [base]
     calls.clear()
-    unsupported = {**base, "model": "openai/gpt-5.6-luna"}
+    luna = {**base, "model": "openai/gpt-5.6-luna"}
+    await client._post_json({**luna, "_hive_scheduled_flex": True})
+    assert calls == [{**luna, "service_tier": "flex"}, {**luna, "service_tier": "default"}]
+    calls.clear()
+    unsupported = {**base, "model": "openrouter/free"}
     await client._post_json({**unsupported, "_hive_scheduled_flex": True})
     assert calls == [unsupported]
