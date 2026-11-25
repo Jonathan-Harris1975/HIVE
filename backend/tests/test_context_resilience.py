@@ -114,14 +114,15 @@ def test_approved_model_migration_and_explicit_rollback() -> None:
 
 
 @pytest.mark.asyncio
-async def test_scheduled_flex_falls_back_to_same_model_once(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("failure_status", [400, 429])
+async def test_scheduled_flex_falls_back_to_same_model_once(monkeypatch: pytest.MonkeyPatch, failure_status: int) -> None:
     client = OpenRouterClient(Settings(openrouter_scheduled_flex_enabled=True))
     calls: list[dict] = []
 
     async def fake_post(payload: dict) -> dict:
         calls.append(payload)
         if payload.get("service_tier") == "flex":
-            return {"_retryable_model_error": True, "status_code": 429}
+            return {"_retryable_model_error": True, "status_code": failure_status}
         return {"choices": [{"message": {"content": "ok"}}]}
 
     monkeypatch.setattr(client, "_post_json_once", fake_post)
