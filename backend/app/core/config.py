@@ -241,7 +241,7 @@ class Settings(BaseSettings):
     cheap_model: str = "openai/gpt-5.6-luna"
     balanced_model: str = "openai/gpt-6.1-terra"
     premium_model: str = "openai/gpt-6.1-sol"
-    code_model: str = "openai/gpt-5.6-sol"
+    code_model: str = "openai/gpt-5.6-luna"
     audit_model: str = "openai/gpt-6.1-terra"
     openrouter_free_fallback_model: str = "nvidia/nemotron-3-ultra-550b-a55b:free"
     allow_paid_fallback: bool = False
