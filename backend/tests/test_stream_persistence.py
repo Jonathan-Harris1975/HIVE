@@ -158,3 +158,38 @@ async def test_interrupted_stream_retains_partial_text_and_known_fallback_cost(m
     costs = store.cost_summary()
     assert costs["ok"] is True
     assert costs["totals"]["cost_usd"] == pytest.approx(0.01)
+
+
+@pytest.mark.asyncio
+async def test_cancelled_stream_before_first_provider_event_is_persisted(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    settings = Settings(
+        APP_ENV="test",
+        DATABASE_ENABLED=True,
+        DATABASE_URL=f"sqlite:///{tmp_path / 'cancelled-before-event.sqlite'}",
+        OPENROUTER_API_KEY="test",
+    )
+    store = SqlStore(settings)
+    assert store.init_schema()["ok"]
+
+    class CancelledBeforeEventClient:
+        def __init__(self, settings):  # noqa: ANN001, ARG002
+            pass
+
+        async def stream_chat_completion(self, payload, fallback_models=None):  # noqa: ANN001, ARG002
+            if False:
+                yield {}
+
+    monkeypatch.setattr(chat_api, "OpenRouterClient", CancelledBeforeEventClient)
+    request = ChatRequest(message="Stop immediately", mode="general", conversation_id="cancelled-before-event")
+    stream = chat_api._stream_and_record_chat(request=request, payload={}, fallback_models=[], settings=settings)
+
+    assert (await anext(stream))["type"] == "conversation"
+    await stream.aclose()
+
+    saved = store.get_conversation("cancelled-before-event")
+    assert saved["ok"] is True
+    assert [message["role"] for message in saved["messages"]] == ["user", "assistant"]
+    assert saved["messages"][-1]["content"] == ""
+    assert saved["messages"][-1]["metadata"]["ok"] is False
+    assert saved["messages"][-1]["metadata"]["client_disconnect_or_cancel"] is True
+    assert saved["messages"][-1]["cost_usd"] is None
