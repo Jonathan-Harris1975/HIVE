@@ -1,5 +1,9 @@
 {
   "$schema": "https://app.kilo.ai/config.json",
+  // Cost policy: start every Kilo agent and background task on Auto Free.
+  // Paid escalation is controlled externally: Luna Flex first, then Luna Standard.
+  "model": "kilo-auto/free",
+  "small_model": "kilo-auto/free",
   "permission": {
     "*": "allow",
     "edit": {
