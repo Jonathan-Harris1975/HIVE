@@ -219,6 +219,7 @@ async def _github_repo_evidence(
             "reason": f"GitHub main-branch lookup returned HTTP {commit_response.status_code}.",
             "sha": None,
             "required_workflows": {},
+            "verification_status": "UNAVAILABLE",
             "deployment": {"workflow": DEPLOYMENT_WORKFLOWS[repo_id], "status": "unavailable"},
         }
     raw_commit = commit_response.json()
@@ -230,6 +231,7 @@ async def _github_repo_evidence(
             "reason": "GitHub main-branch lookup did not return a full commit SHA.",
             "sha": None,
             "required_workflows": {},
+            "verification_status": "UNAVAILABLE",
             "deployment": {"workflow": DEPLOYMENT_WORKFLOWS[repo_id], "status": "unavailable"},
         }
 
@@ -252,6 +254,7 @@ async def _github_repo_evidence(
                 "reason": f"GitHub workflow evidence returned HTTP {runs_response.status_code}.",
                 "sha": sha,
                 "required_workflows": {},
+                "verification_status": "UNAVAILABLE",
                 "deployment": {"workflow": DEPLOYMENT_WORKFLOWS[repo_id], "status": "unavailable"},
             }
 
@@ -299,6 +302,7 @@ async def _github_repo_evidence(
             "reason": "GitHub workflow evidence exceeded the safe 1,000-run pagination window.",
             "sha": sha,
             "required_workflows": {},
+            "verification_status": "UNAVAILABLE",
             "deployment": {"workflow": DEPLOYMENT_WORKFLOWS[repo_id], "status": "unavailable"},
         }
 
@@ -372,14 +376,46 @@ async def _github_repo_evidence(
                 "run_id": run.get("id"),
             })
 
+    # Presentation is independent of the fail-closed release state. Report the
+    # actual observed result for each gate, rather than implying that missing
+    # or running checks are failures (especially during weekend maintenance).
+    all_gates = {
+        **workflow_evidence,
+        deployment_name: {"state": deployment_state, "status": deployment_status},
+    }
+    failed = [f"{name} ({gate['status']})" for name, gate in all_gates.items() if gate["state"] == "BLOCKED"]
+    pending = [name for name, gate in all_gates.items() if gate["status"] == "pending"]
+    missing = [name for name, gate in all_gates.items() if gate["status"] == "missing"]
+    other = [
+        f"{name} ({gate['status']})"
+        for name, gate in all_gates.items()
+        if gate["state"] == "DEGRADED" and gate["status"] not in {"pending", "missing"}
+    ]
+    if failed:
+        verification_status = "FAILED"
+    elif pending:
+        verification_status = "IN_PROGRESS"
+    elif missing:
+        verification_status = "AWAITING_EVIDENCE"
+    elif other:
+        verification_status = "UNVERIFIED"
+    else:
+        verification_status = "VERIFIED"
+    reasons = []
+    if failed:
+        reasons.append("Failed: " + ", ".join(failed))
+    if pending:
+        reasons.append("Verification in progress: " + ", ".join(pending))
+    if missing:
+        reasons.append("Awaiting exact-commit evidence: " + ", ".join(missing))
+    if other:
+        reasons.append("Not verified: " + ", ".join(other))
+
     return {
         "configured": True,
         "state": state,
-        "reason": (
-            "Required exact-SHA GitHub and deployment evidence is green."
-            if state == "GREEN"
-            else "Required exact-SHA GitHub or deployment evidence is incomplete or failed."
-        ),
+        "verification_status": verification_status,
+        "reason": "; ".join(reasons) + "." if reasons else "Required exact-SHA GitHub and deployment evidence is green.",
         "sha": sha,
         "required_workflows": workflow_evidence,
         "smoke_only_workflows": smoke_only_evidence,
@@ -407,6 +443,7 @@ async def _collect_all_gate_evidence(
                 "reason": "GITHUB_TOKEN is not configured; HIVE cannot certify repository gate evidence.",
                 "sha": None,
                 "required_workflows": {},
+                "verification_status": "UNAVAILABLE",
                 "deployment": {"workflow": DEPLOYMENT_WORKFLOWS[repo_id], "status": "unavailable"},
             }
             for repo_id in GOVERNED_REPOSITORY_IDS
@@ -444,6 +481,7 @@ async def _collect_all_gate_evidence(
                     "reason": "GitHub evidence collection exceeded the bounded production-manager deadline.",
                     "sha": None,
                     "required_workflows": {},
+                    "verification_status": "UNAVAILABLE",
                     "deployment": {"workflow": DEPLOYMENT_WORKFLOWS[repo_id], "status": "unavailable"},
                 }
                 for repo_id in GOVERNED_REPOSITORY_IDS
@@ -463,6 +501,7 @@ async def _collect_all_gate_evidence(
                 "reason": f"GitHub evidence probe failed: {result.__class__.__name__}.",
                 "sha": None,
                 "required_workflows": {},
+                "verification_status": "UNAVAILABLE",
                 "deployment": {"workflow": DEPLOYMENT_WORKFLOWS[repo_id], "status": "unavailable"},
             }
         else:
