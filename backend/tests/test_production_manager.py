@@ -582,3 +582,50 @@ async def test_additional_workflow_scan_explicitly_reports_unretrieved_pages():
     assert result["state"] == "GREEN"
     assert result["additional_workflow_failures"] == []
     assert result["additional_workflows_complete"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("repo_id", production_manager.GOVERNED_REPOSITORY_IDS)
+@pytest.mark.parametrize(
+    ("run_status", "conclusion", "expected_status", "expected_state", "message"),
+    [
+        ("completed", "success", "VERIFIED", "GREEN", "evidence is green"),
+        ("in_progress", None, "IN_PROGRESS", "DEGRADED", "Verification in progress"),
+        (None, None, "AWAITING_EVIDENCE", "DEGRADED", "Awaiting exact-commit evidence"),
+        ("completed", "failure", "FAILED", "BLOCKED", "Failed:"),
+        ("completed", "cancelled", "UNVERIFIED", "DEGRADED", "Not verified:"),
+        ("completed", "skipped", "UNVERIFIED", "DEGRADED", "Not verified:"),
+    ],
+)
+async def test_release_evidence_distinguishes_status_for_every_repository(
+    repo_id, run_status, conclusion, expected_status, expected_state, message
+):
+    sha = "a" * 40
+    names = production_manager.REQUIRED_WORKFLOWS[repo_id]
+    target = names[0]
+    deployment = production_manager.DEPLOYMENT_WORKFLOWS[repo_id]
+
+    def handler(request):
+        if request.url.path.endswith("/commits/main"):
+            return httpx.Response(200, json={"sha": sha})
+        runs = [
+            {"id": index + 1, "name": name, "head_sha": sha,
+             "status": "completed", "conclusion": "success"}
+            for index, name in enumerate((*names[1:], deployment))
+        ]
+        if run_status is not None:
+            runs.append({"id": 100, "name": target, "head_sha": sha,
+                         "status": run_status, "conclusion": conclusion})
+        # A previous commit must never certify the current one.
+        runs.append({"id": 101, "name": target, "head_sha": "b" * 40,
+                     "status": "completed", "conclusion": "success"})
+        return httpx.Response(200, json={"workflow_runs": runs})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await production_manager._github_repo_evidence(client, repo_id=repo_id, branch="main")
+    assert result["verification_status"] == expected_status
+    assert result["state"] == expected_state
+    assert message in result["reason"]
+    assert result["deployment"]["status"] == "success"
+    if expected_state != "GREEN":
+        assert target in result["reason"]
