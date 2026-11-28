@@ -28,7 +28,7 @@ python -m piptools compile --output-file=requirements.txt --strip-extras require
 python scripts/verify_dependency_lock.py --compile
 ```
 
-The focused September 2026 dependency refresh uses Uvicorn `0.53.0`, pypdf `6.19.0`, `pydantic-settings 2.15.0`, and `boto3`/`botocore 1.43.98`; the compiled Pydantic resolution remains `2.13.5` / `pydantic-core 2.46.5`. HIVE explicitly keeps settings-source matching case-insensitive, matching its existing environment-alias contract under the pydantic-settings 2.15 source-handling changes. The earlier pypdf `6.16.1` pin was already on the patched side of the August 2026 XForm resource-consumption advisory; that advisory was not active in HIVE's prior lock.
+For historical context, the focused September 2026 dependency refresh used Uvicorn `0.53.0`, pypdf `6.19.0`, `pydantic-settings 2.15.0`, and `boto3`/`botocore 1.43.98`; the compiled Pydantic resolution remains `2.13.5` / `pydantic-core 2.46.5`. HIVE explicitly keeps settings-source matching case-insensitive, matching its existing environment-alias contract under the pydantic-settings 2.15 source-handling changes. The earlier pypdf `6.16.1` pin was already on the patched side of the August 2026 XForm resource-consumption advisory; that advisory was not active in HIVE's prior lock.
 
 ## Core production capabilities
 
@@ -41,6 +41,12 @@ The focused September 2026 dependency refresh uses Uvicorn `0.53.0`, pypdf `6.19
 - Advisory benchmarks, optimisation decisions, monthly cost/operations reports and repository-learning workflows.
 - Cloudflare Workers AI embeddings, Vectorize retrieval and AI Search fan-out.
 - Environment/configuration audit and authenticated ecosystem health aggregation for HIVE-UI Ops.
+
+## Chat operating contract and model governance
+
+Chat distinguishes confirmed evidence, inference and unknown state. The system prompt defaults to read-only analysis and planning, requires explicit approval for external mutations, and requests evidence, risks, ordered actions, validation and rollback for production work. Code and Audit modes add causal-failure analysis and explicit acceptance criteria. Stream cancellation persists the turn rather than silently losing conversation history; missing aggregate evidence is not represented as a confirmed zero. See `backend/app/services/brand_modes.py` and `backend/app/api/chat.py`.
+
+Committed OpenRouter defaults are `openai/gpt-5.6-luna` for default, cheap and code roles, `openai/gpt-6.1-terra` for balanced and audit roles, and `openai/gpt-6.1-sol` for premium. `OPENROUTER_MODEL_MIGRATION_ENABLED` handles legacy configured model IDs; explicit role-specific test overrides are available. Scheduled repository improvements can use eligible Flex routes under `OPENROUTER_SCHEDULED_FLEX_ENABLED` with a bounded timeout; interactive chat/file requests do not use that private scheduling marker. Provider privacy, premium justification and fallback controls remain in force. Automatic model selection/promotion is retired; manual benchmarks are advisory, and repository/content councils are distinct. See [model policy](docs/model-policy.md) and [daily LLM spend](docs/DAILY_LLM_SPEND.md).
 
 ## Configuration
 
@@ -135,3 +141,7 @@ PYTHONPATH=backend uvicorn app.main:app --host 0.0.0.0 --port 8080
 Use the root `Dockerfile` for the production image and `/readyz` for the external deployment health check; the image uses `/livez` internally. The automatic post-CI watcher requires `KOYEB_TOKEN` and `KOYEB_SERVICE`; missing configuration fails the production verification job, and exact-SHA evidence is written only after the bounded Koyeb watch succeeds. Production must retain exact allowed-host restrictions, HTTPS/CORS policy, bounded request/upload/extraction limits, scoped storage permissions, dependency/secret/image scanning and server-side credential handling.
 
 See `SECURITY.md`, `docs/OPERATIONS.md`, `docs/production-readiness.md`, `docs/koyeb-deployment.md`, `docs/cloudflare-decisions.md`, `docs/model-policy.md` and `CONTRIBUTING.md`.
+
+## Ecosystem integration and evidence
+
+The eight governed repositories are [HIVE](https://github.com/Jonathan-Harris1975/HIVE), [HIVE-UI](https://github.com/Jonathan-Harris1975/HIVE-UI), [AIMS](https://github.com/Jonathan-Harris1975/AIMS), [AIMS-UI](https://github.com/Jonathan-Harris1975/AIMS-UI), [MAST](https://github.com/Jonathan-Harris1975/MAST), [RAMS](https://github.com/Jonathan-Harris1975/RAMS), [IRS](https://github.com/Jonathan-Harris1975/IRS) and the [public website](https://github.com/Jonathan-Harris1975/jonathan-harris-website). MAST owns schedules; AIMS owns content and communications execution; HIVE and HIVE-UI provide governed intelligence and operator visibility; RAMS performs bounded remediation; IRS and the website own public delivery boundaries. Keep this README aligned with changes to those contracts. A merged change, a healthy HTTP process and verified live functional acceptance are separate evidence; preserve exact-SHA CI and deployment receipts and never report unverified provider delivery as success.
