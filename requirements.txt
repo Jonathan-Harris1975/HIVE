@@ -170,7 +170,7 @@ pydantic-settings==2.16.2
     #   litellm
 pygments==2.21.0
     # via rich
-pypdf==6.21.4
+pypdf==7.1.1
     # via -r requirements.in
 python-dateutil==2.9.0.post0
     # via botocore
